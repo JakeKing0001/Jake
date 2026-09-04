@@ -76,9 +76,35 @@ class PlanExecutor:
     def __init__(self, skill_registry):
         self.skill_registry = skill_registry
 
-    def execute(self, plan) -> PlanOutcome:
+    def execute(self, plan, blocked_intents: set = None, always_confirm_intents: set = None) -> PlanOutcome:
+        """blocked_intents/always_confirm_intents sono opzionali (default None = nessun
+        controllo, comportamento identico a prima) perche' oggi solo JakeCore._process()
+        applica questa policy sui comandi singoli: RUN_WORKFLOW la aggirava del tutto.
+        Un trigger che fa partire un'automazione da solo (v3.0), pero', non ha nessuno li'
+        pronto a rispondere "confermi?": un passo in always_confirm_intents va quindi trattato
+        come se richiedesse conferma (il piano si mette in pausa su quel passo, senza
+        eseguirlo), e uno in blocked_intents va bloccato allo stesso modo di un fallimento."""
         outcome = PlanOutcome()
         for step in plan.steps:
+            if blocked_intents and step.intent in blocked_intents:
+                outcome.stopped_step = StepOutcome(
+                    step=step,
+                    result=SkillResult(success=False, data={}, error="POLICY_BLOCKED"),
+                    attempts=0,
+                )
+                outcome.rolled_back = self._rollback(outcome.completed)
+                return outcome
+            if always_confirm_intents and step.intent in always_confirm_intents:
+                outcome.stopped_step = StepOutcome(
+                    step=step,
+                    result=SkillResult(
+                        success=False, data={"message": "Richiede conferma manuale."},
+                        error="CONFIRMATION_REQUIRED",
+                    ),
+                    attempts=0,
+                )
+                return outcome
+
             step_outcome = self._execute_step(step)
             if step_outcome.result.success and not _verify_step(step_outcome):
                 step_outcome.result = SkillResult(

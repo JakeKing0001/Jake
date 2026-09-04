@@ -3,6 +3,7 @@
   "news_api_key": "",
   "ollama_model": "qwen2.5:7b",
   "embedding_model": "nomic-embed-text",
+  "vision_model": "qwen2.5vl:7b",
   "blocked_intents": [],
   "always_confirm_intents": []
 }

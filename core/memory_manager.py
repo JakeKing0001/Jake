@@ -13,7 +13,10 @@ class MemoryManager:
     def __init__(self, db_path: Path = None):
         self.db_path = Path(db_path) if db_path else self.DEFAULT_DB_PATH
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._connection = sqlite3.connect(self.db_path)
+        # check_same_thread=False: dalla v3.0 TriggerScheduler legge/scrive workflow_manager e
+        # trigger_manager (entrambi backed da questa stessa connessione) da un thread in
+        # background - stesso accorgimento gia' usato in ReminderManager per lo stesso motivo.
+        self._connection = sqlite3.connect(self.db_path, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
         self._init_schema()
         self._migrate_schema()
