@@ -4,8 +4,8 @@ from core.skill_result import SkillResult
 class ReadScreenSkill:
     """Legge il testo visibile sullo schermo via OCR (v1.3, multimodalita').
 
-    Non e' comprensione visiva vera e propria (Jake non ha un modello con visione collegato):
-    estrae solo il testo presente sullo schermo, non descrive immagini o elementi grafici."""
+    Estrae solo il testo, non descrive immagini/elementi grafici: per la comprensione visiva
+    vera e propria (v3.0) vedi DESCRIBE_SCREEN in skills/describe_screen.py."""
 
     metadata = {
         "intent": "READ_SCREEN",

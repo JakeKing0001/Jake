@@ -21,9 +21,11 @@ from skills.window_control import FocusWindowSkill, MinimizeWindowSkill
 from skills.volume_control import VolumeControlSkill
 from skills.process_control import ListProcessesSkill, CloseAppSkill
 from skills.workflow import SaveWorkflowSkill, RunWorkflowSkill
+from skills.trigger import SetTriggerSkill, ListTriggersSkill, DeleteTriggerSkill
 from skills.reminder import SetReminderSkill, ListRemindersSkill
 from skills.screenshot import TakeScreenshotSkill
 from skills.read_screen import ReadScreenSkill
+from skills.describe_screen import DescribeScreenSkill
 from skills.active_window import GetActiveWindowSkill
 from skills.mouse_control import ClickMouseSkill, MoveMouseSkill
 from skills.keyboard_control import TypeTextSkill, PressKeySkill
@@ -35,9 +37,11 @@ from core.conversation_state import ConversationStateManager
 from core.nest_client import NestClient
 from core.config import Config
 from core.embedding_provider import EmbeddingProvider
+from core.vision_provider import VisionProvider
 from core.planner_provider import PlannerProvider
 from core.plan_executor import PlanExecutor
 from core.workflow_manager import WorkflowManager
+from core.trigger_manager import TriggerManager
 from core.reminder_manager import ReminderManager
 from copy import deepcopy
 
@@ -60,9 +64,11 @@ class SkillRegistry:
         self.embedding_provider = embedding_provider or EmbeddingProvider(
             model=self.config.get("embedding_model", "nomic-embed-text")
         )
+        self.vision_provider = VisionProvider(model=self.config.get("vision_model", "qwen2.5vl:7b"))
         self.planner_provider = PlannerProvider(self, model=self.config.get("ollama_model", "qwen2.5:7b"))
         self.plan_executor = PlanExecutor(self)
         self.workflow_manager = WorkflowManager(self.memory_manager)
+        self.trigger_manager = TriggerManager(self.memory_manager, self.workflow_manager)
         self.reminder_manager = reminder_manager or ReminderManager()
 
         # Condivise anche col research agent (v1.5), che le orchestra invece di limitarsi a
@@ -98,10 +104,14 @@ class SkillRegistry:
             "CLOSE_APP": CloseAppSkill(),
             "SAVE_WORKFLOW": SaveWorkflowSkill(self.planner_provider, self.workflow_manager),
             "RUN_WORKFLOW": RunWorkflowSkill(self.workflow_manager, self.plan_executor),
+            "SET_TRIGGER": SetTriggerSkill(self.trigger_manager),
+            "LIST_TRIGGERS": ListTriggersSkill(self.trigger_manager),
+            "DELETE_TRIGGER": DeleteTriggerSkill(self.trigger_manager),
             "SET_REMINDER": SetReminderSkill(self.reminder_manager),
             "LIST_REMINDERS": ListRemindersSkill(self.reminder_manager),
             "TAKE_SCREENSHOT": TakeScreenshotSkill(),
             "READ_SCREEN": ReadScreenSkill(),
+            "DESCRIBE_SCREEN": DescribeScreenSkill(self.vision_provider),
             "GET_ACTIVE_WINDOW": GetActiveWindowSkill(),
             "CLICK_MOUSE": ClickMouseSkill(),
             "MOVE_MOUSE": MoveMouseSkill(),

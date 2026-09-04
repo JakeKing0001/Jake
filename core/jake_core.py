@@ -6,6 +6,7 @@ from core.skill_result import SkillResult
 from core.context_summarizer import ContextSummarizer
 from core.logger import get_logger
 from core.scheduler import ReminderScheduler
+from core.trigger_scheduler import TriggerScheduler
 from core.desktop_context import DesktopContextTracker
 from core.plugin_loader import load_plugins
 from skills.model_control import ListModelsSkill, SetModelSkill
@@ -52,6 +53,22 @@ class JakeCore:
         self.router.primary_provider.context_provider = self.desktop_context.context_summary
         self.planner_provider.context_provider = self.desktop_context.context_summary
 
+        # Jake proattivo (v3.0): un'automazione salvata puo' far partire se stessa (orario
+        # fisso o app che va in primo piano), non solo su richiesta esplicita. blocked_intents/
+        # always_confirm_intents vengono passati esplicitamente: un trigger scatta senza
+        # nessuno li' pronto a rispondere "confermi?", quindi un passo che richiederebbe
+        # conferma va semplicemente messo in pausa, mai eseguito alla cieca.
+        self.trigger_scheduler = TriggerScheduler(
+            self.skill_registry.trigger_manager,
+            self.skill_registry.workflow_manager,
+            self.plan_executor,
+            self.desktop_context,
+            on_trigger=self._default_on_trigger_fired,
+            blocked_intents=self.blocked_intents,
+            always_confirm_intents=self.always_confirm_intents,
+        )
+        self.trigger_scheduler.start()
+
         # Modelli intercambiabili (v2.0): registrate qui (non in SkillRegistry) perche' devono
         # tenere allineati componenti che vivono in JakeCore/Router, non solo nel registry.
         self.skill_registry.register_skill("LIST_MODELS", ListModelsSkill())
@@ -65,6 +82,10 @@ class JakeCore:
 
     def _default_on_reminder_due(self, reminder: dict) -> None:
         print(f"\nJake > Promemoria: {reminder['text']}\nTu > ", end="", flush=True)
+
+    def _default_on_trigger_fired(self, trigger: dict, outcome, total_steps: int) -> None:
+        summary = self._format_plan_outcome(outcome, total_steps)
+        print(f"\nJake > Ho eseguito automaticamente '{trigger.get('name')}':\n{summary}\nTu > ", end="", flush=True)
 
     def answer(self, text: str):
         text = text.lower().strip()
@@ -211,6 +232,12 @@ class JakeCore:
                     return f"Non trovo nessun processo con '{result.data.get('name', '')}' nel nome."
                 if intent == "RUN_WORKFLOW":
                     return f"Non ho un'automazione salvata chiamata '{result.data.get('name', '')}'."
+                if intent == "SET_TRIGGER":
+                    return f"Non ho un'automazione salvata chiamata '{result.data.get('name', '')}': creala prima con SAVE_WORKFLOW."
+                if intent == "DELETE_TRIGGER":
+                    return f"Non ho nessun trigger chiamato '{result.data.get('name', '')}'."
+                if intent == "LIST_TRIGGERS":
+                    return "Non hai trigger impostati."
                 if intent == "LIST_REMINDERS":
                     return "Non hai promemoria in programma."
                 if intent == "READ_SCREEN":
@@ -224,6 +251,8 @@ class JakeCore:
                 return f"'{result.data.get('at_time', '')}' non è un orario valido (usa HH:MM)."
             if result.error == "OCR_UNAVAILABLE":
                 return "Non ho un motore OCR disponibile per la lingua di questo PC."
+            if result.error == "VISION_UNAVAILABLE":
+                return "Non riesco a vedere lo schermo in questo momento (verifica che il modello di visione sia installato: 'ollama pull qwen2.5vl:7b')."
             if result.error == "VERIFICATION_FAILED":
                 return f"L'azione sembrava riuscita ma la verifica successiva non conferma l'effetto su {result.data.get('path', '')}."
             if result.error == "PATH_NOT_FOUND":
@@ -257,6 +286,8 @@ class JakeCore:
                 return f"Non trovo nessuna finestra con '{result.data.get('title', '')}' nel titolo."
             if result.error == "PLAN_FAILED":
                 return "Non sono riuscito a scomporre questa richiesta in passi."
+            if result.error == "POLICY_BLOCKED":
+                return "Un passo di questa automazione è disabilitato dalla configurazione."
             return "Si è verificato un errore durante l'esecuzione"
 
         if intent == "REMEMBER":
@@ -322,6 +353,16 @@ class JakeCore:
             return f"Ho salvato l'automazione '{result.data['name']}' con {result.data['step_count']} passi."
         if intent == "RUN_WORKFLOW":
             return self._format_plan_outcome(result.data["outcome"], result.data["total_steps"])
+        if intent == "SET_TRIGGER":
+            return f"Ok, '{result.data['workflow_name']}' partira' da sola in base al trigger '{result.data['name']}'."
+        if intent == "LIST_TRIGGERS":
+            triggers = result.data["triggers"]
+            formatted = "; ".join(
+                f"{t['name']} -> {t['workflow_name']} ({t['type']})" for t in triggers
+            )
+            return f"Trigger impostati: {formatted}"
+        if intent == "DELETE_TRIGGER":
+            return f"Ho rimosso il trigger '{result.data['name']}'."
         if intent == "SET_REMINDER":
             return f"Ok, alle {result.data['due_at_local']} ti ricorderò: {result.data['text']}."
         if intent == "LIST_REMINDERS":
@@ -332,6 +373,8 @@ class JakeCore:
         if intent == "READ_SCREEN":
             suffix = " (troncato)" if result.data.get("truncated") else ""
             return f"Sullo schermo leggo{suffix}: {result.data['text']}"
+        if intent == "DESCRIBE_SCREEN":
+            return result.data["description"]
         if intent == "GET_ACTIVE_WINDOW":
             return f"Stai usando: {result.data['title']}"
         if intent == "CLICK_MOUSE":

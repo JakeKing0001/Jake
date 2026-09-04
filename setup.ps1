@@ -66,7 +66,7 @@ if ($ollamaFound) {
         $models = @{
             "qwen2.5:7b"      = "comprensione dei comandi e pianificazione"
             "nomic-embed-text" = "ricerca semantica (file e memoria)"
-            "llava"           = "visione (descrivere cosa c'e' sullo schermo)"
+            "qwen2.5vl:7b"    = "visione (descrivere cosa c'e' sullo schermo)"
         }
         foreach ($model in $models.Keys) {
             $shortName = $model.Split(":")[0]
