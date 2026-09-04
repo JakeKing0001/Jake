@@ -1,0 +1,217 @@
+import json
+import sqlite3
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+class MemoryManager:
+    """Gestisce la memoria a lungo termine di Jake su SQLite (ricordi, preferenze, cronologia)."""
+
+    DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "jake_memory.db"
+    MAX_HISTORY_ENTRIES = 200
+
+    def __init__(self, db_path: Path = None):
+        self.db_path = Path(db_path) if db_path else self.DEFAULT_DB_PATH
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._connection = sqlite3.connect(self.db_path)
+        self._connection.row_factory = sqlite3.Row
+        self._init_schema()
+        self._migrate_schema()
+
+    def _init_schema(self):
+        self._connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS memories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT 'fact',
+                importance INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(key, category)
+            );
+
+            CREATE TABLE IF NOT EXISTS conversation_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                role TEXT NOT NULL,
+                text TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            """
+        )
+        self._connection.commit()
+
+    def _migrate_schema(self):
+        """Aggiunge colonne introdotte dopo la v0.2 ai database creati con lo schema precedente."""
+        existing_columns = {
+            row["name"] for row in self._connection.execute("PRAGMA table_info(memories)").fetchall()
+        }
+        if "embedding" not in existing_columns:
+            self._connection.execute("ALTER TABLE memories ADD COLUMN embedding TEXT")
+        if "project" not in existing_columns:
+            self._connection.execute("ALTER TABLE memories ADD COLUMN project TEXT")
+        self._connection.commit()
+
+    @staticmethod
+    def _now() -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    def remember(
+        self,
+        key: str,
+        value: str,
+        category: str = "fact",
+        importance: int = 1,
+        embedding: list = None,
+        project: str = None,
+    ) -> None:
+        """Salva o aggiorna un ricordo (upsert su key+category)."""
+        now = self._now()
+        embedding_json = json.dumps(embedding) if embedding else None
+        self._connection.execute(
+            """
+            INSERT INTO memories (key, value, category, importance, created_at, updated_at, embedding, project)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(key, category) DO UPDATE SET
+                value = excluded.value,
+                importance = excluded.importance,
+                updated_at = excluded.updated_at,
+                embedding = excluded.embedding,
+                project = excluded.project
+            """,
+            (key, value, category, importance, now, now, embedding_json, project),
+        )
+        self._connection.commit()
+
+    def recall(
+        self, key: str = None, category: str = None, query: str = None, project: str = None, limit: int = 5,
+    ) -> list[dict]:
+        """Recupera ricordi per chiave esatta e/o ricerca libera su chiave/valore."""
+        clauses = []
+        params = []
+        if key:
+            clauses.append("key = ?")
+            params.append(key)
+        if category:
+            clauses.append("category = ?")
+            params.append(category)
+        if project:
+            clauses.append("project = ?")
+            params.append(project)
+        if query:
+            clauses.append("(key LIKE ? OR value LIKE ?)")
+            params.extend([f"%{query}%", f"%{query}%"])
+
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self._connection.execute(
+            f"SELECT key, value, category, importance, updated_at, project FROM memories "
+            f"{where} ORDER BY importance DESC, updated_at DESC LIMIT ?",
+            (*params, limit),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def semantic_recall(self, query_embedding: list, category: str = None, project: str = None, limit: int = 5) -> list[dict]:
+        """Recupera i ricordi piu' simili semanticamente a un embedding di query.
+
+        Calcola la similarita' coseno in Python: adeguato alla scala di una memoria personale
+        (centinaia/migliaia di ricordi), non a un vero indice vettoriale su larga scala."""
+        from core.embedding_provider import EmbeddingProvider
+
+        clauses = ["embedding IS NOT NULL"]
+        params = []
+        if category:
+            clauses.append("category = ?")
+            params.append(category)
+        if project:
+            clauses.append("project = ?")
+            params.append(project)
+
+        rows = self._connection.execute(
+            f"SELECT key, value, category, importance, updated_at, project, embedding "
+            f"FROM memories WHERE {' AND '.join(clauses)}",
+            params,
+        ).fetchall()
+
+        scored = []
+        for row in rows:
+            embedding = json.loads(row["embedding"])
+            score = EmbeddingProvider.cosine_similarity(query_embedding, embedding)
+            entry = {k: row[k] for k in ("key", "value", "category", "importance", "updated_at", "project")}
+            entry["score"] = score
+            scored.append(entry)
+
+        scored.sort(key=lambda entry: entry["score"], reverse=True)
+        return scored[:limit]
+
+    def forget(self, key: str, category: str = None) -> bool:
+        """Elimina i ricordi con la chiave indicata. Restituisce True se qualcosa e' stato rimosso."""
+        if category:
+            cursor = self._connection.execute(
+                "DELETE FROM memories WHERE key = ? AND category = ?", (key, category)
+            )
+        else:
+            cursor = self._connection.execute("DELETE FROM memories WHERE key = ?", (key,))
+        self._connection.commit()
+        return cursor.rowcount > 0
+
+    def count_memories(self) -> int:
+        row = self._connection.execute("SELECT COUNT(*) FROM memories").fetchone()
+        return row[0] if row else 0
+
+    def set_preference(self, name: str, value: str) -> None:
+        self.remember(name, value, category="preference")
+
+    def get_preference(self, name: str, default=None):
+        results = self.recall(key=name, category="preference", limit=1)
+        return results[0]["value"] if results else default
+
+    def log_turn(self, role: str, text: str) -> None:
+        """Registra un turno di conversazione nella cronologia a lungo termine."""
+        self._connection.execute(
+            "INSERT INTO conversation_history (role, text, created_at) VALUES (?, ?, ?)",
+            (role, text, self._now()),
+        )
+        self._connection.execute(
+            """
+            DELETE FROM conversation_history WHERE id NOT IN (
+                SELECT id FROM conversation_history ORDER BY id DESC LIMIT ?
+            )
+            """,
+            (self.MAX_HISTORY_ENTRIES,),
+        )
+        self._connection.commit()
+
+    def get_recent_history(self, limit: int = 10) -> list[dict]:
+        """Restituisce gli ultimi turni di conversazione in ordine cronologico."""
+        rows = self._connection.execute(
+            "SELECT role, text, created_at FROM conversation_history ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in reversed(rows)]
+
+    def summarize_old_history(self, summarizer, keep_recent: int = 50) -> bool:
+        """Comprime i turni piu' vecchi di keep_recent in un'unica memoria 'summary', poi li elimina.
+
+        Non ha effetto (ritorna False) finche' la cronologia resta sotto la soglia: e' economico
+        richiamarlo a ogni turno, il lavoro vero scatta solo occasionalmente."""
+        rows = self._connection.execute(
+            "SELECT id, role, text, created_at FROM conversation_history ORDER BY id ASC"
+        ).fetchall()
+        if len(rows) <= keep_recent:
+            return False
+
+        overflow = rows[: len(rows) - keep_recent]
+        summary_text = summarizer.summarize([dict(row) for row in overflow])
+        if not summary_text:
+            return False
+
+        self.remember(f"riassunto conversazione del {self._now()}", summary_text, category="summary")
+        self._connection.executemany(
+            "DELETE FROM conversation_history WHERE id = ?", [(row["id"],) for row in overflow]
+        )
+        self._connection.commit()
+        return True
+
+    def close(self) -> None:
+        self._connection.close()

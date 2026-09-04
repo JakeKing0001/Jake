@@ -1,0 +1,8 @@
+{
+  "weather_api_key": "",
+  "news_api_key": "",
+  "ollama_model": "qwen2.5:7b",
+  "embedding_model": "nomic-embed-text",
+  "blocked_intents": [],
+  "always_confirm_intents": []
+}

@@ -1,0 +1,27 @@
+# Voce (v0.5): sintesi vocale offline (SAPI5 + OneCore) e riconoscimento vocale offline (Whisper locale).
+# Il core testuale di Jake (v0.1-v0.4) non richiede dipendenze esterne, solo la libreria standard.
+pyttsx3
+faster-whisper
+sounddevice
+keyboard
+# winsdk: da' accesso alle voci OneCore di Windows (Impostazioni > Voce), non visibili a pyttsx3/SAPI5.
+winsdk
+
+# Automazione PC (v0.9): processi, finestre, clipboard.
+# win32gui/win32clipboard arrivano gia' con pywin32, installato come dipendenza di pyttsx3.
+psutil
+
+# GUI/overlay (v1.1): tray icon e pannello di stato.
+pystray
+Pillow
+
+# Multimodalita' (v1.3): screenshot + OCR usano winsdk/win32gui, gia' presenti sopra.
+
+# Controllo del computer (v1.4): mouse e tastiera.
+pyautogui
+
+# Voce continua (v2.0): rilevamento voce (VAD) per la parola di attivazione "Jake".
+# webrtcvad non ha una wheel Windows precompilata su PyPI (serve Visual Studio per la
+# build locale, spesso inaffidabile qui): webrtcvad-wheels e' lo stesso pacchetto con
+# wheel Windows gia' pronte, stesso nome di importazione ('import webrtcvad').
+webrtcvad-wheels
