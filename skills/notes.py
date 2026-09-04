@@ -12,7 +12,10 @@ class AddNoteSkill:
 
     metadata = {
         "intent": "ADD_NOTE",
-        "description": "Aggiunge un appunto al taccuino di Jake, con data e ora.",
+        "description": "SCRIVE un nuovo appunto nel taccuino di Jake, con data e ora. Usalo solo "
+        "quando l'utente sta dettando qualcosa di nuovo da salvare (es. 'appuntati che...', "
+        "'scrivi che...', 'segna che...'). Non usarlo per rileggere appunti gia' presi: per "
+        "quello c'e' LIST_NOTES.",
         "parameters": {
             "text": {
                 "type": "string",
@@ -39,7 +42,9 @@ class AddNoteSkill:
 class ListNotesSkill:
     metadata = {
         "intent": "LIST_NOTES",
-        "description": "Elenca gli ultimi appunti presi.",
+        "description": "LEGGE gli appunti gia' presi in precedenza. Usalo quando l'utente vuole "
+        "rivedere/sentire i propri appunti (es. 'leggimi gli appunti', 'che appunti ho preso', "
+        "'mostrami il taccuino'), mai per salvarne uno nuovo.",
         "parameters": {
             "limit": {
                 "type": "integer",
