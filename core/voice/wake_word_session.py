@@ -1,6 +1,7 @@
 import re
 import threading
 
+from core.logger import get_logger
 from core.voice.vad_listener import VadListener
 
 # Varianti tollerate: Whisper a volte trascrive male "Jake" (nome poco comune in italiano).
@@ -59,7 +60,14 @@ class WakeWordSession:
             if utterance.size == 0:
                 continue
 
-            text = self.stt_provider.transcribe(utterance, self.vad_listener.SAMPLE_RATE).strip()
+            # Un errore imprevisto qui (es. Whisper, audio device) non deve terminare l'intero
+            # ascolto continuo, altrimenti Jake resta muto in silenzio finche' l'utente non si
+            # accorge e riavvia a mano (vedi stesso accorgimento in push_to_talk.py).
+            try:
+                text = self.stt_provider.transcribe(utterance, self.vad_listener.SAMPLE_RATE).strip()
+            except Exception:
+                get_logger().exception("Errore nella trascrizione vocale")
+                continue
             if not text:
                 continue
 
@@ -86,7 +94,10 @@ class WakeWordSession:
                 self._running = False
                 return
 
-            self._speak_async(response)
+            try:
+                self._speak_async(response)
+            except Exception:
+                get_logger().exception("Errore avviando la sintesi vocale")
 
     def stop(self) -> None:
         self._running = False

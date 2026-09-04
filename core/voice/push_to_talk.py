@@ -1,5 +1,6 @@
 import threading
 
+from core.logger import get_logger
 from core.voice.microphone import Microphone, MicrophoneError
 
 
@@ -51,7 +52,16 @@ class PushToTalkSession:
             if audio.size == 0:
                 continue
 
-            text = self.stt_provider.transcribe(audio, self.microphone.sample_rate).strip()
+            # La trascrizione e la sintesi vocale girano fuori dal try/except di
+            # JakeCore.answer(): un errore imprevisto qui (es. Whisper, audio device) non deve
+            # terminare l'intera sessione vocale, altrimenti Jake resta muto in silenzio finche'
+            # l'utente non si accorge e riavvia a mano.
+            try:
+                text = self.stt_provider.transcribe(audio, self.microphone.sample_rate).strip()
+            except Exception:
+                get_logger().exception("Errore nella trascrizione vocale")
+                print("Non sono riuscito a capire, riprova.")
+                continue
             if not text:
                 continue
             print(f"Tu > {text}")
@@ -63,4 +73,7 @@ class PushToTalkSession:
                 print("Chiusura...")
                 return
 
-            self._speak_async(response)
+            try:
+                self._speak_async(response)
+            except Exception:
+                get_logger().exception("Errore avviando la sintesi vocale")

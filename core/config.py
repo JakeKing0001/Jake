@@ -27,8 +27,10 @@ class Config:
         env_value = os.environ.get(f"JAKE_{key.upper()}")
         if env_value:
             return env_value
-        value = self._values.get(key, default)
-        return value if value else default
+        # Solo l'assenza della chiave deve far scattare il default: un valore memorizzato ma
+        # "falsy" (False, 0, "", []) e' comunque una scelta esplicita dell'utente e va rispettata,
+        # non silenziosamente scartata.
+        return self._values.get(key, default)
 
     def set(self, key: str, value) -> None:
         """Aggiorna un valore e lo persiste su config/settings.json (v2.0: modelli

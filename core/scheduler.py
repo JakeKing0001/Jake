@@ -1,6 +1,8 @@
 import threading
 import time
 
+from core.logger import get_logger
+
 
 class ReminderScheduler:
     """Controlla periodicamente i promemoria scaduti (v1.2: Jake proattivo) su un thread separato,
@@ -12,6 +14,7 @@ class ReminderScheduler:
         self.interval_seconds = interval_seconds
         self._thread = None
         self._stop_event = threading.Event()
+        self._logger = get_logger()
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -27,10 +30,18 @@ class ReminderScheduler:
 
     def _run(self) -> None:
         while not self._stop_event.is_set():
-            for reminder in self.reminder_manager.due_reminders():
-                if self.on_due is not None:
-                    try:
-                        self.on_due(reminder)
-                    except Exception:
-                        pass
+            # Un errore qui (es. sqlite occupato per un istante, o il callback che fallisce)
+            # non deve mai terminare il thread per sempre: verrebbe notificato in silenzio e
+            # nessun promemoria futuro scatterebbe piu' finche' Jake non viene riavviato.
+            try:
+                for reminder in self.reminder_manager.due_reminders():
+                    if self.on_due is not None:
+                        try:
+                            self.on_due(reminder)
+                        except Exception:
+                            self._logger.exception(
+                                "Errore nel callback di notifica del promemoria %s", reminder.get("id")
+                            )
+            except Exception:
+                self._logger.exception("Errore controllando i promemoria scaduti")
             self._stop_event.wait(self.interval_seconds)
