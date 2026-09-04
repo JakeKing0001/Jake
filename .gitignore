@@ -1,0 +1,10 @@
+.venv/
+.venv-rvc/
+__pycache__/
+*.pyc
+rvc_models/
+config/settings.json
+*.log
+.claude/
+data/
+*.db
