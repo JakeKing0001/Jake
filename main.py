@@ -4,6 +4,18 @@ from core.jake_core import JakeCore
 
 
 def main():
+    # Prima di questo fix, un errore alla costruzione di JakeCore (plugin rotto, config
+    # corrotta, ecc.) o dentro run_tray()/session.run() non veniva mai intercettato: in
+    # modalita' --tray non c'e' una console visibile (avvio da collegamento/avvio automatico),
+    # quindi il processo spariva nel nulla senza che l'utente vedesse nulla, nemmeno nel log
+    # (self.logger non esiste finche' JakeCore.__init__ non va a buon fine).
+    try:
+        _dispatch()
+    except Exception:
+        _report_fatal_error(is_tray="--tray" in sys.argv)
+
+
+def _dispatch():
     if "--voice" in sys.argv:
         run_voice_mode()
         return
@@ -23,6 +35,25 @@ def main():
             exit()
 
         print(answer)
+
+
+def _report_fatal_error(is_tray: bool) -> None:
+    from core.logger import get_logger
+
+    message = "Jake si e' chiuso per un errore imprevisto all'avvio. Dettagli nel log (data/jake.log)."
+    get_logger().exception("Errore fatale all'avvio di Jake")
+    print(message)
+
+    if is_tray:
+        # In modalita' tray non c'e' una console ad ascoltare il print sopra: un messagebox
+        # nativo di Windows (nessuna dipendenza aggiuntiva, e' nella libreria standard via
+        # ctypes) e' l'unico modo per far arrivare comunque il messaggio all'utente.
+        try:
+            import ctypes
+
+            ctypes.windll.user32.MessageBoxW(0, message, "Jake", 0x10)
+        except Exception:
+            pass
 
 
 def _build_tts_provider():
