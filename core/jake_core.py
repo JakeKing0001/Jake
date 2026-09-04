@@ -240,6 +240,10 @@ class JakeCore:
                     return "Non hai trigger impostati."
                 if intent == "LIST_REMINDERS":
                     return "Non hai promemoria in programma."
+                if intent == "LIST_NOTES":
+                    return "Non hai ancora nessun appunto."
+                if intent == "GET_BROWSER_HISTORY":
+                    return "Non ho trovato cronologia recente nel browser."
                 if intent == "READ_SCREEN":
                     return "Non ho trovato testo leggibile sullo schermo."
                 if intent == "GET_ACTIVE_WINDOW":
@@ -253,6 +257,8 @@ class JakeCore:
                 return "Non ho un motore OCR disponibile per la lingua di questo PC."
             if result.error == "VISION_UNAVAILABLE":
                 return "Non riesco a vedere lo schermo in questo momento (verifica che il modello di visione sia installato: 'ollama pull qwen2.5vl:7b')."
+            if result.error == "BROWSER_HISTORY_UNAVAILABLE":
+                return "Non trovo la cronologia di Chrome o Edge su questo PC."
             if result.error == "VERIFICATION_FAILED":
                 return f"L'azione sembrava riuscita ma la verifica successiva non conferma l'effetto su {result.data.get('path', '')}."
             if result.error == "PATH_NOT_FOUND":
@@ -375,6 +381,14 @@ class JakeCore:
             return f"Sullo schermo leggo{suffix}: {result.data['text']}"
         if intent == "DESCRIBE_SCREEN":
             return result.data["description"]
+        if intent == "ADD_NOTE":
+            return f"Appuntato: {result.data['text']}"
+        if intent == "LIST_NOTES":
+            return "Ultimi appunti:\n" + "\n".join(result.data["notes"])
+        if intent == "GET_BROWSER_HISTORY":
+            entries = result.data["entries"]
+            formatted = "; ".join(f"{e['title']} ({e['url']})" for e in entries)
+            return f"Cronologia recente: {formatted}"
         if intent == "GET_ACTIVE_WINDOW":
             return f"Stai usando: {result.data['title']}"
         if intent == "CLICK_MOUSE":
