@@ -26,6 +26,8 @@ from skills.reminder import SetReminderSkill, ListRemindersSkill
 from skills.screenshot import TakeScreenshotSkill
 from skills.read_screen import ReadScreenSkill
 from skills.describe_screen import DescribeScreenSkill
+from skills.notes import AddNoteSkill, ListNotesSkill
+from skills.browser_history import GetBrowserHistorySkill
 from skills.active_window import GetActiveWindowSkill
 from skills.mouse_control import ClickMouseSkill, MoveMouseSkill
 from skills.keyboard_control import TypeTextSkill, PressKeySkill
@@ -112,6 +114,9 @@ class SkillRegistry:
             "TAKE_SCREENSHOT": TakeScreenshotSkill(),
             "READ_SCREEN": ReadScreenSkill(),
             "DESCRIBE_SCREEN": DescribeScreenSkill(self.vision_provider),
+            "ADD_NOTE": AddNoteSkill(),
+            "LIST_NOTES": ListNotesSkill(),
+            "GET_BROWSER_HISTORY": GetBrowserHistorySkill(),
             "GET_ACTIVE_WINDOW": GetActiveWindowSkill(),
             "CLICK_MOUSE": ClickMouseSkill(),
             "MOVE_MOUSE": MoveMouseSkill(),
