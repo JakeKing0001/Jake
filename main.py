@@ -266,11 +266,17 @@ def run_jarvis_mode(with_voice: bool = True):
             print("Voce non disponibile (vedi data/jake.log): HUD in modalita' solo testo.")
             session = None
 
+    quick_actions = core.config.get("hud_quick_actions") or None
+    if isinstance(quick_actions, list):
+        quick_actions = [(item.get("label"), item.get("command")) for item in quick_actions
+                         if isinstance(item, dict) and item.get("label") and item.get("command")] or None
     app = JarvisApp(
         core, session,
         hotkey=core.config.get("hud_hotkey", "ctrl+shift+j") or "ctrl+shift+j",
-        auto_hide_seconds=float(core.config.get("hud_auto_hide_seconds", 5)),
-        acrylic=bool(core.config.get("hud_acrylic", True)),
+        auto_hide_seconds=float(core.config.get("hud_auto_hide_seconds", 6)),
+        mode=str(core.config.get("hud_mode", "full") or "full"),
+        backdrop=str(core.config.get("hud_backdrop", "clear") or "clear"),
+        quick_actions=quick_actions,
     )
     try:
         app.run()
