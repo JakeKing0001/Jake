@@ -5,16 +5,22 @@ from PySide6.QtGui import QColor, QFont, QLinearGradient
 FONT_FAMILY = "Segoe UI"
 RADIUS = 26
 
-# Il gradiente "Jake": blu elettrico -> blu notte -> navy profondo, semitrasparente.
+# Il gradiente "Jake": blu elettrico -> blu notte -> navy profondo, semitrasparente. Alpha
+# bassi apposta: deve leggersi come vetro sfocato con dietro il desktop vero (che resta
+# riconoscibile), non come un pannello blu pieno con solo un'ombra vaga dietro.
 GRADIENT_STOPS = [
-    (0.00, (70, 140, 255, 62)),
-    (0.55, (30, 60, 130, 58)),
-    (1.00, (10, 25, 70, 80)),
+    (0.00, (75, 145, 255, 34)),
+    (0.55, (35, 65, 135, 30)),
+    (1.00, (12, 28, 75, 46)),
 ]
-GLASS_TINT = QColor(6, 14, 40, 118)        # scurisce il vetro per la leggibilita' del testo
-BORDER = QColor(150, 205, 255, 120)
-BORDER_STRONG = QColor(160, 215, 255, 200)
-HIGHLIGHT = QColor(255, 255, 255, 46)
+GLASS_TINT = QColor(10, 18, 44, 56)        # scurisce quel poco che serve per la leggibilita'
+BORDER = QColor(155, 210, 255, 140)
+BORDER_STRONG = QColor(170, 220, 255, 220)
+BORDER_DIM = QColor(120, 170, 230, 26)     # base del bordo a gradiente: si spegne verso il fondo
+SHADE = QColor(2, 6, 20, 70)               # ombra interna in basso a destra: profondita' del vetro curvo
+HIGHLIGHT = QColor(255, 255, 255, 64)
+SPECULAR = QColor(255, 255, 255, 110)      # riflesso lucido in alto a sinistra, come vetro curvo
+GRAIN_OPACITY = 0.07                       # granulosita': vetro smerigliato, non plastica liscia
 VEIL = QColor(2, 8, 28, 150)               # velo scuro per la modalita' immersiva
 
 TEXT = QColor(236, 246, 255, 240)
