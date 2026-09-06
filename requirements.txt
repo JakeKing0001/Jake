@@ -11,7 +11,7 @@ winsdk
 # win32gui/win32clipboard arrivano gia' con pywin32, installato come dipendenza di pyttsx3.
 psutil
 
-# GUI/overlay (v1.1): tray icon e pannello di stato.
+# GUI/overlay (v1.1): tray icon e pannello di stato (modalita' --tray, legacy).
 pystray
 Pillow
 
@@ -25,3 +25,17 @@ pyautogui
 # build locale, spesso inaffidabile qui): webrtcvad-wheels e' lo stesso pacchetto con
 # wheel Windows gia' pronte, stesso nome di importazione ('import webrtcvad').
 webrtcvad-wheels
+
+# Conversione fusi orari (v3.1): Windows non include il database IANA dei fusi orari usato dal
+# modulo standard 'zoneinfo', quindi va fornito da questo pacchetto (su Linux/Mac non serve).
+tzdata
+
+# Jake 3.0: HUD in vetro (Qt), voce neurale (Edge TTS, online con ripiego offline),
+# volume esatto (CoreAudio via pycaw), numpy per l'indice semantico.
+PySide6
+edge-tts
+pycaw
+comtypes
+numpy
+
+# GPU per Whisper (opzionale, solo con scheda NVIDIA): vedi requirements-gpu.txt.

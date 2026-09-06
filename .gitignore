@@ -8,3 +8,6 @@ config/settings.json
 .claude/
 data/
 *.db
+
+# Skill generate da Jake (specifiche di questo PC)
+plugins/learned_*.py

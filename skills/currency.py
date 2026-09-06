@@ -1,0 +1,51 @@
+import json
+from urllib import error, request
+
+from core.network import is_online
+from core.skill_result import SkillResult
+
+
+class ConvertCurrencySkill:
+    """Usa open.er-api.com, un servizio di cambio gratuito senza chiave richiesta (aggiornato
+    quotidianamente): nessuna configurazione aggiuntiva necessaria."""
+
+    metadata = {
+        "intent": "CONVERT_CURRENCY",
+        "description": "Converte un importo da una valuta a un'altra al cambio attuale.",
+        "remote": True,
+        "parameters": {
+            "amount": {"type": "number", "required": True, "description": "L'importo da convertire."},
+            "from_currency": {"type": "string", "required": True, "description": "Codice valuta di partenza, es. 'EUR', 'USD'."},
+            "to_currency": {"type": "string", "required": True, "description": "Codice valuta di destinazione, es. 'USD', 'GBP'."},
+        },
+    }
+
+    def __init__(self, timeout: float = 8):
+        self.timeout = timeout
+
+    def execute(self, parameters: dict = None):
+        parameters = parameters or {}
+        amount = parameters.get("amount")
+        from_currency = (parameters.get("from_currency") or "").strip().upper()
+        to_currency = (parameters.get("to_currency") or "").strip().upper()
+
+        if not isinstance(amount, (int, float)) or not from_currency or not to_currency:
+            return SkillResult(success=False, data={}, error="MISSING_PARAMETERS")
+        if not is_online():
+            return SkillResult(success=False, data={}, error="NETWORK_UNAVAILABLE")
+
+        url = f"https://open.er-api.com/v6/latest/{from_currency}"
+        try:
+            with request.urlopen(url, timeout=self.timeout) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (error.URLError, TimeoutError, json.JSONDecodeError):
+            return SkillResult(success=False, data={}, error="NETWORK_UNAVAILABLE")
+
+        rate = (payload.get("rates") or {}).get(to_currency)
+        if payload.get("result") != "success" or rate is None:
+            return SkillResult(success=False, data={"from_currency": from_currency, "to_currency": to_currency}, error="CURRENCY_NOT_FOUND")
+
+        return SkillResult(success=True, data={
+            "amount": amount, "from_currency": from_currency, "to_currency": to_currency,
+            "result": round(amount * rate, 2),
+        })

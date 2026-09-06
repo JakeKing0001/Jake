@@ -17,6 +17,7 @@ class VadListener:
         silence_ms: int = 700,
         max_utterance_s: float = 12.0,
         device: int = None,
+        on_level=None,
     ):
         import webrtcvad
 
@@ -24,6 +25,10 @@ class VadListener:
         self.silence_frames_needed = max(1, silence_ms // self.FRAME_MS)
         self.max_frames = int(max_utterance_s * 1000 // self.FRAME_MS)
         self.device = device
+        # v3.0: callback(livello 0..1, parlato: bool) per ogni frame, usato dall'HUD per la
+        # forma d'onda. Deve essere leggerissimo: gira sul thread di ascolto.
+        self.on_level = on_level
+        self.muted = False  # True mentre Jake parla, per non trascrivere la propria voce
 
     def is_available(self) -> bool:
         try:
@@ -64,6 +69,18 @@ class VadListener:
                     continue  # frame incompleto (di solito solo all'avvio/chiusura dello stream)
 
                 is_speech = self.vad.is_speech(frame.tobytes(), self.SAMPLE_RATE)
+                if self.on_level is not None:
+                    try:
+                        rms = float(np.sqrt(np.mean(frame.astype(np.float32) ** 2))) / 32768.0
+                        self.on_level(min(1.0, rms * 8.0), bool(is_speech))
+                    except Exception:
+                        pass
+
+                if self.muted:
+                    speech_frames = []
+                    silence_run = 0
+                    in_speech = False
+                    continue
 
                 if is_speech:
                     speech_frames.append(frame)

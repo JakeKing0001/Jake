@@ -2,6 +2,7 @@ import json
 from urllib import error, request
 
 from core.planner import Plan, PlanStep
+from core.ollama_client import DEFAULT_BASE_URL
 
 
 class PlannerProvider:
@@ -13,13 +14,13 @@ class PlannerProvider:
     def __init__(
         self,
         registry,
-        base_url: str = "http://localhost:11434",
+        base_url: str = None,
         timeout: float = 40,
         model: str = None,
         context_provider=None,
     ):
         self.registry = registry
-        self.base_url = base_url.rstrip("/")
+        self.base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
         self.timeout = timeout
         self.model = model or "qwen2.5:7b"
         self.last_error = None
@@ -96,10 +97,11 @@ class PlannerProvider:
         payload = {
             "model": self.model,
             "stream": False,
+            "keep_alive": "30m",
             "format": self._build_output_schema(),
             # Temperatura 0: i parametri (percorsi, nomi) vanno riprodotti esattamente,
             # non generati creativamente.
-            "options": {"temperature": 0},
+            "options": {"num_ctx": 8192, "temperature": 0},
             "messages": [
                 {"role": "system", "content": self._build_system_prompt()},
                 {"role": "user", "content": text},

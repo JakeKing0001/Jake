@@ -2,6 +2,7 @@ import json
 from urllib import error, request
 
 from core.skill_result import SkillResult
+from core.ollama_client import DEFAULT_BASE_URL
 
 
 class ListModelsSkill:
@@ -11,8 +12,8 @@ class ListModelsSkill:
         "parameters": {},
     }
 
-    def __init__(self, base_url: str = "http://localhost:11434", timeout: float = 10):
-        self.base_url = base_url.rstrip("/")
+    def __init__(self, base_url: str = None, timeout: float = 10):
+        self.base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
         self.timeout = timeout
 
     def execute(self, parameters: dict = None):

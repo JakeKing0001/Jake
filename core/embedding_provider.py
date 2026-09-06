@@ -1,5 +1,6 @@
 import json
 from urllib import error, request
+from core.ollama_client import DEFAULT_BASE_URL
 
 
 class EmbeddingProvider:
@@ -9,9 +10,9 @@ class EmbeddingProvider:
     il modello non sono disponibili, embed() restituisce None: i chiamanti devono degradare
     con grazia alla ricerca testuale semplice, senza far fallire l'intera funzione."""
 
-    def __init__(self, model: str = "nomic-embed-text", base_url: str = "http://localhost:11434", timeout: float = 15):
+    def __init__(self, model: str = "nomic-embed-text", base_url: str = None, timeout: float = 15):
         self.model = model
-        self.base_url = base_url.rstrip("/")
+        self.base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
         self.timeout = timeout
 
     def embed(self, text: str) -> list[float] | None:

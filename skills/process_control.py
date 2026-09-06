@@ -1,5 +1,64 @@
 from core.skill_result import SkillResult
 
+# Nome parlato -> frammento del nome del processo. "chiudi blocco note" non trova nessun
+# processo chiamato "blocco note": il processo e' notepad.exe.
+PROCESS_ALIASES = {
+    "blocco note": "notepad", "notepad": "notepad", "calcolatrice": "calculatorapp", "calcolatore": "calculatorapp",
+    "esplora file": "explorer", "esplora risorse": "explorer", "visual studio code": "code", "vscode": "code",
+    "vs code": "code", "chrome": "chrome", "google chrome": "chrome", "edge": "msedge", "microsoft edge": "msedge",
+    "word": "winword", "excel": "excel", "powerpoint": "powerpnt", "outlook": "outlook", "onenote": "onenote",
+    "terminale": "windowsterminal", "windows terminal": "windowsterminal", "prompt dei comandi": "cmd", "cmd": "cmd",
+    "powershell": "powershell", "paint": "mspaint", "impostazioni": "systemsettings", "task manager": "taskmgr",
+    "gestione attivita": "taskmgr", "gestione attività": "taskmgr", "foto": "photos", "whatsapp": "whatsapp",
+    "spotify": "spotify", "discord": "discord", "steam": "steam", "telegram": "telegram", "opera": "opera",
+    "firefox": "firefox", "blender": "blender", "obs": "obs64", "vlc": "vlc", "teams": "ms-teams", "zoom": "zoom",
+    "brave": "brave", "photoshop": "photoshop", "il browser": "msedge",
+}
+
+
+def _process_needle(name: str) -> str:
+    lowered = (name or "").strip().lower()
+    for suffix in (".exe",):
+        if lowered.endswith(suffix):
+            lowered = lowered[: -len(suffix)]
+    return PROCESS_ALIASES.get(lowered, lowered)
+
+
+def _matching_processes(needle: str, original: str):
+    import psutil
+
+    needles = {needle, original.lower().replace(" ", "")}
+    matching = []
+    for process in psutil.process_iter(["pid", "name"]):
+        process_name = (process.info.get("name") or "").lower()
+        if any(n and n in process_name for n in needles):
+            matching.append(process)
+    return matching
+
+
+def _windows_of_pids(pids: set):
+    """Finestre visibili con titolo appartenenti ai processi indicati: [(hwnd, titolo, pid)]."""
+    import win32gui
+    import win32process
+
+    found = []
+
+    def callback(hwnd, _):
+        if not win32gui.IsWindowVisible(hwnd):
+            return
+        title = win32gui.GetWindowText(hwnd)
+        if not title:
+            return
+        try:
+            _thread_id, pid = win32process.GetWindowThreadProcessId(hwnd)
+        except Exception:
+            return
+        if pid in pids:
+            found.append((hwnd, title, pid))
+
+    win32gui.EnumWindows(callback, None)
+    return found
+
 
 class ListProcessesSkill:
     metadata = {
@@ -21,11 +80,12 @@ class ListProcessesSkill:
 
         parameters = parameters or {}
         name_filter = (parameters.get("name") or "").strip().lower()
+        needle = _process_needle(name_filter) if name_filter else ""
 
         matches = []
         for process in psutil.process_iter(["pid", "name"]):
             process_name = process.info.get("name") or ""
-            if not name_filter or name_filter in process_name.lower():
+            if not name_filter or needle in process_name.lower() or name_filter in process_name.lower():
                 matches.append({"pid": process.info["pid"], "name": process_name})
                 if len(matches) >= self.MAX_RESULTS:
                     break
@@ -36,42 +96,44 @@ class ListProcessesSkill:
 
 
 class CloseAppSkill:
-    """Termina i processi il cui nome corrisponde. Richiede sempre conferma (azione irreversibile)."""
+    """Chiude un'applicazione. Prima in modo gentile (v3.0: WM_CLOSE alle sue finestre, come
+    cliccare la X, cosi' il programma puo' chiedere di salvare); solo se non ha finestre
+    visibili termina i processi, e in quel caso chiede conferma (azione irreversibile)."""
 
     metadata = {
         "intent": "CLOSE_APP",
-        "description": "Chiude (termina) un'applicazione in esecuzione, dato il nome del processo.",
+        "description": "Chiude un'applicazione in esecuzione dato il suo nome (es. 'chiudi spotify', "
+        "'chiudi blocco note'): prima chiude le sue finestre, se serve termina il processo.",
         "parameters": {
             "name": {
                 "type": "string",
                 "required": True,
-                "description": "Nome (anche parziale) del processo da chiudere, es. 'notepad'.",
+                "description": "Nome dell'applicazione o del processo da chiudere, come detto dall'utente.",
             },
         },
     }
 
     def execute(self, parameters: dict = None):
-        import psutil
-
         parameters = parameters or {}
         name_filter = (parameters.get("name") or "").strip().lower()
         if not name_filter:
             return SkillResult(success=False, data={}, error="MISSING_PARAMETERS")
 
-        matching = [
-            process for process in psutil.process_iter(["pid", "name"])
-            if name_filter in (process.info.get("name") or "").lower()
-        ]
+        needle = _process_needle(name_filter)
+        matching = _matching_processes(needle, name_filter)
         if not matching:
             return SkillResult(success=False, data={"name": name_filter}, error="NOT_FOUND")
 
         if not parameters.get("confirmed"):
+            closed_titles = self._close_windows(matching) or self._close_windows_by_title(name_filter)
+            if closed_titles:
+                return SkillResult(success=True, data={"name": name_filter, "closed": closed_titles, "graceful": True})
             names = ", ".join(sorted({p.info["name"] for p in matching}))
             return SkillResult(
                 success=False,
                 data={
                     "name": name_filter,
-                    "message": f"Confermi di voler chiudere: {names}?",
+                    "message": f"Non ha finestre aperte: confermi di voler terminare {names}?",
                     "confirm_parameters": {"name": name_filter, "confirmed": True},
                 },
                 error="CONFIRMATION_REQUIRED",
@@ -88,3 +150,46 @@ class CloseAppSkill:
         if not closed:
             return SkillResult(success=False, data={"name": name_filter}, error="OPERATION_FAILED")
         return SkillResult(success=True, data={"name": name_filter, "closed": closed})
+
+    @staticmethod
+    def _close_windows_by_title(name: str) -> list[str]:
+        """Le app di Store (Calcolatrice, Foto...) hanno la finestra in ApplicationFrameHost,
+        non nel loro processo: si riconoscono dal titolo."""
+        try:
+            import win32con
+            import win32gui
+        except ImportError:
+            return []
+        needle = name.lower()
+        closed = []
+
+        def callback(hwnd, _):
+            if not win32gui.IsWindowVisible(hwnd):
+                return
+            title = win32gui.GetWindowText(hwnd)
+            if title and needle in title.lower() and not title.lower().startswith("jake"):
+                try:
+                    win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+                    closed.append(title)
+                except Exception:
+                    pass
+
+        win32gui.EnumWindows(callback, None)
+        return closed
+
+    @staticmethod
+    def _close_windows(processes) -> list[str]:
+        try:
+            import win32con
+            import win32gui
+        except ImportError:
+            return []
+        pids = {process.info["pid"] for process in processes}
+        closed = []
+        for hwnd, title, _pid in _windows_of_pids(pids):
+            try:
+                win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+                closed.append(title)
+            except Exception:
+                continue
+        return closed
