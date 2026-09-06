@@ -1,0 +1,667 @@
+{"text": "che ore sono", "intent": "GET_TIME", "parameters": {}}
+{"text": "dimmi l'ora", "intent": "GET_TIME", "parameters": {}}
+{"text": "mi dici che ora è", "intent": "GET_TIME", "parameters": {}}
+{"text": "sai che ore sono", "intent": "GET_TIME", "parameters": {}}
+{"text": "che giorno è oggi", "intent": "GET_DATE", "parameters": {}}
+{"text": "dimmi la data di oggi", "intent": "GET_DATE", "parameters": {}}
+{"text": "quanti ne abbiamo oggi", "intent": "GET_DATE", "parameters": {}}
+{"text": "apri blocco note", "intent": "OPEN_APP", "parameters": {"app": "blocco note"}}
+{"text": "apri visual studio code", "intent": "OPEN_APP", "parameters": {"app": "visual studio code"}}
+{"text": "avvia spotify", "intent": "OPEN_APP", "parameters": {"app": "spotify"}}
+{"text": "aprimi blender", "intent": "OPEN_APP", "parameters": {"app": "blender"}}
+{"text": "lancia opera", "intent": "OPEN_APP", "parameters": {"app": "opera"}}
+{"text": "puoi aprire discord", "intent": "OPEN_APP", "parameters": {"app": "discord"}}
+{"text": "fai partire la calcolatrice", "intent": "OPEN_APP", "parameters": {"app": "calcolatrice"}}
+{"text": "apri il terminale", "intent": "OPEN_APP", "parameters": {"app": "terminale"}}
+{"text": "apri esplora file", "intent": "OPEN_APP", "parameters": {"app": "esplora file"}}
+{"text": "apri il browser", "intent": "OPEN_APP", "parameters": {"app": "browser"}}
+{"text": "apri whatsapp", "intent": "OPEN_APP", "parameters": {"app": "whatsapp"}}
+{"text": "apri steam", "intent": "OPEN_APP", "parameters": {"app": "steam"}}
+{"text": "ricorda che il mio colore preferito è il blu", "intent": "REMEMBER", "parameters": {"key": "colore preferito", "value": "blu"}}
+{"text": "ricordati che la password del wifi è casa123", "intent": "REMEMBER", "parameters": {"key": "password del wifi", "value": "casa123"}}
+{"text": "memorizza che il compleanno di marco è il 12 marzo", "intent": "REMEMBER", "parameters": {"key": "compleanno di marco", "value": "12 marzo"}}
+{"text": "segnati che la mia macchina è una panda", "intent": "REMEMBER", "parameters": {"key": "macchina", "value": "panda"}}
+{"text": "cosa ricordi sul mio colore preferito", "intent": "RECALL", "parameters": {"query": "colore preferito"}}
+{"text": "cosa sai del compleanno di marco", "intent": "RECALL", "parameters": {"query": "compleanno di marco"}}
+{"text": "qual è la password del wifi", "intent": "RECALL", "parameters": {"query": "password del wifi"}}
+{"text": "ti ricordi che macchina ho", "intent": "RECALL", "parameters": {"query": "macchina"}}
+{"text": "dimentica il mio colore preferito", "intent": "FORGET", "parameters": {"key": "colore preferito"}}
+{"text": "scorda la password del wifi", "intent": "FORGET", "parameters": {"key": "password del wifi"}}
+{"text": "cancella dalla memoria il compleanno di marco", "intent": "FORGET", "parameters": {"key": "compleanno di marco"}}
+{"text": "apri la cartella download", "intent": "OPEN_PATH", "parameters": {"path": "download"}}
+{"text": "apri il desktop", "intent": "OPEN_PATH", "parameters": {"path": "desktop"}}
+{"text": "apri la cartella documenti", "intent": "OPEN_PATH", "parameters": {"path": "documenti"}}
+{"text": "apri il file C:\\Users\\david\\Desktop\\relazione.docx", "intent": "OPEN_PATH", "parameters": {"path": "C:\\Users\\david\\Desktop\\relazione.docx"}}
+{"text": "aprimi la cartella immagini", "intent": "OPEN_PATH", "parameters": {"path": "immagini"}}
+{"text": "crea la cartella progetti sul desktop", "intent": "CREATE_PATH", "parameters": {"path": "desktop\\progetti", "type": "folder"}}
+{"text": "crea una cartella chiamata foto vacanze nei documenti", "intent": "CREATE_PATH", "parameters": {"path": "documenti\\foto vacanze", "type": "folder"}}
+{"text": "crea il file appunti.txt sul desktop", "intent": "CREATE_PATH", "parameters": {"path": "desktop\\appunti.txt", "type": "file"}}
+{"text": "crea un nuovo file chiamato lista.txt nella cartella download", "intent": "CREATE_PATH", "parameters": {"path": "download\\lista.txt", "type": "file"}}
+{"text": "rinomina il file desktop\\vecchio.txt in nuovo.txt", "intent": "RENAME_PATH", "parameters": {"path": "desktop\\vecchio.txt", "new_name": "nuovo.txt"}}
+{"text": "rinomina la cartella desktop\\progetti in lavoro", "intent": "RENAME_PATH", "parameters": {"path": "desktop\\progetti", "new_name": "lavoro"}}
+{"text": "sposta il file desktop\\foto.jpg nella cartella immagini", "intent": "MOVE_PATH", "parameters": {"path": "desktop\\foto.jpg", "destination": "immagini"}}
+{"text": "sposta desktop\\relazione.docx nei documenti", "intent": "MOVE_PATH", "parameters": {"path": "desktop\\relazione.docx", "destination": "documenti"}}
+{"text": "elimina il file desktop\\vecchio.txt", "intent": "DELETE_PATH", "parameters": {"path": "desktop\\vecchio.txt"}}
+{"text": "cancella la cartella download\\temp", "intent": "DELETE_PATH", "parameters": {"path": "download\\temp"}}
+{"text": "trova il file relazione.docx", "intent": "FIND_FILE", "parameters": {"name": "relazione.docx"}}
+{"text": "cerca il file chiamato bilancio nel desktop", "intent": "FIND_FILE", "parameters": {"name": "bilancio", "path": "desktop"}}
+{"text": "dove ho salvato il file tesi.pdf", "intent": "FIND_FILE", "parameters": {"name": "tesi.pdf"}}
+{"text": "cerca nei documenti la parola fattura", "intent": "SEARCH_FILES", "parameters": {"query": "fattura"}}
+{"text": "cerca nel contenuto dei file bilancio 2025", "intent": "SEARCH_FILES", "parameters": {"query": "bilancio 2025"}}
+{"text": "apri il primo risultato", "intent": "OPEN_SEARCH_RESULT", "parameters": {"index": 1}}
+{"text": "apri il secondo risultato", "intent": "OPEN_SEARCH_RESULT", "parameters": {"index": 2}}
+{"text": "apri il risultato numero 3", "intent": "OPEN_SEARCH_RESULT", "parameters": {"index": 3}}
+{"text": "cerca sul web chi era leonardo da vinci", "intent": "WEB_SEARCH", "parameters": {"query": "leonardo da vinci"}}
+{"text": "cerca su internet cos'è la fotosintesi", "intent": "WEB_SEARCH", "parameters": {"query": "fotosintesi"}}
+{"text": "che tempo fa a roma", "intent": "GET_WEATHER", "parameters": {"city": "roma"}}
+{"text": "meteo a milano", "intent": "GET_WEATHER", "parameters": {"city": "milano"}}
+{"text": "com'è il tempo oggi a torino", "intent": "GET_WEATHER", "parameters": {"city": "torino"}}
+{"text": "piove a napoli", "intent": "GET_WEATHER", "parameters": {"city": "napoli"}}
+{"text": "quanti gradi ci sono a bologna", "intent": "GET_WEATHER", "parameters": {"city": "bologna"}}
+{"text": "ultime notizie", "intent": "GET_NEWS", "parameters": {}}
+{"text": "dammi le notizie di oggi", "intent": "GET_NEWS", "parameters": {}}
+{"text": "notizie sulla formula 1", "intent": "GET_NEWS", "parameters": {"topic": "formula 1"}}
+{"text": "che novità ci sono sulla tecnologia", "intent": "GET_NEWS", "parameters": {"topic": "tecnologia"}}
+{"text": "apri il sito youtube.com", "intent": "OPEN_URL", "parameters": {"url": "youtube.com"}}
+{"text": "vai su github.com", "intent": "OPEN_URL", "parameters": {"url": "github.com"}}
+{"text": "apri youtube", "intent": "OPEN_URL", "parameters": {"url": "youtube.com"}}
+{"text": "apri google", "intent": "OPEN_URL", "parameters": {"url": "google.com"}}
+{"text": "apri gmail", "intent": "OPEN_URL", "parameters": {"url": "mail.google.com"}}
+{"text": "apri netflix", "intent": "OPEN_URL", "parameters": {"url": "netflix.com"}}
+{"text": "apri chatgpt", "intent": "OPEN_URL", "parameters": {"url": "chatgpt.com"}}
+{"text": "apri amazon", "intent": "OPEN_URL", "parameters": {"url": "amazon.it"}}
+{"text": "vai su wikipedia", "intent": "OPEN_URL", "parameters": {"url": "it.wikipedia.org"}}
+{"text": "cosa c'è negli appunti", "intent": "CLIPBOARD_READ", "parameters": {}}
+{"text": "leggi gli appunti", "intent": "CLIPBOARD_READ", "parameters": {}}
+{"text": "cosa ho copiato", "intent": "CLIPBOARD_READ", "parameters": {}}
+{"text": "copia negli appunti ciao a tutti", "intent": "CLIPBOARD_WRITE", "parameters": {"text": "ciao a tutti"}}
+{"text": "metti negli appunti il testo buongiorno", "intent": "CLIPBOARD_WRITE", "parameters": {"text": "buongiorno"}}
+{"text": "porta in primo piano spotify", "intent": "FOCUS_WINDOW", "parameters": {"title": "spotify"}}
+{"text": "vai alla finestra di visual studio code", "intent": "FOCUS_WINDOW", "parameters": {"title": "visual studio code"}}
+{"text": "passa a opera", "intent": "FOCUS_WINDOW", "parameters": {"title": "opera"}}
+{"text": "mostrami la finestra di discord", "intent": "FOCUS_WINDOW", "parameters": {"title": "discord"}}
+{"text": "torna su blender", "intent": "FOCUS_WINDOW", "parameters": {"title": "blender"}}
+{"text": "minimizza spotify", "intent": "MINIMIZE_WINDOW", "parameters": {"title": "spotify"}}
+{"text": "riduci a icona la finestra di opera", "intent": "MINIMIZE_WINDOW", "parameters": {"title": "opera"}}
+{"text": "alza il volume", "intent": "SET_VOLUME", "parameters": {"action": "up"}}
+{"text": "aumenta il volume", "intent": "SET_VOLUME", "parameters": {"action": "up"}}
+{"text": "più forte", "intent": "SET_VOLUME", "parameters": {"action": "up"}}
+{"text": "abbassa il volume", "intent": "SET_VOLUME", "parameters": {"action": "down"}}
+{"text": "diminuisci il volume", "intent": "SET_VOLUME", "parameters": {"action": "down"}}
+{"text": "più piano", "intent": "SET_VOLUME", "parameters": {"action": "down"}}
+{"text": "silenzia", "intent": "SET_VOLUME", "parameters": {"action": "mute"}}
+{"text": "muta l'audio", "intent": "SET_VOLUME", "parameters": {"action": "mute"}}
+{"text": "togli l'audio", "intent": "SET_VOLUME", "parameters": {"action": "mute"}}
+{"text": "mostra i processi", "intent": "LIST_PROCESSES", "parameters": {}}
+{"text": "che processi sono aperti", "intent": "LIST_PROCESSES", "parameters": {}}
+{"text": "elenca i processi di chrome", "intent": "LIST_PROCESSES", "parameters": {"name": "chrome"}}
+{"text": "chiudi spotify", "intent": "CLOSE_APP", "parameters": {"name": "spotify"}}
+{"text": "termina blocco note", "intent": "CLOSE_APP", "parameters": {"name": "notepad"}}
+{"text": "chiudi opera", "intent": "CLOSE_APP", "parameters": {"name": "opera"}}
+{"text": "chiudi discord", "intent": "CLOSE_APP", "parameters": {"name": "discord"}}
+{"text": "ammazza il processo chrome", "intent": "CLOSE_APP", "parameters": {"name": "chrome"}}
+{"text": "salva un'automazione chiamata modalità lavoro che apre visual studio code e spotify", "intent": "SAVE_WORKFLOW", "parameters": {"name": "modalità lavoro", "request": "apre visual studio code e spotify"}}
+{"text": "crea un workflow di nome mattina che apre opera e dice il meteo a roma", "intent": "SAVE_WORKFLOW", "parameters": {"name": "mattina", "request": "apre opera e dice il meteo a roma"}}
+{"text": "esegui l'automazione modalità lavoro", "intent": "RUN_WORKFLOW", "parameters": {"name": "modalità lavoro"}}
+{"text": "lancia il workflow mattina", "intent": "RUN_WORKFLOW", "parameters": {"name": "mattina"}}
+{"text": "fai partire l'automazione modalità lavoro ogni giorno alle 9", "intent": "SET_TRIGGER", "parameters": {"name": "lavoro alle 9", "workflow_name": "modalità lavoro", "trigger_type": "time", "at_time": "09:00"}}
+{"text": "quando apro blender esegui l'automazione modalità 3d", "intent": "SET_TRIGGER", "parameters": {"name": "blender trigger", "workflow_name": "modalità 3d", "trigger_type": "app_focus", "app_contains": "blender"}}
+{"text": "che trigger ho impostato", "intent": "LIST_TRIGGERS", "parameters": {}}
+{"text": "elenca i trigger", "intent": "LIST_TRIGGERS", "parameters": {}}
+{"text": "rimuovi il trigger lavoro alle 9", "intent": "DELETE_TRIGGER", "parameters": {"name": "lavoro alle 9"}}
+{"text": "ricordami di chiamare marco tra 10 minuti", "intent": "SET_REMINDER", "parameters": {"text": "chiamare marco", "in_minutes": 10}}
+{"text": "ricordami tra un'ora di spegnere il forno", "intent": "SET_REMINDER", "parameters": {"text": "spegnere il forno", "in_minutes": 60}}
+{"text": "ricordami alle 18:30 di prendere le medicine", "intent": "SET_REMINDER", "parameters": {"text": "prendere le medicine", "at_time": "18:30"}}
+{"text": "promemoria alle 9 riunione con il team", "intent": "SET_REMINDER", "parameters": {"text": "riunione con il team", "at_time": "09:00"}}
+{"text": "tra 30 minuti ricordami di fare una pausa", "intent": "SET_REMINDER", "parameters": {"text": "fare una pausa", "in_minutes": 30}}
+{"text": "avvisami tra 5 minuti", "intent": "SET_REMINDER", "parameters": {"text": "avviso", "in_minutes": 5}}
+{"text": "che promemoria ho", "intent": "LIST_REMINDERS", "parameters": {}}
+{"text": "quali promemoria ho impostato", "intent": "LIST_REMINDERS", "parameters": {}}
+{"text": "mostrami i miei promemoria", "intent": "LIST_REMINDERS", "parameters": {}}
+{"text": "fai uno screenshot", "intent": "TAKE_SCREENSHOT", "parameters": {}}
+{"text": "cattura lo schermo", "intent": "TAKE_SCREENSHOT", "parameters": {}}
+{"text": "scatta una foto dello schermo", "intent": "TAKE_SCREENSHOT", "parameters": {}}
+{"text": "leggi lo schermo", "intent": "READ_SCREEN", "parameters": {}}
+{"text": "cosa c'è scritto sullo schermo", "intent": "READ_SCREEN", "parameters": {}}
+{"text": "leggimi il testo che vedi sullo schermo", "intent": "READ_SCREEN", "parameters": {}}
+{"text": "descrivi cosa vedi sullo schermo", "intent": "DESCRIBE_SCREEN", "parameters": {}}
+{"text": "cosa c'è sullo schermo", "intent": "DESCRIBE_SCREEN", "parameters": {}}
+{"text": "guarda lo schermo e dimmi che errore c'è", "intent": "DESCRIBE_SCREEN", "parameters": {"question": "che errore c'è"}}
+{"text": "cosa vedi", "intent": "DESCRIBE_SCREEN", "parameters": {}}
+{"text": "appuntati che devo comprare il pane", "intent": "ADD_NOTE", "parameters": {"text": "devo comprare il pane"}}
+{"text": "scrivi un appunto: chiamare il dentista lunedì", "intent": "ADD_NOTE", "parameters": {"text": "chiamare il dentista lunedì"}}
+{"text": "prendi nota che la riunione è spostata a giovedì", "intent": "ADD_NOTE", "parameters": {"text": "la riunione è spostata a giovedì"}}
+{"text": "segna che ho pagato la bolletta", "intent": "ADD_NOTE", "parameters": {"text": "ho pagato la bolletta"}}
+{"text": "leggimi gli appunti", "intent": "LIST_NOTES", "parameters": {}}
+{"text": "che appunti ho preso", "intent": "LIST_NOTES", "parameters": {}}
+{"text": "mostrami il taccuino", "intent": "LIST_NOTES", "parameters": {}}
+{"text": "leggimi gli ultimi 3 appunti", "intent": "LIST_NOTES", "parameters": {"limit": 3}}
+{"text": "che siti ho visitato di recente", "intent": "GET_BROWSER_HISTORY", "parameters": {}}
+{"text": "mostrami la cronologia del browser", "intent": "GET_BROWSER_HISTORY", "parameters": {}}
+{"text": "cosa sto facendo", "intent": "GET_ACTIVE_WINDOW", "parameters": {}}
+{"text": "che finestra ho aperta adesso", "intent": "GET_ACTIVE_WINDOW", "parameters": {}}
+{"text": "clicca in 500 300", "intent": "CLICK_MOUSE", "parameters": {"x": 500, "y": 300}}
+{"text": "fai click destro alle coordinate 800 600", "intent": "CLICK_MOUSE", "parameters": {"x": 800, "y": 600, "button": "right"}}
+{"text": "doppio click in 100 200", "intent": "CLICK_MOUSE", "parameters": {"x": 100, "y": 200, "button": "double"}}
+{"text": "sposta il mouse in 960 540", "intent": "MOVE_MOUSE", "parameters": {"x": 960, "y": 540}}
+{"text": "scrivi ciao a tutti", "intent": "TYPE_TEXT", "parameters": {"text": "ciao a tutti"}}
+{"text": "digita buongiorno come va", "intent": "TYPE_TEXT", "parameters": {"text": "buongiorno come va"}}
+{"text": "scrivi qui: ci vediamo domani alle 10", "intent": "TYPE_TEXT", "parameters": {"text": "ci vediamo domani alle 10"}}
+{"text": "premi invio", "intent": "PRESS_KEY", "parameters": {"keys": "enter"}}
+{"text": "premi control s", "intent": "PRESS_KEY", "parameters": {"keys": "ctrl+s"}}
+{"text": "salva con control s", "intent": "PRESS_KEY", "parameters": {"keys": "ctrl+s"}}
+{"text": "premi alt tab", "intent": "PRESS_KEY", "parameters": {"keys": "alt+tab"}}
+{"text": "premi escape", "intent": "PRESS_KEY", "parameters": {"keys": "esc"}}
+{"text": "fai control z", "intent": "PRESS_KEY", "parameters": {"keys": "ctrl+z"}}
+{"text": "seleziona tutto", "intent": "PRESS_KEY", "parameters": {"keys": "ctrl+a"}}
+{"text": "incolla", "intent": "PRESS_KEY", "parameters": {"keys": "ctrl+v"}}
+{"text": "copia", "intent": "PRESS_KEY", "parameters": {"keys": "ctrl+c"}}
+{"text": "fai una ricerca approfondita sull'energia solare", "intent": "RESEARCH", "parameters": {"topic": "energia solare"}}
+{"text": "informati sulla storia di roma", "intent": "RESEARCH", "parameters": {"topic": "storia di roma"}}
+{"text": "cerca per significato documenti sul bilancio familiare", "intent": "SEMANTIC_SEARCH_FILES", "parameters": {"query": "bilancio familiare"}}
+{"text": "trova per significato file che parlano di vacanze", "intent": "SEMANTIC_SEARCH_FILES", "parameters": {"query": "vacanze"}}
+{"text": "prepara l'indice semantico", "intent": "BUILD_SEMANTIC_INDEX", "parameters": {}}
+{"text": "aggiorna l'indice semantico", "intent": "BUILD_SEMANTIC_INDEX", "parameters": {}}
+{"text": "aggiungi alla lista delle cose da fare comprare il latte", "intent": "ADD_TODO", "parameters": {"text": "comprare il latte"}}
+{"text": "metti in lista chiamare l'idraulico", "intent": "ADD_TODO", "parameters": {"text": "chiamare l'idraulico"}}
+{"text": "aggiungi un task: finire la relazione", "intent": "ADD_TODO", "parameters": {"text": "finire la relazione"}}
+{"text": "devo ricordarmi di pagare l'affitto, mettilo nella todo", "intent": "ADD_TODO", "parameters": {"text": "pagare l'affitto"}}
+{"text": "cosa devo fare", "intent": "LIST_TODOS", "parameters": {}}
+{"text": "mostrami la lista delle cose da fare", "intent": "LIST_TODOS", "parameters": {}}
+{"text": "che task ho", "intent": "LIST_TODOS", "parameters": {}}
+{"text": "leggimi la todo list", "intent": "LIST_TODOS", "parameters": {}}
+{"text": "segna come fatto comprare il latte", "intent": "COMPLETE_TODO", "parameters": {"text": "comprare il latte"}}
+{"text": "ho finito di chiamare l'idraulico", "intent": "COMPLETE_TODO", "parameters": {"text": "chiamare l'idraulico"}}
+{"text": "ho completato il task finire la relazione", "intent": "COMPLETE_TODO", "parameters": {"text": "finire la relazione"}}
+{"text": "togli dalla lista pagare l'affitto", "intent": "DELETE_TODO", "parameters": {"text": "pagare l'affitto"}}
+{"text": "elimina il task comprare il latte", "intent": "DELETE_TODO", "parameters": {"text": "comprare il latte"}}
+{"text": "spegni il computer", "intent": "SYSTEM_POWER", "parameters": {"action": "shutdown"}}
+{"text": "spegni il pc", "intent": "SYSTEM_POWER", "parameters": {"action": "shutdown"}}
+{"text": "arresta il sistema", "intent": "SYSTEM_POWER", "parameters": {"action": "shutdown"}}
+{"text": "riavvia il computer", "intent": "SYSTEM_POWER", "parameters": {"action": "restart"}}
+{"text": "riavvia il pc", "intent": "SYSTEM_POWER", "parameters": {"action": "restart"}}
+{"text": "metti il computer in sospensione", "intent": "SYSTEM_POWER", "parameters": {"action": "sleep"}}
+{"text": "metti in standby", "intent": "SYSTEM_POWER", "parameters": {"action": "sleep"}}
+{"text": "blocca il computer", "intent": "SYSTEM_POWER", "parameters": {"action": "lock"}}
+{"text": "blocca lo schermo", "intent": "SYSTEM_POWER", "parameters": {"action": "lock"}}
+{"text": "metti la luminosità al 40 per cento", "intent": "SET_BRIGHTNESS", "parameters": {"level": 40}}
+{"text": "luminosità al 100", "intent": "SET_BRIGHTNESS", "parameters": {"level": 100}}
+{"text": "imposta la luminosità dello schermo al 70%", "intent": "SET_BRIGHTNESS", "parameters": {"level": 70}}
+{"text": "abbassa la luminosità al 20", "intent": "SET_BRIGHTNESS", "parameters": {"level": 20}}
+{"text": "svuota il cestino", "intent": "EMPTY_RECYCLE_BIN", "parameters": {}}
+{"text": "pulisci il cestino", "intent": "EMPTY_RECYCLE_BIN", "parameters": {}}
+{"text": "che reti wifi ci sono", "intent": "LIST_WIFI_NETWORKS", "parameters": {}}
+{"text": "mostra le reti wifi disponibili", "intent": "LIST_WIFI_NETWORKS", "parameters": {}}
+{"text": "stato git", "intent": "GIT_STATUS", "parameters": {}}
+{"text": "git status del progetto jake", "intent": "GIT_STATUS", "parameters": {"path": "jake"}}
+{"text": "ci sono modifiche non committate", "intent": "GIT_STATUS", "parameters": {}}
+{"text": "fai un git pull", "intent": "GIT_PULL", "parameters": {}}
+{"text": "aggiorna il repository", "intent": "GIT_PULL", "parameters": {}}
+{"text": "apri in vscode la cartella desktop\\jake", "intent": "OPEN_IN_EDITOR", "parameters": {"path": "desktop\\jake"}}
+{"text": "apri il progetto jake in visual studio code", "intent": "OPEN_IN_EDITOR", "parameters": {"path": "jake"}}
+{"text": "esegui il comando ipconfig", "intent": "RUN_COMMAND", "parameters": {"command": "ipconfig"}}
+{"text": "lancia da terminale dir", "intent": "RUN_COMMAND", "parameters": {"command": "dir"}}
+{"text": "esegui questo comando: pip list", "intent": "RUN_COMMAND", "parameters": {"command": "pip list"}}
+{"text": "metti in pausa la musica", "intent": "MEDIA_CONTROL", "parameters": {"action": "play_pause"}}
+{"text": "pausa", "intent": "MEDIA_CONTROL", "parameters": {"action": "play_pause"}}
+{"text": "riprendi la musica", "intent": "MEDIA_CONTROL", "parameters": {"action": "play_pause"}}
+{"text": "play", "intent": "MEDIA_CONTROL", "parameters": {"action": "play_pause"}}
+{"text": "ferma la musica", "intent": "MEDIA_CONTROL", "parameters": {"action": "play_pause"}}
+{"text": "canzone successiva", "intent": "MEDIA_CONTROL", "parameters": {"action": "next"}}
+{"text": "prossima canzone", "intent": "MEDIA_CONTROL", "parameters": {"action": "next"}}
+{"text": "salta questa canzone", "intent": "MEDIA_CONTROL", "parameters": {"action": "next"}}
+{"text": "avanti", "intent": "MEDIA_CONTROL", "parameters": {"action": "next"}}
+{"text": "canzone precedente", "intent": "MEDIA_CONTROL", "parameters": {"action": "previous"}}
+{"text": "torna alla canzone di prima", "intent": "MEDIA_CONTROL", "parameters": {"action": "previous"}}
+{"text": "raccontami una barzelletta", "intent": "TELL_JOKE", "parameters": {}}
+{"text": "dimmi una barzelletta", "intent": "TELL_JOKE", "parameters": {}}
+{"text": "fammi ridere", "intent": "TELL_JOKE", "parameters": {}}
+{"text": "tira un dado", "intent": "ROLL_DICE", "parameters": {}}
+{"text": "lancia due dadi", "intent": "ROLL_DICE", "parameters": {"count": 2}}
+{"text": "tira un dado a 20 facce", "intent": "ROLL_DICE", "parameters": {"sides": 20}}
+{"text": "lancia una moneta", "intent": "FLIP_COIN", "parameters": {}}
+{"text": "testa o croce", "intent": "FLIP_COIN", "parameters": {}}
+{"text": "qual è la capitale della francia", "intent": "ASK_QUESTION", "parameters": {"question": "qual è la capitale della francia"}}
+{"text": "spiegami la fotosintesi", "intent": "ASK_QUESTION", "parameters": {"question": "spiegami la fotosintesi"}}
+{"text": "aiutami a scrivere una mail di scuse per un ritardo", "intent": "ASK_QUESTION", "parameters": {"question": "aiutami a scrivere una mail di scuse per un ritardo"}}
+{"text": "perché il cielo è blu", "intent": "ASK_QUESTION", "parameters": {"question": "perché il cielo è blu"}}
+{"text": "cosa ne pensi dell'intelligenza artificiale", "intent": "ASK_QUESTION", "parameters": {"question": "cosa ne pensi dell'intelligenza artificiale"}}
+{"text": "quanto è alto il monte everest", "intent": "ASK_QUESTION", "parameters": {"question": "quanto è alto il monte everest"}}
+{"text": "chi ha scritto la divina commedia", "intent": "ASK_QUESTION", "parameters": {"question": "chi ha scritto la divina commedia"}}
+{"text": "dammi un consiglio per dormire meglio", "intent": "ASK_QUESTION", "parameters": {"question": "dammi un consiglio per dormire meglio"}}
+{"text": "come si fa la carbonara", "intent": "ASK_QUESTION", "parameters": {"question": "come si fa la carbonara"}}
+{"text": "raccontami una storia", "intent": "ASK_QUESTION", "parameters": {"question": "raccontami una storia"}}
+{"text": "traduci buongiorno in inglese", "intent": "TRANSLATE_TEXT", "parameters": {"text": "buongiorno", "target_language": "inglese"}}
+{"text": "come si dice grazie in giapponese", "intent": "TRANSLATE_TEXT", "parameters": {"text": "grazie", "target_language": "giapponese"}}
+{"text": "traduci in spagnolo ci vediamo domani", "intent": "TRANSLATE_TEXT", "parameters": {"text": "ci vediamo domani", "target_language": "spagnolo"}}
+{"text": "quanto fa 12 per 8", "intent": "CALCULATE", "parameters": {"expression": "12 * 8"}}
+{"text": "calcola 150 diviso 4", "intent": "CALCULATE", "parameters": {"expression": "150 / 4"}}
+{"text": "quanto fa 25 più 17 meno 3", "intent": "CALCULATE", "parameters": {"expression": "25 + 17 - 3"}}
+{"text": "radice quadrata di 144", "intent": "CALCULATE", "parameters": {"expression": "sqrt(144)"}}
+{"text": "2 alla quinta", "intent": "CALCULATE", "parameters": {"expression": "2 ** 5"}}
+{"text": "converti 5 kg in libbre", "intent": "CONVERT_UNITS", "parameters": {"value": 5, "from_unit": "kg", "to_unit": "lb"}}
+{"text": "quanti metri sono 3 miglia", "intent": "CONVERT_UNITS", "parameters": {"value": 3, "from_unit": "miglia", "to_unit": "metri"}}
+{"text": "converti 30 gradi celsius in fahrenheit", "intent": "CONVERT_UNITS", "parameters": {"value": 30, "from_unit": "celsius", "to_unit": "fahrenheit"}}
+{"text": "riassumi quello che ho copiato", "intent": "SUMMARIZE_CLIPBOARD", "parameters": {}}
+{"text": "riassumi gli appunti", "intent": "SUMMARIZE_CLIPBOARD", "parameters": {}}
+{"text": "fammi un riassunto del testo negli appunti", "intent": "SUMMARIZE_CLIPBOARD", "parameters": {}}
+{"text": "quanta batteria ho", "intent": "GET_BATTERY_STATUS", "parameters": {}}
+{"text": "a che percentuale è la batteria", "intent": "GET_BATTERY_STATUS", "parameters": {}}
+{"text": "il pc è in carica", "intent": "GET_BATTERY_STATUS", "parameters": {}}
+{"text": "quanto è usata la cpu", "intent": "GET_CPU_USAGE", "parameters": {}}
+{"text": "a quanto sta il processore", "intent": "GET_CPU_USAGE", "parameters": {}}
+{"text": "quanta ram sto usando", "intent": "GET_MEMORY_USAGE", "parameters": {}}
+{"text": "quanta memoria è occupata", "intent": "GET_MEMORY_USAGE", "parameters": {}}
+{"text": "quanto spazio ho sul disco", "intent": "GET_DISK_USAGE", "parameters": {}}
+{"text": "quanto spazio libero c'è su d", "intent": "GET_DISK_USAGE", "parameters": {"drive": "D:"}}
+{"text": "da quanto è acceso il computer", "intent": "GET_UPTIME", "parameters": {}}
+{"text": "da quanto tempo è acceso il pc", "intent": "GET_UPTIME", "parameters": {}}
+{"text": "che sistema operativo ho", "intent": "GET_SYSTEM_INFO", "parameters": {}}
+{"text": "dammi le informazioni sul computer", "intent": "GET_SYSTEM_INFO", "parameters": {}}
+{"text": "qual è il mio ip locale", "intent": "GET_LOCAL_IP", "parameters": {}}
+{"text": "che indirizzo ip ho nella rete", "intent": "GET_LOCAL_IP", "parameters": {}}
+{"text": "qual è il mio ip pubblico", "intent": "GET_PUBLIC_IP", "parameters": {}}
+{"text": "con che ip mi vedono su internet", "intent": "GET_PUBLIC_IP", "parameters": {}}
+{"text": "pulisci i file temporanei", "intent": "CLEAR_TEMP_FILES", "parameters": {}}
+{"text": "elimina i file temporanei", "intent": "CLEAR_TEMP_FILES", "parameters": {}}
+{"text": "riavvia esplora risorse", "intent": "RESTART_EXPLORER", "parameters": {}}
+{"text": "la barra delle applicazioni è bloccata, riavvia explorer", "intent": "RESTART_EXPLORER", "parameters": {}}
+{"text": "svuota la cache dns", "intent": "FLUSH_DNS", "parameters": {}}
+{"text": "fai un flush dns", "intent": "FLUSH_DNS", "parameters": {}}
+{"text": "quali programmi si avviano con windows", "intent": "LIST_STARTUP_APPS", "parameters": {}}
+{"text": "elenca le app in avvio automatico", "intent": "LIST_STARTUP_APPS", "parameters": {}}
+{"text": "che programmi ho installato", "intent": "LIST_INSTALLED_APPS", "parameters": {}}
+{"text": "ho installato photoshop", "intent": "LIST_INSTALLED_APPS", "parameters": {"name": "photoshop"}}
+{"text": "imposta il piano di alimentazione su prestazioni elevate", "intent": "SET_POWER_PLAN", "parameters": {"plan": "prestazioni elevate"}}
+{"text": "metti il risparmio energetico", "intent": "SET_POWER_PLAN", "parameters": {"plan": "risparmio energetico"}}
+{"text": "attiva il tema scuro", "intent": "TOGGLE_DARK_MODE", "parameters": {"enabled": true}}
+{"text": "metti la modalità scura", "intent": "TOGGLE_DARK_MODE", "parameters": {"enabled": true}}
+{"text": "disattiva il tema scuro", "intent": "TOGGLE_DARK_MODE", "parameters": {"enabled": false}}
+{"text": "metti il tema chiaro", "intent": "TOGGLE_DARK_MODE", "parameters": {"enabled": false}}
+{"text": "a che wifi sono connesso", "intent": "GET_WIFI_STATUS", "parameters": {}}
+{"text": "com'è il segnale del wifi", "intent": "GET_WIFI_STATUS", "parameters": {}}
+{"text": "fai un ping a google.com", "intent": "PING_HOST", "parameters": {"host": "google.com"}}
+{"text": "pinga 8.8.8.8", "intent": "PING_HOST", "parameters": {"host": "8.8.8.8"}}
+{"text": "traccia il percorso verso google.com", "intent": "TRACE_ROUTE", "parameters": {"host": "google.com"}}
+{"text": "fai un traceroute a github.com", "intent": "TRACE_ROUTE", "parameters": {"host": "github.com"}}
+{"text": "il sito github.com è online", "intent": "CHECK_WEBSITE_STATUS", "parameters": {"url": "github.com"}}
+{"text": "controlla se youtube.com è raggiungibile", "intent": "CHECK_WEBSITE_STATUS", "parameters": {"url": "youtube.com"}}
+{"text": "comprimi la cartella desktop\\progetti", "intent": "COMPRESS_PATH", "parameters": {"path": "desktop\\progetti"}}
+{"text": "crea uno zip della cartella documenti\\foto", "intent": "COMPRESS_PATH", "parameters": {"path": "documenti\\foto"}}
+{"text": "estrai l'archivio download\\file.zip", "intent": "EXTRACT_ARCHIVE", "parameters": {"path": "download\\file.zip"}}
+{"text": "scompatta download\\progetto.zip", "intent": "EXTRACT_ARCHIVE", "parameters": {"path": "download\\progetto.zip"}}
+{"text": "quanto pesa il file desktop\\video.mp4", "intent": "GET_FILE_INFO", "parameters": {"path": "desktop\\video.mp4"}}
+{"text": "dammi le informazioni sul file download\\setup.exe", "intent": "GET_FILE_INFO", "parameters": {"path": "download\\setup.exe"}}
+{"text": "quante parole ci sono nel file desktop\\tesi.txt", "intent": "COUNT_WORDS_IN_FILE", "parameters": {"path": "desktop\\tesi.txt"}}
+{"text": "leggi il file desktop\\appunti.txt", "intent": "READ_FILE_TEXT", "parameters": {"path": "desktop\\appunti.txt"}}
+{"text": "leggimi il contenuto di documenti\\lista.txt", "intent": "READ_FILE_TEXT", "parameters": {"path": "documenti\\lista.txt"}}
+{"text": "duplica il file desktop\\relazione.docx", "intent": "DUPLICATE_FILE", "parameters": {"path": "desktop\\relazione.docx"}}
+{"text": "fai una copia di desktop\\foto.jpg", "intent": "DUPLICATE_FILE", "parameters": {"path": "desktop\\foto.jpg"}}
+{"text": "quanto spazio occupa la cartella download", "intent": "GET_FOLDER_SIZE", "parameters": {"path": "download"}}
+{"text": "quanto pesa la cartella documenti", "intent": "GET_FOLDER_SIZE", "parameters": {"path": "documenti"}}
+{"text": "che finestre ho aperte", "intent": "LIST_OPEN_WINDOWS", "parameters": {}}
+{"text": "elenca le finestre aperte", "intent": "LIST_OPEN_WINDOWS", "parameters": {}}
+{"text": "massimizza spotify", "intent": "MAXIMIZE_WINDOW", "parameters": {"title": "spotify"}}
+{"text": "metti a schermo intero la finestra di opera", "intent": "MAXIMIZE_WINDOW", "parameters": {"title": "opera"}}
+{"text": "ripristina la finestra di spotify", "intent": "RESTORE_WINDOW", "parameters": {"title": "spotify"}}
+{"text": "affianca la finestra a sinistra", "intent": "SNAP_WINDOW_LEFT", "parameters": {}}
+{"text": "metti questa finestra a sinistra", "intent": "SNAP_WINDOW_LEFT", "parameters": {}}
+{"text": "affianca la finestra a destra", "intent": "SNAP_WINDOW_RIGHT", "parameters": {}}
+{"text": "metti questa finestra sulla destra", "intent": "SNAP_WINDOW_RIGHT", "parameters": {}}
+{"text": "passa alla finestra successiva", "intent": "SWITCH_NEXT_WINDOW", "parameters": {}}
+{"text": "cambia finestra", "intent": "SWITCH_NEXT_WINDOW", "parameters": {}}
+{"text": "minimizza tutto", "intent": "MINIMIZE_ALL_WINDOWS", "parameters": {}}
+{"text": "mostra il desktop", "intent": "MINIMIZE_ALL_WINDOWS", "parameters": {}}
+{"text": "nascondi tutte le finestre", "intent": "MINIMIZE_ALL_WINDOWS", "parameters": {}}
+{"text": "metti spotify sempre in primo piano", "intent": "SET_WINDOW_ALWAYS_ON_TOP", "parameters": {"title": "spotify"}}
+{"text": "tieni la calcolatrice sempre sopra le altre finestre", "intent": "SET_WINDOW_ALWAYS_ON_TOP", "parameters": {"title": "calcolatrice"}}
+{"text": "ridimensiona la finestra di opera a 1280 per 720", "intent": "RESIZE_WINDOW", "parameters": {"title": "opera", "width": 1280, "height": 720}}
+{"text": "rinvia il promemoria delle medicine di 15 minuti", "intent": "SNOOZE_REMINDER", "parameters": {"text": "medicine", "minutes": 15}}
+{"text": "posticipa di 10 minuti il promemoria della riunione", "intent": "SNOOZE_REMINDER", "parameters": {"text": "riunione", "minutes": 10}}
+{"text": "cancella il promemoria delle medicine", "intent": "DELETE_REMINDER", "parameters": {"text": "medicine"}}
+{"text": "togli il promemoria di chiamare marco", "intent": "DELETE_REMINDER", "parameters": {"text": "chiamare marco"}}
+{"text": "annulla il promemoria della riunione", "intent": "DELETE_REMINDER", "parameters": {"text": "riunione"}}
+{"text": "ricordami ogni giorno alle 8 di prendere le vitamine", "intent": "SET_DAILY_REMINDER", "parameters": {"text": "prendere le vitamine", "at_time": "08:00"}}
+{"text": "tutti i giorni alle 22 ricordami di caricare il telefono", "intent": "SET_DAILY_REMINDER", "parameters": {"text": "caricare il telefono", "at_time": "22:00"}}
+{"text": "avvia un pomodoro", "intent": "START_POMODORO", "parameters": {}}
+{"text": "inizia una sessione pomodoro da 50 minuti", "intent": "START_POMODORO", "parameters": {"minutes": 50}}
+{"text": "fai partire una sessione di lavoro di 25 minuti", "intent": "START_POMODORO", "parameters": {"minutes": 25}}
+{"text": "ferma il pomodoro", "intent": "STOP_POMODORO", "parameters": {}}
+{"text": "interrompi la sessione pomodoro", "intent": "STOP_POMODORO", "parameters": {}}
+{"text": "cerca tra gli appunti la parola dentista", "intent": "SEARCH_NOTES", "parameters": {"query": "dentista"}}
+{"text": "ho preso appunti sulla bolletta", "intent": "SEARCH_NOTES", "parameters": {"query": "bolletta"}}
+{"text": "esporta gli appunti in desktop\\appunti.md", "intent": "EXPORT_NOTES", "parameters": {"path": "desktop\\appunti.md"}}
+{"text": "cancella tutti gli appunti", "intent": "CLEAR_NOTES", "parameters": {}}
+{"text": "svuota il taccuino", "intent": "CLEAR_NOTES", "parameters": {}}
+{"text": "mostrami gli ultimi commit", "intent": "GIT_LOG", "parameters": {}}
+{"text": "git log del progetto jake", "intent": "GIT_LOG", "parameters": {"path": "jake"}}
+{"text": "su che branch sono", "intent": "GIT_BRANCH", "parameters": {}}
+{"text": "che branch è attivo", "intent": "GIT_BRANCH", "parameters": {}}
+{"text": "mostrami il git diff", "intent": "GIT_DIFF", "parameters": {}}
+{"text": "cosa ho modificato nel repository", "intent": "GIT_DIFF", "parameters": {}}
+{"text": "esegui lo script desktop\\test.py", "intent": "RUN_PYTHON_SCRIPT", "parameters": {"path": "desktop\\test.py"}}
+{"text": "lancia lo script python documenti\\analisi.py", "intent": "RUN_PYTHON_SCRIPT", "parameters": {"path": "documenti\\analisi.py"}}
+{"text": "formatta questo json {\"a\":1,\"b\":[1,2]}", "intent": "FORMAT_JSON", "parameters": {"text": "{\"a\":1,\"b\":[1,2]}"}}
+{"text": "quante righe di codice ci sono nel progetto desktop\\jake", "intent": "COUNT_LINES_OF_CODE", "parameters": {"path": "desktop\\jake"}}
+{"text": "conta le righe python in desktop\\jake", "intent": "COUNT_LINES_OF_CODE", "parameters": {"path": "desktop\\jake", "extension": ".py"}}
+{"text": "genera un uuid", "intent": "GENERATE_UUID", "parameters": {}}
+{"text": "dammi un identificatore univoco", "intent": "GENERATE_UUID", "parameters": {}}
+{"text": "la porta 8080 è occupata", "intent": "CHECK_PORT_IN_USE", "parameters": {"port": 8080}}
+{"text": "controlla se la porta 3000 è in uso", "intent": "CHECK_PORT_IN_USE", "parameters": {"port": 3000}}
+{"text": "libera la porta 8080", "intent": "KILL_PROCESS_BY_PORT", "parameters": {"port": 8080}}
+{"text": "termina il processo sulla porta 3000", "intent": "KILL_PROCESS_BY_PORT", "parameters": {"port": 3000}}
+{"text": "dimmi una citazione", "intent": "RANDOM_QUOTE", "parameters": {}}
+{"text": "dammi una frase motivazionale", "intent": "RANDOM_QUOTE", "parameters": {}}
+{"text": "dimmi una curiosità", "intent": "RANDOM_FACT", "parameters": {}}
+{"text": "raccontami un fatto interessante", "intent": "RANDOM_FACT", "parameters": {}}
+{"text": "palla magica, vincerò la partita", "intent": "MAGIC_8_BALL", "parameters": {"question": "vincerò la partita"}}
+{"text": "chiedi alla palla magica se domani pioverà", "intent": "MAGIC_8_BALL", "parameters": {"question": "domani pioverà"}}
+{"text": "scegli tra pizza, sushi e hamburger", "intent": "CHOOSE_RANDOM", "parameters": {"options": ["pizza", "sushi", "hamburger"]}}
+{"text": "scegli a caso tra rosso e blu", "intent": "CHOOSE_RANDOM", "parameters": {"options": ["rosso", "blu"]}}
+{"text": "giochiamo a sasso carta forbice, io scelgo sasso", "intent": "ROCK_PAPER_SCISSORS", "parameters": {"choice": "sasso"}}
+{"text": "sasso carta forbice: carta", "intent": "ROCK_PAPER_SCISSORS", "parameters": {"choice": "carta"}}
+{"text": "conta le parole in questo testo: il gatto dorme sul divano", "intent": "COUNT_WORDS", "parameters": {"text": "il gatto dorme sul divano"}}
+{"text": "converti in maiuscolo ciao mondo", "intent": "CONVERT_CASE", "parameters": {"text": "ciao mondo", "style": "upper"}}
+{"text": "scrivi in minuscolo CIAO MONDO", "intent": "CONVERT_CASE", "parameters": {"text": "CIAO MONDO", "style": "lower"}}
+{"text": "genera una password", "intent": "GENERATE_PASSWORD", "parameters": {}}
+{"text": "creami una password sicura di 20 caratteri", "intent": "GENERATE_PASSWORD", "parameters": {"length": 20}}
+{"text": "correggi questo testo: io ha andato al mare ieri", "intent": "PROOFREAD_TEXT", "parameters": {"text": "io ha andato al mare ieri"}}
+{"text": "correggi la grammatica di: loro va a scuola", "intent": "PROOFREAD_TEXT", "parameters": {"text": "loro va a scuola"}}
+{"text": "riassumi questo testo: la rivoluzione industriale ha cambiato il modo di produrre beni, spostando il lavoro dalle campagne alle fabbriche", "intent": "SUMMARIZE_TEXT", "parameters": {"text": "la rivoluzione industriale ha cambiato il modo di produrre beni, spostando il lavoro dalle campagne alle fabbriche"}}
+{"text": "in che lingua è scritto: guten morgen wie geht es dir", "intent": "DETECT_LANGUAGE", "parameters": {"text": "guten morgen wie geht es dir"}}
+{"text": "che lingua è bonjour tout le monde", "intent": "DETECT_LANGUAGE", "parameters": {"text": "bonjour tout le monde"}}
+{"text": "estrai i link da: visita https://example.com e https://google.com", "intent": "EXTRACT_URLS_FROM_TEXT", "parameters": {"text": "visita https://example.com e https://google.com"}}
+{"text": "scrivi 42 in lettere", "intent": "CONVERT_NUMBER_TO_WORDS", "parameters": {"number": 42}}
+{"text": "come si scrive 1500 in lettere", "intent": "CONVERT_NUMBER_TO_WORDS", "parameters": {"number": 1500}}
+{"text": "converti 2024 in numeri romani", "intent": "CONVERT_ROMAN_NUMERAL", "parameters": {"value": "2024"}}
+{"text": "quanto vale il numero romano XIV", "intent": "CONVERT_ROMAN_NUMERAL", "parameters": {"value": "XIV"}}
+{"text": "converti in morse la parola sos", "intent": "CONVERT_MORSE_CODE", "parameters": {"text": "sos", "direction": "to_morse"}}
+{"text": "decodifica il morse ... --- ...", "intent": "CONVERT_MORSE_CODE", "parameters": {"text": "... --- ...", "direction": "from_morse"}}
+{"text": "che giorno della settimana era il 25/12/2020", "intent": "GET_DAY_OF_WEEK", "parameters": {"date": "25/12/2020"}}
+{"text": "che giorno della settimana è oggi", "intent": "GET_DAY_OF_WEEK", "parameters": {}}
+{"text": "quanti giorni mancano al 25/12/2026", "intent": "DAYS_UNTIL", "parameters": {"date": "25/12/2026"}}
+{"text": "quanto manca al 01/01/2027", "intent": "DAYS_UNTIL", "parameters": {"date": "01/01/2027"}}
+{"text": "che settimana dell'anno è", "intent": "GET_WEEK_NUMBER", "parameters": {}}
+{"text": "in che settimana siamo", "intent": "GET_WEEK_NUMBER", "parameters": {}}
+{"text": "che ore sono a new york quando da noi sono le 15:00", "intent": "CONVERT_TIMEZONE", "parameters": {"time": "15:00", "from_zone": "Europe/Rome", "to_zone": "America/New_York"}}
+{"text": "converti le 10:00 di tokyo nell'ora di roma", "intent": "CONVERT_TIMEZONE", "parameters": {"time": "10:00", "from_zone": "Asia/Tokyo", "to_zone": "Europe/Rome"}}
+{"text": "stampa il file desktop\\relazione.pdf", "intent": "PRINT_FILE", "parameters": {"path": "desktop\\relazione.pdf"}}
+{"text": "manda in stampa documenti\\contratto.docx", "intent": "PRINT_FILE", "parameters": {"path": "documenti\\contratto.docx"}}
+{"text": "calcola il bmi per 70 kg e 175 cm", "intent": "CALCULATE_BMI", "parameters": {"weight_kg": 70, "height_cm": 175}}
+{"text": "peso 80 chili e sono alto 180, qual è il mio indice di massa corporea", "intent": "CALCULATE_BMI", "parameters": {"weight_kg": 80, "height_cm": 180}}
+{"text": "calcola la mancia su 85 euro", "intent": "CALCULATE_TIP", "parameters": {"amount": 85}}
+{"text": "conto di 120 euro, mancia del 15 per cento diviso 4 persone", "intent": "CALCULATE_TIP", "parameters": {"amount": 120, "percent": 15, "people": 4}}
+{"text": "quanti anni ha chi è nato il 15/06/1990", "intent": "CALCULATE_AGE", "parameters": {"birth_date": "15/06/1990"}}
+{"text": "sono nato il 03/03/2001, quanti anni ho", "intent": "CALCULATE_AGE", "parameters": {"birth_date": "03/03/2001"}}
+{"text": "quanto costa un prodotto da 80 euro con il 25 per cento di sconto", "intent": "CALCULATE_DISCOUNT", "parameters": {"price": 80, "discount_percent": 25}}
+{"text": "calcola lo sconto del 30% su 199 euro", "intent": "CALCULATE_DISCOUNT", "parameters": {"price": 199, "discount_percent": 30}}
+{"text": "traduci gli appunti in inglese", "intent": "TRANSLATE_CLIPBOARD", "parameters": {"target_language": "inglese"}}
+{"text": "traduci quello che ho copiato in francese", "intent": "TRANSLATE_CLIPBOARD", "parameters": {"target_language": "francese"}}
+{"text": "quali file ho aperto di recente", "intent": "LIST_RECENT_FILES", "parameters": {}}
+{"text": "mostrami i file recenti", "intent": "LIST_RECENT_FILES", "parameters": {}}
+{"text": "apri una finestra in incognito", "intent": "OPEN_INCOGNITO_WINDOW", "parameters": {}}
+{"text": "apri il browser in modalità privata", "intent": "OPEN_INCOGNITO_WINDOW", "parameters": {}}
+{"text": "svuota gli appunti", "intent": "EMPTY_CLIPBOARD", "parameters": {}}
+{"text": "cancella quello che ho copiato", "intent": "EMPTY_CLIPBOARD", "parameters": {}}
+{"text": "97 è un numero primo", "intent": "IS_PRIME", "parameters": {"number": 97}}
+{"text": "dimmi se 51 è primo", "intent": "IS_PRIME", "parameters": {"number": 51}}
+{"text": "qual è il decimo numero di fibonacci", "intent": "FIBONACCI", "parameters": {"n": 10}}
+{"text": "fibonacci di 20", "intent": "FIBONACCI", "parameters": {"n": 20}}
+{"text": "massimo comun divisore tra 12 e 18", "intent": "GCD_LCM", "parameters": {"a": 12, "b": 18}}
+{"text": "mcm tra 4 e 6", "intent": "GCD_LCM", "parameters": {"a": 4, "b": 6}}
+{"text": "quanto è il 20 per cento di 150", "intent": "CALCULATE_PERCENTAGE", "parameters": {"percent": 20, "value": 150}}
+{"text": "calcola il 15% di 80", "intent": "CALCULATE_PERCENTAGE", "parameters": {"percent": 15, "value": 80}}
+{"text": "dammi un numero a caso tra 1 e 100", "intent": "RANDOM_NUMBER", "parameters": {"min": 1, "max": 100}}
+{"text": "numero casuale da 1 a 6", "intent": "RANDOM_NUMBER", "parameters": {"min": 1, "max": 6}}
+{"text": "quanto è sicura la password ciao123", "intent": "CHECK_PASSWORD_STRENGTH", "parameters": {"password": "ciao123"}}
+{"text": "valuta la password Tr0ub4dor&3", "intent": "CHECK_PASSWORD_STRENGTH", "parameters": {"password": "Tr0ub4dor&3"}}
+{"text": "calcola l'hash del file download\\setup.exe", "intent": "CHECK_FILE_HASH", "parameters": {"path": "download\\setup.exe"}}
+{"text": "sha256 di desktop\\iso.img", "intent": "CHECK_FILE_HASH", "parameters": {"path": "desktop\\iso.img"}}
+{"text": "a che ora tramonta il sole a roma", "intent": "GET_SUNRISE_SUNSET", "parameters": {"city": "roma"}}
+{"text": "quando sorge il sole a milano", "intent": "GET_SUNRISE_SUNSET", "parameters": {"city": "milano"}}
+{"text": "che fase lunare c'è oggi", "intent": "GET_MOON_PHASE", "parameters": {}}
+{"text": "com'è la luna stanotte", "intent": "GET_MOON_PHASE", "parameters": {}}
+{"text": "quanto sono 100 dollari in euro", "intent": "CONVERT_CURRENCY", "parameters": {"amount": 100, "from_currency": "USD", "to_currency": "EUR"}}
+{"text": "converti 50 euro in sterline", "intent": "CONVERT_CURRENCY", "parameters": {"amount": 50, "from_currency": "EUR", "to_currency": "GBP"}}
+{"text": "qual è la prossima festività", "intent": "GET_NEXT_HOLIDAY", "parameters": {}}
+{"text": "quando è il prossimo giorno festivo", "intent": "GET_NEXT_HOLIDAY", "parameters": {}}
+{"text": "che risoluzione ha lo schermo", "intent": "GET_SCREEN_RESOLUTION", "parameters": {}}
+{"text": "quanti pixel ha il mio monitor", "intent": "GET_SCREEN_RESOLUTION", "parameters": {}}
+{"text": "che scheda video ho", "intent": "GET_GPU_INFO", "parameters": {}}
+{"text": "qual è la mia gpu", "intent": "GET_GPU_INFO", "parameters": {}}
+{"text": "quali server dns sto usando", "intent": "GET_DNS_SERVERS", "parameters": {}}
+{"text": "qual è il valore della variabile d'ambiente PATH", "intent": "GET_ENVIRONMENT_VARIABLE", "parameters": {"name": "PATH"}}
+{"text": "leggi la variabile d'ambiente JAVA_HOME", "intent": "GET_ENVIRONMENT_VARIABLE", "parameters": {"name": "JAVA_HOME"}}
+{"text": "qual è il mio indirizzo mac", "intent": "GET_MAC_ADDRESS", "parameters": {}}
+{"text": "che dischi ho", "intent": "LIST_DRIVES", "parameters": {}}
+{"text": "elenca le unità disco", "intent": "LIST_DRIVES", "parameters": {}}
+{"text": "trova i file più grandi nella cartella download", "intent": "FIND_LARGE_FILES", "parameters": {"path": "download"}}
+{"text": "quali file occupano più spazio in documenti", "intent": "FIND_LARGE_FILES", "parameters": {"path": "documenti"}}
+{"text": "trova i file sopra i 500 mega nel desktop", "intent": "FIND_LARGE_FILES", "parameters": {"path": "desktop", "min_size_mb": 500}}
+{"text": "trova i file duplicati nella cartella immagini", "intent": "FIND_DUPLICATE_FILES", "parameters": {"path": "immagini"}}
+{"text": "ci sono doppioni nella cartella download", "intent": "FIND_DUPLICATE_FILES", "parameters": {"path": "download"}}
+{"text": "che modelli hai installato", "intent": "LIST_MODELS", "parameters": {}}
+{"text": "elenca i modelli ollama", "intent": "LIST_MODELS", "parameters": {}}
+{"text": "usa il modello qwen2.5:7b", "intent": "SET_MODEL", "parameters": {"model": "qwen2.5:7b"}}
+{"text": "cambia modello e usa llama3.1:8b", "intent": "SET_MODEL", "parameters": {"model": "llama3.1:8b"}}
+{"text": "cerca su youtube gatti divertenti", "intent": "SEARCH_IN_BROWSER", "parameters": {"query": "gatti divertenti", "site": "youtube"}}
+{"text": "cerca su google ricette con le zucchine", "intent": "SEARCH_IN_BROWSER", "parameters": {"query": "ricette con le zucchine", "site": "google"}}
+{"text": "cerca gatti su youtube", "intent": "SEARCH_IN_BROWSER", "parameters": {"query": "gatti", "site": "youtube"}}
+{"text": "cerca su amazon cuffie bluetooth", "intent": "SEARCH_IN_BROWSER", "parameters": {"query": "cuffie bluetooth", "site": "amazon"}}
+{"text": "cerca su wikipedia la rivoluzione francese", "intent": "SEARCH_IN_BROWSER", "parameters": {"query": "rivoluzione francese", "site": "wikipedia"}}
+{"text": "cerca nel browser come installare python", "intent": "SEARCH_IN_BROWSER", "parameters": {"query": "come installare python", "site": "google"}}
+{"text": "cerca su opera youtube", "intent": "SEARCH_IN_BROWSER", "parameters": {"query": "youtube", "site": "google"}}
+{"text": "googla il meteo di domani a roma", "intent": "SEARCH_IN_BROWSER", "parameters": {"query": "meteo di domani a roma", "site": "google"}}
+{"text": "cerca su github progetti python per principianti", "intent": "SEARCH_IN_BROWSER", "parameters": {"query": "progetti python per principianti", "site": "github"}}
+{"text": "cerca su maps la pizzeria più vicina", "intent": "SEARCH_IN_BROWSER", "parameters": {"query": "pizzeria più vicina", "site": "maps"}}
+{"text": "cerca ricette pasta e ceci", "intent": "SEARCH_IN_BROWSER", "parameters": {"query": "ricette pasta e ceci", "site": "google"}}
+{"text": "cerca video di tutorial blender", "intent": "SEARCH_IN_BROWSER", "parameters": {"query": "tutorial blender", "site": "youtube"}}
+{"text": "cerca immagini di tramonti", "intent": "SEARCH_IN_BROWSER", "parameters": {"query": "tramonti", "site": "images"}}
+{"text": "metti bohemian rhapsody su spotify", "intent": "PLAY_MEDIA", "parameters": {"query": "bohemian rhapsody", "service": "spotify"}}
+{"text": "riproduci su youtube il trailer di dune", "intent": "PLAY_MEDIA", "parameters": {"query": "trailer di dune", "service": "youtube"}}
+{"text": "fammi sentire i queen", "intent": "PLAY_MEDIA", "parameters": {"query": "queen", "service": "spotify"}}
+{"text": "metti un po' di musica jazz", "intent": "PLAY_MEDIA", "parameters": {"query": "musica jazz", "service": "spotify"}}
+{"text": "metti su youtube lofi hip hop", "intent": "PLAY_MEDIA", "parameters": {"query": "lofi hip hop", "service": "youtube"}}
+{"text": "suona thunderstruck degli ac dc", "intent": "PLAY_MEDIA", "parameters": {"query": "thunderstruck ac dc", "service": "spotify"}}
+{"text": "metti la mia playlist preferita", "intent": "PLAY_MEDIA", "parameters": {"query": "playlist preferita", "service": "spotify"}}
+{"text": "metti un timer di 2 minuti", "intent": "SET_TIMER", "parameters": {"minutes": 2}}
+{"text": "imposta un timer di 10 minuti", "intent": "SET_TIMER", "parameters": {"minutes": 10}}
+{"text": "timer di 30 secondi", "intent": "SET_TIMER", "parameters": {"seconds": 30}}
+{"text": "metti un timer di un quarto d'ora", "intent": "SET_TIMER", "parameters": {"minutes": 15}}
+{"text": "timer di un'ora per la pasta", "intent": "SET_TIMER", "parameters": {"minutes": 60, "label": "pasta"}}
+{"text": "avvia un conto alla rovescia di 5 minuti", "intent": "SET_TIMER", "parameters": {"minutes": 5}}
+{"text": "metti un timer per le uova di 7 minuti", "intent": "SET_TIMER", "parameters": {"minutes": 7, "label": "uova"}}
+{"text": "annulla il timer", "intent": "CANCEL_TIMER", "parameters": {}}
+{"text": "togli questo timer", "intent": "CANCEL_TIMER", "parameters": {}}
+{"text": "ferma il timer", "intent": "CANCEL_TIMER", "parameters": {}}
+{"text": "cancella il timer della pasta", "intent": "CANCEL_TIMER", "parameters": {"label": "pasta"}}
+{"text": "annulla il conto alla rovescia", "intent": "CANCEL_TIMER", "parameters": {}}
+{"text": "quanto manca al timer", "intent": "LIST_TIMERS", "parameters": {}}
+{"text": "che timer ho attivi", "intent": "LIST_TIMERS", "parameters": {}}
+{"text": "ho impostato qualche timer", "intent": "LIST_TIMERS", "parameters": {}}
+{"text": "clicca su accedi", "intent": "CLICK_TEXT", "parameters": {"text": "accedi"}}
+{"text": "premi il pulsante salva", "intent": "CLICK_TEXT", "parameters": {"text": "salva"}}
+{"text": "clicca su file", "intent": "CLICK_TEXT", "parameters": {"text": "file"}}
+{"text": "fai click su ok", "intent": "CLICK_TEXT", "parameters": {"text": "ok"}}
+{"text": "clicca dove c'è scritto continua", "intent": "CLICK_TEXT", "parameters": {"text": "continua"}}
+{"text": "clicca sul bottone accetta", "intent": "CLICK_TEXT", "parameters": {"text": "accetta"}}
+{"text": "clicca sull'icona delle impostazioni", "intent": "CLICK_ELEMENT", "parameters": {"description": "icona delle impostazioni"}}
+{"text": "clicca sul pulsante blu in basso a destra", "intent": "CLICK_ELEMENT", "parameters": {"description": "pulsante blu in basso a destra"}}
+{"text": "clicca sulla x per chiudere il popup", "intent": "CLICK_ELEMENT", "parameters": {"description": "x per chiudere il popup"}}
+{"text": "clicca sulla barra di ricerca", "intent": "CLICK_ELEMENT", "parameters": {"description": "barra di ricerca"}}
+{"text": "scorri giù", "intent": "SCROLL", "parameters": {"direction": "down"}}
+{"text": "scorri verso il basso", "intent": "SCROLL", "parameters": {"direction": "down"}}
+{"text": "vai giù", "intent": "SCROLL", "parameters": {"direction": "down"}}
+{"text": "scorri su", "intent": "SCROLL", "parameters": {"direction": "up"}}
+{"text": "torna in alto", "intent": "SCROLL", "parameters": {"direction": "up", "amount": 50}}
+{"text": "scorri giù di molto", "intent": "SCROLL", "parameters": {"direction": "down", "amount": 20}}
+{"text": "vai in fondo alla pagina", "intent": "SCROLL", "parameters": {"direction": "down", "amount": 100}}
+{"text": "volume al 50 per cento", "intent": "SET_VOLUME_LEVEL", "parameters": {"level": 50}}
+{"text": "metti il volume a 20", "intent": "SET_VOLUME_LEVEL", "parameters": {"level": 20}}
+{"text": "imposta il volume al massimo", "intent": "SET_VOLUME_LEVEL", "parameters": {"level": 100}}
+{"text": "volume al minimo", "intent": "SET_VOLUME_LEVEL", "parameters": {"level": 0}}
+{"text": "porta il volume all'80%", "intent": "SET_VOLUME_LEVEL", "parameters": {"level": 80}}
+{"text": "a quanto è il volume", "intent": "GET_VOLUME_LEVEL", "parameters": {}}
+{"text": "qual è il livello del volume", "intent": "GET_VOLUME_LEVEL", "parameters": {}}
+{"text": "leggi questo", "intent": "READ_SELECTION", "parameters": {}}
+{"text": "leggimi il testo selezionato", "intent": "READ_SELECTION", "parameters": {}}
+{"text": "leggi ad alta voce quello che ho selezionato", "intent": "READ_SELECTION", "parameters": {}}
+{"text": "leggimi questa pagina", "intent": "READ_SELECTION", "parameters": {}}
+{"text": "scrivi sotto dettatura", "intent": "START_DICTATION", "parameters": {}}
+{"text": "modalità dettatura", "intent": "START_DICTATION", "parameters": {}}
+{"text": "inizia a dettare", "intent": "START_DICTATION", "parameters": {}}
+{"text": "detta", "intent": "START_DICTATION", "parameters": {}}
+{"text": "fine dettatura", "intent": "STOP_DICTATION", "parameters": {}}
+{"text": "smetti di scrivere", "intent": "STOP_DICTATION", "parameters": {}}
+{"text": "basta dettare", "intent": "STOP_DICTATION", "parameters": {}}
+{"text": "chiudi questa finestra", "intent": "CLOSE_WINDOW", "parameters": {}}
+{"text": "chiudi la finestra attiva", "intent": "CLOSE_WINDOW", "parameters": {}}
+{"text": "chiudi la finestra di blocco note", "intent": "CLOSE_WINDOW", "parameters": {"title": "blocco note"}}
+{"text": "chiudi questa scheda", "intent": "PRESS_KEY", "parameters": {"keys": "ctrl+w"}}
+{"text": "apri una nuova scheda", "intent": "PRESS_KEY", "parameters": {"keys": "ctrl+t"}}
+{"text": "riapri l'ultima scheda chiusa", "intent": "PRESS_KEY", "parameters": {"keys": "ctrl+shift+t"}}
+{"text": "torna indietro", "intent": "PRESS_KEY", "parameters": {"keys": "alt+left"}}
+{"text": "vai avanti nel browser", "intent": "PRESS_KEY", "parameters": {"keys": "alt+right"}}
+{"text": "ricarica la pagina", "intent": "PRESS_KEY", "parameters": {"keys": "f5"}}
+{"text": "aggiorna la pagina", "intent": "PRESS_KEY", "parameters": {"keys": "f5"}}
+{"text": "schermo intero", "intent": "PRESS_KEY", "parameters": {"keys": "f11"}}
+{"text": "ingrandisci il testo", "intent": "PRESS_KEY", "parameters": {"keys": "ctrl+plus"}}
+{"text": "rimpicciolisci il testo", "intent": "PRESS_KEY", "parameters": {"keys": "ctrl+-"}}
+{"text": "annulla l'ultima modifica", "intent": "PRESS_KEY", "parameters": {"keys": "ctrl+z"}}
+{"text": "ripeti l'ultima modifica", "intent": "PRESS_KEY", "parameters": {"keys": "ctrl+y"}}
+{"text": "cancella la parola", "intent": "PRESS_KEY", "parameters": {"keys": "ctrl+backspace"}}
+{"text": "vai a capo", "intent": "PRESS_KEY", "parameters": {"keys": "enter"}}
+{"text": "premi tab", "intent": "PRESS_KEY", "parameters": {"keys": "tab"}}
+{"text": "premi spazio", "intent": "PRESS_KEY", "parameters": {"keys": "space"}}
+{"text": "cancella", "intent": "PRESS_KEY", "parameters": {"keys": "backspace"}}
+{"text": "apri il menu start", "intent": "PRESS_KEY", "parameters": {"keys": "win"}}
+{"text": "apri le impostazioni di windows", "intent": "PRESS_KEY", "parameters": {"keys": "win+i"}}
+{"text": "apri il task manager", "intent": "PRESS_KEY", "parameters": {"keys": "ctrl+shift+esc"}}
+{"text": "apri la ricerca di windows", "intent": "PRESS_KEY", "parameters": {"keys": "win+s"}}
+{"text": "apri gli emoji", "intent": "PRESS_KEY", "parameters": {"keys": "win+."}}
+{"text": "cattura un'area dello schermo", "intent": "PRESS_KEY", "parameters": {"keys": "win+shift+s"}}
+{"text": "impara che quando dico modalità gaming devi aprire steam e discord", "intent": "LEARN_COMMAND", "parameters": {"phrase": "modalità gaming", "request": "apri steam e discord"}}
+{"text": "quando dico buonanotte spegni il computer", "intent": "LEARN_COMMAND", "parameters": {"phrase": "buonanotte", "request": "spegni il computer"}}
+{"text": "impara: se dico al lavoro apri visual studio code", "intent": "LEARN_COMMAND", "parameters": {"phrase": "al lavoro", "request": "apri visual studio code"}}
+{"text": "d'ora in poi quando dico musica metti un po' di musica jazz su spotify", "intent": "LEARN_COMMAND", "parameters": {"phrase": "musica", "request": "metti un po' di musica jazz su spotify"}}
+{"text": "ricordati che quando dico relax devi abbassare la luminosità al 30", "intent": "LEARN_COMMAND", "parameters": {"phrase": "relax", "request": "abbassa la luminosità al 30"}}
+{"text": "cosa hai imparato", "intent": "LIST_LEARNED", "parameters": {}}
+{"text": "quali comandi ti ho insegnato", "intent": "LIST_LEARNED", "parameters": {}}
+{"text": "elenca i comandi personalizzati", "intent": "LIST_LEARNED", "parameters": {}}
+{"text": "dimentica il comando modalità gaming", "intent": "FORGET_LEARNED", "parameters": {"phrase": "modalità gaming"}}
+{"text": "non usare più il comando buonanotte", "intent": "FORGET_LEARNED", "parameters": {"phrase": "buonanotte"}}
+{"text": "impara a fare una cosa nuova: dirmi quanti file ci sono in una cartella", "intent": "CREATE_SKILL", "parameters": {"request": "dirmi quanti file ci sono in una cartella"}}
+{"text": "crea una nuova capacità che converte i secondi in ore e minuti", "intent": "CREATE_SKILL", "parameters": {"request": "converte i secondi in ore e minuti"}}
+{"text": "impara a generare un qr code da un testo", "intent": "CREATE_SKILL", "parameters": {"request": "generare un qr code da un testo"}}
+{"text": "vorrei che imparassi a dirmi il giorno dell'anno", "intent": "CREATE_SKILL", "parameters": {"request": "dirmi il giorno dell'anno"}}
+{"text": "scriviti una skill per contare quante volte una parola compare in un testo", "intent": "CREATE_SKILL", "parameters": {"request": "contare quante volte una parola compare in un testo"}}
+{"text": "che skill hai creato da solo", "intent": "LIST_CREATED_SKILLS", "parameters": {}}
+{"text": "elenca le capacità che hai imparato da solo", "intent": "LIST_CREATED_SKILLS", "parameters": {}}
+{"text": "elimina la skill che hai creato per il qr code", "intent": "DELETE_CREATED_SKILL", "parameters": {"name": "qr code"}}
+{"text": "no intendevo apri spotify", "intent": "CORRECT_LAST", "parameters": {"request": "apri spotify"}}
+{"text": "sbagliato, volevo dire chiudi opera", "intent": "CORRECT_LAST", "parameters": {"request": "chiudi opera"}}
+{"text": "no, dovevi cercare gatti su youtube", "intent": "CORRECT_LAST", "parameters": {"request": "cerca gatti su youtube"}}
+{"text": "non intendevo quello, intendevo metti un timer di 5 minuti", "intent": "CORRECT_LAST", "parameters": {"request": "metti un timer di 5 minuti"}}
+{"text": "ripeti", "intent": "REPEAT_LAST", "parameters": {}}
+{"text": "cosa hai detto", "intent": "REPEAT_LAST", "parameters": {}}
+{"text": "puoi ripetere", "intent": "REPEAT_LAST", "parameters": {}}
+{"text": "non ho capito, ripeti", "intent": "REPEAT_LAST", "parameters": {}}
+{"text": "cosa sai fare", "intent": "HELP", "parameters": {}}
+{"text": "che comandi posso darti", "intent": "HELP", "parameters": {}}
+{"text": "aiuto", "intent": "HELP", "parameters": {}}
+{"text": "cosa puoi fare per me", "intent": "HELP", "parameters": {}}
+{"text": "quali sono le tue funzioni", "intent": "HELP", "parameters": {}}
+{"text": "zitto", "intent": "STOP_TALKING", "parameters": {}}
+{"text": "basta", "intent": "STOP_TALKING", "parameters": {}}
+{"text": "stai zitto", "intent": "STOP_TALKING", "parameters": {}}
+{"text": "smettila di parlare", "intent": "STOP_TALKING", "parameters": {}}
+{"text": "ok basta così", "intent": "STOP_TALKING", "parameters": {}}
+{"text": "non ascoltare per 10 minuti", "intent": "PAUSE_LISTENING", "parameters": {"minutes": 10}}
+{"text": "vai a dormire", "intent": "PAUSE_LISTENING", "parameters": {}}
+{"text": "smetti di ascoltare per mezz'ora", "intent": "PAUSE_LISTENING", "parameters": {"minutes": 30}}
+{"text": "modalità silenziosa", "intent": "PAUSE_LISTENING", "parameters": {}}
+{"text": "ciao", "intent": "CHITCHAT", "parameters": {"text": "ciao"}}
+{"text": "ciao jake", "intent": "CHITCHAT", "parameters": {"text": "ciao jake"}}
+{"text": "buongiorno", "intent": "CHITCHAT", "parameters": {"text": "buongiorno"}}
+{"text": "buonasera", "intent": "CHITCHAT", "parameters": {"text": "buonasera"}}
+{"text": "grazie", "intent": "CHITCHAT", "parameters": {"text": "grazie"}}
+{"text": "grazie mille", "intent": "CHITCHAT", "parameters": {"text": "grazie mille"}}
+{"text": "ok grazie", "intent": "CHITCHAT", "parameters": {"text": "ok grazie"}}
+{"text": "perfetto", "intent": "CHITCHAT", "parameters": {"text": "perfetto"}}
+{"text": "ottimo lavoro", "intent": "CHITCHAT", "parameters": {"text": "ottimo lavoro"}}
+{"text": "bravo", "intent": "CHITCHAT", "parameters": {"text": "bravo"}}
+{"text": "come stai", "intent": "CHITCHAT", "parameters": {"text": "come stai"}}
+{"text": "come va", "intent": "CHITCHAT", "parameters": {"text": "come va"}}
+{"text": "chi sei", "intent": "CHITCHAT", "parameters": {"text": "chi sei"}}
+{"text": "come ti chiami", "intent": "CHITCHAT", "parameters": {"text": "come ti chiami"}}
+{"text": "sei sveglio", "intent": "CHITCHAT", "parameters": {"text": "sei sveglio"}}
+{"text": "ci sei", "intent": "CHITCHAT", "parameters": {"text": "ci sei"}}
+{"text": "mi senti", "intent": "CHITCHAT", "parameters": {"text": "mi senti"}}
+{"text": "a dopo", "intent": "CHITCHAT", "parameters": {"text": "a dopo"}}
+{"text": "buonanotte jake", "intent": "CHITCHAT", "parameters": {"text": "buonanotte jake"}}
+{"text": "ti voglio bene", "intent": "CHITCHAT", "parameters": {"text": "ti voglio bene"}}
+{"text": "sei un genio", "intent": "CHITCHAT", "parameters": {"text": "sei un genio"}}
+{"text": "no niente", "intent": "CHITCHAT", "parameters": {"text": "no niente"}}
+{"text": "lascia stare", "intent": "CHITCHAT", "parameters": {"text": "lascia stare"}}
+{"text": "manda una mail a marco@example.com con oggetto riunione e scrivi ci vediamo alle 10", "intent": "SEND_EMAIL", "parameters": {"to": "marco@example.com", "subject": "riunione", "body": "ci vediamo alle 10"}}
+{"text": "scrivi un'email a luca@example.com per dirgli che arrivo in ritardo", "intent": "SEND_EMAIL", "parameters": {"to": "luca@example.com", "body": "arrivo in ritardo"}}
+{"text": "manda un messaggio whatsapp a marco: arrivo tra 5 minuti", "intent": "SEND_WHATSAPP", "parameters": {"contact": "marco", "message": "arrivo tra 5 minuti"}}
+{"text": "scrivi su whatsapp a giulia che la cena è alle 8", "intent": "SEND_WHATSAPP", "parameters": {"contact": "giulia", "message": "la cena è alle 8"}}
+{"text": "invia su whatsapp a mamma ti chiamo dopo", "intent": "SEND_WHATSAPP", "parameters": {"contact": "mamma", "message": "ti chiamo dopo"}}
+{"text": "salva il numero di marco: +39 333 1234567", "intent": "SAVE_CONTACT", "parameters": {"name": "marco", "phone": "+39 333 1234567"}}
+{"text": "il numero di giulia è 3331112222", "intent": "SAVE_CONTACT", "parameters": {"name": "giulia", "phone": "3331112222"}}
+{"text": "memorizza il contatto mamma con numero 3339998888", "intent": "SAVE_CONTACT", "parameters": {"name": "mamma", "phone": "3339998888"}}
+{"text": "salva l'email di luca: luca@example.com", "intent": "SAVE_CONTACT", "parameters": {"name": "luca", "email": "luca@example.com"}}
+{"text": "chi ho in rubrica", "intent": "LIST_CONTACTS", "parameters": {}}
+{"text": "che contatti ho salvato", "intent": "LIST_CONTACTS", "parameters": {}}
+{"text": "apri la cartella dove sono i download", "intent": "OPEN_PATH", "parameters": {"path": "download"}}
+{"text": "apri i video", "intent": "OPEN_PATH", "parameters": {"path": "video"}}
+{"text": "apri la cartella musica", "intent": "OPEN_PATH", "parameters": {"path": "musica"}}
+{"text": "apri il cestino", "intent": "OPEN_PATH", "parameters": {"path": "cestino"}}
+{"text": "apri il pannello di controllo", "intent": "OPEN_APP", "parameters": {"app": "pannello di controllo"}}
+{"text": "apri le impostazioni", "intent": "OPEN_APP", "parameters": {"app": "impostazioni"}}
+{"text": "apri paint", "intent": "OPEN_APP", "parameters": {"app": "paint"}}
+{"text": "apri word", "intent": "OPEN_APP", "parameters": {"app": "word"}}
+{"text": "apri excel", "intent": "OPEN_APP", "parameters": {"app": "excel"}}
+{"text": "apri chrome", "intent": "OPEN_APP", "parameters": {"app": "chrome"}}
+{"text": "apri edge", "intent": "OPEN_APP", "parameters": {"app": "edge"}}
+{"text": "apri telegram", "intent": "OPEN_APP", "parameters": {"app": "telegram"}}
+{"text": "apri la calcolatrice", "intent": "OPEN_APP", "parameters": {"app": "calcolatrice"}}
+{"text": "apri powershell", "intent": "OPEN_APP", "parameters": {"app": "powershell"}}
+{"text": "apri il prompt dei comandi", "intent": "OPEN_APP", "parameters": {"app": "prompt dei comandi"}}
+{"text": "apri vlc", "intent": "OPEN_APP", "parameters": {"app": "vlc"}}
+{"text": "apri obs", "intent": "OPEN_APP", "parameters": {"app": "obs"}}
+{"text": "apri photoshop", "intent": "OPEN_APP", "parameters": {"app": "photoshop"}}
+{"text": "cerca su youtube", "intent": "SEARCH_IN_BROWSER", "parameters": {"query": "", "site": "youtube"}}
+{"text": "apri twitch", "intent": "OPEN_URL", "parameters": {"url": "twitch.tv"}}
+{"text": "apri instagram", "intent": "OPEN_URL", "parameters": {"url": "instagram.com"}}
+{"text": "apri facebook", "intent": "OPEN_URL", "parameters": {"url": "facebook.com"}}
+{"text": "apri reddit", "intent": "OPEN_URL", "parameters": {"url": "reddit.com"}}
+{"text": "apri whatsapp web", "intent": "OPEN_URL", "parameters": {"url": "web.whatsapp.com"}}
+{"text": "apri google drive", "intent": "OPEN_URL", "parameters": {"url": "drive.google.com"}}
+{"text": "apri google maps", "intent": "OPEN_URL", "parameters": {"url": "maps.google.com"}}
+{"text": "apri prime video", "intent": "OPEN_URL", "parameters": {"url": "primevideo.com"}}
+{"text": "apri disney plus", "intent": "OPEN_URL", "parameters": {"url": "disneyplus.com"}}
+{"text": "apri il sito dell'università", "intent": "ASK_QUESTION", "parameters": {"question": "apri il sito dell'università"}}
+{"text": "scrivi una poesia sul mare", "intent": "ASK_QUESTION", "parameters": {"question": "scrivi una poesia sul mare"}}
+{"text": "inventa un nome per il mio gatto", "intent": "ASK_QUESTION", "parameters": {"question": "inventa un nome per il mio gatto"}}
+{"text": "cosa significa la parola resilienza", "intent": "ASK_QUESTION", "parameters": {"question": "cosa significa la parola resilienza"}}
+{"text": "dammi un'idea per cena", "intent": "ASK_QUESTION", "parameters": {"question": "dammi un'idea per cena"}}
+{"text": "quanto dista roma da milano", "intent": "ASK_QUESTION", "parameters": {"question": "quanto dista roma da milano"}}
+{"text": "chi ha vinto i mondiali del 2006", "intent": "ASK_QUESTION", "parameters": {"question": "chi ha vinto i mondiali del 2006"}}
+{"text": "scrivi un messaggio di auguri per un compleanno", "intent": "ASK_QUESTION", "parameters": {"question": "scrivi un messaggio di auguri per un compleanno"}}
+{"text": "riformula questa frase in modo formale: ci sentiamo dopo", "intent": "ASK_QUESTION", "parameters": {"question": "riformula questa frase in modo formale: ci sentiamo dopo"}}
+{"text": "spiegami come funziona git in due frasi", "intent": "ASK_QUESTION", "parameters": {"question": "spiegami come funziona git in due frasi"}}
+{"text": "quanto è 3 elevato alla 4", "intent": "CALCULATE", "parameters": {"expression": "3 ** 4"}}
+{"text": "quanto fa il 7 per cento di 250", "intent": "CALCULATE_PERCENTAGE", "parameters": {"percent": 7, "value": 250}}
+{"text": "quanti chilometri sono 10 miglia", "intent": "CONVERT_UNITS", "parameters": {"value": 10, "from_unit": "miglia", "to_unit": "km"}}
+{"text": "quanto sono 3 libbre in chili", "intent": "CONVERT_UNITS", "parameters": {"value": 3, "from_unit": "lb", "to_unit": "kg"}}
+{"text": "ricordami domani alle 9 di mandare la mail", "intent": "SET_REMINDER", "parameters": {"text": "mandare la mail", "at_time": "09:00"}}
+{"text": "ricordami tra 2 ore di uscire", "intent": "SET_REMINDER", "parameters": {"text": "uscire", "in_minutes": 120}}
+{"text": "fra 20 minuti ricordami di controllare il forno", "intent": "SET_REMINDER", "parameters": {"text": "controllare il forno", "in_minutes": 20}}
+{"text": "svegliami alle 7:30", "intent": "SET_REMINDER", "parameters": {"text": "sveglia", "at_time": "07:30"}}
+{"text": "metti una sveglia alle 6", "intent": "SET_REMINDER", "parameters": {"text": "sveglia", "at_time": "06:00"}}
+{"text": "apri opera e cerca gatti", "intent": "SEARCH_IN_BROWSER", "parameters": {"query": "gatti", "site": "google"}}
+{"text": "apri youtube e cerca lofi", "intent": "SEARCH_IN_BROWSER", "parameters": {"query": "lofi", "site": "youtube"}}
+{"text": "vai su youtube e metti musica rilassante", "intent": "PLAY_MEDIA", "parameters": {"query": "musica rilassante", "service": "youtube"}}
+{"text": "apri spotify e metti i coldplay", "intent": "PLAY_MEDIA", "parameters": {"query": "coldplay", "service": "spotify"}}

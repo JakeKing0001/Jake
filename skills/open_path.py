@@ -25,6 +25,15 @@ class OpenPathSkill:
         if not raw_path:
             return SkillResult(success=False, data={}, error="MISSING_PARAMETERS")
 
+        # Cartelle speciali di Windows (cestino, pannello di controllo): "shell:..." non e' un
+        # percorso su disco, va passato direttamente alla shell.
+        if raw_path.lower().startswith("shell:"):
+            try:
+                os.startfile(raw_path)
+                return SkillResult(success=True, data={"path": raw_path})
+            except Exception:
+                return SkillResult(success=False, data={"path": raw_path}, error="OPERATION_FAILED")
+
         target = Path(raw_path).expanduser()
         if not target.exists():
             return SkillResult(success=False, data={"path": raw_path}, error="PATH_NOT_FOUND")

@@ -2,6 +2,7 @@ import json
 from urllib import error, request
 
 from core.skill_result import SkillResult
+from core.ollama_client import DEFAULT_BASE_URL
 
 
 class ResearchSkill:
@@ -24,11 +25,11 @@ class ResearchSkill:
         },
     }
 
-    def __init__(self, web_search_skill, search_files_skill, model: str, base_url: str = "http://localhost:11434", timeout: float = 40):
+    def __init__(self, web_search_skill, search_files_skill, model: str, base_url: str = None, timeout: float = 40):
         self.web_search_skill = web_search_skill
         self.search_files_skill = search_files_skill
         self.model = model
-        self.base_url = base_url.rstrip("/")
+        self.base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
         self.timeout = timeout
 
     def execute(self, parameters: dict = None):
@@ -58,7 +59,8 @@ class ResearchSkill:
         payload = {
             "model": self.model,
             "stream": False,
-            "options": {"temperature": 0.3},
+            "keep_alive": "30m",
+            "options": {"num_ctx": 8192, "temperature": 0.3},
             "messages": [
                 {
                     "role": "system",

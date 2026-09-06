@@ -1,4 +1,4 @@
-# Prepara Jake al primo avvio: venv, dipendenze, modelli Ollama, config.
+# Prepara Jake al primo avvio: venv, dipendenze, modelli Ollama, config, GPU opzionale.
 # A differenza di setup_rvc.ps1 (script una tantum per un componente opzionale), questo e'
 # pensato per un utente alle prime armi: ogni passo ha un try/catch con un messaggio chiaro
 # invece di un errore PowerShell grezzo.
@@ -21,7 +21,7 @@ function Step-Failed($step, $err) {
     exit 1
 }
 
-Write-Host "1/6 Verifico che Python sia installato..."
+Write-Host "1/7 Verifico che Python sia installato..."
 try {
     $pythonVersion = & python --version 2>&1
     Write-Host "  Trovato: $pythonVersion"
@@ -29,7 +29,7 @@ try {
     Step-Failed "verifica Python" "Python non e' installato o non e' nel PATH. Scaricalo da https://python.org (spunta 'Add python.exe to PATH' durante l'installazione)."
 }
 
-Write-Host "2/6 Preparo l'ambiente virtuale (.venv)..."
+Write-Host "2/7 Preparo l'ambiente virtuale (.venv)..."
 try {
     if (-not (Test-Path "$root\.venv\Scripts\python.exe")) {
         & python -m venv "$root\.venv"
@@ -42,7 +42,7 @@ try {
 }
 $py = "$root\.venv\Scripts\python.exe"
 
-Write-Host "3/6 Installo le dipendenze Python (puo' richiedere qualche minuto)..."
+Write-Host "3/7 Installo le dipendenze Python (puo' richiedere qualche minuto)..."
 try {
     & $py -m pip install -q -r "$root\requirements.txt"
     if ($LASTEXITCODE -ne 0) { throw "pip install ha restituito un errore" }
@@ -50,7 +50,21 @@ try {
     Step-Failed "installazione dipendenze" $_
 }
 
-Write-Host "4/6 Verifico Ollama (serve per capire i comandi e per la ricerca semantica)..."
+Write-Host "4/7 GPU NVIDIA (opzionale, rende il riconoscimento vocale molto piu' veloce e preciso)..."
+$nvidiaFound = $null -ne (Get-Command nvidia-smi -ErrorAction SilentlyContinue)
+if ($nvidiaFound) {
+    try {
+        Write-Host "  Trovata una GPU NVIDIA: installo le librerie CUDA per Whisper (~1 GB)..."
+        & $py -m pip install -q -r "$root\requirements-gpu.txt"
+        if ($LASTEXITCODE -ne 0) { throw "pip install (GPU) ha restituito un errore" }
+    } catch {
+        Write-Host "  Non sono riuscito a installare le librerie GPU: Jake usera' la CPU. ($_)" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "  Nessuna GPU NVIDIA rilevata: Jake usera' la CPU (va bene comunque)."
+}
+
+Write-Host "5/7 Verifico Ollama (serve per capire i comandi e per la ricerca semantica)..."
 $ollamaFound = $null -ne (Get-Command ollama -ErrorAction SilentlyContinue)
 if (-not $ollamaFound) {
     Write-Host "  Ollama non e' installato." -ForegroundColor Yellow
@@ -59,14 +73,15 @@ if (-not $ollamaFound) {
     Write-Host "  Trovato."
 }
 
-Write-Host "5/6 Verifico i modelli Ollama necessari..."
+Write-Host "6/7 Verifico i modelli Ollama necessari..."
 if ($ollamaFound) {
     try {
         $installed = & ollama list 2>&1 | Out-String
-        $models = @{
-            "qwen2.5:7b"      = "comprensione dei comandi e pianificazione"
-            "nomic-embed-text" = "ricerca semantica (file e memoria)"
-            "qwen2.5vl:7b"    = "visione (descrivere cosa c'e' sullo schermo)"
+        $models = [ordered]@{
+            "qwen2.5:7b"        = "comprensione dei comandi e pianificazione"
+            "nomic-embed-text"  = "ricerca semantica (comandi, file e memoria)"
+            "qwen2.5-coder:7b"  = "Jake si scrive nuove capacita' da solo"
+            "qwen2.5vl:7b"      = "visione (descrivere e cliccare cio' che c'e' sullo schermo)"
         }
         foreach ($model in $models.Keys) {
             $shortName = $model.Split(":")[0]
@@ -85,7 +100,7 @@ if ($ollamaFound) {
     Write-Host "  Saltato (Ollama non installato)."
 }
 
-Write-Host "6/6 Preparo la configurazione..."
+Write-Host "7/7 Preparo la configurazione..."
 try {
     if (-not (Test-Path "$root\config\settings.json")) {
         Copy-Item "$root\config\settings.example.json" "$root\config\settings.json"
@@ -107,9 +122,10 @@ if ($Autostart) {
         $mainPy = "$root\main.py"
         $q = [char]34
         $vbsContent = "Set shell = CreateObject(${q}WScript.Shell${q})`r`n" +
-            "shell.Run ${q}${q}${q}$pyw${q}${q} ${q}${q}$mainPy${q}${q} --tray${q}, 0, False`r`n"
+            "shell.CurrentDirectory = ${q}$root${q}`r`n" +
+            "shell.Run ${q}${q}${q}$pyw${q}${q} ${q}${q}$mainPy${q}${q}${q}, 0, False`r`n"
         Set-Content -Path $vbsPath -Value $vbsContent -Encoding ASCII
-        Write-Host "  Fatto: Jake partira' nella system tray a ogni accensione."
+        Write-Host "  Fatto: Jake (HUD + voce) partira' a ogni accensione."
         Write-Host "  Per disattivarlo, elimina: $vbsPath"
     } catch {
         Step-Failed "impostazione avvio automatico" $_
@@ -118,7 +134,9 @@ if ($Autostart) {
 
 Write-Host ""
 Write-Host "Fatto! Avvia Jake con:" -ForegroundColor Green
-Write-Host "  .venv\Scripts\python.exe main.py --tray" -ForegroundColor Green
+Write-Host "  .venv\Scripts\python.exe main.py            (HUD + voce continua: di' 'Jake')" -ForegroundColor Green
+Write-Host "  .venv\Scripts\python.exe main.py --no-voice (solo HUD e barra comandi Ctrl+Shift+J)" -ForegroundColor Green
+Write-Host "  .venv\Scripts\python.exe main.py --cli      (testo nel terminale)" -ForegroundColor Green
 if (-not $ollamaFound) {
     Write-Host "(installa Ollama e rilancia questo script prima del primo avvio, altrimenti Jake capira' poco)" -ForegroundColor Yellow
 }

@@ -2,6 +2,7 @@ import base64
 import json
 from pathlib import Path
 from urllib import error, request
+from core.ollama_client import DEFAULT_BASE_URL
 
 DEFAULT_PROMPT = (
     "Descrivi in italiano, in modo conciso, cosa vedi in questa schermata: layout, "
@@ -15,9 +16,9 @@ class VisionProvider:
     describe(), un fallimento (Ollama giu', modello di visione non scaricato) restituisce
     semplicemente None e la skill chiamante degrada con un messaggio comprensibile."""
 
-    def __init__(self, model: str = "qwen2.5vl:7b", base_url: str = "http://localhost:11434", timeout: float = 60):
+    def __init__(self, model: str = "qwen2.5vl:7b", base_url: str = None, timeout: float = 60):
         self.model = model
-        self.base_url = base_url.rstrip("/")
+        self.base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
         self.timeout = timeout
 
     def describe(self, image_path: Path, question: str = None) -> str | None:
@@ -30,6 +31,8 @@ class VisionProvider:
         payload = {
             "model": self.model,
             "stream": False,
+            "keep_alive": "30m",
+            "options": {"num_ctx": 8192},
             "messages": [
                 {"role": "user", "content": question or DEFAULT_PROMPT, "images": [image_b64]},
             ],

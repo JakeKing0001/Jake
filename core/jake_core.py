@@ -1,49 +1,137 @@
 import re
 
-from core.router import Router
-from core.skill_registry import SkillRegistry
-from core.skill_result import SkillResult
+from core.command import Command
 from core.context_summarizer import ContextSummarizer
-from core.logger import get_logger
-from core.scheduler import ReminderScheduler
-from core.trigger_scheduler import TriggerScheduler
 from core.desktop_context import DesktopContextTracker
+from core.learning_manager import LearningManager
+from core.logger import get_logger
+from core.nlu import chitchat
+from core.nlu.examples import ExampleStore
+from core.nlu.index import lexical_similarity
+from core.nlu.normalizer import TranscriptNormalizer
+from core.nlu.retriever import CapabilityRetriever
+from core.ollama_client import OllamaClient
 from core.plugin_loader import load_plugins
+from core.response_formatter import format_plan_outcome, format_skill_result
+from core.router import Router
+from core.scheduler import ReminderScheduler
+from core.session_hooks import SessionHooks
+from core.skill_forge import SkillForge
+from core.skill_registry import SkillRegistry
+from core.trigger_scheduler import TriggerScheduler
+from skills.learn import CorrectLastSkill, ForgetLearnedSkill, LearnCommandSkill, ListLearnedSkill
 from skills.model_control import ListModelsSkill, SetModelSkill
+from skills.session_control import (
+    HelpSkill, PauseListeningSkill, RepeatLastSkill, StartDictationSkill, StopDictationSkill, StopTalkingSkill,
+)
+from skills.skill_forge_skills import CreateSkillSkill, DeleteCreatedSkillSkill, ListCreatedSkillsSkill
 
 
 class JakeCore:
     EXIT_SENTINEL = "l'utente vuole uscire"
+    NO_PLAN = "Non so ancora fare questa cosa"
     # Il classificatore a singolo intent non "fallisce" su una richiesta composta: si limita a
     # sceglierne una parte e scarta il resto senza segnalarlo. Questi marcatori intercettano le
     # richieste esplicitamente multi-step PRIMA che accada, instradandole subito al planner.
-    # Escluse le richieste che DEFINISCONO un'automazione (SAVE_WORKFLOW): li' l'intera frase
-    # composta e' voluta dentro un solo parametro libero, non va spezzata in piu' passi subito.
-    MULTI_STEP_PATTERN = re.compile(r"\b(?:e poi|poi|quindi|successivamente|dopodich[eé])\b")
-    WORKFLOW_DEFINITION_PATTERN = re.compile(r"\bautomazion\w*\b|\bworkflow\b")
+    # Escluse le richieste che DEFINISCONO un'automazione o un comando (SAVE_WORKFLOW,
+    # LEARN_COMMAND): li' l'intera frase composta e' voluta dentro un solo parametro libero.
+    # La sola "e" (congiunzione) conta come multi-step solo se seguita da un altro verbo
+    # d'azione noto (es. "apri opera E cerca gatti"): senza questo vincolo qualunque "e" dentro
+    # al contenuto di un comando singolo (es. "cerca ricette pasta e ceci") verrebbe deviata
+    # inutilmente sul planner invece di restare un unico intent.
+    _ACTION_VERBS = (
+        "apri|aprimi|avvia|avviami|cerca|vai|crea|elimina|cancella|trova|chiudi|termina|"
+        "spegni|riavvia|blocca|sospendi|alza|abbassa|aumenta|diminuisci|silenzia|muta|scrivi|"
+        "ricordami|ricorda|ricordati|memorizza|dimentica|scorda|manda|invia|esegui|metti|togli|"
+        "leggi|mostra|elenca|fai|cattura|scatta|salva|copia|sposta|rinomina|dimmi|dammi|clicca|premi"
+    )
+    MULTI_STEP_PATTERN = re.compile(
+        rf"\b(?:e poi|poi|quindi|successivamente|dopodich[eé])\b|"
+        rf"\be(?=\s+(?:{_ACTION_VERBS})\b)"
+    )
+    WORKFLOW_DEFINITION_PATTERN = re.compile(
+        r"\bautomazion\w*\b|\bworkflow\b|\bquando dico\b|\bse dico\b|\bimpara\b|\bd'ora in poi\b|\bogni volta che dico\b"
+    )
+    # "apri youtube e cerca gatti": la seconda azione E' la prima (ricerca nel browser). Il planner
+    # farebbe due passi (apri sito + cerca): meglio un solo intent, che il classificatore gestisce.
+    BROWSER_COMBO_PATTERN = re.compile(
+        r"^(?:apri|vai su)\s+(?:youtube|google|opera|chrome|edge|il browser|firefox|amazon|spotify)\s+e\s+(?:cerca|metti|riproduci|fammi sentire)\b"
+    )
+    QUESTION_PATTERN = re.compile(
+        r"^(?:chi|cosa|che cosa|come|quando|dove|perch[eé]|quanto|quanti|quante|quale|quali|cos'|com'|qual|"
+        r"spiegami|dimmi|raccontami|consigliami|suggeriscimi|aiutami|scrivimi|inventa|descrivi|riassumi|"
+        r"sai|sapresti|potresti|puoi dirmi|mi dici|mi spieghi|secondo te)\b|\?$"
+    )
+    _REQUEST_VERBS = (
+        "apri|aprimi|aprire|avvia|avviare|lancia|lanciare|cerca|cercare|vai|crea|creare|elimina|cancella|"
+        "trova|chiudi|chiudere|termina|spegni|spegnere|riavvia|blocca|sospendi|alza|alzare|abbassa|abbassare|"
+        "aumenta|diminuisci|silenzia|muta|scrivi|scrivere|ricordami|ricorda|memorizza|dimentica|manda|mandare|"
+        "invia|inviare|esegui|eseguire|metti|mettere|togli|leggi|leggere|mostra|mostrami|elenca|fai|fare|cattura|"
+        "scatta|salva|salvare|copia|sposta|rinomina|dimmi|dammi|dirmi|darmi|clicca|cliccare|premi|premere|imposta|"
+        "impostare|attiva|attivare|disattiva|disattivare|riproduci|suona|fammi|porta|passa|minimizza|massimizza|"
+        "descrivi|traduci|calcola|converti|controlla|verifica|pulisci|svuota|prendi|segna|appunta|cambia|usa|rispondi"
+    )
+    # "quando dico X fai Y": insegnamento deterministico, senza passare dal modello (che tende a
+    # eseguire Y subito invece di imparare l'associazione).
+    LEARN_PATTERNS = [
+        re.compile(
+            r"^(?:impara(?: che)?|ricordati che|ricorda che|d'ora in poi|da ora in poi|da adesso|da oggi|"
+            r"ogni volta che|tutte le volte che)?[\s,]*(?:se|quando)\s+(?:ti\s+)?dico\s+(?P<phrase>.+?)"
+            r"[\s,:]*(?:devi|dovrai|dovresti|allora|tu|fai|fa'|esegui|vuol dire che|significa che|intendo che|voglio che)?[\s,]*"
+            rf"(?P<request>(?:{_REQUEST_VERBS})\b.+)$"
+        ),
+        re.compile(r"^impara\s*:?\s*(?P<phrase>.+?)\s*(?:=|->|=>|significa|vuol dire)\s*(?P<request>.+)$"),
+    ]
+    CORRECTION_PATTERNS = [
+        re.compile(
+            r"^(?:no|nope|sbagliato|errato|non intendevo(?: quello)?|non era quello|non volevo quello)[\s,.!]*"
+            r"(?:intendevo dire|intendevo|volevo dire|volevo|dovevi|devi|era|dicevo|ho detto)\s+(?P<request>.+)$"
+        ),
+        re.compile(r"^(?:intendevo dire|intendevo|volevo dire|dovevi)\s+(?P<request>.+)$"),
+    ]
+    POSITIVE_ANSWERS = {"si", "sì", "yes", "y", "ok", "okay", "va bene", "certo", "confermo", "procedi", "vai", "esatto", "sisi", "si si", "sì sì", "conferma", "fallo", "assolutamente"}
+    NEGATIVE_ANSWERS = {"no", "n", "annulla", "cancel", "lascia stare", "non farlo", "no grazie", "nope", "negativo", "ferma", "stop"}
 
     def __init__(self):
         self.logger = get_logger()
         self.skill_registry = SkillRegistry()
+        config = self.skill_registry.config
+        self.config = config
+        self.ollama = self.skill_registry.ollama_client
+        self.model = config.get("ollama_model", "qwen2.5:7b")
 
         # Skill/plugin installabili (v2.0): un file .py in plugins/ con una funzione
         # register(registry) diventa una capacita' di Jake senza toccare il core.
         self.loaded_plugins = load_plugins(self.skill_registry, logger=self.logger)
 
-        self.router = Router(skill_registry=self.skill_registry)
+        # Comprensione (v3.0): normalizzazione del parlato, esempi, recupero semantico.
+        self.normalizer = TranscriptNormalizer(app_names_provider=self.skill_registry.app_names)
+        self.example_store = ExampleStore()
+        embedding_model = config.get("embedding_model", "nomic-embed-text")
+        self.retriever = CapabilityRetriever(
+            self.skill_registry, self.example_store,
+            embedder=lambda texts: self.ollama.embed(embedding_model, texts, timeout=120),
+            model_name=embedding_model,
+        )
+        self.learning = LearningManager(self.example_store, self.retriever, self.normalizer, logger=self.logger)
+        self.session_hooks = SessionHooks()
+
+        self.router = Router(
+            skill_registry=self.skill_registry, example_store=self.example_store,
+            retriever=self.retriever, client=self.ollama,
+        )
         self.conversation_state = self.skill_registry.conversation_state
         self.memory_manager = self.skill_registry.memory_manager
         self.planner_provider = self.skill_registry.planner_provider
         self.plan_executor = self.skill_registry.plan_executor
         self.context_summarizer = ContextSummarizer(model=self.router.primary_provider.model)
-        config = self.skill_registry.config
         self.blocked_intents = set(config.get("blocked_intents", []) or [])
         self.always_confirm_intents = set(config.get("always_confirm_intents", []) or [])
 
         # Jake proattivo (v1.2): di default stampa i promemoria scaduti; chi lancia Jake
-        # (CLI, voce, tray) puo' sostituire questo callback per parlarli o mostrarli come toast.
+        # (CLI, voce, tray, HUD) puo' sostituire questo callback per parlarli o mostrarli.
         self.reminder_manager = self.skill_registry.reminder_manager
-        self.scheduler = ReminderScheduler(self.reminder_manager, on_due=self._default_on_reminder_due)
+        self.scheduler = ReminderScheduler(self.reminder_manager, on_due=self._default_on_reminder_due, interval_seconds=5)
         self.scheduler.start()
 
         # Contestualizzazione leggera del desktop (v2.0): il classificatore e il planner
@@ -53,11 +141,7 @@ class JakeCore:
         self.router.primary_provider.context_provider = self.desktop_context.context_summary
         self.planner_provider.context_provider = self.desktop_context.context_summary
 
-        # Jake proattivo (v3.0): un'automazione salvata puo' far partire se stessa (orario
-        # fisso o app che va in primo piano), non solo su richiesta esplicita. blocked_intents/
-        # always_confirm_intents vengono passati esplicitamente: un trigger scatta senza
-        # nessuno li' pronto a rispondere "confermi?", quindi un passo che richiederebbe
-        # conferma va semplicemente messo in pausa, mai eseguito alla cieca.
+        # Jake proattivo (v3.0): un'automazione salvata puo' far partire se stessa.
         self.trigger_scheduler = TriggerScheduler(
             self.skill_registry.trigger_manager,
             self.skill_registry.workflow_manager,
@@ -69,8 +153,15 @@ class JakeCore:
         )
         self.trigger_scheduler.start()
 
-        # Modelli intercambiabili (v2.0): registrate qui (non in SkillRegistry) perche' devono
-        # tenere allineati componenti che vivono in JakeCore/Router, non solo nel registry.
+        # Fucina di skill (v3.0): Jake si scrive nuove capacita' da solo.
+        self.skill_forge = SkillForge(
+            self.skill_registry, client=OllamaClient(timeout=240),
+            model_provider=lambda: self.model, logger=self.logger,
+            on_skill_installed=self._on_skill_installed,
+            coder_model=config.get("coder_model") or None,
+        )
+
+        # Skill che hanno bisogno del core (non solo del registry): registrate qui.
         self.skill_registry.register_skill("LIST_MODELS", ListModelsSkill())
         self.skill_registry.register_skill(
             "SET_MODEL",
@@ -79,16 +170,66 @@ class JakeCore:
                 config=config,
             ),
         )
+        for intent, skill in (
+            ("LEARN_COMMAND", LearnCommandSkill(self)),
+            ("LIST_LEARNED", ListLearnedSkill(self)),
+            ("FORGET_LEARNED", ForgetLearnedSkill(self)),
+            ("CORRECT_LAST", CorrectLastSkill(self)),
+            ("REPEAT_LAST", RepeatLastSkill(self)),
+            ("HELP", HelpSkill(self)),
+            ("STOP_TALKING", StopTalkingSkill(self)),
+            ("PAUSE_LISTENING", PauseListeningSkill(self)),
+            ("START_DICTATION", StartDictationSkill(self)),
+            ("STOP_DICTATION", StopDictationSkill(self)),
+            ("CREATE_SKILL", CreateSkillSkill(self.skill_forge)),
+            ("LIST_CREATED_SKILLS", ListCreatedSkillsSkill(self.skill_forge)),
+            ("DELETE_CREATED_SKILL", DeleteCreatedSkillSkill(self.skill_forge, self.learning)),
+        ):
+            self.skill_registry.register_skill(intent, skill)
+
+        # Indici del recupero semantico: costruiti dopo che TUTTE le skill sono registrate.
+        self.retriever.refresh()
+        self.logger.info(
+            "Jake 3.0 pronto: %d capacita', %d esempi (%d imparati), embedding %s",
+            len(self.skill_registry.skills), len(self.example_store.all()),
+            len(self.example_store.learned()), "attivi" if self.retriever.using_embeddings() else "NON disponibili (fallback lessicale)",
+        )
+
+        self.last_exchange = None  # {"text", "command", "response"}
+        self.last_response = None
+        self.last_route = None
+
+    # ---- callback di default -------------------------------------------------------------
 
     def _default_on_reminder_due(self, reminder: dict) -> None:
-        print(f"\nJake > Promemoria: {reminder['text']}\nTu > ", end="", flush=True)
+        print(f"\nJake > {self.format_due_reminder(reminder)}\nTu > ", end="", flush=True)
+
+    @staticmethod
+    def format_due_reminder(reminder: dict) -> str:
+        if reminder.get("kind") == "timer":
+            label = reminder.get("text") or "timer"
+            return "Il timer è scaduto!" if label == "timer" else f"Il timer per {label} è scaduto!"
+        return f"Promemoria: {reminder['text']}"
 
     def _default_on_trigger_fired(self, trigger: dict, outcome, total_steps: int) -> None:
-        summary = self._format_plan_outcome(outcome, total_steps)
+        summary = format_plan_outcome(outcome, total_steps, self.skill_registry)
         print(f"\nJake > Ho eseguito automaticamente '{trigger.get('name')}':\n{summary}\nTu > ", end="", flush=True)
 
-    def answer(self, text: str):
-        text = text.lower().strip()
+    def _on_skill_installed(self, draft) -> None:
+        self.retriever.refresh()
+        for example in draft.examples:
+            try:
+                self.learning.teach(self.normalizer.normalize(example), draft.intent, {}, source="forge")
+            except Exception:
+                self.logger.exception("Errore registrando gli esempi della skill %s", draft.intent)
+
+    # ---- API pubblica --------------------------------------------------------------------
+
+    def answer(self, text: str) -> str:
+        raw_text = text or ""
+        text = self.normalizer.normalize(raw_text)
+        if not text:
+            return "Non ho sentito nulla."
         try:
             response = self._process(text)
         except Exception:
@@ -97,333 +238,228 @@ class JakeCore:
             self.logger.exception("Errore imprevisto elaborando: %s", text)
             response = "Mi dispiace, si è verificato un errore imprevisto. L'ho registrato nel log."
 
+        if response is None:
+            response = ""
         self.conversation_state.add_turn("user", text)
         self.memory_manager.log_turn("user", text)
         if response != self.EXIT_SENTINEL:
             self.conversation_state.add_turn("jake", response)
             self.memory_manager.log_turn("jake", response)
-        self.logger.info("Tu: %s | Jake: %s", text, response)
+            if response:
+                self.last_response = response
+        if raw_text.strip().lower() != text:
+            self.logger.info("Tu: %s (normalizzato da: %s) | Jake: %s", text, raw_text.strip(), response)
+        else:
+            self.logger.info("Tu: %s | Jake: %s", text, response)
 
         # No-op finche' la cronologia resta sotto soglia: il riassunto scatta solo occasionalmente.
         self.memory_manager.summarize_old_history(self.context_summarizer)
-
         return response
+
+    def resolve_command(self, text: str) -> Command:
+        """Classifica un testo senza eseguirlo (usato dalle skill di apprendimento)."""
+        return self.router.detect_intent(self.normalizer.normalize(text))
+
+    def describe_command(self, command: Command) -> str:
+        """Descrizione parlabile di un comando: 'apro spotify', 'eseguo l'automazione X'."""
+        intent = command.intent
+        parameters = command.parameters or {}
+        if intent == "RUN_WORKFLOW":
+            return f"eseguo l'automazione «{parameters.get('name', '')}»"
+        skill = self.skill_registry.get_skill(intent)
+        description = (getattr(skill, "metadata", {}) or {}).get("description", "") or intent
+        description = description.split(". ")[0].split(" Usalo")[0].rstrip(".")
+        values = ", ".join(f"{k}: {v}" for k, v in parameters.items() if v not in (None, "", False))
+        return f"{description[0].lower() + description[1:]}" + (f" ({values})" if values else "")
+
+    def apply_correction(self, request: str) -> str:
+        """'No, intendevo X': esegue X e impara ad associare la frase precedente a X."""
+        previous = self.last_exchange
+        text = self.normalizer.normalize(request)
+        command = self.router.detect_intent(text)
+        if command.intent == "UNKNOWN":
+            plan_response = self._try_plan(text)
+            if plan_response != self.NO_PLAN:
+                return plan_response
+            return "Non ho capito nemmeno la correzione: prova a dirlo in un altro modo."
+        response = self._execute_command(text, command, learn=False)
+        if previous and previous.get("text") and previous["text"] != text:
+            previous_command = previous.get("command")
+            previous_intent = previous_command.intent if previous_command is not None else "UNKNOWN"
+            # Impara solo se la correzione riguarda davvero la frase precedente: stesse parole
+            # chiave, oppure Jake non aveva capito nulla. "apri X" seguito da "no, intendevo che
+            # ore sono" non deve insegnare che "apri X" significa chiedere l'ora.
+            related = lexical_similarity(previous["text"], text) >= 0.25 or previous_intent in ("UNKNOWN", "CHITCHAT", "ASK_QUESTION")
+            if related:
+                self.learning.correct(previous["text"], previous_command, command)
+                self.logger.info("Correzione: %r -> %s %s", previous["text"], command.intent, command.parameters)
+        return response
+
+    # ---- pipeline ------------------------------------------------------------------------
 
     def _process(self, text: str) -> str:
         if self.conversation_state.has_pending_action():
             return self._handle_confirmation(text)
 
-        if text == "esci" or text == "usci" or text.startswith("esci ") or text.startswith("usci "):
+        if text in ("esci", "usci", "chiudi jake", "spegniti", "jake spegniti") or text.startswith(("esci ", "usci ")):
             return self.EXIT_SENTINEL
 
-        if self.MULTI_STEP_PATTERN.search(text) and not self.WORKFLOW_DEFINITION_PATTERN.search(text):
+        meta = self._match_meta_command(text)
+        if meta is not None:
+            self.logger.info("Meta-comando: %s %s", meta.intent, meta.parameters)
+            return self._execute_command(text, meta, learn=False)
+
+        # Un comando insegnato o corretto dall'utente vince su tutto (anche sulle frasi di
+        # cortesia: "prova jake" potrebbe sembrare un saluto, ma se l'utente lo ha insegnato...).
+        taught = self.example_store.find_exact(text)
+        if taught is not None and taught.source in ("taught", "corrected"):
+            self.last_route = "exact"
+            self.logger.info("Comando insegnato: %s %s", taught.intent, taught.parameters)
+            return self._execute_command(text, Command(taught.intent, dict(taught.parameters)), learn=False)
+
+        # Frasi di cortesia brevi: risposta immediata, nessuna chiamata al modello.
+        if len(text.split()) <= 4:
+            quick = chitchat.reply(text)
+            if quick is not None:
+                self.learning.commit_pending()
+                self._remember_exchange(text, Command("CHITCHAT", {"text": text}), quick)
+                return quick
+
+        if (
+            self.MULTI_STEP_PATTERN.search(text)
+            and not self.WORKFLOW_DEFINITION_PATTERN.search(text)
+            and not self.BROWSER_COMBO_PATTERN.search(text)
+        ):
             plan_response = self._try_plan(text)
-            if plan_response != "Non so ancora fare questa cosa":
+            if plan_response != self.NO_PLAN:
                 return plan_response
             # la pianificazione non ha prodotto nulla di utile: ripiega sul routing normale
 
         command = self.router.detect_intent(text)
+        self.last_route = self.router.last_route
+        self.logger.info("Instradamento: %s -> %s %s", self.last_route, command.intent, command.parameters)
 
-        # Se l'intent è sconosciuto, prova a scomporre la richiesta in più passi
-        # (es. "prepara l'ambiente per lavorare su NEST") prima di arrenderti.
         if command.intent == "UNKNOWN":
-            return self._try_plan(text)
+            return self._handle_unknown(text)
+        return self._execute_command(text, command)
 
-        if command.intent in self.blocked_intents:
-            self.logger.warning("Azione bloccata da policy: %s", command.intent)
-            return f"L'azione {command.intent} è disabilitata nella configurazione."
+    def _match_meta_command(self, text: str) -> Command | None:
+        """Comandi su Jake stesso riconosciuti da regole precise (insegnare, correggere): troppo
+        importanti per lasciarli al modello, che a volte esegue invece di imparare."""
+        for pattern in self.LEARN_PATTERNS:
+            match = pattern.match(text)
+            if match:
+                phrase = match.group("phrase").strip(" ,:")
+                request = match.group("request").strip()
+                if phrase and request:
+                    return Command("LEARN_COMMAND", {"phrase": phrase, "request": request})
+        for pattern in self.CORRECTION_PATTERNS:
+            match = pattern.match(text)
+            if match and self.last_exchange is not None:
+                return Command("CORRECT_LAST", {"request": match.group("request").strip()})
+        return None
 
-        # Ottieni la skill dal Registry
-        skill = self.skill_registry.get_skill(command.intent)
+    def _execute_command(self, text: str, command: Command, learn: bool = True) -> str:
+        intent = command.intent
+        if intent in self.blocked_intents:
+            self.logger.warning("Azione bloccata da policy: %s", intent)
+            return f"L'azione {intent} è disabilitata nella configurazione."
 
+        skill = self.skill_registry.get_skill(intent)
         if skill is None:
-            return f"Skill non trovata per {command.intent}"
+            return f"Skill non trovata per {intent}"
 
-        if command.intent in self.always_confirm_intents:
+        if intent in self.always_confirm_intents:
             self.conversation_state.set_pending_action({
-                "intent": command.intent,
-                "parameters": command.parameters,
-                "reason": "policy_confirmation_required",
+                "intent": intent, "parameters": command.parameters, "reason": "policy_confirmation_required",
+                "text": text,
             })
-            return f"La configurazione richiede conferma per {command.intent}. Confermi?"
+            return f"La configurazione richiede conferma per {intent}. Confermi?"
 
-        result = self.skill_registry.execute(command.intent, command.parameters)
-        if result.error == "CONFIRMATION_REQUIRED":
+        result = self.skill_registry.execute(intent, command.parameters)
+        if result is not None and result.error == "CONFIRMATION_REQUIRED":
             self.conversation_state.set_pending_action({
-                "intent": command.intent,
+                "intent": intent,
                 "parameters": result.data.get("confirm_parameters", command.parameters),
                 "reason": "confirmation_required",
+                "text": text,
             })
+            self._remember_exchange(text, command, result.data.get("message", ""))
             return result.data.get("message", "Confermi questa azione?")
-        return self._format_skill_result(command.intent, result)
+
+        response = format_skill_result(intent, result, self.skill_registry)
+        if learn:
+            self.learning.observe(text, command, result, route=self.router.last_route)
+        self._remember_exchange(text, command, response)
+        return response
+
+    def _handle_unknown(self, text: str) -> str:
+        plan_response = self._try_plan(text)
+        if plan_response != self.NO_PLAN:
+            return plan_response
+
+        if self.QUESTION_PATTERN.search(text):
+            return self._execute_command(text, Command("ASK_QUESTION", {"question": text}), learn=False)
+
+        self.learning.commit_pending()
+        self._remember_exchange(text, Command("UNKNOWN", {}), self.NO_PLAN)
+        if self.skill_forge.is_available():
+            self.conversation_state.set_pending_action({
+                "intent": "CREATE_SKILL", "parameters": {"request": text}, "reason": "offer_learn", "text": text,
+            })
+            return "Non so ancora fare questa cosa. Vuoi che provi a impararla da solo, scrivendomi una nuova capacità?"
+        return self.NO_PLAN
 
     def _try_plan(self, text: str) -> str:
         plan = self.planner_provider.build_plan(text)
         if plan is None or len(plan.steps) < 2:
-            return "Non so ancora fare questa cosa"
+            return self.NO_PLAN
         outcome = self.plan_executor.execute(plan)
-        return self._format_plan_outcome(outcome, len(plan.steps))
-
-    def _format_plan_outcome(self, outcome, total_steps: int) -> str:
-        lines = []
-        for step_outcome in outcome.completed:
-            label = step_outcome.step.description or step_outcome.step.intent
-            lines.append(f"- fatto: {label}")
-
-        if outcome.success:
-            lines.insert(0, f"Ho completato i {len(outcome.completed)} passi richiesti:")
-            return "\n".join(lines)
-
-        stopped = outcome.stopped_step
-        label = stopped.step.description or stopped.step.intent
-        if stopped.result.error == "CONFIRMATION_REQUIRED":
-            lines.append(f"- in pausa: {label}: {stopped.result.data.get('message', 'richiede conferma')}")
-            lines.append("Chiedimelo singolarmente per confermare questo passo.")
-        else:
-            lines.append(f"- fallito: {label}: {self._format_skill_result(stopped.step.intent, stopped.result)}")
-            if outcome.rolled_back:
-                undone = ", ".join(o.step.description or o.step.intent for o in outcome.rolled_back)
-                lines.append(f"Ho annullato i passi precedenti per sicurezza: {undone}.")
-
-        lines.insert(0, f"Piano interrotto dopo {len(outcome.completed)} passi completati su {total_steps}:")
-        return "\n".join(lines)
+        response = format_plan_outcome(outcome, len(plan.steps), self.skill_registry)
+        self._remember_exchange(text, Command("PLAN", {"steps": len(plan.steps)}), response)
+        return response
 
     def _handle_confirmation(self, text: str) -> str:
-        positive_answers = {"si", "sì", "yes", "y"}
-        negative_answers = {"no", "n", "annulla", "cancel"}
-
-        if text in positive_answers:
+        if text in self.POSITIVE_ANSWERS:
             action = self.conversation_state.get_pending_action()
             self.conversation_state.clear_pending_action()
             result = self.skill_registry.execute(action["intent"], action["parameters"])
-            return self._format_skill_result(action["intent"], result)
-        if text in negative_answers:
+            # Una conferma puo' chiederne un'altra (CREATE_SKILL: "provo a imparare?" -> codice
+            # scritto -> "lo attivo?"): stessa gestione del percorso normale.
+            if result is not None and result.error == "CONFIRMATION_REQUIRED":
+                self.conversation_state.set_pending_action({
+                    "intent": action["intent"],
+                    "parameters": result.data.get("confirm_parameters", action["parameters"]),
+                    "reason": "confirmation_required",
+                    "text": action.get("text", ""),
+                })
+                return result.data.get("message", "Confermi questa azione?")
+            response = format_skill_result(action["intent"], result, self.skill_registry)
+            command = Command(action["intent"], action["parameters"])
+            if action.get("reason") == "confirmation_required" and action.get("text"):
+                self.learning.observe(action["text"], command, result, route="llm" if self.last_route == "llm" else "confirmed")
+            self._remember_exchange(action.get("text", text), command, response)
+            return response
+        if text in self.NEGATIVE_ANSWERS:
             self.conversation_state.clear_pending_action()
             return "Va bene, annullato."
-        return "Puoi rispondere sì per confermare oppure no per annullare."
+        # Ne' si' ne' no: l'utente e' passato ad altro. Annulla l'azione in sospeso e vai avanti.
+        self.conversation_state.clear_pending_action()
+        return self._process(text)
 
-    def _format_skill_result(self, intent: str, result: SkillResult) -> str:
-        if not result.success:
-            if result.error == "UNSUPPORTED_APP":
-                app = result.data.get("app", "")
-                return f"Non posso ancora aprire {app}" if app else "Applicazione non specificata"
-            if result.error == "LAUNCH_FAILED":
-                return f"Errore nell'apertura di {result.data.get('app', '')}"
-            if result.error == "CONFIRMATION_REQUIRED":
-                return result.data.get("message", "Confermi questa azione?")
-            if result.error == "MISSING_PARAMETERS":
-                if intent == "REMEMBER":
-                    return "Dimmi cosa devo ricordare: mi servono sia il nome che il contenuto."
-                if intent == "FORGET":
-                    return "Dimmi cosa devo dimenticare."
-                return "Mancano delle informazioni per eseguire questa azione."
-            if result.error == "NOT_FOUND":
-                if intent == "RECALL":
-                    return "Non ho trovato nulla su questo argomento."
-                if intent == "FORGET":
-                    return "Non trovo nulla da dimenticare con quel nome."
-                if intent in ("FIND_FILE", "SEARCH_FILES", "SEMANTIC_SEARCH_FILES"):
-                    return "Non ho trovato nessun file corrispondente."
-                if intent == "WEB_SEARCH":
-                    return "Non ho trovato una risposta rapida per questa ricerca."
-                if intent == "GET_NEWS":
-                    return "Non ho trovato notizie su questo argomento."
-                if intent in ("LIST_PROCESSES", "CLOSE_APP"):
-                    return f"Non trovo nessun processo con '{result.data.get('name', '')}' nel nome."
-                if intent == "RUN_WORKFLOW":
-                    return f"Non ho un'automazione salvata chiamata '{result.data.get('name', '')}'."
-                if intent == "SET_TRIGGER":
-                    return f"Non ho un'automazione salvata chiamata '{result.data.get('name', '')}': creala prima con SAVE_WORKFLOW."
-                if intent == "DELETE_TRIGGER":
-                    return f"Non ho nessun trigger chiamato '{result.data.get('name', '')}'."
-                if intent == "LIST_TRIGGERS":
-                    return "Non hai trigger impostati."
-                if intent == "LIST_REMINDERS":
-                    return "Non hai promemoria in programma."
-                if intent == "LIST_NOTES":
-                    return "Non hai ancora nessun appunto."
-                if intent == "GET_BROWSER_HISTORY":
-                    return "Non ho trovato cronologia recente nel browser."
-                if intent == "READ_SCREEN":
-                    return "Non ho trovato testo leggibile sullo schermo."
-                if intent == "GET_ACTIVE_WINDOW":
-                    return "Non riesco a determinare la finestra attiva."
-                if intent == "RESEARCH":
-                    return "Non ho trovato nulla, ne' sul web ne' nei file locali, su questo argomento."
-                return "Non ho trovato nulla."
-            if result.error == "INVALID_TIME":
-                return f"'{result.data.get('at_time', '')}' non è un orario valido (usa HH:MM)."
-            if result.error == "OCR_UNAVAILABLE":
-                return "Non ho un motore OCR disponibile per la lingua di questo PC."
-            if result.error == "VISION_UNAVAILABLE":
-                return "Non riesco a vedere lo schermo in questo momento (verifica che il modello di visione sia installato: 'ollama pull qwen2.5vl:7b')."
-            if result.error == "BROWSER_HISTORY_UNAVAILABLE":
-                return "Non trovo la cronologia di Chrome o Edge su questo PC."
-            if result.error == "VERIFICATION_FAILED":
-                return f"L'azione sembrava riuscita ma la verifica successiva non conferma l'effetto su {result.data.get('path', '')}."
-            if result.error == "PATH_NOT_FOUND":
-                return f"Non trovo il percorso {result.data.get('path', '')}"
-            if result.error == "PROTECTED_PATH":
-                return f"Non posso modificare {result.data.get('path', '')}: è una cartella protetta."
-            if result.error == "ALREADY_EXISTS":
-                return f"Esiste già qualcosa in {result.data.get('path', '')}"
-            if result.error == "OPERATION_FAILED":
-                return f"Non sono riuscito a completare l'operazione su {result.data.get('path', '')}"
-            if result.error == "RESULT_NOT_FOUND":
-                return "Non so quale risultato aprire: prova prima a fare una ricerca."
-            if result.error == "NEST_UNAVAILABLE":
-                return "NEST non è disponibile su questo computer."
-            if result.error == "NEST_ERROR":
-                return f"NEST ha restituito un errore: {result.data.get('message', '')}"
-            if result.error == "NETWORK_UNAVAILABLE":
-                return "Non ho accesso a internet in questo momento."
-            if result.error == "OLLAMA_UNAVAILABLE":
-                return "Non riesco a contattare Ollama in questo momento."
-            if result.error == "MISSING_API_KEY":
-                setting = result.data.get("setting", "")
-                return f"Per usarlo devi configurare '{setting}' in config/settings.json (vedi config/settings.example.json)."
-            if result.error == "CITY_NOT_FOUND":
-                return f"Non trovo la città {result.data.get('city', '')}"
-            if result.error == "INVALID_URL":
-                return f"'{result.data.get('url', '')}' non è un indirizzo web valido."
-            if result.error == "CLIPBOARD_EMPTY":
-                return "Gli appunti sono vuoti o non contengono testo."
-            if result.error == "WINDOW_NOT_FOUND":
-                return f"Non trovo nessuna finestra con '{result.data.get('title', '')}' nel titolo."
-            if result.error == "PLAN_FAILED":
-                return "Non sono riuscito a scomporre questa richiesta in passi."
-            if result.error == "POLICY_BLOCKED":
-                return "Un passo di questa automazione è disabilitato dalla configurazione."
-            return "Si è verificato un errore durante l'esecuzione"
+    def _remember_exchange(self, text: str, command: Command, response: str) -> None:
+        self.last_exchange = {"text": text, "command": command, "response": response}
 
-        if intent == "REMEMBER":
-            return f"Ok, ricorderò che {result.data['key']} è {result.data['value']}."
-        if intent == "RECALL":
-            entries = result.data["results"]
-            formatted = "; ".join(f"{entry['key']}: {entry['value']}" for entry in entries)
-            return f"Ecco cosa ricordo: {formatted}"
-        if intent == "FORGET":
-            return f"Ho dimenticato {result.data['key']}."
-        if intent == "OPEN_PATH" or intent == "OPEN_SEARCH_RESULT":
-            return f"Ho aperto {result.data['path']}"
-        if intent == "CREATE_PATH":
-            kind = "la cartella" if result.data.get("type") == "folder" else "il file"
-            return f"Ho creato {kind} {result.data['path']}"
-        if intent == "RENAME_PATH":
-            return f"Ho rinominato {result.data['path']} in {result.data['new_path']}"
-        if intent == "MOVE_PATH":
-            return f"Ho spostato {result.data['path']} in {result.data['new_path']}"
-        if intent == "DELETE_PATH":
-            return f"Ho eliminato {result.data['path']}"
-        if intent == "FIND_FILE":
-            files = result.data["results"]
-            return f"Ho trovato {len(files)} file: " + "; ".join(files)
-        if intent == "SEARCH_FILES":
-            results = result.data["results"]
-            formatted = "; ".join(f"{i}. {r['path']}" for i, r in enumerate(results, start=1))
-            return f"Ecco cosa ho trovato: {formatted}"
-        if intent == "WEB_SEARCH":
-            source = f" (fonte: {result.data['url']})" if result.data.get("url") else ""
-            return f"{result.data['summary']}{source}"
-        if intent == "GET_WEATHER":
-            temperature = result.data.get("temperature")
-            feels_like = result.data.get("feels_like")
-            return (
-                f"A {result.data['city']}: {result.data['description']}, {temperature}°C "
-                f"(percepiti {feels_like}°C)"
-            )
-        if intent == "GET_NEWS":
-            headlines = result.data["headlines"]
-            formatted = "; ".join(f"{h['title']} ({h['source']})" for h in headlines)
-            return f"Ultime notizie: {formatted}"
-        if intent == "OPEN_URL":
-            return f"Ho aperto {result.data['url']}"
-        if intent == "CLIPBOARD_READ":
-            return f"Negli appunti c'è: {result.data['text']}"
-        if intent == "CLIPBOARD_WRITE":
-            return "Ho copiato il testo negli appunti."
-        if intent == "FOCUS_WINDOW":
-            return f"Ho attivato la finestra {result.data['title']}"
-        if intent == "MINIMIZE_WINDOW":
-            return f"Ho minimizzato la finestra {result.data['title']}"
-        if intent == "SET_VOLUME":
-            labels = {"up": "alzato", "down": "abbassato", "mute": "silenziato"}
-            return f"Volume {labels.get(result.data['action'], 'modificato')}."
-        if intent == "LIST_PROCESSES":
-            processes = result.data["processes"]
-            formatted = ", ".join(f"{p['name']} (PID {p['pid']})" for p in processes)
-            return f"Processi trovati: {formatted}"
-        if intent == "CLOSE_APP":
-            return "Ho chiuso: " + ", ".join(result.data["closed"])
-        if intent == "SAVE_WORKFLOW":
-            return f"Ho salvato l'automazione '{result.data['name']}' con {result.data['step_count']} passi."
-        if intent == "RUN_WORKFLOW":
-            return self._format_plan_outcome(result.data["outcome"], result.data["total_steps"])
-        if intent == "SET_TRIGGER":
-            return f"Ok, '{result.data['workflow_name']}' partira' da sola in base al trigger '{result.data['name']}'."
-        if intent == "LIST_TRIGGERS":
-            triggers = result.data["triggers"]
-            formatted = "; ".join(
-                f"{t['name']} -> {t['workflow_name']} ({t['type']})" for t in triggers
-            )
-            return f"Trigger impostati: {formatted}"
-        if intent == "DELETE_TRIGGER":
-            return f"Ho rimosso il trigger '{result.data['name']}'."
-        if intent == "SET_REMINDER":
-            return f"Ok, alle {result.data['due_at_local']} ti ricorderò: {result.data['text']}."
-        if intent == "LIST_REMINDERS":
-            formatted = "; ".join(f"{r['due_at_local']}: {r['text']}" for r in result.data["reminders"])
-            return f"Promemoria in programma: {formatted}"
-        if intent == "TAKE_SCREENSHOT":
-            return f"Screenshot salvato in {result.data['path']}"
-        if intent == "READ_SCREEN":
-            suffix = " (troncato)" if result.data.get("truncated") else ""
-            return f"Sullo schermo leggo{suffix}: {result.data['text']}"
-        if intent == "DESCRIBE_SCREEN":
-            return result.data["description"]
-        if intent == "ADD_NOTE":
-            return f"Appuntato: {result.data['text']}"
-        if intent == "LIST_NOTES":
-            return "Ultimi appunti:\n" + "\n".join(result.data["notes"])
-        if intent == "GET_BROWSER_HISTORY":
-            entries = result.data["entries"]
-            formatted = "; ".join(f"{e['title']} ({e['url']})" for e in entries)
-            return f"Cronologia recente: {formatted}"
-        if intent == "GET_ACTIVE_WINDOW":
-            return f"Stai usando: {result.data['title']}"
-        if intent == "CLICK_MOUSE":
-            return f"Cliccato in ({result.data['x']}, {result.data['y']})"
-        if intent == "MOVE_MOUSE":
-            return f"Mouse spostato in ({result.data['x']}, {result.data['y']})"
-        if intent == "TYPE_TEXT":
-            return "Testo digitato."
-        if intent == "PRESS_KEY":
-            return f"Premuto: {result.data['keys']}"
-        if intent == "RESEARCH":
-            return result.data["synthesis"]
-        if intent == "SEMANTIC_SEARCH_FILES":
-            results = result.data["results"]
-            formatted = "; ".join(f"{i}. {r['path']}" for i, r in enumerate(results, start=1))
-            return f"Ecco cosa ho trovato per significato: {formatted}"
-        if intent == "BUILD_SEMANTIC_INDEX":
-            return result.data["summary"]
-        if intent == "LIST_MODELS":
-            return "Modelli installati: " + ", ".join(result.data["models"])
-        if intent == "SET_MODEL":
-            return f"Ok, ora uso il modello {result.data['model']}."
+    # ---- chiusura ------------------------------------------------------------------------
 
-        if "time" in result.data:
-            return f"Attualmente sono le {result.data['time']}"
-        if "date" in result.data:
-            return f"La data di oggi è {result.data['date']}"
-        if "app" in result.data:
-            return f"Ho aperto {result.data['app']}"
-
-        # Punto di estensione per plugin (v2.0): una skill di terze parti puo' fornire un
-        # format_result(result) proprio, senza dover modificare questo file.
-        skill = self.skill_registry.get_skill(intent)
-        format_result = getattr(skill, "format_result", None)
-        if callable(format_result):
-            return format_result(result)
-
-        return str(result.data)
+    def shutdown(self) -> None:
+        for component in (self.scheduler, self.trigger_scheduler, self.desktop_context):
+            try:
+                component.stop()
+            except Exception:
+                pass
+        try:
+            self.retriever.example_index.save_cache()
+            self.retriever.capability_index.save_cache()
+        except Exception:
+            pass

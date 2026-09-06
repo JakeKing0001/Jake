@@ -1,13 +1,14 @@
 import json
 from urllib import error, request
+from core.ollama_client import DEFAULT_BASE_URL
 
 
 class ContextSummarizer:
     """Riassume conversazioni lunghe in un breve paragrafo, usando Ollama (nessuno schema strutturato)."""
 
-    def __init__(self, model: str = None, base_url: str = "http://localhost:11434", timeout: float = 30):
+    def __init__(self, model: str = None, base_url: str = None, timeout: float = 30):
         self.model = model or "qwen2.5:7b"
-        self.base_url = base_url.rstrip("/")
+        self.base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
         self.timeout = timeout
 
     def summarize(self, turns: list[dict]) -> str | None:
@@ -18,7 +19,8 @@ class ContextSummarizer:
         payload = {
             "model": self.model,
             "stream": False,
-            "options": {"temperature": 0.2},
+            "keep_alive": "30m",
+            "options": {"num_ctx": 8192, "temperature": 0.2},
             "messages": [
                 {
                     "role": "system",

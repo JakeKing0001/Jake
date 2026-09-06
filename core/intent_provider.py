@@ -1,19 +1,10 @@
-from abc import ABC, abstractmethod
-from copy import deepcopy
-import json
 import re
-from urllib import error, request
 
 from core.command import Command
-
-
-class IntentProvider(ABC):
-	"""Interfaccia per i componenti che trasformano testo in Command."""
-
-	@abstractmethod
-	def detect_intent(self, text: str) -> Command:
-		"""Riconosce l'intent e restituisce il comando corrispondente."""
-		raise NotImplementedError
+from core.intent_provider_base import IntentProvider
+# Il classificatore Ollama vive in core/nlu/llm_classifier.py dalla v3.0 (recupero semantico):
+# riesportato qui per compatibilita' con chi importa OllamaProvider da questo modulo.
+from core.nlu.llm_classifier import OllamaProvider  # noqa: E402,F401
 
 
 class RuleBasedProvider(IntentProvider):
@@ -51,6 +42,31 @@ class RuleBasedProvider(IntentProvider):
 		self.semantic_search_triggers = ["cerca per significato", "trova per significato", "cerca concettualmente"]
 		self.build_semantic_index_triggers = ["prepara l'indice semantico", "aggiorna l'indice semantico"]
 		self.research_triggers = ["fai una ricerca approfondita su", "ricerca approfondita su", "informati su"]
+		self.add_todo_triggers = ["aggiungi alla lista delle cose da fare", "metti in lista", "aggiungi un task"]
+		self.list_todos_triggers = ["cosa devo fare", "mostrami la lista delle cose da fare", "elenca i task", "che task ho"]
+		self.complete_todo_triggers = ["segna come fatto", "segna come completato", "ho completato il task", "completa il task"]
+		self.shutdown_triggers = ["spegni il computer", "spegni il pc"]
+		self.restart_triggers = ["riavvia il computer", "riavvia il pc"]
+		self.sleep_triggers = ["metti in sospensione", "metti in standby", "sospendi il computer"]
+		self.lock_triggers = ["blocca il computer", "blocca lo schermo"]
+		self.brightness_triggers = ["luminosità al", "imposta la luminosità"]
+		self.empty_recycle_bin_triggers = ["svuota il cestino"]
+		self.list_wifi_triggers = ["reti wifi disponibili", "mostra le reti wifi", "cerca reti wifi"]
+		self.git_status_triggers = ["stato git", "git status"]
+		self.git_pull_triggers = ["git pull", "aggiorna il repository", "fai un pull"]
+		self.open_in_editor_triggers = ["apri in vscode", "apri in visual studio code"]
+		self.run_command_triggers = ["esegui il comando", "esegui questo comando", "lancia da terminale"]
+		self.media_play_pause_triggers = ["metti in pausa la musica", "riprendi la musica", "play e pausa"]
+		self.media_next_triggers = ["traccia successiva", "prossima canzone", "canzone successiva"]
+		self.media_previous_triggers = ["traccia precedente", "canzone precedente"]
+		self.tell_joke_triggers = ["raccontami una barzelletta", "dimmi una barzelletta", "fammi ridere"]
+		self.roll_dice_triggers = ["tira un dado", "lancia un dado", "tira i dadi"]
+		self.flip_coin_triggers = ["lancia una moneta", "testa o croce"]
+		self.calculate_triggers = ["quanto fa", "quanto vale", "calcola"]
+		self.convert_units_triggers = ["converti"]
+		self.summarize_clipboard_triggers = [
+			"riassumi gli appunti", "riassumi quello che ho copiato", "riassumi il contenuto degli appunti",
+		]
 
 	def extract_parameter_after_trigger(self, text: str, triggers: list) -> str:
 		"""Estrae il parametro dopo un trigger, ripulendo gli spazi."""
@@ -100,6 +116,14 @@ class RuleBasedProvider(IntentProvider):
 
 		return None
 
+	_MATH_WORDS_PATTERN = re.compile(r"\bpiu'?\b|\bmeno\b|\bper\b|\bdiviso\b|\bfratto\b")
+	_MATH_WORDS = {"piu": "+", "piu'": "+", "meno": "-", "per": "*", "diviso": "/", "fratto": "/"}
+	_CONVERT_PATTERN = re.compile(r"([\d.,]+)\s*([a-zàèéìòù]+)\s+in\s+([a-zàèéìòù]+)")
+
+	@classmethod
+	def _normalize_math_expression(cls, text: str) -> str:
+		return cls._MATH_WORDS_PATTERN.sub(lambda m: cls._MATH_WORDS[m.group().rstrip("'")], text)
+
 	def detect_intent(self, text: str) -> Command:
 		if "apri" in text and "risultato" in text:
 			index = self._extract_result_index(text)
@@ -109,6 +133,12 @@ class RuleBasedProvider(IntentProvider):
 		if any(trigger in text for trigger in self.open_url_triggers):
 			url = self.extract_parameter_after_trigger(text, self.open_url_triggers)
 			return Command("OPEN_URL", {"url": url})
+
+		# Controllato prima di open_triggers: "apri in vscode" contiene anche "apri" e finirebbe
+		# per essere interpretato come OPEN_APP se controllato dopo.
+		if any(trigger in text for trigger in self.open_in_editor_triggers):
+			path = self.extract_parameter_after_trigger(text, self.open_in_editor_triggers)
+			return Command("OPEN_IN_EDITOR", {"path": path})
 
 		if any(trigger in text for trigger in self.open_triggers):
 			app_name = self.extract_parameter_after_trigger(text, self.open_triggers)
@@ -157,6 +187,80 @@ class RuleBasedProvider(IntentProvider):
 		if any(trigger in text for trigger in self.research_triggers):
 			topic = self.extract_parameter_after_trigger(text, self.research_triggers)
 			return Command("RESEARCH", {"topic": topic})
+
+		if any(trigger in text for trigger in self.list_todos_triggers):
+			return Command("LIST_TODOS", {})
+
+		if any(trigger in text for trigger in self.complete_todo_triggers):
+			content = self.extract_parameter_after_trigger(text, self.complete_todo_triggers)
+			return Command("COMPLETE_TODO", {"text": content})
+
+		if any(trigger in text for trigger in self.add_todo_triggers):
+			content = self.extract_parameter_after_trigger(text, self.add_todo_triggers)
+			return Command("ADD_TODO", {"text": content})
+
+		if any(trigger in text for trigger in self.shutdown_triggers):
+			return Command("SYSTEM_POWER", {"action": "shutdown"})
+		if any(trigger in text for trigger in self.restart_triggers):
+			return Command("SYSTEM_POWER", {"action": "restart"})
+		if any(trigger in text for trigger in self.sleep_triggers):
+			return Command("SYSTEM_POWER", {"action": "sleep"})
+		if any(trigger in text for trigger in self.lock_triggers):
+			return Command("SYSTEM_POWER", {"action": "lock"})
+
+		if any(trigger in text for trigger in self.brightness_triggers):
+			match = re.search(r"\d+", text)
+			if match:
+				return Command("SET_BRIGHTNESS", {"level": int(match.group())})
+
+		if any(trigger in text for trigger in self.empty_recycle_bin_triggers):
+			return Command("EMPTY_RECYCLE_BIN", {})
+
+		if any(trigger in text for trigger in self.list_wifi_triggers):
+			return Command("LIST_WIFI_NETWORKS", {})
+
+		if any(trigger in text for trigger in self.git_status_triggers):
+			path = self.extract_parameter_after_trigger(text, self.git_status_triggers)
+			return Command("GIT_STATUS", {"path": path} if path else {})
+
+		if any(trigger in text for trigger in self.git_pull_triggers):
+			path = self.extract_parameter_after_trigger(text, self.git_pull_triggers)
+			return Command("GIT_PULL", {"path": path} if path else {})
+
+		if any(trigger in text for trigger in self.run_command_triggers):
+			command = self.extract_parameter_after_trigger(text, self.run_command_triggers)
+			return Command("RUN_COMMAND", {"command": command})
+
+		if any(trigger in text for trigger in self.media_next_triggers):
+			return Command("MEDIA_CONTROL", {"action": "next"})
+		if any(trigger in text for trigger in self.media_previous_triggers):
+			return Command("MEDIA_CONTROL", {"action": "previous"})
+		if any(trigger in text for trigger in self.media_play_pause_triggers):
+			return Command("MEDIA_CONTROL", {"action": "play_pause"})
+
+		if any(trigger in text for trigger in self.tell_joke_triggers):
+			return Command("TELL_JOKE", {})
+
+		if any(trigger in text for trigger in self.flip_coin_triggers):
+			return Command("FLIP_COIN", {})
+
+		if any(trigger in text for trigger in self.roll_dice_triggers):
+			return Command("ROLL_DICE", {})
+
+		if any(trigger in text for trigger in self.summarize_clipboard_triggers):
+			return Command("SUMMARIZE_CLIPBOARD", {})
+
+		convert_match = self._CONVERT_PATTERN.search(text) if any(t in text for t in self.convert_units_triggers) else None
+		if convert_match:
+			return Command("CONVERT_UNITS", {
+				"value": float(convert_match.group(1).replace(",", ".")),
+				"from_unit": convert_match.group(2),
+				"to_unit": convert_match.group(3),
+			})
+
+		if any(trigger in text for trigger in self.calculate_triggers):
+			content = self.extract_parameter_after_trigger(text, self.calculate_triggers)
+			return Command("CALCULATE", {"expression": self._normalize_math_expression(content)})
 
 		if any(trigger in text for trigger in self.weather_triggers):
 			city = self.extract_parameter_after_trigger(text, self.weather_triggers)
@@ -210,190 +314,3 @@ class RuleBasedProvider(IntentProvider):
 		if re.search(r"\b(data|giorno|oggi)\b", text):
 			return Command("GET_DATE")
 		return Command("UNKNOWN")
-
-
-class OllamaProvider(IntentProvider):
-	# Nessun modello e' bundlato con Ollama: quello configurato deve esistere già scaricato
-	# (`ollama pull <modello>`), altrimenti ogni richiesta fallisce con 404 e si passa al
-	# fallback rule-based senza errori visibili. Configurabile via "ollama_model" in config.
-	DEFAULT_MODEL = "qwen2.5:7b"
-	UNKNOWN_INTENT = "UNKNOWN"
-
-	def __init__(
-		self,
-		registry,
-		base_url: str = "http://localhost:11434",
-		timeout: float = 25,
-		model: str = None,
-		context_provider=None,
-	):
-		self.registry = registry
-		self.base_url = base_url.rstrip("/")
-		self.timeout = timeout
-		self.model = model or self.DEFAULT_MODEL
-		self.last_error = None
-		# Contestualizzazione desktop (v2.0): callable opzionale che restituisce una riga di
-		# contesto (es. finestre usate di recente), per risolvere richieste ambigue.
-		self.context_provider = context_provider
-
-	def detect_intent(self, text: str) -> Command:
-		self.last_error = None
-		try:
-			response = self._request_ollama(text)
-			payload = self._parse_response(response)
-			return self._command_from_payload(payload)
-		except error.URLError:
-			self.last_error = "OLLAMA_UNAVAILABLE"
-		except (TimeoutError, ValueError, TypeError, KeyError, json.JSONDecodeError):
-			self.last_error = "INVALID_OLLAMA_RESPONSE"
-		except Exception:
-			self.last_error = "OLLAMA_ERROR"
-		return Command("UNKNOWN", {})
-
-	def get_valid_intents(self) -> list[str]:
-		intents = [capability["intent"] for capability in self.registry.list_capabilities()]
-		if self.UNKNOWN_INTENT not in intents:
-			intents.append(self.UNKNOWN_INTENT)
-		return intents
-
-	def build_output_schema(self) -> dict:
-		parameter_properties = {}
-		for capability in self.registry.list_capabilities():
-			for name, metadata in capability.get("parameters", {}).items():
-				parameter_schema = deepcopy(metadata)
-				parameter_schema.pop("required", None)
-				parameter_properties.setdefault(name, parameter_schema)
-
-		return {
-			"type": "object",
-			"additionalProperties": False,
-			"required": ["intent", "parameters"],
-			"properties": {
-				"intent": {
-					"type": "string",
-					"enum": self.get_valid_intents(),
-				},
-				"parameters": {
-					"type": "object",
-					"additionalProperties": False,
-					"properties": parameter_properties,
-				},
-			},
-		}
-
-	def build_system_prompt(self) -> str:
-		lines = [
-			"Sei il parser degli intent di Jake.",
-			"Rispondi esclusivamente con JSON valido secondo lo schema fornito.",
-		]
-		context = self.context_provider() if self.context_provider else None
-		if context:
-			lines.append(
-				f"Contesto (solo per capire a cosa si riferisce l'utente in richieste ambigue, "
-				f"es. pronomi o 'quel file': non copiarlo mai nei parametri se l'utente non lo "
-				f"dice esplicitamente): {context}"
-			)
-		lines.append("Capacita disponibili:")
-		for capability in self.registry.list_capabilities():
-			lines.append(f"- {capability['intent']}: {capability['description']}")
-			parameters = capability.get("parameters", {})
-			if not parameters:
-				lines.append("  Parametri: nessuno.")
-				continue
-			for name, metadata in parameters.items():
-				required = "obbligatorio" if metadata.get("required") else "facoltativo"
-				lines.append(
-					f"  Parametro {name}: {metadata.get('type', 'string')}, "
-					f"{required}. {metadata.get('description', '')}"
-				)
-		lines.extend([
-				"Usa UNKNOWN se nessuna capacita e appropriata.",
-				"Usa UNKNOWN anche se la richiesta e' generica o di alto livello (es. 'prepara l'ambiente "
-				"di lavoro') e non specifica esplicitamente i valori letterali richiesti (percorsi, nomi, "
-				"citta', testo). Non inventare MAI un valore per un parametro obbligatorio: se il valore "
-				"non compare nel messaggio dell'utente, usa UNKNOWN invece di indovinarlo.",
-				"Se la richiesta descrive piu' azioni distinte da eseguire in sequenza (es. contiene "
-				"'e poi', 'quindi') e nessuna singola capacita' tra quelle elencate puo' rappresentare "
-				"l'intera richiesta in una sola volta, usa UNKNOWN: non eseguire solo una parte della "
-				"richiesta scartando il resto in silenzio. Fanno eccezione le capacita' che hanno "
-				"esplicitamente un parametro pensato per contenere una descrizione libera e articolata "
-				"(es. SAVE_WORKFLOW): in quel caso l'intera richiesta va dentro quel parametro.",
-				"Non inventare intent o parametri e non aggiungere spiegazioni o Markdown.",
-		])
-		return "\n".join(lines)
-
-	def _request_ollama(self, text: str) -> dict:
-		payload = {
-			"model": self.model,
-			"stream": False,
-			"format": self.build_output_schema(),
-			# Temperatura 0: qui serve riprodurre esattamente percorsi e testo letterale
-			# dell'utente, non generare variazioni creative (che corrompono i backslash
-			# nei percorsi Windows o "correggono" maiuscole/minuscole nei nomi).
-			"options": {"temperature": 0},
-			"messages": [
-				{"role": "system", "content": self.build_system_prompt()},
-				{"role": "user", "content": text},
-			],
-		}
-		body = json.dumps(payload).encode("utf-8")
-		http_request = request.Request(
-			f"{self.base_url}/api/chat",
-			data=body,
-			headers={"Content-Type": "application/json"},
-			method="POST",
-		)
-		with request.urlopen(http_request, timeout=self.timeout) as response:
-			return json.loads(response.read().decode("utf-8"))
-
-	def _parse_response(self, response: dict) -> dict:
-		content = response["message"]["content"]
-		payload = json.loads(content) if isinstance(content, str) else content
-		if not isinstance(payload, dict):
-			raise ValueError("Ollama output is not an object")
-		return payload
-
-	def _command_from_payload(self, payload: dict) -> Command:
-		intent = payload.get("intent")
-		parameters = payload.get("parameters")
-		if not isinstance(parameters, dict) or intent not in self.get_valid_intents():
-			raise ValueError("Invalid intent contract")
-
-		if intent == self.UNKNOWN_INTENT:
-			if parameters:
-				raise ValueError("UNKNOWN cannot have parameters")
-			return Command(intent, {})
-
-		capability = next(
-			capability for capability in self.registry.list_capabilities()
-			if capability["intent"] == intent
-		)
-		metadata = capability.get("parameters", {})
-		if any(name not in metadata for name in parameters):
-			raise ValueError("Unexpected parameters")
-		for name, parameter in metadata.items():
-			if parameter.get("required") and name not in parameters:
-				raise ValueError("Missing required parameter")
-			if name in parameters and not self._matches_type(parameters[name], parameter.get("type")):
-				raise ValueError("Invalid parameter type")
-
-		validated_parameters = deepcopy(parameters)
-		if "app" in validated_parameters:
-			validated_parameters["app"] = validated_parameters["app"].strip()
-		return Command(intent, validated_parameters)
-
-	@staticmethod
-	def _matches_type(value, type_name: str) -> bool:
-		if type_name == "string":
-			return isinstance(value, str)
-		if type_name == "integer":
-			return isinstance(value, int) and not isinstance(value, bool)
-		if type_name == "number":
-			return isinstance(value, (int, float)) and not isinstance(value, bool)
-		if type_name == "boolean":
-			return isinstance(value, bool)
-		if type_name == "array":
-			return isinstance(value, list)
-		if type_name == "object":
-			return isinstance(value, dict)
-		return False

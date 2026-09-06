@@ -66,3 +66,95 @@ class ListNotesSkill:
             return SkillResult(success=False, data={}, error="NOT_FOUND")
 
         return SkillResult(success=True, data={"notes": lines[-int(limit):]})
+
+
+class SearchNotesSkill:
+    metadata = {
+        "intent": "SEARCH_NOTES",
+        "description": "Cerca un appunto specifico per parola chiave, anche tra quelli piu' vecchi. "
+        "Diverso da LIST_NOTES, che mostra solo gli ultimi in ordine cronologico.",
+        "parameters": {
+            "query": {
+                "type": "string",
+                "required": True,
+                "description": "Parola o frase da cercare tra gli appunti.",
+            },
+        },
+    }
+
+    MAX_RESULTS = 10
+
+    def execute(self, parameters: dict = None):
+        parameters = parameters or {}
+        query = (parameters.get("query") or "").strip().lower()
+        if not query:
+            return SkillResult(success=False, data={}, error="MISSING_PARAMETERS")
+
+        if not NOTES_PATH.is_file():
+            return SkillResult(success=False, data={}, error="NOT_FOUND")
+
+        lines = [line.strip() for line in NOTES_PATH.read_text(encoding="utf-8").splitlines() if line.strip()]
+        matches = [line for line in lines if query in line.lower()]
+        if not matches:
+            return SkillResult(success=False, data={"query": query}, error="NOT_FOUND")
+
+        return SkillResult(success=True, data={"notes": matches[-self.MAX_RESULTS:]})
+
+
+class ExportNotesSkill:
+    metadata = {
+        "intent": "EXPORT_NOTES",
+        "description": "Esporta una copia di tutti gli appunti in un file a scelta.",
+        "parameters": {
+            "path": {
+                "type": "string",
+                "required": True,
+                "description": "Percorso del file di destinazione in cui salvare la copia.",
+            },
+        },
+    }
+
+    def execute(self, parameters: dict = None):
+        parameters = parameters or {}
+        raw_path = (parameters.get("path") or "").strip()
+        if not raw_path:
+            return SkillResult(success=False, data={}, error="MISSING_PARAMETERS")
+
+        if not NOTES_PATH.is_file():
+            return SkillResult(success=False, data={}, error="NOT_FOUND")
+
+        destination = Path(raw_path).expanduser()
+        try:
+            destination.write_text(NOTES_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+        except OSError:
+            return SkillResult(success=False, data={"path": raw_path}, error="OPERATION_FAILED")
+
+        return SkillResult(success=True, data={"path": str(destination)})
+
+
+class ClearNotesSkill:
+    """Azione irreversibile (svuota il taccuino): richiede sempre conferma, come CLOSE_APP."""
+
+    metadata = {
+        "intent": "CLEAR_NOTES",
+        "description": "Cancella tutti gli appunti presi finora.",
+        "parameters": {},
+    }
+
+    def execute(self, parameters: dict = None):
+        parameters = parameters or {}
+        if not NOTES_PATH.is_file():
+            return SkillResult(success=False, data={}, error="NOT_FOUND")
+
+        if not parameters.get("confirmed"):
+            return SkillResult(
+                success=False,
+                data={
+                    "message": "Confermi di voler cancellare tutti gli appunti?",
+                    "confirm_parameters": {"confirmed": True},
+                },
+                error="CONFIRMATION_REQUIRED",
+            )
+
+        NOTES_PATH.unlink()
+        return SkillResult(success=True, data={})
