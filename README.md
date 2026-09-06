@@ -1,6 +1,6 @@
-# Jake 3.0
+# Jake 3.1
 
-Assistente personale vocale, locale, per Windows. Ascolta, capisce l'italiano parlato, **fa le cose al posto tuo** (apre programmi e siti, cerca, scrive, clicca, gestisce file, finestre, timer, promemoria, musica...), risponde a domande, **impara comandi nuovi** e, quando non sa fare qualcosa, **si scrive da solo una nuova capacità**. Quando lo attivi compare un HUD in vetro semitrasparente blu, stile Jarvis, sopra qualunque finestra.
+Assistente personale vocale, locale, per Windows. Ascolta, capisce l'italiano parlato, **fa le cose al posto tuo** (apre programmi e siti, cerca, scrive, clicca, gestisce file, finestre, timer, promemoria, musica...), risponde a domande, **impara comandi nuovi** e, quando non sa fare qualcosa, **si scrive da solo una nuova capacità**. Per i compiti composti ("trova il file X e leggimelo") **ragiona a passi**: esegue un'azione, guarda il risultato vero, decide la successiva, e chiede a te solo se manca davvero un'informazione che solo tu conosci. Quando lo attivi compare un HUD a schermo intero in vetro liquido blu, stile Jarvis, sopra qualunque cosa: i suoi pannelli sono cliccabili, il resto dello schermo resta trasparente e utilizzabile.
 
 Tutto gira sul tuo PC: modelli Ollama per capire e ragionare, Whisper per la voce (su GPU se c'è), voce neurale Microsoft (online, con ripiego offline). Nessun dato lascia il computer, tranne la sintesi vocale se usi la voce online.
 
@@ -40,6 +40,12 @@ Requisiti: Windows 10/11, Python 3.11+, [Ollama](https://ollama.com) con `qwen2.
 
 Dopo una risposta puoi continuare a parlare per qualche secondo senza ripetere «Jake» (finestra di follow-up). Le domande di conferma («confermi?») accettano il sì/no direttamente.
 
+## Come ragiona sui compiti composti
+
+Una richiesta come «trova il file tesi.pdf e dimmi cosa contiene» non è una singola azione: Jake la affida a un agente che lavora a passi (`core/agent.py`), non a un piano scritto in anticipo. Cerca il file, guarda il risultato VERO (il percorso trovato), lo passa al passo successivo (leggerlo), e solo allora risponde. Se un passo manca di un dato che solo tu conosci (quale contatto, quale cartella), si ferma e te lo chiede invece di indovinare; se rispondi, riprende da dove si era fermato.
+
+Anche i comandi singoli hanno dei ripieghi (`core/fallbacks.py`): «apri instagram» detto come sito ma installato come app lo apre comunque; un'app non trovata ma che sembra un sito noto (YouTube, GitHub...) si apre lo stesso; un nome inventato che non corrisponde a nulla ti viene proposto di cercarlo nel browser. E dopo aver nominato qualcosa («trova il file X», «apri Spotify»), puoi riferirti con un pronome: «aprilo», «chiudilo», «leggilo», «cancellalo».
+
 ## Come impara
 
 1. **Comandi tuoi**: «quando dico modalità gaming apri steam e discord», «d'ora in poi quando dico buonanotte spegni il computer». Da quel momento la frase esegue il comando (anche composto: diventa un'automazione). «cosa hai imparato», «dimentica il comando modalità gaming».
@@ -54,31 +60,37 @@ Dati di apprendimento: `data/learned_examples.jsonl`, `data/learned_vocabulary.j
 ```
 voce ──VAD──▶ Whisper (GPU) ──▶ TranscriptNormalizer ──▶ Router ──▶ Skill ──▶ risposta ──▶ Edge TTS / OneCore
                                  numeri, orari, nomi app      │                                      │
-                                 errori noti di Whisper       ├─ corsia veloce: frase già nota          └─ HUD (Qt, acrilico, sempre sopra)
-                                                              ├─ classificatore Ollama con recupero semantico
+                                 errori noti di Whisper,      ├─ corsia veloce: frase già nota          └─ HUD (Qt, vetro, sempre sopra)
+                                 pronomi (aprilo, chiudilo)    ├─ classificatore Ollama con recupero semantico
                                                               │    (solo le ~18 capacità pertinenti + esempi few-shot)
                                                               ├─ regole locali (se Ollama non risponde)
-                                                              └─ planner multi-step / domanda libera / fucina
+                                                              └─ agente a passi (composti/UNKNOWN) ──ripieghi──▶ Skill
 ```
 
 - `core/nlu/` — normalizzazione, esempi, indice semantico (embedding con cache su disco, fallback lessicale), retriever, chitchat, classificatore LLM.
+- `core/agent.py` — agente a passi per i compiti composti: sceglie uno strumento alla volta, osserva il risultato reale, decide il successivo o chiede chiarimenti (mai un piano fisso scritto in anticipo).
+- `core/fallbacks.py` — ripieghi quando una skill fallisce in modo prevedibile (riscrittura prima dell'esecuzione, alternativa automatica, proposta da confermare).
+- `core/conversation_state.py` — oltre allo stato di conferma, ricorda le ultime entità nominate (file, app, finestra...) per risolvere i pronomi.
 - `core/learning_manager.py` — apprendimento continuo; `core/skill_forge.py` — generazione e validazione di nuove skill.
 - `core/voice/` — Whisper (`stt_provider.py`, CUDA automatico), Edge TTS (`edge_tts_provider.py`), sessione wake word con dettatura/pausa/follow-up.
-- `core/gui/hud/` — HUD (PySide6): finestra frameless traslucida, blur acrilico via `SetWindowCompositionAttribute`, click-through in modalità vocale, barra comandi con hotkey, tray.
+- `core/gui/hud/` — HUD a schermo intero (PySide6): `theme.py` (un solo gradiente condiviso), `glass.py` (pannelli di vetro: sfondo sfocato + gradiente + bordo), `widgets.py` (orb, forma d'onda, conversazione, contesto live, azioni rapide, barra comandi), `overlay.py` (finestra mascherata: vetro solo nei pannelli, resto trasparente e cliccabile), `win_effects.py` (acrilico Windows, click-through, no-activate).
 - `skills/` — una classe per capacità (`metadata` + `execute`), ~200 in totale; `plugins/` — skill esterne e auto-generate.
 
 ## Configurazione (`config/settings.json`)
 
 | Chiave | Default | Note |
 |---|---|---|
-| `ollama_model` | `qwen2.5:7b` | classificatore, planner, domande |
+| `ollama_model` | `qwen2.5:7b` | classificatore, agente, domande |
 | `coder_model` | `qwen2.5-coder:7b` | fucina (se assente usa `ollama_model`) |
 | `embedding_model` | `nomic-embed-text` | recupero semantico |
 | `vision_model` | `qwen2.5vl:7b` | descrivere/cliccare lo schermo |
 | `tts_engine` / `tts_voice` / `tts_rate` | `edge` / `it-IT-DiegoNeural` / `+8%` | `offline` per la voce di Windows; altre voci: Giuseppe, Elsa, Isabella |
 | `stt_model` / `stt_device` | auto | forzare es. `medium` / `cpu` |
 | `follow_up_seconds` | 6 | secondi in cui si può parlare senza wake word dopo una risposta (0 per disattivare) |
-| `hud_hotkey` / `hud_auto_hide_seconds` / `hud_acrylic` | `ctrl+shift+j` / 5 / true | |
+| `hud_mode` | `full` | `full` (tutti i pannelli) o `compact` (solo la pillola in basso) |
+| `hud_backdrop` | `clear` | `clear` (desktop visibile fuori dai pannelli) o `immersive` (tutto lo schermo scurito, click fuori = chiudi) |
+| `hud_hotkey` / `hud_auto_hide_seconds` | `ctrl+shift+j` / 6 | |
+| `hud_quick_actions` | `[]` | lista di `{"label": "...", "command": "..."}` per le chip in più oltre a quelle di default |
 | `blocked_intents` / `always_confirm_intents` | `[]` | policy di sicurezza |
 | `JAKE_OLLAMA_URL` (variabile d'ambiente) | `http://127.0.0.1:11434` | usare sempre 127.0.0.1: `localhost` costa ~2 s a chiamata su Windows |
 

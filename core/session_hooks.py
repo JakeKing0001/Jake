@@ -8,7 +8,7 @@ testo restano None e le skill rispondono che serve la voce."""
 
 class SessionHooks:
     NAMES = ("stop_speaking", "pause_listening", "resume_listening", "start_dictation",
-             "stop_dictation", "speak", "notify", "set_state")
+             "stop_dictation", "speak", "notify", "set_state", "show_hud", "hide_hud")
 
     def __init__(self):
         for name in self.NAMES:

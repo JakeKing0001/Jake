@@ -166,6 +166,12 @@ class WakeWordSession:
         self.paused_until = 0.0
         self._set_state("idle", "")
 
+    def arm_listening(self) -> None:
+        """Come aver detto 'Jake': la prossima frase e' un comando (click sull'orb dell'HUD)."""
+        self._interrupt_speech()
+        self._awaiting_command_until = time.time() + self.COMMAND_WAIT_SECONDS
+        self._set_state("listening", "")
+
     def start_dictation(self) -> None:
         self.dictation_active = True
         self._set_state("dictation", "")

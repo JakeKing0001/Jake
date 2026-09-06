@@ -1,5 +1,7 @@
 import re
 
+from core import fallbacks
+from core.agent import TaskAgent
 from core.command import Command
 from core.context_summarizer import ContextSummarizer
 from core.desktop_context import DesktopContextTracker
@@ -18,6 +20,7 @@ from core.scheduler import ReminderScheduler
 from core.session_hooks import SessionHooks
 from core.skill_forge import SkillForge
 from core.skill_registry import SkillRegistry
+from core.skill_result import SkillResult
 from core.trigger_scheduler import TriggerScheduler
 from skills.learn import CorrectLastSkill, ForgetLearnedSkill, LearnCommandSkill, ListLearnedSkill
 from skills.model_control import ListModelsSkill, SetModelSkill
@@ -92,6 +95,15 @@ class JakeCore:
     POSITIVE_ANSWERS = {"si", "sì", "yes", "y", "ok", "okay", "va bene", "certo", "confermo", "procedi", "vai", "esatto", "sisi", "si si", "sì sì", "conferma", "fallo", "assolutamente"}
     NEGATIVE_ANSWERS = {"no", "n", "annulla", "cancel", "lascia stare", "non farlo", "no grazie", "nope", "negativo", "ferma", "stop"}
 
+    # Riferimenti ("aprilo", "chiudilo"): risolti col riferimento piu' recente adatto (v3.1).
+    # Ancorati a tutta la frase (^...$) apposta: non devono scattare su un "quello" dentro una
+    # frase piu' lunga, solo su un comando pronominale secco.
+    _PRONOUN_OPTIONAL = r"\s*(?:lo|la|li|le|quello|quella|questo|questa)?$"
+    _PRONOUN_OPEN = re.compile(r"^(?:apri|aprilo|aprila|aprimelo|aprimela)" + _PRONOUN_OPTIONAL)
+    _PRONOUN_CLOSE = re.compile(r"^(?:chiudi|chiudilo|chiudila)" + _PRONOUN_OPTIONAL)
+    _PRONOUN_READ = re.compile(r"^(?:leggi|leggilo|leggila|leggimelo|leggimela)" + _PRONOUN_OPTIONAL)
+    _PRONOUN_DELETE = re.compile(r"^(?:elimina|eliminalo|eliminala|cancella|cancellalo|cancellala)" + _PRONOUN_OPTIONAL)
+
     def __init__(self):
         self.logger = get_logger()
         self.skill_registry = SkillRegistry()
@@ -115,6 +127,18 @@ class JakeCore:
         )
         self.learning = LearningManager(self.example_store, self.retriever, self.normalizer, logger=self.logger)
         self.session_hooks = SessionHooks()
+
+        # Agente a passi (v3.1): per le richieste composte o non capite dal classificatore,
+        # invece di eseguire un piano fisso scritto in anticipo, Jake pensa un passo alla
+        # volta e guarda il risultato vero prima di decidere il successivo (vedi core/agent.py).
+        self.agent = TaskAgent(
+            self.skill_registry, self.retriever, self.ollama, model_provider=lambda: self.model,
+            format_result=lambda intent, result: format_skill_result(intent, result, self.skill_registry),
+            logger=self.logger,
+            context_provider=lambda: self._agent_context(),
+            executor=lambda intent, parameters: self._resolve_and_execute(Command(intent, parameters))[1],
+        )
+        self.agent.on_step = self._on_agent_step
 
         self.router = Router(
             skill_registry=self.skill_registry, example_store=self.example_store,
@@ -215,6 +239,13 @@ class JakeCore:
         summary = format_plan_outcome(outcome, total_steps, self.skill_registry)
         print(f"\nJake > Ho eseguito automaticamente '{trigger.get('name')}':\n{summary}\nTu > ", end="", flush=True)
 
+    def _agent_context(self) -> str:
+        parts = [part for part in (self.desktop_context.context_summary(), self.conversation_state.entities_summary()) if part]
+        return " | ".join(parts)
+
+    def _on_agent_step(self, step_index: int, description: str) -> None:
+        self.session_hooks.call("set_state", "working", description)
+
     def _on_skill_installed(self, draft) -> None:
         self.retriever.refresh()
         for example in draft.examples:
@@ -230,6 +261,7 @@ class JakeCore:
         text = self.normalizer.normalize(raw_text)
         if not text:
             return "Non ho sentito nulla."
+        text = self._resolve_pronouns(text)
         try:
             response = self._process(text)
         except Exception:
@@ -276,11 +308,12 @@ class JakeCore:
         """'No, intendevo X': esegue X e impara ad associare la frase precedente a X."""
         previous = self.last_exchange
         text = self.normalizer.normalize(request)
+        text = self._resolve_pronouns(text)
         command = self.router.detect_intent(text)
         if command.intent == "UNKNOWN":
-            plan_response = self._try_plan(text)
-            if plan_response != self.NO_PLAN:
-                return plan_response
+            agent_response = self._run_agent(text)
+            if agent_response != self.NO_PLAN:
+                return agent_response
             return "Non ho capito nemmeno la correzione: prova a dirlo in un altro modo."
         response = self._execute_command(text, command, learn=False)
         if previous and previous.get("text") and previous["text"] != text:
@@ -330,10 +363,10 @@ class JakeCore:
             and not self.WORKFLOW_DEFINITION_PATTERN.search(text)
             and not self.BROWSER_COMBO_PATTERN.search(text)
         ):
-            plan_response = self._try_plan(text)
-            if plan_response != self.NO_PLAN:
-                return plan_response
-            # la pianificazione non ha prodotto nulla di utile: ripiega sul routing normale
+            agent_response = self._run_agent(text)
+            if agent_response != self.NO_PLAN:
+                return agent_response
+            # l'agente non e' riuscito a fare nulla di utile: ripiega sul routing normale
 
         command = self.router.detect_intent(text)
         self.last_route = self.router.last_route
@@ -342,6 +375,107 @@ class JakeCore:
         if command.intent == "UNKNOWN":
             return self._handle_unknown(text)
         return self._execute_command(text, command)
+
+    def _resolve_pronouns(self, text: str) -> str:
+        """'aprilo', 'chiudilo', 'leggilo', 'eliminalo': sostituisce il riferimento generico
+        con l'ultima entita' pertinente (file, app, finestra...) ricordata da conversation_state.
+        Se non c'e' nulla di adatto in memoria, lascia il testo com'era: meglio UNKNOWN (o una
+        domanda dell'agente) che un valore inventato."""
+        entities = self.conversation_state.get_entities()
+        if not entities:
+            return text
+        if self._PRONOUN_OPEN.match(text):
+            target = entities.get("path") or entities.get("app") or entities.get("url")
+            if target:
+                return f"apri {target}"
+        elif self._PRONOUN_CLOSE.match(text):
+            target = entities.get("app") or entities.get("title")
+            if target:
+                return f"chiudi {target}"
+        elif self._PRONOUN_READ.match(text):
+            target = entities.get("path")
+            if target:
+                return f"leggi il file {target}"
+        elif self._PRONOUN_DELETE.match(text):
+            target = entities.get("path")
+            if target:
+                return f"elimina {target}"
+        return text
+
+    def _resolve_and_execute(self, command: Command) -> tuple[Command, SkillResult | None, str | None]:
+        """Esegue un comando applicando i ripieghi (v3.1, vedi core/fallbacks.py): riscrittura
+        prima dell'esecuzione (es. OPEN_URL su un nome di app installata -> OPEN_APP), e se
+        fallisce prova un'alternativa sensata o propone un'azione da confermare, invece di
+        fermarsi al primo 'non trovato'. Restituisce (comando davvero eseguito, risultato, nota
+        da anteporre alla risposta o None)."""
+        resolved = fallbacks.pre_execution_rewrite(command, self.skill_registry)
+        result = self.skill_registry.execute(resolved.intent, resolved.parameters)
+        if result is not None and not result.success and result.error != "CONFIRMATION_REQUIRED":
+            alt_command, note = fallbacks.alternative_for(resolved, result, self.skill_registry)
+            if alt_command is not None:
+                alt_result = self.skill_registry.execute(alt_command.intent, alt_command.parameters)
+                if alt_result is not None and alt_result.success:
+                    return alt_command, alt_result, note
+            else:
+                offer = fallbacks.offer_after_failure(resolved, result)
+                if offer is not None:
+                    result = SkillResult(
+                        success=False,
+                        data={
+                            "message": offer["message"], "confirm_parameters": offer["parameters"],
+                            "confirm_intent": offer["intent"],
+                        },
+                        error="CONFIRMATION_REQUIRED",
+                    )
+        return resolved, result, None
+
+    def _run_agent(self, request: str, remember_text: str = None) -> str:
+        """Richiesta composta o non riconosciuta: l'agente pensa un passo alla volta e guarda
+        i risultati veri prima di decidere il successivo (core/agent.py), invece di eseguire un
+        piano fisso scritto in anticipo. Se il modello non e' raggiungibile o non conclude
+        nulla, ripiega sul vecchio planner a piano fisso; se fallisce anche quello, NO_PLAN."""
+        remember_text = remember_text if remember_text is not None else request
+        try:
+            outcome = self.agent.run(request, history=self.conversation_state.get_short_term_history())
+        except Exception:
+            self.logger.exception("Errore nell'agente per: %s", request)
+            outcome = None
+
+        if outcome is None or (outcome.error is not None and not outcome.did_something):
+            return self._try_plan(request)
+
+        if outcome.pending_confirmation is not None:
+            self.conversation_state.set_pending_action({
+                "intent": outcome.pending_confirmation["intent"],
+                "parameters": outcome.pending_confirmation["parameters"],
+                "reason": "confirmation_required",
+                "text": remember_text,
+            })
+            message = outcome.pending_confirmation["message"]
+            self._remember_exchange(remember_text, Command("AGENT", {"request": request}), message)
+            return message
+
+        if outcome.question is not None:
+            self.conversation_state.set_pending_action({
+                "intent": "AGENT_CONTINUE",
+                "parameters": {"request": request, "question": outcome.question},
+                "reason": "agent_question",
+                "text": remember_text,
+            })
+            self._remember_exchange(remember_text, Command("AGENT", {"request": request}), outcome.question)
+            return outcome.question
+
+        response = outcome.final_answer or self.NO_PLAN
+        self._remember_exchange(remember_text, Command("AGENT", {"request": request}), response)
+        return response
+
+    def _continue_agent(self, action: dict, answer_text: str) -> str:
+        """L'utente ha risposto alla domanda di chiarimento posta dall'agente: si riprende il
+        compito con la richiesta originale piu' la risposta appena data."""
+        request = action["parameters"]["request"]
+        question = action["parameters"].get("question", "")
+        combined = f"{request}\n(L'utente ha risposto alla domanda \"{question}\" con: {answer_text})"
+        return self._run_agent(combined, remember_text=answer_text)
 
     def _match_meta_command(self, text: str) -> Command | None:
         """Comandi su Jake stesso riconosciuti da regole precise (insegnare, correggere): troppo
@@ -376,27 +510,31 @@ class JakeCore:
             })
             return f"La configurazione richiede conferma per {intent}. Confermi?"
 
-        result = self.skill_registry.execute(intent, command.parameters)
+        resolved, result, note = self._resolve_and_execute(command)
         if result is not None and result.error == "CONFIRMATION_REQUIRED":
             self.conversation_state.set_pending_action({
-                "intent": intent,
-                "parameters": result.data.get("confirm_parameters", command.parameters),
+                "intent": result.data.get("confirm_intent", resolved.intent),
+                "parameters": result.data.get("confirm_parameters", resolved.parameters),
                 "reason": "confirmation_required",
                 "text": text,
             })
-            self._remember_exchange(text, command, result.data.get("message", ""))
+            self._remember_exchange(text, resolved, result.data.get("message", ""))
             return result.data.get("message", "Confermi questa azione?")
 
-        response = format_skill_result(intent, result, self.skill_registry)
+        response = format_skill_result(resolved.intent, result, self.skill_registry)
+        if note:
+            response = f"{note} {response}"
+        if result is not None and result.success:
+            self.conversation_state.remember_entities(resolved.intent, resolved.parameters, result.data or {})
         if learn:
-            self.learning.observe(text, command, result, route=self.router.last_route)
-        self._remember_exchange(text, command, response)
+            self.learning.observe(text, resolved, result, route=self.router.last_route)
+        self._remember_exchange(text, resolved, response)
         return response
 
     def _handle_unknown(self, text: str) -> str:
-        plan_response = self._try_plan(text)
-        if plan_response != self.NO_PLAN:
-            return plan_response
+        agent_response = self._run_agent(text)
+        if agent_response != self.NO_PLAN:
+            return agent_response
 
         if self.QUESTION_PATTERN.search(text):
             return self._execute_command(text, Command("ASK_QUESTION", {"question": text}), learn=False)
@@ -420,15 +558,21 @@ class JakeCore:
         return response
 
     def _handle_confirmation(self, text: str) -> str:
+        action = self.conversation_state.get_pending_action()
+        # Una domanda di chiarimento dell'agente non e' un si'/no: qualunque risposta la
+        # prosegue (anche "si"/"no" sono risposte legittime, es. "hai salvato le modifiche?").
+        if action.get("reason") == "agent_question":
+            self.conversation_state.clear_pending_action()
+            return self._continue_agent(action, text)
+
         if text in self.POSITIVE_ANSWERS:
-            action = self.conversation_state.get_pending_action()
             self.conversation_state.clear_pending_action()
             result = self.skill_registry.execute(action["intent"], action["parameters"])
             # Una conferma puo' chiederne un'altra (CREATE_SKILL: "provo a imparare?" -> codice
             # scritto -> "lo attivo?"): stessa gestione del percorso normale.
             if result is not None and result.error == "CONFIRMATION_REQUIRED":
                 self.conversation_state.set_pending_action({
-                    "intent": action["intent"],
+                    "intent": result.data.get("confirm_intent", action["intent"]),
                     "parameters": result.data.get("confirm_parameters", action["parameters"]),
                     "reason": "confirmation_required",
                     "text": action.get("text", ""),
@@ -436,6 +580,8 @@ class JakeCore:
                 return result.data.get("message", "Confermi questa azione?")
             response = format_skill_result(action["intent"], result, self.skill_registry)
             command = Command(action["intent"], action["parameters"])
+            if result is not None and result.success:
+                self.conversation_state.remember_entities(action["intent"], action["parameters"], result.data or {})
             if action.get("reason") == "confirmation_required" and action.get("text"):
                 self.learning.observe(action["text"], command, result, route="llm" if self.last_route == "llm" else "confirmed")
             self._remember_exchange(action.get("text", text), command, response)
