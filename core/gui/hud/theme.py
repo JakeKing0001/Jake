@@ -9,11 +9,11 @@ RADIUS = 26
 # bassi apposta: deve leggersi come vetro sfocato con dietro il desktop vero (che resta
 # riconoscibile), non come un pannello blu pieno con solo un'ombra vaga dietro.
 GRADIENT_STOPS = [
-    (0.00, (75, 145, 255, 34)),
-    (0.55, (35, 65, 135, 30)),
-    (1.00, (12, 28, 75, 46)),
+    (0.00, (75, 145, 255, 22)),
+    (0.55, (35, 65, 135, 18)),
+    (1.00, (12, 28, 75, 30)),
 ]
-GLASS_TINT = QColor(10, 18, 44, 56)        # scurisce quel poco che serve per la leggibilita'
+GLASS_TINT = QColor(10, 18, 44, 34)        # scurisce quel poco che serve per la leggibilita'
 BORDER = QColor(155, 210, 255, 140)
 BORDER_STRONG = QColor(170, 220, 255, 220)
 BORDER_DIM = QColor(120, 170, 230, 26)     # base del bordo a gradiente: si spegne verso il fondo

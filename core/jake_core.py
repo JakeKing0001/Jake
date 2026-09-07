@@ -21,6 +21,7 @@ from core.session_hooks import SessionHooks
 from core.skill_forge import SkillForge
 from core.skill_registry import SkillRegistry
 from core.skill_result import SkillResult
+from core.system_advisor import SystemAdvisor
 from core.trigger_scheduler import TriggerScheduler
 from skills.learn import CorrectLastSkill, ForgetLearnedSkill, LearnCommandSkill, ListLearnedSkill
 from skills.model_control import ListModelsSkill, SetModelSkill
@@ -177,6 +178,15 @@ class JakeCore:
         )
         self.trigger_scheduler.start()
 
+        # Jake proattivo (v3.2): nota da solo batteria scarica e disco quasi pieno, senza
+        # che tu debba chiederglielo (vedi core/system_advisor.py). Disattivabile da config
+        # per chi lo trova invadente o lavora su un fisso senza batteria.
+        self.system_advisor = SystemAdvisor(
+            on_advisory=self._default_on_advisory,
+            enabled=bool(config.get("system_advisor_enabled", True)),
+        )
+        self.system_advisor.start()
+
         # Fucina di skill (v3.0): Jake si scrive nuove capacita' da solo.
         self.skill_forge = SkillForge(
             self.skill_registry, client=OllamaClient(timeout=240),
@@ -234,6 +244,9 @@ class JakeCore:
             label = reminder.get("text") or "timer"
             return "Il timer è scaduto!" if label == "timer" else f"Il timer per {label} è scaduto!"
         return f"Promemoria: {reminder['text']}"
+
+    def _default_on_advisory(self, message: str) -> None:
+        print(f"\nJake > {message}\nTu > ", end="", flush=True)
 
     def _default_on_trigger_fired(self, trigger: dict, outcome, total_steps: int) -> None:
         summary = format_plan_outcome(outcome, total_steps, self.skill_registry)
@@ -599,7 +612,7 @@ class JakeCore:
     # ---- chiusura ------------------------------------------------------------------------
 
     def shutdown(self) -> None:
-        for component in (self.scheduler, self.trigger_scheduler, self.desktop_context):
+        for component in (self.scheduler, self.trigger_scheduler, self.system_advisor, self.desktop_context):
             try:
                 component.stop()
             except Exception:

@@ -190,6 +190,8 @@ def _format_error(intent: str, result: SkillResult) -> str:
         return "Questa funzione è disponibile solo in modalità vocale."
     if error == "FORGE_FAILED":
         return data.get("message") or "Non sono riuscito a creare la nuova capacità."
+    if error == "BLOCKED":
+        return data.get("message") or "Non eseguo questa azione: è nella lista di quelle bloccate per sicurezza."
     return "Si è verificato un errore durante l'esecuzione"
 
 

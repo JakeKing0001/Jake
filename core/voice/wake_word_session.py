@@ -91,9 +91,16 @@ class WakeWordSession:
         trigger_scheduler = getattr(self.jake_core, "trigger_scheduler", None)
         if trigger_scheduler is not None:
             trigger_scheduler.on_trigger = self._on_trigger_fired
+        system_advisor = getattr(self.jake_core, "system_advisor", None)
+        if system_advisor is not None:
+            system_advisor.on_advisory = self._on_advisory
 
     def _on_reminder_due(self, reminder: dict) -> None:
         message = self.jake_core.format_due_reminder(reminder)
+        self._set_state("notify", message)
+        self.speak(message)
+
+    def _on_advisory(self, message: str) -> None:
         self._set_state("notify", message)
         self.speak(message)
 

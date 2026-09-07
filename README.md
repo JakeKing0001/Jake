@@ -70,8 +70,10 @@ voce ──VAD──▶ Whisper (GPU) ──▶ TranscriptNormalizer ──▶ R
 - `core/nlu/` — normalizzazione, esempi, indice semantico (embedding con cache su disco, fallback lessicale), retriever, chitchat, classificatore LLM.
 - `core/agent.py` — agente a passi per i compiti composti: sceglie uno strumento alla volta, osserva il risultato reale, decide il successivo o chiede chiarimenti (mai un piano fisso scritto in anticipo).
 - `core/fallbacks.py` — ripieghi quando una skill fallisce in modo prevedibile (riscrittura prima dell'esecuzione, alternativa automatica, proposta da confermare).
+- `core/command_safety.py` — blocca `esegui il comando ...` quando corrisponde a un pattern distruttivo noto (cancellazione ricorsiva, formattazione, cancellazione di copie shadow, download-and-execute, PowerShell offuscato...), anche dopo conferma: una conferma vocale non basta contro un comando davvero pericoloso.
 - `core/conversation_state.py` — oltre allo stato di conferma, ricorda le ultime entità nominate (file, app, finestra...) per risolvere i pronomi.
 - `core/learning_manager.py` — apprendimento continuo; `core/skill_forge.py` — generazione e validazione di nuove skill.
+- `core/system_advisor.py` — Jake proattivo alla Jarvis: nota da solo batteria scarica e disco quasi pieno e lo dice, senza che tu debba chiederglielo.
 - `core/voice/` — Whisper (`stt_provider.py`, CUDA automatico), Edge TTS (`edge_tts_provider.py`), sessione wake word con dettatura/pausa/follow-up.
 - `core/gui/hud/` — HUD a schermo intero (PySide6): `theme.py` (un solo gradiente condiviso), `glass.py` (pannelli di vetro: sfondo sfocato + gradiente + bordo), `widgets.py` (orb, forma d'onda, conversazione, contesto live, azioni rapide, barra comandi), `overlay.py` (finestra mascherata: vetro solo nei pannelli, resto trasparente e cliccabile), `win_effects.py` (acrilico Windows, click-through, no-activate).
 - `skills/` — una classe per capacità (`metadata` + `execute`), ~200 in totale; `plugins/` — skill esterne e auto-generate.
@@ -92,6 +94,7 @@ voce ──VAD──▶ Whisper (GPU) ──▶ TranscriptNormalizer ──▶ R
 | `hud_hotkey` / `hud_auto_hide_seconds` | `ctrl+shift+j` / 6 | |
 | `hud_quick_actions` | `[]` | lista di `{"label": "...", "command": "..."}` per le chip in più oltre a quelle di default |
 | `blocked_intents` / `always_confirm_intents` | `[]` | policy di sicurezza |
+| `system_advisor_enabled` | `true` | avvisi proattivi (batteria scarica, disco quasi pieno): `false` per disattivarli |
 | `JAKE_OLLAMA_URL` (variabile d'ambiente) | `http://127.0.0.1:11434` | usare sempre 127.0.0.1: `localhost` costa ~2 s a chiamata su Windows |
 
 ## Sviluppo

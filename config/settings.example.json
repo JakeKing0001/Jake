@@ -17,5 +17,6 @@
   "always_confirm_intents": [],
   "hud_mode": "full",
   "hud_backdrop": "clear",
-  "hud_quick_actions": []
+  "hud_quick_actions": [],
+  "system_advisor_enabled": true
 }
