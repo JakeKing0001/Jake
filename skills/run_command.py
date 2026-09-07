@@ -1,5 +1,6 @@
 import subprocess
 
+from core.command_safety import check_command_safety
 from core.skill_result import SkillResult
 
 MAX_OUTPUT_CHARS = 1500
@@ -30,6 +31,15 @@ class RunCommandSkill:
         command = (parameters.get("command") or "").strip()
         if not command:
             return SkillResult(success=False, data={}, error="MISSING_PARAMETERS")
+
+        blocked_reason = check_command_safety(command)
+        if blocked_reason:
+            return SkillResult(
+                success=False,
+                data={"command": command, "reason": blocked_reason,
+                      "message": f"Non eseguo questo comando: sembra {blocked_reason}. Se ti serve davvero, usalo dal terminale direttamente."},
+                error="BLOCKED",
+            )
 
         if not parameters.get("confirmed"):
             return SkillResult(

@@ -122,6 +122,9 @@ class JarvisApp:
                 hooks.kind = "hud"
                 hooks.set_state = lambda state, detail="": self.bridge.state.emit(state, detail or "")
             core.scheduler.on_due = self._on_reminder_due_text
+            advisor = getattr(core, "system_advisor", None)
+            if advisor is not None:
+                advisor.on_advisory = self._on_advisory_text
         if hooks is not None:
             hooks.show_hud = lambda: self.bridge.show.emit(False)
             hooks.hide_hud = lambda: self.bridge.hide.emit()
@@ -334,6 +337,9 @@ class JarvisApp:
 
     def _on_reminder_due_text(self, reminder: dict) -> None:
         message = self.core.format_due_reminder(reminder)
+        self.bridge.state.emit("notify", message)
+
+    def _on_advisory_text(self, message: str) -> None:
         self.bridge.state.emit("notify", message)
 
     # ---- comandi testuali ----------------------------------------------------------------
