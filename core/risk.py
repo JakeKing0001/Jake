@@ -84,6 +84,7 @@ SKILL_RISK: dict[str, RiskLevel] = {
     "SEARCH_FILES": RiskLevel.READ_ONLY,
     "OPEN_SEARCH_RESULT": RiskLevel.LOCAL_REVERSIBLE,
     "SEMANTIC_SEARCH_FILES": RiskLevel.READ_ONLY,
+    "HYBRID_SEARCH_FILES": RiskLevel.READ_ONLY,
     "BUILD_SEMANTIC_INDEX": RiskLevel.LOCAL_REVERSIBLE,
     "COMPRESS_PATH": RiskLevel.LOCAL_REVERSIBLE,
     "EXTRACT_ARCHIVE": RiskLevel.DESTRUCTIVE,  # puo' sovrascrivere file esistenti senza preavviso
