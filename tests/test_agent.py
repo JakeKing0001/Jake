@@ -138,6 +138,48 @@ class IndependentVerificationTests(unittest.TestCase):
         self.assertEqual(outcome.steps[0].result.error, "VERIFICATION_FAILED")
 
 
+class KillSwitchStopsTheRunTests(unittest.TestCase):
+    """F1 (Trustworthy Agent Core 3.0, vedi core/kill_switch.py): il flag e' controllato SOLO
+    tra un passo e il successivo, mai a meta' - qui simulato attivandolo dentro on_step (chiamato
+    subito prima di eseguire davvero il passo 1), cosi' il passo 2 non deve mai arrivare a
+    chiamare il modello."""
+
+    def test_activating_between_steps_stops_before_the_next_model_call(self):
+        tmp_dir = Path(tempfile.mkdtemp(prefix="jake_agent_kill_"))
+        self.addCleanup(shutil.rmtree, tmp_dir, ignore_errors=True)
+        target = tmp_dir / "nuovo_file.txt"
+
+        registry = FakeRegistry()
+        # Un solo turno pronto: se il kill switch non fermasse l'agente prima del passo 2, la
+        # seconda chiamata a client.chat() solleverebbe IndexError (nessun turno rimasto) invece
+        # che fallire silenziosamente - un secondo turno "a sorpresa" nasconderebbe il problema.
+        client = ScriptedOllamaClient([
+            {"thought": "Creo il file", "action": {"intent": "CREATE_PATH", "parameters": {"path": str(target)}},
+             "final_answer": "", "ask_user": ""},
+        ])
+        agent = _agent(registry, client)
+        agent.on_step = lambda step_index, description: agent.kill_switch.activate()
+
+        outcome = agent.run("crea un file e poi fai qualcos'altro")
+
+        self.assertIn(("CREATE_PATH", {"path": str(target)}), registry.calls)
+        self.assertEqual(outcome.error, "KILLED")
+        self.assertEqual(len(outcome.rolled_back), 1)
+        self.assertFalse(target.exists(), "il rollback doveva annullare il passo gia' fatto")
+
+    def test_already_active_before_the_first_step_runs_no_step_at_all(self):
+        registry = FakeRegistry()
+        client = ScriptedOllamaClient([])  # nessun turno: run() non deve chiamare il modello
+        agent = _agent(registry, client)
+        agent.kill_switch.activate()
+
+        outcome = agent.run("fai qualcosa")
+
+        self.assertEqual(outcome.error, "KILLED")
+        self.assertEqual(outcome.steps, [])
+        self.assertEqual(registry.calls, [])
+
+
 class RollbackAfterFatalErrorTests(unittest.TestCase):
     def test_completed_reversible_step_is_undone_after_a_model_error(self):
         tmp_dir = Path(tempfile.mkdtemp(prefix="jake_agent_rollback_"))

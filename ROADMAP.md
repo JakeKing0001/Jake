@@ -314,13 +314,26 @@ pulita; smoke test installazione/avvio/arresto; dashboard locale con errori e la
   timeout/retry per-azione dichiarati (oggi `execution_safety.MAX_ATTEMPTS`/`RETRYABLE_ERRORS`
   sono globali, non per-azione), idempotency key e compensazione strutturata restano da fare -
   il rollback esiste ma solo per il filesystem (`execution_safety.ROLLBACK_HANDLERS`).
+- 🟡 Kill switch globale (`core/kill_switch.py`, `skills/kill_switch.py`): un interruttore
+  condiviso, controllato tra un passo e il successivo (mai a metà - vedi il modulo sul perché non
+  è un abort violento del thread) da `TaskAgent.run()` e `PlanExecutor.execute()`, che ferma
+  anche `ReminderScheduler`/`TriggerScheduler` per davvero (i thread terminano). "ferma tutto"/
+  "stop di emergenza" (intent `KILL_SWITCH`, classificato `LOCAL_REVERSIBLE` di proposito: un
+  interruttore d'emergenza che chiedesse conferma non servirebbe) e "riprendi" (`RESET_KILL_
+  SWITCH`) via voce/testo, verificati end-to-end con un `JakeCore` reale (thread dello scheduler
+  effettivamente terminato dopo "ferma tutto", riavviato dopo "riprendi"), oltre a test con
+  rollback dei passi già fatti quando il kill switch scatta a metà di un compito composto. Manca
+  l'hotkey globale e la voce tray dalla richiesta originale ("da tastiera, tray e voce"): restano
+  🟡 perché toccano `core/gui/hud/app.py` (PySide6), un'applicazione grafica che non può essere
+  verificata visivamente/interattivamente in questo ambiente - aggiungerla senza poterla vedere
+  girare avrebbe significato dichiarare fatto qualcosa di verificato solo a metà.
 - ⬜ Separazione formale planner/policy engine/executor, capability token per agente/skill/
   dispositivo, Windows Hello/passkey, difese da prompt injection (taint tracking/allowlist),
-  sandbox OS per i plugin generati dalla fucina, backup transazionale + undo center nell'HUD, kill
-  switch globale: non affrontati in questa sessione. Sono i pezzi più grandi e rischiosi di F1
-  (un kernel di permessi vero, autenticazione forte, sandboxing a livello OS): meritano una
-  sessione dedicata con più tempo per la revisione di sicurezza, non un'implementazione affrettata
-  - meglio dichiararli apertamente qui che spacciare un abbozzo rischioso per fatto.
+  sandbox OS per i plugin generati dalla fucina, backup transazionale + undo center nell'HUD: non
+  affrontati in questa sessione. Sono i pezzi più grandi e rischiosi di F1 (un kernel di permessi
+  vero, autenticazione forte, sandboxing a livello OS): meritano una sessione dedicata con più
+  tempo per la revisione di sicurezza, non un'implementazione affrettata - meglio dichiararli
+  apertamente qui che spacciare un abbozzo rischioso per fatto.
 
 **Criterio di uscita:** nessuna skill non classificata; nessuna azione esterna/admin senza
 ricevuta di policy; test d'attacco su prompt injection e plugin; restore verificato.

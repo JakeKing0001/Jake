@@ -11,6 +11,7 @@ from core.context_summarizer import ContextSummarizer
 from core.desktop_context import DesktopContextTracker
 from core.event_bus import EventBus
 from core.hud_protocol import EventType, HudEvent
+from core.kill_switch import KillSwitch
 from core.learning_manager import LearningManager
 from core.logger import get_logger, log_action, new_trace_id
 from core.nlu import chitchat
@@ -34,6 +35,7 @@ from core.skill_registry import SkillRegistry
 from core.skill_result import SkillResult
 from core.system_advisor import SystemAdvisor
 from core.trigger_scheduler import TriggerScheduler
+from skills.kill_switch import KillSwitchSkill, ResetKillSwitchSkill
 from skills.learn import CorrectLastSkill, ForgetLearnedSkill, LearnCommandSkill, ListLearnedSkill
 from skills.model_control import ListModelsSkill, SetModelSkill
 from skills.session_control import (
@@ -90,6 +92,14 @@ class JakeCore:
         self.action_ledger = ActionLedger()
         self.skill_registry.plan_executor.action_ledger = self.action_ledger
 
+        # Kill switch globale (F1): un solo interruttore condiviso da tutti gli agenti e le
+        # automazioni - vedi core/kill_switch.py, skills/kill_switch.py, activate_kill_switch()/
+        # reset_kill_switch() piu' sotto. Azionabile da voce/testo (skill KILL_SWITCH) e, quando
+        # il resto dell'infrastruttura lo aggancera' (hotkey globale, tray - non fatto in questa
+        # sessione), da li' allo stesso oggetto.
+        self.kill_switch = KillSwitch()
+        self.skill_registry.plan_executor.kill_switch = self.kill_switch
+
         # Protocollo eventi + server companion (v4.9.1 HUD IPC transport, v5.8 Mobile
         # Companion, v5.9 Ambient Computing): qualsiasi presentazione esterna (HUD nativo,
         # app companion su un altro dispositivo) puo' iscriversi a self.event_bus senza essere
@@ -132,6 +142,7 @@ class JakeCore:
             context_provider=lambda: self._agent_context(),
             executor=lambda intent, parameters: self._resolve_and_execute(Command(intent, parameters))[1],
             session_recorder=self.session_recorder, action_ledger=self.action_ledger, agent_name="general",
+            kill_switch=self.kill_switch,
         )
         self.agent.on_step = self._on_agent_step
 
@@ -146,6 +157,7 @@ class JakeCore:
             context_provider=lambda: self._agent_context(),
             executor=lambda intent, parameters: self._resolve_and_execute(Command(intent, parameters))[1],
             session_recorder=self.session_recorder, action_ledger=self.action_ledger,
+            kill_switch=self.kill_switch,
         )
         self.coding_agent = TaskAgent(
             self.skill_registry, self.retriever, self.ollama,
@@ -247,6 +259,8 @@ class JakeCore:
             ("STOP_TALKING", StopTalkingSkill(self)),
             ("PAUSE_LISTENING", PauseListeningSkill(self)),
             ("SET_PRIVATE_MODE", PrivateModeSkill(self)),
+            ("KILL_SWITCH", KillSwitchSkill(self)),
+            ("RESET_KILL_SWITCH", ResetKillSwitchSkill(self)),
             ("START_DICTATION", StartDictationSkill(self)),
             ("STOP_DICTATION", StopDictationSkill(self)),
             ("CREATE_SKILL", CreateSkillSkill(self.skill_forge)),
@@ -772,6 +786,31 @@ class JakeCore:
 
     def _remember_exchange(self, text: str, command: Command, response: str) -> None:
         self.last_exchange = {"text": text, "command": command, "response": response}
+
+    # ---- kill switch -----------------------------------------------------------------------
+
+    def activate_kill_switch(self) -> None:
+        """Ferma subito agenti e automazioni (F1, vedi core/kill_switch.py): il flag condiviso
+        interrompe qualunque agente/piano PRIMA del passo successivo (mai a meta' di uno gia' in
+        corso, vedi il modulo), e ReminderScheduler/TriggerScheduler vengono fermati per davvero
+        (i loro thread terminano, non solo "smettono di fare qualcosa") - non ripartono da soli:
+        serve reset_kill_switch() per farli ripartire."""
+        self.kill_switch.activate()
+        for scheduler in (self.scheduler, self.trigger_scheduler):
+            try:
+                scheduler.stop()
+            except Exception:
+                self.logger.exception("Errore fermando uno scheduler durante il kill switch")
+
+    def reset_kill_switch(self) -> None:
+        """Disattiva il kill switch e fa ripartire gli scheduler fermati da activate_kill_
+        switch() - non riparte da sola: e' una scelta esplicita, cosi' come lo e' stata fermarli."""
+        self.kill_switch.reset()
+        for scheduler in (self.scheduler, self.trigger_scheduler):
+            try:
+                scheduler.start()
+            except Exception:
+                self.logger.exception("Errore riavviando uno scheduler dopo il kill switch")
 
     # ---- chiusura ------------------------------------------------------------------------
 

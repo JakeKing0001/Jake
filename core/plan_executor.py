@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 
 from core.action_ledger import ActionLedger, ActionReceipt, authorization_of, new_action_id
 from core.execution_safety import VERIFIABLE_INTENTS, execute_with_retry, rollback_effect, verify_effect
+from core.kill_switch import KillSwitch
 from core.logger import log_action, new_trace_id
 from core.planner import PlanStep
 from core.risk import risk_of
@@ -36,7 +37,7 @@ class PlanExecutor:
     Un passo che richiede conferma (operazione rischiosa) mette in pausa il piano senza
     eseguirlo: la sicurezza delle conferme non viene mai aggirata da una richiesta multi-step."""
 
-    def __init__(self, skill_registry, session_recorder=None, action_ledger=None):
+    def __init__(self, skill_registry, session_recorder=None, action_ledger=None, kill_switch=None):
         self.skill_registry = skill_registry
         # Disattivato per default (vedi SessionRecorder.__init__) finche' JakeCore non assegna
         # il proprio, condiviso con _execute_command e TaskAgent (vedi core/jake_core.py): senza,
@@ -46,6 +47,9 @@ class PlanExecutor:
         # F1: come session_recorder, condiviso se passato, altrimenti un'istanza locale che
         # scrive comunque (il ledger e' sempre attivo, non opt-in).
         self.action_ledger = action_ledger or ActionLedger()
+        # F1: come sopra - condiviso con TaskAgent/JakeCore se passato (un solo interruttore per
+        # tutto, vedi core/kill_switch.py), altrimenti un'istanza locale mai attivata.
+        self.kill_switch = kill_switch or KillSwitch()
 
     def execute(
         self, plan, blocked_intents: set = None, always_confirm_intents: set = None,
@@ -68,6 +72,17 @@ class PlanExecutor:
         trace_id = trace_id or new_trace_id()
         outcome = PlanOutcome()
         for step in plan.steps:
+            if self.kill_switch.is_active():
+                # F1: controllato SOLO tra un passo e il successivo (vedi core/kill_switch.py).
+                outcome.stopped_step = StepOutcome(
+                    step=step, result=SkillResult(success=False, data={}, error="KILLED"), attempts=0,
+                )
+                outcome.rolled_back = self._rollback(outcome.completed)
+                self._log_step(
+                    trace_id, private, model, requested_by, time.monotonic(), step.intent, step.parameters,
+                    result="error:KILLED", verified=None,
+                )
+                return outcome
             if blocked_intents and step.intent in blocked_intents:
                 outcome.stopped_step = StepOutcome(
                     step=step,

@@ -53,7 +53,7 @@ Le dimensioni dei modelli sopra sono misurate direttamente (`ollama list`/`ollam
 - **Memoria, appunti, cose da fare**: «ricorda che la password del wifi è ...», «appuntati che devo comprare il pane», «aggiungi alla lista delle cose da fare chiamare l'idraulico», «cosa devo fare»
 - **Rubrica e messaggi**: «salva il numero di marco 333...», «manda un whatsapp a marco: arrivo tra 5 minuti», «manda una mail a luca@... con oggetto riunione»
 - **Domande e testo**: «qual è la capitale della francia», «spiegami la fotosintesi», «traduci buongiorno in inglese», «quanto fa 12 per 8», «converti 5 kg in libbre», «riassumi quello che ho copiato»
-- **Su Jake stesso**: «cosa sai fare», «ripeti», «zitto», «non ascoltare per 10 minuti» ... «Jake, svegliati», «no, intendevo apri discord»
+- **Su Jake stesso**: «cosa sai fare», «ripeti», «zitto», «non ascoltare per 10 minuti» ... «Jake, svegliati», «no, intendevo apri discord», «ferma tutto» (kill switch: ferma subito agenti e automazioni, senza chiedere conferma) ... «riprendi»
 
 Dopo una risposta puoi continuare a parlare per qualche secondo senza ripetere «Jake» (finestra di follow-up). Le domande di conferma («confermi?») accettano il sì/no direttamente.
 

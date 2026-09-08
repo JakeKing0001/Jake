@@ -580,6 +580,12 @@
 {"text": "vai a dormire", "intent": "PAUSE_LISTENING", "parameters": {}}
 {"text": "smetti di ascoltare per mezz'ora", "intent": "PAUSE_LISTENING", "parameters": {"minutes": 30}}
 {"text": "modalità silenziosa", "intent": "PAUSE_LISTENING", "parameters": {}}
+{"text": "ferma tutto", "intent": "KILL_SWITCH", "parameters": {}}
+{"text": "stop di emergenza", "intent": "KILL_SWITCH", "parameters": {}}
+{"text": "fermati subito", "intent": "KILL_SWITCH", "parameters": {}}
+{"text": "blocca tutto", "intent": "KILL_SWITCH", "parameters": {}}
+{"text": "riprendi", "intent": "RESET_KILL_SWITCH", "parameters": {}}
+{"text": "riattiva tutto", "intent": "RESET_KILL_SWITCH", "parameters": {}}
 {"text": "ciao", "intent": "CHITCHAT", "parameters": {"text": "ciao"}}
 {"text": "ciao jake", "intent": "CHITCHAT", "parameters": {"text": "ciao jake"}}
 {"text": "buongiorno", "intent": "CHITCHAT", "parameters": {"text": "buongiorno"}}

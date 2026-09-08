@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 
 from core.action_ledger import ActionLedger, ActionReceipt, authorization_of, new_action_id
 from core.execution_safety import VERIFIABLE_INTENTS, execute_with_retry, rollback_effect, verify_effect
+from core.kill_switch import KillSwitch
 from core.logger import log_action, new_trace_id
 from core.ollama_client import OllamaClient, OllamaError
 from core.risk import risk_of
@@ -41,6 +42,10 @@ NEVER_FOR_AGENT = {
     "UNKNOWN", "CHITCHAT", "ASK_QUESTION", "CORRECT_LAST", "REPEAT_LAST", "HELP", "STOP_TALKING", "PAUSE_LISTENING",
     "START_DICTATION", "STOP_DICTATION", "LEARN_COMMAND", "FORGET_LEARNED", "LIST_LEARNED", "CREATE_SKILL",
     "LIST_CREATED_SKILLS", "DELETE_CREATED_SKILL", "SET_MODEL", "SYSTEM_POWER", "RUN_COMMAND", "SHOW_HUD", "HIDE_HUD",
+    # Un agente che decidesse da solo di fermare tutto (o di riattivarlo) come "passo" di un
+    # compito composto non avrebbe senso: il kill switch e' un comando diretto dell'utente
+    # all'infrastruttura, non uno strumento tra i tanti per portare a termine una richiesta (F1).
+    "KILL_SWITCH", "RESET_KILL_SWITCH",
 }
 NONE_ACTION = "NONE"
 
@@ -79,7 +84,8 @@ class TaskAgent:
 
     def __init__(self, registry, retriever, client: OllamaClient, model_provider, format_result,
                  logger=None, context_provider=None, executor=None, fixed_tools: list[str] = None,
-                 persona_line: str = None, session_recorder=None, action_ledger=None, agent_name: str = "general"):
+                 persona_line: str = None, session_recorder=None, action_ledger=None, agent_name: str = "general",
+                 kill_switch=None):
         self.registry = registry
         self.retriever = retriever
         self.client = client
@@ -98,6 +104,10 @@ class TaskAgent:
         # JakeCore.__init__): quale agente specializzato ha deciso il passo, per la ricevuta nel
         # ledger (requested_by="agent:<agent_name>").
         self.agent_name = agent_name
+        # F1: come session_recorder/action_ledger, condiviso se passato (JakeCore ne tiene UNO
+        # solo, azionabile da voce/hotkey/tray - vedi core/kill_switch.py), altrimenti
+        # un'istanza locale mai attivata (self.kill_switch.is_active() e' sempre False).
+        self.kill_switch = kill_switch or KillSwitch()
         # executor(intent, parameters) -> SkillResult: di default il registry (con risoluzione
         # dei percorsi); il core puo' passare una versione con policy/ripieghi.
         self.executor = executor or (lambda intent, parameters: registry.execute(intent, parameters))
@@ -280,6 +290,13 @@ class TaskAgent:
         start_time = time.monotonic()
 
         for step_index in range(1, self.MAX_STEPS + 1):
+            if self.kill_switch.is_active():
+                # F1: controllato SOLO tra un passo e il successivo, mai a meta' (vedi
+                # core/kill_switch.py sul perche' non e' un abort violento a livello di thread).
+                outcome.error = "KILLED"
+                if self.logger:
+                    self.logger.warning("Agente: kill switch attivo, fermato dopo %d passi per: %s", len(outcome.steps), request)
+                break
             if time.monotonic() - start_time > self.RUN_TIMEOUT_SECONDS:
                 outcome.error = "TIMEOUT"
                 if self.logger:
