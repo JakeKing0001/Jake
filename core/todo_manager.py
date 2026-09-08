@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -46,6 +46,17 @@ class TodoManager:
         rows = self._connection.execute(
             "SELECT id, text FROM todos WHERE done = 0 ORDER BY id ASC LIMIT ?",
             (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_stale_pending(self, days: float = 3) -> list[dict]:
+        """Attivita' ancora aperte create da almeno 'days' giorni (v4.2, Proactive
+        Intelligence: usata da SystemAdvisor per notare da solo una todo dimenticata, invece
+        di aspettare che l'utente chieda LIST_TODOS). Le piu' vecchie per prime."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        rows = self._connection.execute(
+            "SELECT id, text, created_at FROM todos WHERE done = 0 AND created_at <= ? ORDER BY created_at ASC",
+            (cutoff,),
         ).fetchall()
         return [dict(row) for row in rows]
 

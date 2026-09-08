@@ -120,6 +120,7 @@ class JakeCore:
         self.system_advisor = SystemAdvisor(
             on_advisory=self._default_on_advisory,
             enabled=bool(config.get("system_advisor_enabled", True)),
+            todo_manager=self.skill_registry.todo_manager,
         )
         self.system_advisor.start()
 
