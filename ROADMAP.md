@@ -125,12 +125,20 @@ ingredienti moltiplica gli errori.
   1600+ chiamate dirette e con `tests/test_companion_server.py` fino a fallire alla run 15/20
   prima del fix). Corretto facendo drenare il body anche a `_handle_release`; verificato con 20
   esecuzioni consecutive della suite dopo il fix, tutte verdi.
-- 🟡 CI Windows aggiunta (`.github/workflows/ci.yml`): matrice Python 3.11/3.12, `ruff check`,
-  `mypy` selettivo, `python -m compileall`, la suite unitaria, più un job separato che compila il
-  prototipo HUD nativo e verifica che il binario resti in esecuzione (non è ancora una suite di
-  test C++/QML, che non esiste - vedi hud/native/README.md). Verificata eseguendo localmente ogni
-  singolo passo (ruff/mypy/compileall/unittest tutti verdi); il workflow stesso non è ancora
-  stato eseguito su GitHub Actions perché richiede un push, quindi resta da confermare lì.
+- ✅ CI Windows aggiunta (`.github/workflows/ci.yml`) ed eseguita davvero su GitHub Actions:
+  matrice Python 3.11/3.12, `ruff check`, `mypy` selettivo, `python -m compileall`, la suite
+  unitaria, lo smoke test, più un job separato che compila il prototipo HUD nativo e verifica che
+  il binario resti in esecuzione (non è ancora una suite di test C++/QML, che non esiste - vedi
+  hud/native/README.md). Il primo push (commit 8b0d4cf) ha fatto fallire davvero il job Python
+  3.11 - non un'ipotesi: `numpy==2.5.2` (pinnato osservando l'ambiente di sviluppo, Python 3.12)
+  richiede Python >=3.12 e non esiste come wheel per 3.11, quindi `pip install --require-hashes`
+  falliva con "No matching distribution found". Esattamente il tipo di errore che una matrice
+  multi-versione dovrebbe scoprire. Corretto abbassando a `numpy==2.4.6` (l'ultima versione che
+  supporta ancora 3.11, verificato sui metadati PyPI) e verificato non solo rilanciando la CI, ma
+  anche in locale su un vero interprete Python 3.11.9 (disponibile via `py -3.11` su questa
+  macchina): `pip install --require-hashes` di tutto `all.lock.txt`, poi l'intera suite (352
+  test), ruff, mypy, `compileall` e lo smoke test, tutti verdi su 3.11 vero prima ancora di
+  ripushare - non solo "dovrebbe funzionare adesso".
 - ✅ CMake Presets (`hud/native/CMakePresets.json`, `binaryDir` fisso) e rilevamento Qt per
   `GLOB_RECURSE` di `Qt6Config.cmake` sotto le cartelle Qt comuni, invece di un elenco di versioni
   fisse (`hud/native/CMakeLists.txt`). Motivato da un incidente reale: il commit "problem with
