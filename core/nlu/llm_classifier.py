@@ -29,6 +29,7 @@ class OllamaProvider(IntentProvider):
         timeout: float = 25,
         model: str = None,
         context_provider=None,
+        history_provider=None,
         retriever=None,
         client: OllamaClient = None,
     ):
@@ -41,6 +42,13 @@ class OllamaProvider(IntentProvider):
         # Contestualizzazione desktop (v2.0): callable opzionale che restituisce una riga di
         # contesto (es. finestre usate di recente), per risolvere richieste ambigue.
         self.context_provider = context_provider
+        # Cronologia recente (v4.0, Conversational Intelligence): callable opzionale che
+        # restituisce gli ultimi turni di conversazione (stesso formato usato dall'agente a
+        # passi, vedi core/agent.py). Prima il classificatore vedeva SOLO la frase corrente:
+        # un'ellissi come "e a Milano?" dopo "che tempo fa a Roma?" non aveva modo di essere
+        # capita, perche' non c'era nessun turno precedente nel prompt da cui dedurre che si
+        # sta ancora parlando del meteo.
+        self.history_provider = history_provider
         # Recupero semantico (v3.0): se assente, il prompt elenca tutte le capacita' (come prima).
         self.retriever = retriever
         self.last_retrieval = None
@@ -123,6 +131,14 @@ class OllamaProvider(IntentProvider):
                 f"es. pronomi o 'quel file': non copiarlo mai nei parametri se l'utente non lo "
                 f"dice esplicitamente): {context}"
             )
+        if self.history_provider is not None:
+            lines.append(
+                "Prima del messaggio dell'utente potresti vedere alcuni turni precedenti della "
+                "conversazione: usali SOLO per capire a cosa si riferisce una frase breve o "
+                "un'ellissi (es. 'e a Milano?' dopo aver gia' chiesto il meteo altrove, oppure "
+                "'anche quello dopo'). Classifica SEMPRE e SOLO l'ULTIMO messaggio dell'utente, "
+                "mai uno di quelli precedenti, e non rieseguire un comando gia' fatto."
+            )
         lines.append("Capacita' disponibili (scegline UNA):")
         for capability in capabilities:
             lines.append(f"- {capability['intent']}: {capability['description']}")
@@ -168,13 +184,25 @@ class OllamaProvider(IntentProvider):
 
     # ---- dettagli ----------------------------------------------------------------------
 
+    def _recent_history_messages(self, limit: int = 4) -> list[dict]:
+        if self.history_provider is None:
+            return []
+        try:
+            history = self.history_provider() or []
+        except Exception:
+            return []
+        return [
+            {"role": "assistant" if turn.get("role") == "jake" else "user", "content": turn.get("text", "")}
+            for turn in history[-limit:]
+        ]
+
     def _request_ollama(self, text: str, capabilities: list, examples: list) -> dict:
+        messages = [{"role": "system", "content": self.build_system_prompt(capabilities, examples)}]
+        messages.extend(self._recent_history_messages())
+        messages.append({"role": "user", "content": text})
         return self.client.chat(
             self.model,
-            messages=[
-                {"role": "system", "content": self.build_system_prompt(capabilities, examples)},
-                {"role": "user", "content": text},
-            ],
+            messages=messages,
             format=self.build_output_schema(capabilities),
             # Temperatura 0: qui serve riprodurre esattamente percorsi e testo letterale
             # dell'utente, non generare variazioni creative.
