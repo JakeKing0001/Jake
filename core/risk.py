@@ -277,6 +277,30 @@ SKILL_RISK: dict[str, RiskLevel] = {
 }
 
 
+# Skill che gia' implementano una propria richiesta di conferma su misura, con controlli di
+# precondizione (esiste il file? il percorso e' protetto?) PRIMA di chiedere, e un messaggio
+# specifico (il percorso vero, il nome del processo...) invece di uno generico. Per queste il
+# gate centrale (vedi JakeCore._resolve_and_execute, core/jake_core.py) non deve intervenire:
+# altrimenti l'utente vedrebbe un "Confermi questa azione?" spoglio PRIMA che la skill controlli
+# se l'azione e' persino possibile, perdendo il messaggio piu' preciso che gia' esiste.
+SELF_CONFIRMING_INTENTS: frozenset[str] = frozenset({
+    "DELETE_PATH", "RUN_COMMAND", "RUN_PYTHON_SCRIPT", "KILL_PROCESS_BY_PORT",
+    "CLOSE_APP", "EMPTY_RECYCLE_BIN", "SYSTEM_POWER", "CREATE_SKILL",
+    "CLEAR_TEMP_FILES", "CLEAR_NOTES",
+})
+
+
+def needs_central_confirmation(intent: str) -> bool:
+    """Vero se l'intent e' abbastanza rischioso (DESTRUCTIVE o superiore) da dover sempre
+    passare da una conferma, e non e' gia' una di quelle che se la gestiscono da sole in modo
+    piu' preciso (vedi SELF_CONFIRMING_INTENTS). E' il criterio con cui JakeCore popola
+    always_confirm_intents all'avvio (vedi core/jake_core.py): prima quell'insieme andava
+    riempito a mano in config.json skill per skill, ora chiudere il rischio e' automatico e non
+    dipende dal ricordarsi di aggiornare la configurazione ogni volta che nasce una nuova skill
+    pericolosa."""
+    return is_at_least(risk_of(intent), RiskLevel.DESTRUCTIVE) and intent not in SELF_CONFIRMING_INTENTS
+
+
 def risk_of(intent: str) -> RiskLevel:
     """Livello di rischio di un intent. Una skill non ancora censita qui (un plugin di terze
     parti, o una skill scritta dalla Skill Forge) ricade su ADMIN per difetto: e' la scelta
