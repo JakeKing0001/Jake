@@ -178,5 +178,54 @@ class RollbackAfterFatalErrorTests(unittest.TestCase):
         self.assertIsNone(outcome.error)
 
 
+class SpecializedAgentConfigurationTests(unittest.TestCase):
+    """v5.0/5.1: un agente 'di dominio' (es. CodingAgent) e' lo stesso TaskAgent con
+    fixed_tools/persona_line impostati, non una classe diversa (vedi core/orchestrator.py)."""
+
+    def test_fixed_tools_bypasses_the_retriever_entirely(self):
+        registry = FakeRegistry()
+        retriever_calls = []
+
+        class ExplodingRetriever:
+            def retrieve(self, *args, **kwargs):
+                retriever_calls.append(1)
+                raise AssertionError("il recupero semantico non deve essere chiamato con fixed_tools impostato")
+
+        agent = TaskAgent(
+            registry, ExplodingRetriever(), ScriptedOllamaClient([]), model_provider=lambda: "fake-model",
+            format_result=lambda intent, result: str(result.data), fixed_tools=["CREATE_PATH"],
+        )
+
+        tools = agent._tools("qualsiasi richiesta")
+
+        self.assertEqual(retriever_calls, [])
+        self.assertEqual([t["intent"] for t in tools], ["CREATE_PATH"])
+
+    def test_fixed_tools_ignores_intents_not_in_the_registry(self):
+        registry = FakeRegistry()
+        agent = TaskAgent(
+            registry, None, ScriptedOllamaClient([]), model_provider=lambda: "fake-model",
+            format_result=lambda intent, result: str(result.data), fixed_tools=["CREATE_PATH", "NON_ESISTE"],
+        )
+        tools = agent._tools("qualsiasi richiesta")
+        self.assertEqual([t["intent"] for t in tools], ["CREATE_PATH"])
+
+    def test_persona_line_overrides_the_first_prompt_line(self):
+        registry = FakeRegistry()
+        agent = TaskAgent(
+            registry, None, ScriptedOllamaClient([]), model_provider=lambda: "fake-model",
+            format_result=lambda intent, result: str(result.data), fixed_tools=["CREATE_PATH"],
+            persona_line="Sei Jake, un agente di sviluppo.",
+        )
+        prompt = agent._system_prompt(agent._tools("qualsiasi richiesta"))
+        self.assertTrue(prompt.startswith("Sei Jake, un agente di sviluppo."))
+
+    def test_default_persona_line_is_unchanged_without_a_domain(self):
+        registry = FakeRegistry()
+        agent = _agent(registry, ScriptedOllamaClient([]))
+        prompt = agent._system_prompt(agent._tools("qualsiasi richiesta"))
+        self.assertTrue(prompt.startswith("Sei Jake, un agente che controlla un PC Windows"))
+
+
 if __name__ == "__main__":
     unittest.main()

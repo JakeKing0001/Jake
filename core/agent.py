@@ -75,7 +75,8 @@ class TaskAgent:
     RUN_TIMEOUT_SECONDS = 90
 
     def __init__(self, registry, retriever, client: OllamaClient, model_provider, format_result,
-                 logger=None, context_provider=None, executor=None):
+                 logger=None, context_provider=None, executor=None, fixed_tools: list[str] = None,
+                 persona_line: str = None):
         self.registry = registry
         self.retriever = retriever
         self.client = client
@@ -87,11 +88,21 @@ class TaskAgent:
         # dei percorsi); il core puo' passare una versione con policy/ripieghi.
         self.executor = executor or (lambda intent, parameters: registry.execute(intent, parameters))
         self.on_step = None  # callable(step_index, description)
+        # Specializzazione (v5.0/5.1, Multi-Agent Architecture): un TaskAgent "di dominio" (es.
+        # CodingAgent) usa un elenco di strumenti FISSO invece del recupero semantico generico,
+        # e una prima riga di prompt diversa da quella di default. Tutto il resto - il ciclo a
+        # passi, retry/verifica/rollback (core/execution_safety.py), il budget di tempo - resta
+        # identico: non e' una classe diversa, e' lo stesso agente configurato diversamente.
+        self.fixed_tools = fixed_tools
+        self.persona_line = persona_line
 
     # ---- strumenti -----------------------------------------------------------------------
 
     def _tools(self, request: str) -> list[dict]:
         by_intent = {capability["intent"]: capability for capability in self.registry.list_capabilities()}
+        if self.fixed_tools is not None:
+            ordered = [intent for intent in self.fixed_tools if intent in by_intent and intent not in NEVER_FOR_AGENT]
+            return [by_intent[intent] for intent in ordered[:32]]
         chosen = []
         try:
             retrieval = self.retriever.retrieve(request, max_capabilities=22, max_examples=0)
@@ -142,7 +153,7 @@ class TaskAgent:
 
     def _system_prompt(self, tools: list[dict]) -> str:
         lines = [
-            "Sei Jake, un agente che controlla un PC Windows per conto dell'utente, in italiano.",
+            self.persona_line or "Sei Jake, un agente che controlla un PC Windows per conto dell'utente, in italiano.",
             "Lavori a passi: a ogni turno scegli UNA sola azione tra gli strumenti, oppure concludi.",
             "Rispondi SOLO con JSON: {\"thought\": \"...\", \"action\": {\"intent\": \"...\", \"parameters\": {...}}, \"final_answer\": \"\", \"ask_user\": \"\"}",
             "- thought: una frase breve in italiano su cosa fai e perche' (es. 'Cerco il file tesi.pdf').",

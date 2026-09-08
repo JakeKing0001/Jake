@@ -13,6 +13,8 @@ from core.nlu.normalizer import TranscriptNormalizer
 from core.nlu.retriever import CapabilityRetriever
 from core.notification_center import NotificationCenter
 from core.ollama_client import OllamaClient
+from core import orchestrator
+from core.orchestrator import JakeOrchestrator
 from core.plugin_loader import load_plugins
 from core.response_formatter import format_plan_outcome, format_skill_result
 from core.risk import needs_central_confirmation
@@ -78,6 +80,31 @@ class JakeCore:
             executor=lambda intent, parameters: self._resolve_and_execute(Command(intent, parameters))[1],
         )
         self.agent.on_step = self._on_agent_step
+
+        # Architettura multi-agente (v5.0/5.1/5.2): stesso TaskAgent, configurato con un
+        # elenco di strumenti fisso e un prompt diverso per i domini coding/ricerca, invece del
+        # recupero semantico generico su tutte le ~200 capacita'. JakeOrchestrator sceglie quale
+        # dei tre usare in base alla richiesta (vedi core/orchestrator.py).
+        agent_kwargs = dict(
+            model_provider=lambda: self.model,
+            format_result=lambda intent, result: format_skill_result(intent, result, self.skill_registry),
+            logger=self.logger,
+            context_provider=lambda: self._agent_context(),
+            executor=lambda intent, parameters: self._resolve_and_execute(Command(intent, parameters))[1],
+        )
+        self.coding_agent = TaskAgent(
+            self.skill_registry, self.retriever, self.ollama,
+            fixed_tools=list(orchestrator.CODING_TOOLS), persona_line=orchestrator.CODING_PERSONA,
+            **agent_kwargs,
+        )
+        self.coding_agent.on_step = self._on_agent_step
+        self.research_agent = TaskAgent(
+            self.skill_registry, self.retriever, self.ollama,
+            fixed_tools=list(orchestrator.RESEARCH_TOOLS), persona_line=orchestrator.RESEARCH_PERSONA,
+            **agent_kwargs,
+        )
+        self.research_agent.on_step = self._on_agent_step
+        self.orchestrator = JakeOrchestrator(self.agent, self.coding_agent, self.research_agent)
 
         self.router = Router(
             skill_registry=self.skill_registry, example_store=self.example_store,
@@ -405,13 +432,14 @@ class JakeCore:
         return resolved, result, None
 
     def _run_agent(self, request: str, remember_text: str = None) -> str:
-        """Richiesta composta o non riconosciuta: l'agente pensa un passo alla volta e guarda
-        i risultati veri prima di decidere il successivo (core/agent.py), invece di eseguire un
-        piano fisso scritto in anticipo. Se il modello non e' raggiungibile o non conclude
-        nulla, ripiega sul vecchio planner a piano fisso; se fallisce anche quello, NO_PLAN."""
+        """Richiesta composta o non riconosciuta: l'orchestratore (v5.0, core/orchestrator.py)
+        sceglie l'agente generico o uno specializzato (coding/ricerca), che pensa un passo alla
+        volta e guarda i risultati veri prima di decidere il successivo (core/agent.py), invece
+        di eseguire un piano fisso scritto in anticipo. Se il modello non e' raggiungibile o non
+        conclude nulla, ripiega sul vecchio planner a piano fisso; se fallisce anche quello, NO_PLAN."""
         remember_text = remember_text if remember_text is not None else request
         try:
-            outcome = self.agent.run(request, history=self.conversation_state.get_short_term_history())
+            outcome = self.orchestrator.run(request, history=self.conversation_state.get_short_term_history())
         except Exception:
             self.logger.exception("Errore nell'agente per: %s", request)
             outcome = None
