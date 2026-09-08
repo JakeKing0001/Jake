@@ -49,6 +49,23 @@ FORBIDDEN_PATTERNS = [
 
 ALLOWED_THIRD_PARTY = {"psutil", "PIL", "numpy", "win32gui", "win32con", "win32api", "win32clipboard", "pyperclip", "requests"}
 
+# Controlli statici indipendenti da FORBIDDEN_PATTERNS (v5.3, Self-Improvement controllato):
+# quella lista nera e' testuale (regex sul sorgente), quindi aggirabile con l'indirezione,
+# es. getattr(os, "system")(...) invece di os.system(...) non contiene mai la sottostringa
+# "os.system". Questi controlli lavorano sull'AST e coprono due tecniche note: accesso
+# indiretto a un nome pericoloso via getattr con stringa letterale, e la catena classica di
+# sandbox-escape di Python (un oggetto qualsiasi -> __class__ -> __bases__/__mro__ ->
+# __subclasses__() per risalire a classi non ristrette, es. subprocess.Popen, a partire da un
+# valore del tutto innocuo come "".__class__...).
+DANGEROUS_ATTR_NAMES = {
+    "__globals__", "__builtins__", "__subclasses__", "__base__", "__bases__",
+    "__mro__", "__code__", "__closure__", "__loader__",
+}
+DANGEROUS_INDIRECT_NAMES = {
+    "eval", "exec", "compile", "system", "popen", "rmtree", "remove", "unlink",
+    "rmdir", "removedirs", "__import__", "chmod", "kill", "startfile",
+}
+
 _PLUGIN_TEMPLATE = '''"""Plugin di esempio, formato richiesto."""
 import random
 
@@ -196,6 +213,28 @@ class SkillForge:
 
     # ---- validazione -------------------------------------------------------------------
 
+    @staticmethod
+    def _check_ast_escapes(tree: ast.AST) -> None:
+        """Vedi il commento su DANGEROUS_ATTR_NAMES/DANGEROUS_INDIRECT_NAMES: controlli
+        sull'AST per le tecniche note di evasione di FORBIDDEN_PATTERNS (che e' solo testuale)."""
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and node.attr in DANGEROUS_ATTR_NAMES:
+                raise ForgeError(
+                    f"accede all'attributo '{node.attr}', una tecnica nota per aggirare i controlli di sicurezza"
+                )
+            if isinstance(node, ast.Call):
+                func_name = None
+                if isinstance(node.func, ast.Name):
+                    func_name = node.func.id
+                elif isinstance(node.func, ast.Attribute):
+                    func_name = node.func.attr
+                if func_name == "getattr":
+                    for arg in node.args:
+                        if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and arg.value in DANGEROUS_INDIRECT_NAMES:
+                            raise ForgeError(f"usa getattr per raggiungere '{arg.value}' indirettamente, non ammesso")
+                if func_name == "import_module":
+                    raise ForgeError("importa moduli dinamicamente (importlib.import_module), non ammesso")
+
     def _validate(self, code: str) -> tuple[str, str, list]:
         try:
             tree = ast.parse(code)
@@ -205,6 +244,7 @@ class SkillForge:
         for pattern, why in FORBIDDEN_PATTERNS:
             if pattern.search(code):
                 raise ForgeError(f"contiene {why}, non ammesso")
+        self._check_ast_escapes(tree)
 
         for node in ast.walk(tree):
             if isinstance(node, (ast.Import, ast.ImportFrom)):
