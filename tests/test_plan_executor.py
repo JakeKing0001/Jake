@@ -182,5 +182,39 @@ class SessionRecorderWiringTests(unittest.TestCase):
         recorder.record_failure.assert_not_called()
 
 
+class ActionLedgerWiringTests(unittest.TestCase):
+    """F1 (Trustworthy Agent Core 3.0, vedi core/action_ledger.py): vedi anche
+    tests/test_agent.py::ActionLedgerWiringTests, stesso principio per l'altro esecutore."""
+
+    def test_step_records_a_receipt_with_the_given_requested_by(self):
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
+        plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
+        ledger = unittest.mock.Mock()
+        executor = PlanExecutor(registry)
+        executor.action_ledger = ledger
+
+        with unittest.mock.patch("core.plan_executor.log_action"):
+            executor.execute(plan, trace_id="trace-plan-ledger", requested_by="trigger:buonanotte")
+
+        ledger.record.assert_called_once()
+        (receipt,), kwargs = ledger.record.call_args
+        self.assertEqual(receipt.trace_id, "trace-plan-ledger")
+        self.assertEqual(receipt.requested_by, "trigger:buonanotte")
+        self.assertEqual(receipt.authorization, "none")
+        self.assertFalse(kwargs["private"])
+
+    def test_requested_by_defaults_to_user(self):
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
+        plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
+        ledger = unittest.mock.Mock()
+        executor = PlanExecutor(registry)
+        executor.action_ledger = ledger
+
+        with unittest.mock.patch("core.plan_executor.log_action"):
+            executor.execute(plan)
+
+        self.assertEqual(ledger.record.call_args.args[0].requested_by, "user")
+
+
 if __name__ == "__main__":
     unittest.main()

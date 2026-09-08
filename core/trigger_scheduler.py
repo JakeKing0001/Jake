@@ -117,7 +117,7 @@ class TriggerScheduler:
         # da solo non e' mai legato a una conversazione in modalita' privata.
         outcome = self.plan_executor.execute(
             plan, blocked_intents=self.blocked_intents, always_confirm_intents=self.always_confirm_intents,
-            trace_id=new_trace_id(), private=False, model=None,
+            trace_id=new_trace_id(), private=False, model=None, requested_by=f"trigger:{name}",
         )
         self.trigger_manager.mark_fired(name, datetime.now().isoformat())
 

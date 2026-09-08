@@ -8,10 +8,12 @@ conversation_state, learning, last_route), quindi bastano quelli per testare la 
 senza toccare nulla di esterno (stesso approccio delle fake minimali in tests/test_agentics.py)."""
 import unittest
 
+from core.action_ledger import ActionLedger
 from core.auth_gate import AuthGate
 from core.command import Command
 from core.conversation_state import ConversationStateManager
 from core.jake_core import JakeCore
+from core.session_recorder import SessionRecorder
 from core.skill_result import SkillResult
 
 
@@ -200,6 +202,13 @@ def _bare_core_for_confirmation(skill_registry, auth_gate) -> JakeCore:
     core.learning = FakeLearning()
     core.last_route = None
     core.last_exchange = None
+    # F1: _finalize_pending_action registra anche sul ledger/log strutturato (vedi
+    # core/action_ledger.py) - servono anche qui, non solo private_mode/model, altrimenti
+    # _log_action_outcome esplode su un attributo mai impostato da questo core "spoglio".
+    core.private_mode = False
+    core.model = "test-model"
+    core.action_ledger = ActionLedger()
+    core.session_recorder = SessionRecorder()
     return core
 
 
@@ -236,6 +245,34 @@ class HandleConfirmationAuthTests(unittest.TestCase):
         self.assertEqual(skill.calls, [])
         self.assertIn("errata", response.lower())
         self.assertFalse(core.conversation_state.has_pending_action())
+
+    def test_confirmed_execution_writes_a_ledger_receipt_correlated_to_the_pending_action(self):
+        """F1: prima di questa correzione, _finalize_pending_action eseguiva l'azione vera (qui,
+        dopo la passphrase corretta) senza scriverne mai una ricevuta - solo la richiesta di
+        conferma iniziale finiva nel ledger, non l'esecuzione. Il trace_id impostato da chi ha
+        chiesto la conferma deve comparire identico sulla ricevuta finale."""
+        import unittest.mock
+
+        skill = FakeSkill(SkillResult(success=True, data={"plan": "balanced"}))
+        registry = FakeRegistry({"SET_POWER_PLAN": skill})
+        core = _bare_core_for_confirmation(registry, AuthGate(passphrase="apri sesamo"))
+        core.action_ledger = unittest.mock.Mock()
+        core.conversation_state.set_pending_action({
+            "intent": "SET_POWER_PLAN", "parameters": {"plan": "balanced", "authenticated": True},
+            "reason": "auth_required", "text": "metti il pc in risparmio energetico",
+            "trace_id": "trace-from-the-original-request",
+        })
+
+        with unittest.mock.patch("core.jake_core.log_action"):
+            core._handle_confirmation("apri sesamo")
+
+        core.action_ledger.record.assert_called_once()
+        (receipt,), kwargs = core.action_ledger.record.call_args
+        self.assertEqual(receipt.trace_id, "trace-from-the-original-request")
+        self.assertEqual(receipt.authorization, "passphrase")
+        self.assertEqual(receipt.result, "success")
+        self.assertFalse(kwargs["private"])
+
 
 if __name__ == "__main__":
     unittest.main()

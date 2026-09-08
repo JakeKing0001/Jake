@@ -13,6 +13,7 @@ import json
 import time
 from dataclasses import dataclass, field
 
+from core.action_ledger import ActionLedger, ActionReceipt, authorization_of, new_action_id
 from core.execution_safety import VERIFIABLE_INTENTS, execute_with_retry, rollback_effect, verify_effect
 from core.logger import log_action, new_trace_id
 from core.ollama_client import OllamaClient, OllamaError
@@ -78,7 +79,7 @@ class TaskAgent:
 
     def __init__(self, registry, retriever, client: OllamaClient, model_provider, format_result,
                  logger=None, context_provider=None, executor=None, fixed_tools: list[str] = None,
-                 persona_line: str = None, session_recorder=None):
+                 persona_line: str = None, session_recorder=None, action_ledger=None, agent_name: str = "general"):
         self.registry = registry
         self.retriever = retriever
         self.client = client
@@ -90,6 +91,13 @@ class TaskAgent:
         # costruisce l'agente (JakeCore, che condivide lo stesso SessionRecorder con
         # _execute_command e PlanExecutor), record_failure() qui sotto e' semplicemente un no-op.
         self.session_recorder = session_recorder or SessionRecorder()
+        # F1: come session_recorder, condiviso con JakeCore/PlanExecutor se passato, altrimenti
+        # un'istanza locale che scrive comunque (il ledger e' sempre attivo, non opt-in).
+        self.action_ledger = action_ledger or ActionLedger()
+        # "general" | "coding" | "research" (vedi core/orchestrator.py, agent_kwargs in
+        # JakeCore.__init__): quale agente specializzato ha deciso il passo, per la ricevuta nel
+        # ledger (requested_by="agent:<agent_name>").
+        self.agent_name = agent_name
         # executor(intent, parameters) -> SkillResult: di default il registry (con risoluzione
         # dei percorsi); il core puo' passare una versione con policy/ripieghi.
         self.executor = executor or (lambda intent, parameters: registry.execute(intent, parameters))
@@ -202,15 +210,28 @@ class TaskAgent:
         comando singolo - cosi' un compito composto a piu' passi si legge come una sequenza
         correlata invece che come eventi scollegati. Un passo fallito (non solo in attesa di
         conferma) alimenta anche session_recorder, con gli stessi parametri del passo, per
-        tools/replay_session.py."""
+        tools/replay_session.py. Alimenta anche action_ledger (F1): requested_by="agent:<nome>",
+        cosi' una ricevuta del ledger dice sempre se e' stato un comando diretto dell'utente o
+        una decisione autonoma dell'agente, non solo quale skill ha agito."""
+        duration_ms = (time.monotonic() - started) * 1000
+        risk = risk_of(intent).value
         log_action(
-            trace_id, private=private, duration_ms=(time.monotonic() - started) * 1000,
-            model=model, skill=intent, risk_decision=risk_of(intent).value, result=result, verified=verified,
+            trace_id, private=private, duration_ms=duration_ms,
+            model=model, skill=intent, risk_decision=risk, result=result, verified=verified,
+        )
+        self.action_ledger.record(
+            ActionReceipt(
+                action_id=new_action_id(), trace_id=trace_id, ts=time.time(), intent=intent,
+                requested_by=f"agent:{self.agent_name}", risk_decision=risk,
+                authorization=authorization_of(result, parameters), result=result,
+                verified=verified, duration_ms=duration_ms, model=model,
+            ),
+            private=private,
         )
         if not result.startswith("success") and result not in self._NOT_A_FAILURE:
             self.session_recorder.record_failure(
                 trace_id, intent=intent, parameters=parameters, error=result,
-                risk_decision=risk_of(intent).value, private=private,
+                risk_decision=risk, private=private,
             )
 
     def _observe(self, intent: str, result: SkillResult | None) -> str:
