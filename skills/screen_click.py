@@ -8,9 +8,49 @@ piu' lento e meno affidabile, e' il ripiego quando l'OCR non basta.
 pyautogui.FAILSAFE resta attivo: portare il mouse in un angolo interrompe tutto."""
 import json
 import re
+import time
 from difflib import SequenceMatcher
 
 from core.skill_result import SkillResult
+
+# Tempo dato all'interfaccia di assestarsi (animazioni, caricamento) prima di catturare lo
+# screenshot "dopo" per il confronto (v3.6, vedi core/vision/screen_diff.py).
+_POST_CLICK_SETTLE_SECONDS = 0.4
+
+
+def _click_and_measure(x: int, y: int, button: str = "left") -> tuple[bool, dict]:
+    """Clicca e osserva se lo schermo e' visibilmente cambiato dopo (v3.6, Vision 2.0): non
+    cambia mai success/error del click stesso (un click valido puo' legittimamente non produrre
+    nessun cambiamento visibile, es. un link che apre una pagina gia' aperta), solo aggiunge un
+    segnale informativo in piu' che oggi l'agente puo' leggere e in futuro il Computer Use Engine
+    (fase 3.7) potra' usare per un vero retry/recupero."""
+    from core.vision.screen import capture_screenshot_image
+    from core.vision.screen_diff import pixel_change_ratio, screen_visibly_changed
+
+    try:
+        before = capture_screenshot_image()
+    except Exception:
+        before = None
+
+    try:
+        import pyautogui
+        if button == "double":
+            pyautogui.doubleClick(x, y)
+        else:
+            pyautogui.click(x, y, button="right" if button == "right" else "left")
+    except Exception:
+        return False, {}
+
+    extra = {}
+    if before is not None:
+        try:
+            time.sleep(_POST_CLICK_SETTLE_SECONDS)
+            after = capture_screenshot_image()
+            ratio = pixel_change_ratio(before, after)
+            extra = {"screen_changed": screen_visibly_changed(before, after), "change_ratio": round(ratio, 4)}
+        except Exception:
+            pass
+    return True, extra
 
 
 def _normalize(text: str) -> str:
@@ -81,15 +121,10 @@ class ClickTextSkill:
         if hit is None:
             return SkillResult(success=False, data={"text": text}, error="NOT_FOUND")
 
-        try:
-            import pyautogui
-            if button == "double":
-                pyautogui.doubleClick(hit["x"], hit["y"])
-            else:
-                pyautogui.click(hit["x"], hit["y"], button="right" if button == "right" else "left")
-        except Exception:
+        clicked, extra = _click_and_measure(hit["x"], hit["y"], button)
+        if not clicked:
             return SkillResult(success=False, data={"text": text}, error="OPERATION_FAILED")
-        return SkillResult(success=True, data={"text": hit["matched"], "x": hit["x"], "y": hit["y"]})
+        return SkillResult(success=True, data={"text": hit["matched"], "x": hit["x"], "y": hit["y"], **extra})
 
 
 class ClickElementSkill:
@@ -159,12 +194,10 @@ class ClickElementSkill:
 
     @staticmethod
     def _click(x: int, y: int, description: str):
-        try:
-            import pyautogui
-            pyautogui.click(x, y)
-        except Exception:
+        clicked, extra = _click_and_measure(x, y)
+        if not clicked:
             return SkillResult(success=False, data={"description": description}, error="OPERATION_FAILED")
-        return SkillResult(success=True, data={"description": description, "x": x, "y": y})
+        return SkillResult(success=True, data={"description": description, "x": x, "y": y, **extra})
 
 
 class ScrollSkill:
