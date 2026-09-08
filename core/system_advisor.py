@@ -14,18 +14,21 @@ from core.logger import get_logger
 
 BATTERY_LOW_PERCENT = 15
 DISK_FREE_LOW_GB = 3.0
+STALE_TODO_DAYS = 3
 
 
 class SystemAdvisor:
-    def __init__(self, on_advisory=None, interval_seconds: float = 300, enabled: bool = True):
+    def __init__(self, on_advisory=None, interval_seconds: float = 300, enabled: bool = True, todo_manager=None):
         self.on_advisory = on_advisory
         self.interval_seconds = interval_seconds
         self.enabled = enabled
+        self.todo_manager = todo_manager
         self._thread = None
         self._stop_event = threading.Event()
         self._logger = get_logger()
         self._battery_warned = False
         self._disk_warned = False
+        self._stale_todo_ids_warned: set = set()  # (v4.2) gia' segnalate: non ripeterle ogni giro
 
     def start(self) -> None:
         if not self.enabled or (self._thread is not None and self._thread.is_alive()):
@@ -49,6 +52,10 @@ class SystemAdvisor:
                 self._check_disk()
             except Exception:
                 self._logger.exception("Errore controllando lo spazio su disco")
+            try:
+                self._check_stale_todos()
+            except Exception:
+                self._logger.exception("Errore controllando le attivita' in sospeso")
             self._stop_event.wait(self.interval_seconds)
 
     def _check_battery(self) -> None:
@@ -78,6 +85,27 @@ class SystemAdvisor:
             self._advise(f"Lo spazio libero sul disco di sistema sta finendo: restano {free_gb:.1f} GB.")
         elif not low:
             self._disk_warned = False
+
+    def _check_stale_todos(self) -> None:
+        """Nota da sola una todo dimenticata (v4.2, Proactive Intelligence), invece di aspettare
+        che l'utente chieda LIST_TODOS e si accorga solo allora di averla lasciata li'. Ogni
+        attivita' viene segnalata una sola volta (per id): completarla o cancellarla non e'
+        necessario perche' non venga piu' ripetuta, ma se torna a essere la piu' vecchia dopo che
+        le altre sono state smaltite non viene ri-segnalata piu' del dovuto."""
+        if self.todo_manager is None:
+            return
+        stale = self.todo_manager.list_stale_pending(days=STALE_TODO_DAYS)
+        stale_ids = {todo["id"] for todo in stale}
+        self._stale_todo_ids_warned &= stale_ids  # dimentica gli id non piu' in sospeso/stale
+        new_ones = [todo for todo in stale if todo["id"] not in self._stale_todo_ids_warned]
+        if not new_ones:
+            return
+        self._stale_todo_ids_warned |= {todo["id"] for todo in new_ones}
+        if len(new_ones) == 1:
+            self._advise(f"C'e' un'attivita' in sospeso da un po' nella todo list: \"{new_ones[0]['text']}\".")
+        else:
+            oldest = new_ones[0]["text"]
+            self._advise(f"Hai {len(new_ones)} attivita' in sospeso da un po' nella todo list, la piu' vecchia e': \"{oldest}\".")
 
     def _advise(self, message: str) -> None:
         self._logger.info("Avviso proattivo: %s", message)
