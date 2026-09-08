@@ -617,6 +617,22 @@ def _format_success(intent: str, result: SkillResult, registry=None) -> str | No
         return f"Capacità che ho creato da solo: {formatted}"
     if intent == "DELETE_CREATED_SKILL":
         return f"Ho eliminato la capacità {data.get('intent') or data.get('file')}."
+    if intent == "SET_NOTIFICATION_MODE":
+        from core.notification_center import MODE_LABELS_IT, NotificationMode
+        label = MODE_LABELS_IT.get(NotificationMode(data["mode"]), data["mode"])
+        released = data.get("released") or []
+        if not released:
+            return f"Modalità {label} attiva."
+        catch_up = " ".join(released)
+        return f"Modalità {label} attiva. Nel frattempo: {catch_up}"
+    if intent == "GET_NOTIFICATION_MODE":
+        from core.notification_center import MODE_LABELS_IT, NotificationMode
+        label = MODE_LABELS_IT.get(NotificationMode(data["mode"]), data["mode"])
+        pending = data.get("pending", 0)
+        if pending:
+            noun = "notifica" if pending == 1 else "notifiche"
+            return f"Modalità {label}: {pending} {noun} in attesa."
+        return f"Modalità {label}."
     return None
 
 

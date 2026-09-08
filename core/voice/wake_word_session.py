@@ -96,18 +96,27 @@ class WakeWordSession:
             system_advisor.on_advisory = self._on_advisory
 
     def _on_reminder_due(self, reminder: dict) -> None:
-        message = self.jake_core.format_due_reminder(reminder)
+        # Passa dalla stessa modalita' di notifica (v4.3) del percorso CLI: vedi JakeCore.notify.
+        message = self.jake_core.notify("reminder", self.jake_core.format_due_reminder(reminder))
+        if message is None:
+            return
         self._set_state("notify", message)
         self.speak(message)
 
     def _on_advisory(self, message: str) -> None:
+        message = self.jake_core.notify("advisory", message)
+        if message is None:
+            return
         self._set_state("notify", message)
         self.speak(message)
 
     def _on_trigger_fired(self, trigger: dict, outcome, total_steps: int) -> None:
         from core.response_formatter import format_plan_outcome
         summary = format_plan_outcome(outcome, total_steps, self.jake_core.skill_registry)
-        message = f"Ho eseguito automaticamente {trigger.get('name')}. {summary.splitlines()[0]}"
+        raw = f"Ho eseguito automaticamente {trigger.get('name')}. {summary.splitlines()[0]}"
+        message = self.jake_core.notify("trigger", raw)
+        if message is None:
+            return
         self._set_state("notify", message)
         self.speak(message)
 
