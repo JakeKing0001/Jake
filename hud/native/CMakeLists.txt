@@ -5,6 +5,25 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
+# Qt 6 may be installed outside the default CMake search paths on Windows.
+# Add common Qt locations before searching so CMake can find Qt6Config.cmake.
+if(DEFINED ENV{QTDIR})
+    list(APPEND CMAKE_PREFIX_PATH "$ENV{QTDIR}")
+endif()
+
+if(WIN32)
+    foreach(_qt_prefix
+        "C:/Qt/6.5.3/msvc2019_64"
+        "C:/Qt/6.5.3/msvc2022_64"
+        "C:/Qt/6.8.2/msvc2022_64"
+        "C:/Qt/6.9.0/msvc2022_64"
+    )
+        if(EXISTS "${_qt_prefix}")
+            list(APPEND CMAKE_PREFIX_PATH "${_qt_prefix}")
+        endif()
+    endforeach()
+endif()
+
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 Network)
 
 qt_standard_project_setup(REQUIRES 6.5)
