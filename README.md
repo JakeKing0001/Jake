@@ -94,6 +94,7 @@ voce ──VAD──▶ Whisper (GPU) ──▶ TranscriptNormalizer ──▶ R
 | `hud_hotkey` / `hud_auto_hide_seconds` | `ctrl+shift+j` / 6 | |
 | `hud_quick_actions` | `[]` | lista di `{"label": "...", "command": "..."}` per le chip in più oltre a quelle di default |
 | `blocked_intents` / `always_confirm_intents` | `[]` | policy di sicurezza |
+| `admin_passphrase` | `""` | se impostata, le azioni a rischio ADMIN (spegnimento, comandi, skill auto-generate) chiedono questa passphrase invece della semplice conferma sì/no; vuota = disattivata |
 | `system_advisor_enabled` | `true` | avvisi proattivi (batteria scarica, disco quasi pieno): `false` per disattivarli |
 | `JAKE_OLLAMA_URL` (variabile d'ambiente) | `http://127.0.0.1:11434` | usare sempre 127.0.0.1: `localhost` costa ~2 s a chiamata su Windows |
 

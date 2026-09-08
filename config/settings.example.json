@@ -15,6 +15,7 @@
   "hud_auto_hide_seconds": 5,
   "blocked_intents": [],
   "always_confirm_intents": [],
+  "admin_passphrase": "",
   "hud_mode": "full",
   "hud_backdrop": "clear",
   "hud_quick_actions": [],

@@ -8,7 +8,7 @@ import re
 import unittest
 from pathlib import Path
 
-from core.risk import SKILL_RISK, RiskLevel, is_at_least, risk_of
+from core.risk import SELF_CONFIRMING_INTENTS, SKILL_RISK, RiskLevel, is_at_least, needs_central_auth, risk_of
 
 ROOT = Path(__file__).resolve().parent.parent
 INTENT_KEY_RE = re.compile(r'"([A-Z][A-Z0-9_]*)"\s*:')
@@ -80,6 +80,26 @@ class TestEveryRegisteredSkillIsClassified(unittest.TestCase):
         known = _catalog_intents() | _jake_core_registered_intents()
         stale = SKILL_RISK.keys() - known
         self.assertEqual(stale, set(), f"voci di SKILL_RISK per intent che non esistono piu': {sorted(stale)}")
+
+
+class TestNeedsCentralAuth(unittest.TestCase):
+    """v5.4, Permissions & Security Kernel: il gradino REQUIRE_AUTH, un livello sopra
+    needs_central_confirmation (che copre DESTRUCTIVE e superiori)."""
+
+    def test_admin_non_self_confirming_intent_needs_auth(self):
+        self.assertTrue(needs_central_auth("SET_POWER_PLAN"))
+
+    def test_self_confirming_admin_intent_does_not_need_the_central_gate(self):
+        for intent in ("SYSTEM_POWER", "RUN_COMMAND", "RUN_PYTHON_SCRIPT", "CREATE_SKILL"):
+            self.assertIn(intent, SELF_CONFIRMING_INTENTS)
+            self.assertFalse(needs_central_auth(intent), intent)
+
+    def test_destructive_intent_does_not_need_auth_only_confirmation(self):
+        self.assertEqual(risk_of("DELETE_PATH"), RiskLevel.DESTRUCTIVE)
+        self.assertFalse(needs_central_auth("DELETE_PATH"))
+
+    def test_read_only_intent_does_not_need_auth(self):
+        self.assertFalse(needs_central_auth("GET_TIME"))
 
 
 if __name__ == "__main__":
