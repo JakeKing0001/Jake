@@ -35,6 +35,7 @@ _NOT_FOUND_BY_INTENT = {
     "FIND_FILE": "Non ho trovato nessun file corrispondente.",
     "SEARCH_FILES": "Non ho trovato nessun file corrispondente.",
     "SEMANTIC_SEARCH_FILES": "Non ho trovato nessun file corrispondente.",
+    "HYBRID_SEARCH_FILES": "Non ho trovato nessun file corrispondente.",
     "WEB_SEARCH": "Non ho trovato una risposta rapida per questa ricerca.",
     "GET_NEWS": "Non ho trovato notizie su questo argomento.",
     "LIST_TRIGGERS": "Non hai trigger impostati.",
@@ -232,9 +233,14 @@ def _format_success(intent: str, result: SkillResult, registry=None) -> str | No
     if intent == "FIND_FILE":
         files = data["results"]
         return f"Ho trovato {len(files)} file: " + "; ".join(files)
-    if intent in ("SEARCH_FILES", "SEMANTIC_SEARCH_FILES"):
+    if intent in ("SEARCH_FILES", "SEMANTIC_SEARCH_FILES", "HYBRID_SEARCH_FILES"):
         formatted = "; ".join(f"{i}. {r['path']}" for i, r in enumerate(data["results"], start=1))
-        prefix = "Ecco cosa ho trovato per significato" if intent == "SEMANTIC_SEARCH_FILES" else "Ecco cosa ho trovato"
+        if intent == "SEMANTIC_SEARCH_FILES":
+            prefix = "Ecco cosa ho trovato per significato"
+        elif intent == "HYBRID_SEARCH_FILES":
+            prefix = "Ecco cosa ho trovato (ricerca combinata)"
+        else:
+            prefix = "Ecco cosa ho trovato"
         return f"{prefix}: {formatted}"
     if intent == "WEB_SEARCH":
         source = f" (fonte: {data['url']})" if data.get("url") else ""

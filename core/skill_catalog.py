@@ -29,6 +29,7 @@ from skills.delete_path import DeletePathSkill
 from skills.find_file import FindFileSkill
 from skills.open_search_result import OpenSearchResultSkill
 from skills.semantic_search_files import SemanticSearchFilesSkill
+from skills.hybrid_search_files import HybridSearchFilesSkill
 from skills.build_semantic_index import BuildSemanticIndexSkill
 from skills.file_utils import (
     CompressPathSkill, ExtractArchiveSkill, GetFileInfoSkill, CountWordsInFileSkill,
@@ -169,6 +170,7 @@ def build_filesystem_skills(nest_client, conversation_state, search_files_skill)
         "SEARCH_FILES": search_files_skill,
         "OPEN_SEARCH_RESULT": OpenSearchResultSkill(conversation_state),
         "SEMANTIC_SEARCH_FILES": SemanticSearchFilesSkill(nest_client, conversation_state),
+        "HYBRID_SEARCH_FILES": HybridSearchFilesSkill(nest_client, conversation_state),
         "BUILD_SEMANTIC_INDEX": BuildSemanticIndexSkill(nest_client),
         "COMPRESS_PATH": CompressPathSkill(),
         "EXTRACT_ARCHIVE": ExtractArchiveSkill(),
