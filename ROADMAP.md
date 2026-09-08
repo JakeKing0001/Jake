@@ -329,10 +329,23 @@ pulita; smoke test installazione/avvio/arresto; dashboard locale con errori e la
   di provare a intercettare l'import: nessun test in `tests/test_windows_hello.py`/
   `tests/test_auth_gate.py`/`tests/test_jake_core_permissions.py` può più toccare l'API reale.
   `is_available()` (nessun prompt, solo un controllo) resta invece chiamata per davvero nei test.
-- ⬜ JSON Schema validato per intent/tool call/risultato/errore/prova/undo/chiarimento: non
-  affrontato. `TaskAgent._schema()` (core/agent.py) genera già uno schema JSON per vincolare
-  l'output del modello (v3.1), ma non c'è ancora una validazione formale, condivisa e applicata
-  anche ai risultati/errori delle skill.
+- 🟡 JSON Schema validato: `TaskAgent._schema()` (core/agent.py) genera già uno schema JSON per
+  vincolare l'output del modello (v3.1, tool call). Aggiunto ora `core/schema_validation.py`, che
+  valida la busta **richiesta di chiarimento** (CONFIRMATION_REQUIRED/AUTH_REQUIRED:
+  `message`/`confirm_parameters`/`confirm_intent` opzionale) - l'UNICA struttura condivisa da
+  tutte le ~15 skill self-confirming (`core/risk.py` SELF_CONFIRMING_INTENTS, es.
+  `skills/delete_path.py`) prima che `JakeCore`/`TaskAgent` la consumino per mettere in pausa e
+  poi rieseguire l'azione. Collegata ai tre punti che leggono `result.data` di una skill per
+  costruire un'azione in sospeso (`JakeCore._execute_command`/`_finalize_pending_action` tramite
+  il nuovo `_safe_confirm_envelope`, e `TaskAgent.run()`): una busta malformata (campo mancante o
+  del tipo sbagliato, es. da una skill scritta male o auto-generata dalla fucina) non produce più
+  un "confermi?" senza messaggio vero o - peggio - dei `confirm_parameters` corrotti che
+  farebbero rieseguire l'azione con i parametri sbagliati dopo il sì, ma logga un avviso e
+  ripiega su un default sicuro (i parametri già noti, con il marcatore di conferma/
+  autenticazione forzato). Resta 🟡, non ✅: non copre risultato/errore/prova/undo per le altre
+  ~200 skill (ognuna con una propria forma di `data`, farlo per tutte è un progetto a sé), solo
+  la busta di conferma condivisa. Coperto da `tests/test_schema_validation.py` e da nuovi test
+  dedicati in `tests/test_jake_core_permissions.py`/`tests/test_agent.py`.
 - 🟡 `action_id`/idempotency key/prova post-condizione: `action_id` fatto (vedi sopra).
   `idempotency_key_of()` (`core/action_ledger.py`) aggiunge anche una chiave stabile per
   "stesso intent, stessi parametri" a ogni ricevuta (hash SHA-256 troncato, ordine dei parametri

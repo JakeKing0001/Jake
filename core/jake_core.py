@@ -28,6 +28,7 @@ from core.response_formatter import format_plan_outcome, format_skill_result
 from core.risk import needs_central_auth, needs_central_confirmation, risk_of
 from core.router import Router
 from core.scheduler import ReminderScheduler
+from core.schema_validation import validate_confirm_envelope
 from core.session_hooks import SessionHooks
 from core.session_recorder import SessionRecorder
 from core.skill_forge import SkillForge
@@ -649,16 +650,17 @@ class JakeCore:
         resolved, result, note = self._resolve_and_execute(command)
         if result is not None and result.error in ("CONFIRMATION_REQUIRED", "AUTH_REQUIRED"):
             reason = "auth_required" if result.error == "AUTH_REQUIRED" else "confirmation_required"
+            envelope = self._safe_confirm_envelope(resolved, result, reason)
             self.conversation_state.set_pending_action({
-                "intent": result.data.get("confirm_intent", resolved.intent),
-                "parameters": result.data.get("confirm_parameters", resolved.parameters),
+                "intent": envelope.get("confirm_intent", resolved.intent),
+                "parameters": envelope.get("confirm_parameters", resolved.parameters),
                 "reason": reason,
                 "text": text,
                 "trace_id": trace_id,  # F1: la ricevuta della conferma si correla a questa
             })
-            self._remember_exchange(text, resolved, result.data.get("message", ""))
+            self._remember_exchange(text, resolved, envelope.get("message", ""))
             self._log_action_outcome(trace_id, started, resolved.intent, resolved.parameters, result=reason)
-            return result.data.get("message", "Confermi questa azione?")
+            return envelope.get("message", "Confermi questa azione?")
 
         response = format_skill_result(resolved.intent, result, self.skill_registry)
         if note:
@@ -675,6 +677,29 @@ class JakeCore:
     # Un esito che non e' un vero fallimento da poter far ripartire (una conferma in attesa non
     # e' un bug), ne' un successo: session_recorder.record_failure() li ignora entrambi.
     _NOT_A_FAILURE = {"success", "confirmation_required", "auth_required"}
+
+    def _safe_confirm_envelope(self, intent: str, parameters: dict, result: SkillResult, reason: str) -> dict:
+        """Valida la busta CONFIRMATION_REQUIRED/AUTH_REQUIRED di una skill (F1, vedi
+        core/schema_validation.py) prima di fidarsene: un campo mancante o del tipo sbagliato in
+        una skill scritta male (o auto-generata dalla fucina, mai rivista da un umano prima di
+        essere confermata) non deve rompere in modo subdolo il ciclo conferma/esecuzione - un
+        "confermi?" senza messaggio vero, o peggio dei confirm_parameters malformati che
+        farebbero rieseguire l'azione con i parametri sbagliati dopo il si'. Se malformata, logga
+        un avviso e ripiega su un default sicuro (i parametri gia' noti, con il marcatore di
+        conferma/autenticazione forzato) invece di propagare qualcosa di inaffidabile."""
+        problems = validate_confirm_envelope(result.data)
+        if not problems:
+            return result.data
+        self.logger.warning(
+            "Busta di conferma malformata per %s: %s. Ripiego su un default sicuro.",
+            intent, "; ".join(problems),
+        )
+        marker = "authenticated" if reason == "auth_required" else "confirmed"
+        return {
+            "confirm_intent": intent,
+            "confirm_parameters": {**(parameters or {}), marker: True},
+            "message": f"Confermi: {self.describe_command(Command(intent, parameters))}?",
+        }
 
     def _log_action_outcome(self, trace_id: str, started: float, intent: str, parameters: dict, *, result: str) -> None:
         """Punto unico da cui _execute_command scrive in jake_actions.jsonl (F0: log strutturati
@@ -788,15 +813,16 @@ class JakeCore:
         # scritto -> "lo attivo?"): stessa gestione del percorso normale.
         if result is not None and result.error in ("CONFIRMATION_REQUIRED", "AUTH_REQUIRED"):
             reason = "auth_required" if result.error == "AUTH_REQUIRED" else "confirmation_required"
+            envelope = self._safe_confirm_envelope(action["intent"], action["parameters"], result, reason)
             self.conversation_state.set_pending_action({
-                "intent": result.data.get("confirm_intent", action["intent"]),
-                "parameters": result.data.get("confirm_parameters", action["parameters"]),
+                "intent": envelope.get("confirm_intent", action["intent"]),
+                "parameters": envelope.get("confirm_parameters", action["parameters"]),
                 "reason": reason,
                 "text": action.get("text", ""),
                 "trace_id": trace_id,
             })
             self._log_action_outcome(trace_id, started, action["intent"], action["parameters"], result=reason)
-            return result.data.get("message", "Confermi questa azione?")
+            return envelope.get("message", "Confermi questa azione?")
         outcome = "success" if (result is not None and result.success) else f"error:{result.error}" if result is not None else "no_result"
         self._log_action_outcome(trace_id, started, action["intent"], action["parameters"], result=outcome)
         response = format_skill_result(action["intent"], result, self.skill_registry)

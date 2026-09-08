@@ -244,6 +244,26 @@ class AuthRequiredPropagationTests(unittest.TestCase):
         self.assertEqual(outcome.pending_confirmation["kind"], "AUTH_REQUIRED")
         self.assertEqual(outcome.pending_confirmation["message"], "Serve la passphrase.")
 
+    def test_malformed_confirmation_envelope_falls_back_to_a_safe_default(self):
+        """F1 (core/schema_validation.py): una skill che dimentica message/confirm_parameters
+        non deve far crashare l'agente ne' propagare una busta inaffidabile - vedi anche
+        tests/test_schema_validation.py e tests/test_jake_core_permissions.py::
+        SafeConfirmEnvelopeTests per lo stesso principio sull'altro percorso."""
+        registry = FakeRegistry(add_note_results=[
+            SkillResult(success=False, data={}, error="CONFIRMATION_REQUIRED"),  # busta vuota
+        ])
+        client = ScriptedOllamaClient([
+            {"thought": "Aggiungo l'appunto", "action": {"intent": "ADD_NOTE", "parameters": {"text": "prova"}},
+             "final_answer": "", "ask_user": ""},
+        ])
+        outcome = _agent(registry, client).run("aggiungi un appunto rischioso")
+
+        self.assertIsNotNone(outcome.pending_confirmation)
+        self.assertTrue(outcome.pending_confirmation["message"])
+        self.assertEqual(
+            outcome.pending_confirmation["parameters"], {"text": "prova", "confirmed": True},
+        )
+
 
 class StructuredLoggingTests(unittest.TestCase):
     """F0: ogni passo dell'agente scrive un record in jake_actions.jsonl (core/logger.log_

@@ -19,6 +19,7 @@ from core.kill_switch import KillSwitch
 from core.logger import log_action, new_trace_id
 from core.ollama_client import OllamaClient, OllamaError
 from core.risk import risk_of
+from core.schema_validation import validate_confirm_envelope
 from core.session_recorder import SessionRecorder
 from core.skill_result import SkillResult
 
@@ -376,10 +377,25 @@ class TaskAgent:
                 step = AgentStep(intent=intent, parameters=parameters, thought=thought, result=result, attempts=attempts)
                 if result is not None and result.error in ("CONFIRMATION_REQUIRED", "AUTH_REQUIRED"):
                     outcome.steps.append(step)
+                    # F1: valida la busta prima di fidarsene (core/schema_validation.py) - una
+                    # skill che dimentica message/confirm_parameters non deve rompere in modo
+                    # subdolo il ciclo conferma/esecuzione, vedi core/jake_core.py._safe_confirm_
+                    # envelope per lo stesso principio sull'altro percorso (comando singolo).
+                    envelope_problems = validate_confirm_envelope(result.data)
+                    if envelope_problems:
+                        if self.logger:
+                            self.logger.warning(
+                                "Busta di conferma malformata per %s: %s. Ripiego su un default sicuro.",
+                                intent, "; ".join(envelope_problems),
+                            )
+                        marker = "authenticated" if result.error == "AUTH_REQUIRED" else "confirmed"
+                        envelope = {"confirm_parameters": {**parameters, marker: True}}
+                    else:
+                        envelope = result.data
                     outcome.pending_confirmation = {
                         "intent": intent,
-                        "parameters": result.data.get("confirm_parameters", parameters),
-                        "message": result.data.get("message", "Confermi questa azione?"),
+                        "parameters": envelope.get("confirm_parameters", parameters),
+                        "message": envelope.get("message", "Confermi questa azione?"),
                         # v5.4/5.5: distingue una conferma si'/no da un'autenticazione vera,
                         # cosi' JakeCore._run_agent puo' passare il tipo giusto di attesa
                         # (vedi conversation_state pending_action.reason).
