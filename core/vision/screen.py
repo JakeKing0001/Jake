@@ -76,3 +76,22 @@ def get_active_window_title() -> str | None:
         return None
     title = win32gui.GetWindowText(hwnd)
     return title or None
+
+
+def list_open_window_titles(max_results: int = 20) -> list[str]:
+    """Titoli di tutte le finestre visibili sul desktop, nell'ordine restituito da Windows
+    (che tende a rispecchiare lo z-order). Condivisa da LIST_OPEN_WINDOWS (skills/window_
+    layout.py) e da DesktopContextTracker (core/desktop_context.py, v3.5 World Context Engine)
+    invece di enumerare le finestre in due punti diversi con la stessa logica."""
+    import win32gui
+
+    titles = []
+
+    def callback(hwnd, _):
+        if win32gui.IsWindowVisible(hwnd):
+            title = win32gui.GetWindowText(hwnd)
+            if title:
+                titles.append(title)
+
+    win32gui.EnumWindows(callback, None)
+    return titles[:max_results]
