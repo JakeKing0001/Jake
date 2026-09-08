@@ -9,6 +9,12 @@ class MemoryManager:
 
     DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "jake_memory.db"
     MAX_HISTORY_ENTRIES = 200
+    # Soglia di similarita' coseno oltre la quale due ricordi sono considerati "la stessa cosa
+    # detta in un altro modo" (v3.4, fase Memory 2.0), non solo "argomento simile": 0.93 e'
+    # deliberatamente alto, per aggiornare "il mio compleanno e' il 5 marzo" -> "il mio
+    # compleanno e' il 5 di marzo" nello stesso ricordo, senza fondere due fatti diversi ma
+    # correlati (es. "mi piace il caffe'" e "mi piace il te'").
+    DEDUP_SIMILARITY_THRESHOLD = 0.93
 
     def __init__(self, db_path: Path = None):
         self.db_path = Path(db_path) if db_path else self.DEFAULT_DB_PATH
@@ -69,9 +75,20 @@ class MemoryManager:
         embedding: list = None,
         project: str = None,
     ) -> None:
-        """Salva o aggiorna un ricordo (upsert su key+category)."""
+        """Salva o aggiorna un ricordo (upsert su key+category). Se e' fornito un embedding e
+        un ricordo esistente nella stessa categoria/progetto e' semanticamente quasi identico
+        (v3.4, vedi DEDUP_SIMILARITY_THRESHOLD), aggiorna QUELLO invece di crearne uno nuovo con
+        una chiave diversa: altrimenti "il mio compleanno e' il 5 marzo" seguito da "ricordati
+        che compio gli anni il 5 di marzo" produrrebbe due ricordi separati per lo stesso fatto,
+        che invecchiando in modo indipendente potrebbero anche finire per contraddirsi."""
         now = self._now()
         embedding_json = json.dumps(embedding) if embedding else None
+
+        if embedding:
+            duplicate_key = self._find_duplicate_key(embedding, category, project, exclude_key=key)
+            if duplicate_key is not None:
+                key = duplicate_key
+
         self._connection.execute(
             """
             INSERT INTO memories (key, value, category, importance, created_at, updated_at, embedding, project)
@@ -87,10 +104,43 @@ class MemoryManager:
         )
         self._connection.commit()
 
+    def _find_duplicate_key(self, embedding: list, category: str, project: str, exclude_key: str) -> str | None:
+        """Chiave del ricordo esistente piu' simile semanticamente a embedding, nella stessa
+        categoria/progetto, se supera DEDUP_SIMILARITY_THRESHOLD. None se non c'e' nulla di
+        abbastanza simile (compreso il caso, normale, in cui exclude_key e' gia' quello giusto:
+        un upsert su una chiave identica non ha bisogno del dedup semantico)."""
+        from core.embedding_provider import EmbeddingProvider
+
+        clauses = ["embedding IS NOT NULL", "key != ?"]
+        params = [exclude_key]
+        if category:
+            clauses.append("category = ?")
+            params.append(category)
+        if project:
+            clauses.append("project = ?")
+            params.append(project)
+
+        rows = self._connection.execute(
+            f"SELECT key, embedding FROM memories WHERE {' AND '.join(clauses)}", params,
+        ).fetchall()
+
+        best_key, best_score = None, 0.0
+        for row in rows:
+            score = EmbeddingProvider.cosine_similarity(embedding, json.loads(row["embedding"]))
+            if score > best_score:
+                best_key, best_score = row["key"], score
+        return best_key if best_score >= self.DEDUP_SIMILARITY_THRESHOLD else None
+
     def recall(
         self, key: str = None, category: str = None, query: str = None, project: str = None, limit: int = 5,
+        since: str = None, until: str = None,
     ) -> list[dict]:
-        """Recupera ricordi per chiave esatta e/o ricerca libera su chiave/valore."""
+        """Recupera ricordi per chiave esatta e/o ricerca libera su chiave/valore.
+
+        since/until (v3.4, query temporali): stringhe ISO 8601, confrontate su updated_at (il
+        campo che riflette quando il ricordo e' stato detto o corretto l'ultima volta, non solo
+        quando e' stato creato la prima volta). Il confronto testuale funziona perche' ISO 8601
+        e' ordinabile lessicograficamente."""
         clauses = []
         params = []
         if key:
@@ -105,6 +155,12 @@ class MemoryManager:
         if query:
             clauses.append("(key LIKE ? OR value LIKE ?)")
             params.extend([f"%{query}%", f"%{query}%"])
+        if since:
+            clauses.append("updated_at >= ?")
+            params.append(since)
+        if until:
+            clauses.append("updated_at <= ?")
+            params.append(until)
 
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = self._connection.execute(
