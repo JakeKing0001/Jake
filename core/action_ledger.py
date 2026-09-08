@@ -32,6 +32,7 @@ new_action_id = new_trace_id
 AUTHORIZATION_NONE = "none"
 AUTHORIZATION_CONFIRMED = "confirmed"
 AUTHORIZATION_PASSPHRASE = "passphrase"
+AUTHORIZATION_WINDOWS_HELLO = "windows_hello"
 AUTHORIZATION_PENDING = "pending"
 AUTHORIZATION_BLOCKED = "blocked"
 
@@ -39,13 +40,19 @@ AUTHORIZATION_BLOCKED = "blocked"
 def authorization_of(result: str, parameters: dict) -> str:
     """Deriva lo stato di autorizzazione dagli stessi segnali gia' usati altrove (core/risk.py,
     JakeCore._resolve_and_execute), invece di chiedere a chi registra la ricevuta di dichiararlo
-    a mano - due fonti diverse per lo stesso fatto potrebbero disallinearsi in silenzio."""
+    a mano - due fonti diverse per lo stesso fatto potrebbero disallinearsi in silenzio.
+
+    authenticated_via (F1) distingue Windows Hello dalla passphrase quando entrambi sono attivi
+    (core/auth_gate.py): "passphrase" resta il default per compatibilita' con le ricevute scritte
+    prima che questo campo esistesse (authenticated=True senza authenticated_via)."""
     parameters = parameters or {}
     if result in ("blocked_by_policy", "policy_blocked"):
         return AUTHORIZATION_BLOCKED
     if result in ("confirmation_required", "auth_required"):
         return AUTHORIZATION_PENDING
     if parameters.get("authenticated"):
+        if parameters.get("authenticated_via") == "windows_hello":
+            return AUTHORIZATION_WINDOWS_HELLO
         return AUTHORIZATION_PASSPHRASE
     if parameters.get("confirmed"):
         return AUTHORIZATION_CONFIRMED
