@@ -11,3 +11,7 @@ data/
 
 # Skill generate da Jake (specifiche di questo PC)
 plugins/learned_*.py
+
+# HUD nativo (v4.9.x): output di build C++/CMake, rigenerabile con cmake --build
+hud/native/build/
+hud/native/build2/
