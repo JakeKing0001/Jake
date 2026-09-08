@@ -1,12 +1,11 @@
-"""Test unitari per il click "a vista" (skills/screen_click.py) e il nuovo segnale di
-cambiamento visivo dopo il click (v3.6, Vision 2.0). Nessun vero mouse/schermo: pyautogui e le
-funzioni di cattura schermo sono mockate."""
+"""Test unitari per il matching testo-schermo (skills/screen_click.py) e per come CLICK_TEXT usa
+il ComputerAgent (v3.7, Computer Use Engine: vedi tests/test_computer_agent.py per il controller
+stesso). Nessun vero mouse/schermo."""
 import unittest
 from unittest import mock
 
-from PIL import Image
-
-from skills.screen_click import ClickTextSkill, _click_and_measure, find_text_on_screen
+from core.computer_agent import ComputerActionResult
+from skills.screen_click import ClickTextSkill, find_text_on_screen
 
 WORDS = [
     {"text": "Accedi", "line": 0, "x": 100, "y": 200, "w": 60, "h": 20},
@@ -36,62 +35,73 @@ class FindTextOnScreenTests(unittest.TestCase):
         self.assertIsNone(find_text_on_screen("Accedi", []))
 
 
-class ClickAndMeasureTests(unittest.TestCase):
-    def test_reports_visible_change(self):
-        before = Image.new("RGB", (10, 10), (0, 0, 0))
-        after = Image.new("RGB", (10, 10), (255, 255, 255))
-        with mock.patch("core.vision.screen.capture_screenshot_image", side_effect=[before, after]), \
-             mock.patch("pyautogui.click") as click, mock.patch("time.sleep"):
-            clicked, extra = _click_and_measure(5, 5)
-        click.assert_called_once_with(5, 5, button="left")
-        self.assertTrue(clicked)
-        self.assertTrue(extra["screen_changed"])
-        self.assertGreater(extra["change_ratio"], 0.9)
+class FakeComputerAgent:
+    """Doppio finto di ComputerAgent (v3.7): la skill gli delega tutto, quindi basta controllare
+    che le passi i parametri giusti e traduca il ComputerActionResult in un SkillResult coerente."""
 
-    def test_reports_no_visible_change(self):
-        same = Image.new("RGB", (10, 10), (0, 0, 0))
-        with mock.patch("core.vision.screen.capture_screenshot_image", side_effect=[same, same.copy()]), \
-             mock.patch("pyautogui.click"), mock.patch("time.sleep"):
-            clicked, extra = _click_and_measure(5, 5)
-        self.assertTrue(clicked)
-        self.assertFalse(extra["screen_changed"])
+    def __init__(self, words=WORDS, click_result=None):
+        self.words = words
+        self.click_result = click_result or ComputerActionResult(success=True, x=0, y=0, matched="", verified=True, change_ratio=0.5)
+        self.click_calls = []
 
-    def test_pyautogui_failure_is_reported_but_never_raises(self):
-        with mock.patch("core.vision.screen.capture_screenshot_image", return_value=Image.new("RGB", (10, 10))), \
-             mock.patch("pyautogui.click", side_effect=RuntimeError("no display")):
-            clicked, extra = _click_and_measure(5, 5)
-        self.assertFalse(clicked)
-        self.assertEqual(extra, {})
+    def observe(self):
+        return self.words
 
-    def test_screenshot_failure_still_allows_the_click_to_succeed(self):
-        """Il segnale di cambiamento visivo e' un extra: se la cattura fallisce (permessi,
-        ambiente senza schermo) il click deve comunque essere riportato come riuscito, solo
-        senza screen_changed/change_ratio nei dati."""
-        with mock.patch("core.vision.screen.capture_screenshot_image", side_effect=RuntimeError("no screen")), \
-             mock.patch("pyautogui.click") as click:
-            clicked, extra = _click_and_measure(5, 5)
-        click.assert_called_once()
-        self.assertTrue(clicked)
-        self.assertEqual(extra, {})
+    def locate_text(self, text, words=None):
+        return find_text_on_screen(text, words if words is not None else self.words)
+
+    def click_point(self, x, y, button="left", matched=None):
+        self.click_calls.append((x, y, button, matched))
+        return self.click_result
 
 
 class ClickTextSkillTests(unittest.TestCase):
-    def test_successful_click_includes_change_signal(self):
-        skill = ClickTextSkill()
-        with mock.patch("core.vision.screen.read_screen_words", return_value=WORDS), \
-             mock.patch("skills.screen_click._click_and_measure", return_value=(True, {"screen_changed": True, "change_ratio": 0.5})):
-            result = skill.execute({"text": "Accedi"})
+    def test_successful_click_reports_the_verification_signal(self):
+        agent = FakeComputerAgent(click_result=ComputerActionResult(
+            success=True, x=130, y=210, matched="Accedi", verified=True, change_ratio=0.42,
+        ))
+        skill = ClickTextSkill(computer_agent=agent)
+
+        result = skill.execute({"text": "Accedi"})
+
         self.assertTrue(result.success)
         self.assertTrue(result.data["screen_changed"])
+        self.assertEqual(result.data["change_ratio"], 0.42)
+        self.assertEqual(agent.click_calls, [(130, 210, "left", "Accedi")])
 
     def test_text_not_found_never_attempts_a_click(self):
-        skill = ClickTextSkill()
-        with mock.patch("core.vision.screen.read_screen_words", return_value=WORDS), \
-             mock.patch("skills.screen_click._click_and_measure") as click_and_measure:
-            result = skill.execute({"text": "Non c'e'"})
+        agent = FakeComputerAgent(words=WORDS)
+        skill = ClickTextSkill(computer_agent=agent)
+
+        result = skill.execute({"text": "Non c'e'"})
+
         self.assertFalse(result.success)
         self.assertEqual(result.error, "NOT_FOUND")
-        click_and_measure.assert_not_called()
+        self.assertEqual(agent.click_calls, [])
+
+    def test_ocr_unavailable_is_reported(self):
+        agent = FakeComputerAgent(words=None)
+        skill = ClickTextSkill(computer_agent=agent)
+
+        result = skill.execute({"text": "Accedi"})
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "OCR_UNAVAILABLE")
+
+    def test_click_failure_is_propagated(self):
+        agent = FakeComputerAgent(click_result=ComputerActionResult(success=False, error="OPERATION_FAILED"))
+        skill = ClickTextSkill(computer_agent=agent)
+
+        result = skill.execute({"text": "Accedi"})
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "OPERATION_FAILED")
+
+    def test_missing_text_parameter(self):
+        skill = ClickTextSkill(computer_agent=FakeComputerAgent())
+        result = skill.execute({})
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "MISSING_PARAMETERS")
 
 
 if __name__ == "__main__":
