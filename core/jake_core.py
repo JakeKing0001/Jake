@@ -14,6 +14,7 @@ from core.nlu.retriever import CapabilityRetriever
 from core.ollama_client import OllamaClient
 from core.plugin_loader import load_plugins
 from core.response_formatter import format_plan_outcome, format_skill_result
+from core.risk import needs_central_confirmation
 from core.router import Router
 from core.scheduler import ReminderScheduler
 from core.session_hooks import SessionHooks
@@ -149,6 +150,16 @@ class JakeCore:
             ("DELETE_CREATED_SKILL", DeleteCreatedSkillSkill(self.skill_forge, self.learning)),
         ):
             self.skill_registry.register_skill(intent, skill)
+
+        # Modello di permessi centralizzato (v3.2, vedi core/risk.py): ogni skill DESTRUCTIVE o
+        # ADMIN che non gestisce gia' da sola una conferma su misura finisce qui automaticamente,
+        # invece di dover essere elencata a mano in always_confirm_intents. self.always_confirm_
+        # intents e' lo STESSO oggetto set gia' passato per riferimento a trigger_scheduler
+        # (costruito sopra, prima che tutte le skill fossero registrate): aggiornarlo qui via
+        # .update() lo aggiorna anche li'.
+        self.always_confirm_intents.update(
+            intent for intent in self.skill_registry.skills if needs_central_confirmation(intent)
+        )
 
         # Indici del recupero semantico: costruiti dopo che TUTTE le skill sono registrate.
         self.retriever.refresh()
@@ -322,8 +333,23 @@ class JakeCore:
         prima dell'esecuzione (es. OPEN_URL su un nome di app installata -> OPEN_APP), e se
         fallisce prova un'alternativa sensata o propone un'azione da confermare, invece di
         fermarsi al primo 'non trovato'. Restituisce (comando davvero eseguito, risultato, nota
-        da anteporre alla risposta o None)."""
+        da anteporre alla risposta o None). Questo e' anche il punto in cui entra il modello di
+        permessi centralizzato (v3.2): un intent in always_confirm_intents (config manuale +
+        classificazione del rischio, vedi core/risk.py) chiede conferma qui, PRIMA di eseguire
+        davvero, invece che solo nel percorso a comando singolo di JakeCore._execute_command.
+        Questo copre anche l'agente a passi (core/agent.py), che esegue le skill passando da
+        qui e non da _execute_command."""
         resolved = fallbacks.pre_execution_rewrite(command, self.skill_registry)
+        if resolved.intent in self.always_confirm_intents and not (resolved.parameters or {}).get("confirmed"):
+            return resolved, SkillResult(
+                success=False,
+                data={
+                    "message": f"Confermi: {self.describe_command(resolved)}?",
+                    "confirm_parameters": {**(resolved.parameters or {}), "confirmed": True},
+                    "confirm_intent": resolved.intent,
+                },
+                error="CONFIRMATION_REQUIRED",
+            ), None
         result = self.skill_registry.execute(resolved.intent, resolved.parameters)
         if result is not None and not result.success and result.error != "CONFIRMATION_REQUIRED":
             alt_command, note = fallbacks.alternative_for(resolved, result, self.skill_registry)
@@ -405,13 +431,6 @@ class JakeCore:
         if skill is None:
             return f"Skill non trovata per {intent}"
 
-        if intent in self.always_confirm_intents:
-            self.conversation_state.set_pending_action({
-                "intent": intent, "parameters": command.parameters, "reason": "policy_confirmation_required",
-                "text": text,
-            })
-            return f"La configurazione richiede conferma per {intent}. Confermi?"
-
         resolved, result, note = self._resolve_and_execute(command)
         if result is not None and result.error == "CONFIRMATION_REQUIRED":
             self.conversation_state.set_pending_action({
@@ -454,7 +473,9 @@ class JakeCore:
         plan = self.planner_provider.build_plan(text)
         if plan is None or len(plan.steps) < 2:
             return self.NO_PLAN
-        outcome = self.plan_executor.execute(plan)
+        outcome = self.plan_executor.execute(
+            plan, blocked_intents=self.blocked_intents, always_confirm_intents=self.always_confirm_intents,
+        )
         response = format_plan_outcome(outcome, len(plan.steps), self.skill_registry)
         self._remember_exchange(text, Command("PLAN", {"steps": len(plan.steps)}), response)
         return response
