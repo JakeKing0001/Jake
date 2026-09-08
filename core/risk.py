@@ -277,6 +277,12 @@ SKILL_RISK: dict[str, RiskLevel] = {
     "STOP_TALKING": RiskLevel.READ_ONLY,
     "PAUSE_LISTENING": RiskLevel.LOCAL_REVERSIBLE,
     "SET_PRIVATE_MODE": RiskLevel.LOCAL_REVERSIBLE,
+    # LOCAL_REVERSIBLE apposta, non piu' su: un kill switch che chiedesse conferma prima di
+    # fermare qualcosa (needs_central_confirmation scatta da DESTRUCTIVE in su, vedi sopra)
+    # sarebbe inutile in un'emergenza - fermare/riavviare e' sempre annullabile, l'una con
+    # l'altra (F1, vedi skills/kill_switch.py).
+    "KILL_SWITCH": RiskLevel.LOCAL_REVERSIBLE,
+    "RESET_KILL_SWITCH": RiskLevel.LOCAL_REVERSIBLE,
     "START_DICTATION": RiskLevel.LOCAL_REVERSIBLE,
     "STOP_DICTATION": RiskLevel.LOCAL_REVERSIBLE,
     "CREATE_SKILL": RiskLevel.ADMIN,  # la Skill Forge scrive ed espone codice eseguibile nuovo

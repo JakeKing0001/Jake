@@ -216,5 +216,60 @@ class ActionLedgerWiringTests(unittest.TestCase):
         self.assertEqual(ledger.record.call_args.args[0].requested_by, "user")
 
 
+class KillSwitchStopsThePlanTests(unittest.TestCase):
+    """F1 (vedi core/kill_switch.py e tests/test_agent.py::KillSwitchStopsTheRunTests, stesso
+    principio per l'altro esecutore): il flag e' controllato solo tra un passo e il successivo."""
+
+    def test_activating_during_step_one_stops_before_step_two_and_rolls_back(self):
+        target = str(Path(tempfile.gettempdir()) / "jake_test_plan_kill_9231.txt")
+        self.addCleanup(lambda: Path(target).unlink(missing_ok=True))
+
+        class KillingRegistry(FakeRegistry):
+            """Simula il kill switch premuto MENTRE il passo 1 e' in corso: si attiva come
+            effetto collaterale dell'esecuzione del primo passo, non prima."""
+
+            def __init__(self, kill_switch):
+                super().__init__()
+                self.kill_switch = kill_switch
+
+            def execute(self, intent, parameters=None):
+                result = super().execute(intent, parameters)
+                self.kill_switch.activate()
+                return result
+
+        from core.kill_switch import KillSwitch
+        kill_switch = KillSwitch()
+        registry = KillingRegistry(kill_switch)
+        plan = Plan(steps=[
+            PlanStep(intent="CREATE_PATH", parameters={"path": target}),
+            PlanStep(intent="ADD_NOTE", parameters={"text": "non deve mai arrivare qui"}),
+        ])
+        executor = PlanExecutor(registry)
+        executor.kill_switch = kill_switch
+
+        outcome = executor.execute(plan)
+
+        # CREATE_PATH (passo 1) poi DELETE_PATH (il rollback che lo annulla): ADD_NOTE (passo 2)
+        # non compare mai, il kill switch l'ha bloccato prima che l'esecutore ci arrivasse.
+        self.assertEqual([call[0] for call in registry.calls], ["CREATE_PATH", "DELETE_PATH"])
+        self.assertEqual(outcome.stopped_step.result.error, "KILLED")
+        self.assertEqual(len(outcome.rolled_back), 1)
+        self.assertFalse(Path(target).exists(), "il rollback doveva cancellare il file creato dal passo 1")
+
+    def test_already_active_before_the_plan_starts_executes_no_step(self):
+        from core.kill_switch import KillSwitch
+        kill_switch = KillSwitch()
+        kill_switch.activate()
+        registry = FakeRegistry()
+        plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
+        executor = PlanExecutor(registry)
+        executor.kill_switch = kill_switch
+
+        outcome = executor.execute(plan)
+
+        self.assertEqual(outcome.stopped_step.result.error, "KILLED")
+        self.assertEqual(registry.calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()
