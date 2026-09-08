@@ -2,17 +2,24 @@ import threading
 from collections import deque
 from datetime import datetime
 
+# Anteprima appunti troncata (v3.5, World Context Engine): abbastanza per far capire al modello
+# "di cosa sta parlando" un "riassumi questo"/"traduci questo" detto senza specificare cosa,
+# ma non tanto da gonfiare ogni prompt con un blocco di testo intero copiato per altri motivi.
+CLIPBOARD_PREVIEW_MAX_CHARS = 120
+
 
 class DesktopContextTracker:
-    """Tiene traccia, in background e a basso costo, delle finestre/app usate di recente
-    (v2.0: contestualizzazione "leggera" del desktop). Solo il titolo della finestra attiva,
-    controllato a intervalli: nessuna lettura continua dello schermo/OCR (troppo costosa
-    e invasiva per girare sempre)."""
+    """Tiene traccia, in background e a basso costo, di cosa sta facendo l'utente sul desktop
+    in questo momento (v2.0 finestra attiva; v3.5 World Context Engine: anche le finestre
+    aperte e un'anteprima degli appunti). Letture leggere a intervalli, mai continue (niente
+    OCR/screenshot qui: troppo costoso e invasivo per girare sempre in background)."""
 
     def __init__(self, poll_seconds: float = 3.0, history_size: int = 10):
         self.poll_seconds = poll_seconds
         self._history = deque(maxlen=history_size)
         self._current_title = None
+        self._open_windows: list[str] = []
+        self._clipboard_preview: str | None = None
         self._lock = threading.Lock()
         self._thread = None
         self._stop_event = threading.Event()
@@ -30,20 +37,54 @@ class DesktopContextTracker:
             self._thread.join(timeout=2)
 
     def _run(self) -> None:
+        while not self._stop_event.is_set():
+            self._poll_active_window()
+            self._poll_open_windows()
+            self._poll_clipboard()
+            self._stop_event.wait(self.poll_seconds)
+
+    def _poll_active_window(self) -> None:
         from core.vision.screen import get_active_window_title
 
-        while not self._stop_event.is_set():
+        try:
+            title = get_active_window_title()
+        except Exception:
+            return
+        if title and title != self._current_title:
+            with self._lock:
+                self._current_title = title
+                self._history.append({"title": title, "at": datetime.now()})
+
+    def _poll_open_windows(self) -> None:
+        from core.vision.screen import list_open_window_titles
+
+        try:
+            titles = list_open_window_titles()
+        except Exception:
+            return
+        with self._lock:
+            self._open_windows = titles
+
+    def _poll_clipboard(self) -> None:
+        try:
+            import win32clipboard
+
+            win32clipboard.OpenClipboard()
             try:
-                title = get_active_window_title()
-            except Exception:
-                title = None
+                text = win32clipboard.GetClipboardData(win32clipboard.CF_UNICODETEXT)
+            finally:
+                win32clipboard.CloseClipboard()
+        except Exception:
+            text = None
 
-            if title and title != self._current_title:
-                with self._lock:
-                    self._current_title = title
-                    self._history.append({"title": title, "at": datetime.now()})
-
-            self._stop_event.wait(self.poll_seconds)
+        preview = None
+        if text and text.strip():
+            stripped = text.strip().replace("\n", " ")
+            preview = stripped[:CLIPBOARD_PREVIEW_MAX_CHARS]
+            if len(stripped) > CLIPBOARD_PREVIEW_MAX_CHARS:
+                preview += "…"
+        with self._lock:
+            self._clipboard_preview = preview
 
     def get_current_window(self) -> str | None:
         with self._lock:
@@ -63,9 +104,24 @@ class DesktopContextTracker:
                 break
         return unique
 
+    def get_open_windows(self) -> list[str]:
+        with self._lock:
+            return list(self._open_windows)
+
+    def get_clipboard_preview(self) -> str | None:
+        with self._lock:
+            return self._clipboard_preview
+
     def context_summary(self) -> str:
-        """Riga di contesto da iniettare nei prompt di sistema di Ollama/Planner."""
+        """Riga di contesto da iniettare nei prompt di sistema di Ollama/Planner/Agente."""
+        parts = []
         recent = self.get_recent_windows()
-        if not recent:
-            return ""
-        return "Finestre/app usate di recente sul desktop: " + "; ".join(recent)
+        if recent:
+            parts.append("Finestre/app usate di recente sul desktop: " + "; ".join(recent))
+        open_windows = self.get_open_windows()
+        if open_windows:
+            parts.append("Finestre aperte ora: " + "; ".join(open_windows[:8]))
+        clipboard = self.get_clipboard_preview()
+        if clipboard:
+            parts.append(f'Appunti: "{clipboard}"')
+        return " | ".join(parts)

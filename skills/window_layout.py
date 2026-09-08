@@ -12,20 +12,12 @@ class ListOpenWindowsSkill:
     MAX_RESULTS = 20
 
     def execute(self, parameters: dict = None):
-        import win32gui
+        from core.vision.screen import list_open_window_titles
 
-        titles = []
-
-        def callback(hwnd, _):
-            if win32gui.IsWindowVisible(hwnd):
-                title = win32gui.GetWindowText(hwnd)
-                if title:
-                    titles.append(title)
-
-        win32gui.EnumWindows(callback, None)
+        titles = list_open_window_titles(self.MAX_RESULTS)
         if not titles:
             return SkillResult(success=False, data={}, error="NOT_FOUND")
-        return SkillResult(success=True, data={"titles": titles[:self.MAX_RESULTS]})
+        return SkillResult(success=True, data={"titles": titles})
 
 
 class MaximizeWindowSkill:
