@@ -1,8 +1,12 @@
 # HUD in vetro e voce neurale (F0, ex Jake 3.0): PySide6 per l'overlay Qt, edge-tts per la voce
 # online, pycaw/comtypes per il volume esatto via CoreAudio, numpy per l'indice semantico usato
 # anche fuori dall'HUD (core/nlu/). requirements/gui.txt copre invece la tray icon legacy.
+# numpy 2.4.6, non l'ultima disponibile (2.5.x): 2.5.0+ richiede Python >=3.12 (vedi PyPI,
+# "Requires-Python"), e la CI (F0) testa anche 3.11 - trovato da un run reale della CI che ha
+# rifiutato numpy==2.5.2 su Python 3.11 con "No matching distribution found", non da una
+# verifica manuale. 2.4.6 e' l'ultima versione che supporta ancora 3.11.
 PySide6==6.11.2
 edge-tts==7.2.8
 pycaw==20251023
 comtypes==1.4.16
-numpy==2.5.2
+numpy==2.4.6
