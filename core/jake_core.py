@@ -30,7 +30,8 @@ from core.trigger_scheduler import TriggerScheduler
 from skills.learn import CorrectLastSkill, ForgetLearnedSkill, LearnCommandSkill, ListLearnedSkill
 from skills.model_control import ListModelsSkill, SetModelSkill
 from skills.session_control import (
-    HelpSkill, PauseListeningSkill, RepeatLastSkill, StartDictationSkill, StopDictationSkill, StopTalkingSkill,
+    HelpSkill, PauseListeningSkill, PrivateModeSkill, RepeatLastSkill, StartDictationSkill, StopDictationSkill,
+    StopTalkingSkill,
 )
 from skills.notification_mode import GetNotificationModeSkill, SetNotificationModeSkill
 from skills.skill_forge_skills import CreateSkillSkill, DeleteCreatedSkillSkill, ListCreatedSkillsSkill
@@ -53,6 +54,12 @@ class JakeCore:
         # coda per dopo. Creato presto: sia lo scheduler dei promemoria sia il trigger scheduler
         # sia il system advisor, costruiti piu' sotto, notificano gia' passando da qui.
         self.notification_center = NotificationCenter()
+
+        # Modalita' privata (v5.6, Privacy Engine): quando attiva, answer() non scrive lo
+        # scambio ne' nella memoria a lungo termine ne' nel log operativo (vedi answer()). Non
+        # e' salvata su disco: riparte sempre disattivata a ogni avvio di Jake, cosi' non puo'
+        # restare attiva per sbaglio senza che l'utente se ne accorga in una sessione successiva.
+        self.private_mode = False
 
         # Skill/plugin installabili (v2.0): un file .py in plugins/ con una funzione
         # register(registry) diventa una capacita' di Jake senza toccare il core.
@@ -192,6 +199,7 @@ class JakeCore:
             ("HELP", HelpSkill(self)),
             ("STOP_TALKING", StopTalkingSkill(self)),
             ("PAUSE_LISTENING", PauseListeningSkill(self)),
+            ("SET_PRIVATE_MODE", PrivateModeSkill(self)),
             ("START_DICTATION", StartDictationSkill(self)),
             ("STOP_DICTATION", StopDictationSkill(self)),
             ("CREATE_SKILL", CreateSkillSkill(self.skill_forge)),
@@ -301,20 +309,28 @@ class JakeCore:
 
         if response is None:
             response = ""
+        # La cronologia in RAM (self.conversation_state) resta attiva anche in modalita' privata
+        # (v5.6, Privacy Engine): serve alla sessione corrente per pronomi/riferimenti e sparisce
+        # comunque al riavvio. Cio' che la modalita' privata sospende e' la scrittura su DISCO,
+        # sia nella memoria a lungo termine sia nel log operativo: uno scambio in modalita'
+        # privata non deve lasciare traccia persistente da nessuna parte.
         self.conversation_state.add_turn("user", text)
-        self.memory_manager.log_turn("user", text)
         if response != self.EXIT_SENTINEL:
             self.conversation_state.add_turn("jake", response)
-            self.memory_manager.log_turn("jake", response)
             if response:
                 self.last_response = response
-        if raw_text.strip().lower() != text:
-            self.logger.info("Tu: %s (normalizzato da: %s) | Jake: %s", text, raw_text.strip(), response)
+        if self.private_mode:
+            self.logger.info("Scambio in modalità privata: non registrato.")
         else:
-            self.logger.info("Tu: %s | Jake: %s", text, response)
-
-        # No-op finche' la cronologia resta sotto soglia: il riassunto scatta solo occasionalmente.
-        self.memory_manager.summarize_old_history(self.context_summarizer)
+            self.memory_manager.log_turn("user", text)
+            if response != self.EXIT_SENTINEL:
+                self.memory_manager.log_turn("jake", response)
+            if raw_text.strip().lower() != text:
+                self.logger.info("Tu: %s (normalizzato da: %s) | Jake: %s", text, raw_text.strip(), response)
+            else:
+                self.logger.info("Tu: %s | Jake: %s", text, response)
+            # No-op finche' la cronologia resta sotto soglia: il riassunto scatta solo occasionalmente.
+            self.memory_manager.summarize_old_history(self.context_summarizer)
         return response
 
     def resolve_command(self, text: str) -> Command:
