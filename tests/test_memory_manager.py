@@ -74,5 +74,86 @@ class TemporalQueryTests(MemoryManagerTestCase):
         )
 
 
+class KnowledgeGraphTests(MemoryManagerTestCase):
+    """v4.4, Personal Knowledge Graph: link()/related()/unlink()."""
+
+    def test_related_returns_linked_memory_with_its_current_value(self):
+        self.manager.remember("Mario", "un collega")
+        self.manager.remember("Acme", "un'azienda di consegne")
+        self.manager.link("Mario", "fact", "lavora per", "Acme", "fact")
+
+        related = self.manager.related("Mario", "fact")
+
+        self.assertEqual(len(related), 1)
+        self.assertEqual(related[0], {"predicate": "lavora per", "key": "Acme", "category": "fact", "value": "un'azienda di consegne"})
+
+    def test_related_with_no_links_is_empty(self):
+        self.manager.remember("Mario", "un collega")
+        self.assertEqual(self.manager.related("Mario", "fact"), [])
+
+    def test_related_can_filter_by_predicate(self):
+        self.manager.remember("Mario", "un collega")
+        self.manager.remember("Acme", "un'azienda")
+        self.manager.remember("Torino", "una citta'")
+        self.manager.link("Mario", "fact", "lavora per", "Acme", "fact")
+        self.manager.link("Mario", "fact", "vive a", "Torino", "fact")
+
+        self.assertEqual([r["key"] for r in self.manager.related("Mario", "fact", predicate="vive a")], ["Torino"])
+
+    def test_related_reflects_a_value_updated_after_linking(self):
+        self.manager.remember("Mario", "un collega")
+        self.manager.remember("Acme", "un'azienda piccola")
+        self.manager.link("Mario", "fact", "lavora per", "Acme", "fact")
+        self.manager.remember("Acme", "un'azienda grande ora")  # aggiorna lo stesso ricordo
+
+        related = self.manager.related("Mario", "fact")
+        self.assertEqual(related[0]["value"], "un'azienda grande ora")
+
+    def test_forgetting_the_object_also_removes_the_incoming_edge(self):
+        """forget() ripulisce ogni arco che tocca la chiave dimenticata, sia come soggetto sia
+        come oggetto: un grafo senza archi che puntano a un nodo ormai cancellato."""
+        self.manager.remember("Mario", "un collega")
+        self.manager.remember("Acme", "un'azienda")
+        self.manager.link("Mario", "fact", "lavora per", "Acme", "fact")
+        self.manager.forget("Acme")
+
+        self.assertEqual(self.manager.related("Mario", "fact"), [])
+
+    def test_related_shows_no_value_for_an_edge_pointing_to_a_key_that_no_longer_exists(self):
+        """Difesa indipendente da forget(): related() non deve mai sollevare un errore se
+        l'oggetto di un arco non esiste piu' per qualunque motivo, solo restituire value=None."""
+        self.manager.remember("Mario", "un collega")
+        self.manager.link("Mario", "fact", "lavora per", "Acme", "fact")  # 'Acme' mai salvato
+
+        related = self.manager.related("Mario", "fact")
+        self.assertEqual(related, [{"predicate": "lavora per", "key": "Acme", "category": "fact", "value": None}])
+
+    def test_forgetting_the_subject_removes_its_outgoing_links(self):
+        self.manager.remember("Mario", "un collega")
+        self.manager.remember("Acme", "un'azienda")
+        self.manager.link("Mario", "fact", "lavora per", "Acme", "fact")
+        self.manager.forget("Mario")
+
+        self.assertEqual(self.manager.related("Mario", "fact"), [])
+
+    def test_unlink_removes_the_relation(self):
+        self.manager.remember("Mario", "un collega")
+        self.manager.remember("Acme", "un'azienda")
+        self.manager.link("Mario", "fact", "lavora per", "Acme", "fact")
+
+        removed = self.manager.unlink("Mario", "fact", "lavora per", "Acme", "fact")
+
+        self.assertTrue(removed)
+        self.assertEqual(self.manager.related("Mario", "fact"), [])
+
+    def test_duplicate_link_is_a_no_op(self):
+        self.manager.remember("Mario", "un collega")
+        self.manager.remember("Acme", "un'azienda")
+        self.manager.link("Mario", "fact", "lavora per", "Acme", "fact")
+        self.manager.link("Mario", "fact", "lavora per", "Acme", "fact")
+
+        self.assertEqual(len(self.manager.related("Mario", "fact")), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

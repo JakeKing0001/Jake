@@ -49,6 +49,7 @@ from skills.browser_search import SearchInBrowserSkill, PlayMediaSkill
 from skills.remember import RememberSkill
 from skills.recall import RecallSkill
 from skills.forget import ForgetSkill
+from skills.link_memory import LinkMemorySkill
 from skills.notes import AddNoteSkill, ListNotesSkill, SearchNotesSkill, ExportNotesSkill, ClearNotesSkill
 from skills.todo import AddTodoSkill, ListTodosSkill, CompleteTodoSkill, DeleteTodoSkill
 
@@ -204,6 +205,7 @@ def build_memory_notes_todo_skills(memory_manager, embedding_provider, todo_mana
         "REMEMBER": RememberSkill(memory_manager, embedding_provider),
         "RECALL": RecallSkill(memory_manager, embedding_provider),
         "FORGET": ForgetSkill(memory_manager),
+        "LINK_MEMORY": LinkMemorySkill(memory_manager),
         "ADD_NOTE": AddNoteSkill(),
         "LIST_NOTES": ListNotesSkill(),
         "SEARCH_NOTES": SearchNotesSkill(),

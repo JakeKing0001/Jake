@@ -112,6 +112,8 @@ def _format_error(intent: str, result: SkillResult) -> str:
             return f"Non trovo '{data.get('text', '')}' sullo schermo."
         if intent == "DELETE_CREATED_SKILL":
             return f"Non ho nessuna capacità creata da me che corrisponda a '{data.get('name', '')}'."
+        if intent == "LINK_MEMORY":
+            return f"Non trovo nessun ricordo chiamato '{data.get('key', '')}': salvalo prima con REMEMBER."
         return _NOT_FOUND_BY_INTENT.get(intent, "Non ho trovato nulla.")
     if error == "INVALID_TIME":
         return f"'{data.get('at_time', '')}' non è un orario valido (usa HH:MM)."
@@ -200,10 +202,22 @@ def _format_success(intent: str, result: SkillResult, registry=None) -> str | No
     if intent == "REMEMBER":
         return f"Ok, ricorderò che {data['key']} è {data['value']}."
     if intent == "RECALL":
-        formatted = "; ".join(f"{entry['key']}: {entry['value']}" for entry in data["results"])
+        def _entry_line(entry: dict) -> str:
+            line = f"{entry['key']}: {entry['value']}"
+            related = entry.get("related") or []
+            if related:
+                # Un salto nel grafo di conoscenza personale (v4.4): mostra anche cosa e'
+                # collegato a questo ricordo, senza dover fare una RECALL separata per scoprirlo.
+                extra = "; ".join(f"{r['predicate']} {r['key']}" for r in related if r.get("value") is not None)
+                if extra:
+                    line += f" ({extra})"
+            return line
+        formatted = "; ".join(_entry_line(entry) for entry in data["results"])
         return f"Ecco cosa ricordo: {formatted}"
     if intent == "FORGET":
         return f"Ho dimenticato {data['key']}."
+    if intent == "LINK_MEMORY":
+        return f"Ok, ho collegato {data['subject']} — {data['predicate']} — {data['object']}."
     if intent in ("OPEN_PATH", "OPEN_SEARCH_RESULT"):
         return f"Ho aperto {data['path']}"
     if intent == "CREATE_PATH":

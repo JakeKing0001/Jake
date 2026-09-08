@@ -114,6 +114,7 @@ SKILL_RISK: dict[str, RiskLevel] = {
     "REMEMBER": RiskLevel.LOCAL_REVERSIBLE,
     "RECALL": RiskLevel.READ_ONLY,
     "FORGET": RiskLevel.DESTRUCTIVE,
+    "LINK_MEMORY": RiskLevel.LOCAL_REVERSIBLE,
     "ADD_NOTE": RiskLevel.LOCAL_REVERSIBLE,
     "LIST_NOTES": RiskLevel.READ_ONLY,
     "SEARCH_NOTES": RiskLevel.READ_ONLY,
