@@ -1,6 +1,5 @@
-import re
-
 from core import fallbacks
+from core import intent_patterns
 from core.agent import TaskAgent
 from core.command import Command
 from core.context_summarizer import ContextSummarizer
@@ -34,76 +33,6 @@ from skills.skill_forge_skills import CreateSkillSkill, DeleteCreatedSkillSkill,
 class JakeCore:
     EXIT_SENTINEL = "l'utente vuole uscire"
     NO_PLAN = "Non so ancora fare questa cosa"
-    # Il classificatore a singolo intent non "fallisce" su una richiesta composta: si limita a
-    # sceglierne una parte e scarta il resto senza segnalarlo. Questi marcatori intercettano le
-    # richieste esplicitamente multi-step PRIMA che accada, instradandole subito al planner.
-    # Escluse le richieste che DEFINISCONO un'automazione o un comando (SAVE_WORKFLOW,
-    # LEARN_COMMAND): li' l'intera frase composta e' voluta dentro un solo parametro libero.
-    # La sola "e" (congiunzione) conta come multi-step solo se seguita da un altro verbo
-    # d'azione noto (es. "apri opera E cerca gatti"): senza questo vincolo qualunque "e" dentro
-    # al contenuto di un comando singolo (es. "cerca ricette pasta e ceci") verrebbe deviata
-    # inutilmente sul planner invece di restare un unico intent.
-    _ACTION_VERBS = (
-        "apri|aprimi|avvia|avviami|cerca|vai|crea|elimina|cancella|trova|chiudi|termina|"
-        "spegni|riavvia|blocca|sospendi|alza|abbassa|aumenta|diminuisci|silenzia|muta|scrivi|"
-        "ricordami|ricorda|ricordati|memorizza|dimentica|scorda|manda|invia|esegui|metti|togli|"
-        "leggi|mostra|elenca|fai|cattura|scatta|salva|copia|sposta|rinomina|dimmi|dammi|clicca|premi"
-    )
-    MULTI_STEP_PATTERN = re.compile(
-        rf"\b(?:e poi|poi|quindi|successivamente|dopodich[eé])\b|"
-        rf"\be(?=\s+(?:{_ACTION_VERBS})\b)"
-    )
-    WORKFLOW_DEFINITION_PATTERN = re.compile(
-        r"\bautomazion\w*\b|\bworkflow\b|\bquando dico\b|\bse dico\b|\bimpara\b|\bd'ora in poi\b|\bogni volta che dico\b"
-    )
-    # "apri youtube e cerca gatti": la seconda azione E' la prima (ricerca nel browser). Il planner
-    # farebbe due passi (apri sito + cerca): meglio un solo intent, che il classificatore gestisce.
-    BROWSER_COMBO_PATTERN = re.compile(
-        r"^(?:apri|vai su)\s+(?:youtube|google|opera|chrome|edge|il browser|firefox|amazon|spotify)\s+e\s+(?:cerca|metti|riproduci|fammi sentire)\b"
-    )
-    QUESTION_PATTERN = re.compile(
-        r"^(?:chi|cosa|che cosa|come|quando|dove|perch[eé]|quanto|quanti|quante|quale|quali|cos'|com'|qual|"
-        r"spiegami|dimmi|raccontami|consigliami|suggeriscimi|aiutami|scrivimi|inventa|descrivi|riassumi|"
-        r"sai|sapresti|potresti|puoi dirmi|mi dici|mi spieghi|secondo te)\b|\?$"
-    )
-    _REQUEST_VERBS = (
-        "apri|aprimi|aprire|avvia|avviare|lancia|lanciare|cerca|cercare|vai|crea|creare|elimina|cancella|"
-        "trova|chiudi|chiudere|termina|spegni|spegnere|riavvia|blocca|sospendi|alza|alzare|abbassa|abbassare|"
-        "aumenta|diminuisci|silenzia|muta|scrivi|scrivere|ricordami|ricorda|memorizza|dimentica|manda|mandare|"
-        "invia|inviare|esegui|eseguire|metti|mettere|togli|leggi|leggere|mostra|mostrami|elenca|fai|fare|cattura|"
-        "scatta|salva|salvare|copia|sposta|rinomina|dimmi|dammi|dirmi|darmi|clicca|cliccare|premi|premere|imposta|"
-        "impostare|attiva|attivare|disattiva|disattivare|riproduci|suona|fammi|porta|passa|minimizza|massimizza|"
-        "descrivi|traduci|calcola|converti|controlla|verifica|pulisci|svuota|prendi|segna|appunta|cambia|usa|rispondi"
-    )
-    # "quando dico X fai Y": insegnamento deterministico, senza passare dal modello (che tende a
-    # eseguire Y subito invece di imparare l'associazione).
-    LEARN_PATTERNS = [
-        re.compile(
-            r"^(?:impara(?: che)?|ricordati che|ricorda che|d'ora in poi|da ora in poi|da adesso|da oggi|"
-            r"ogni volta che|tutte le volte che)?[\s,]*(?:se|quando)\s+(?:ti\s+)?dico\s+(?P<phrase>.+?)"
-            r"[\s,:]*(?:devi|dovrai|dovresti|allora|tu|fai|fa'|esegui|vuol dire che|significa che|intendo che|voglio che)?[\s,]*"
-            rf"(?P<request>(?:{_REQUEST_VERBS})\b.+)$"
-        ),
-        re.compile(r"^impara\s*:?\s*(?P<phrase>.+?)\s*(?:=|->|=>|significa|vuol dire)\s*(?P<request>.+)$"),
-    ]
-    CORRECTION_PATTERNS = [
-        re.compile(
-            r"^(?:no|nope|sbagliato|errato|non intendevo(?: quello)?|non era quello|non volevo quello)[\s,.!]*"
-            r"(?:intendevo dire|intendevo|volevo dire|volevo|dovevi|devi|era|dicevo|ho detto)\s+(?P<request>.+)$"
-        ),
-        re.compile(r"^(?:intendevo dire|intendevo|volevo dire|dovevi)\s+(?P<request>.+)$"),
-    ]
-    POSITIVE_ANSWERS = {"si", "sì", "yes", "y", "ok", "okay", "va bene", "certo", "confermo", "procedi", "vai", "esatto", "sisi", "si si", "sì sì", "conferma", "fallo", "assolutamente"}
-    NEGATIVE_ANSWERS = {"no", "n", "annulla", "cancel", "lascia stare", "non farlo", "no grazie", "nope", "negativo", "ferma", "stop"}
-
-    # Riferimenti ("aprilo", "chiudilo"): risolti col riferimento piu' recente adatto (v3.1).
-    # Ancorati a tutta la frase (^...$) apposta: non devono scattare su un "quello" dentro una
-    # frase piu' lunga, solo su un comando pronominale secco.
-    _PRONOUN_OPTIONAL = r"\s*(?:lo|la|li|le|quello|quella|questo|questa)?$"
-    _PRONOUN_OPEN = re.compile(r"^(?:apri|aprilo|aprila|aprimelo|aprimela)" + _PRONOUN_OPTIONAL)
-    _PRONOUN_CLOSE = re.compile(r"^(?:chiudi|chiudilo|chiudila)" + _PRONOUN_OPTIONAL)
-    _PRONOUN_READ = re.compile(r"^(?:leggi|leggilo|leggila|leggimelo|leggimela)" + _PRONOUN_OPTIONAL)
-    _PRONOUN_DELETE = re.compile(r"^(?:elimina|eliminalo|eliminala|cancella|cancellalo|cancellala)" + _PRONOUN_OPTIONAL)
 
     def __init__(self):
         self.logger = get_logger()
@@ -347,7 +276,7 @@ class JakeCore:
         if self.conversation_state.has_pending_action():
             return self._handle_confirmation(text)
 
-        if text in ("esci", "usci", "chiudi jake", "spegniti", "jake spegniti") or text.startswith(("esci ", "usci ")):
+        if intent_patterns.is_exit(text):
             return self.EXIT_SENTINEL
 
         meta = self._match_meta_command(text)
@@ -371,11 +300,7 @@ class JakeCore:
                 self._remember_exchange(text, Command("CHITCHAT", {"text": text}), quick)
                 return quick
 
-        if (
-            self.MULTI_STEP_PATTERN.search(text)
-            and not self.WORKFLOW_DEFINITION_PATTERN.search(text)
-            and not self.BROWSER_COMBO_PATTERN.search(text)
-        ):
+        if intent_patterns.is_multi_step_request(text):
             agent_response = self._run_agent(text)
             if agent_response != self.NO_PLAN:
                 return agent_response
@@ -390,30 +315,7 @@ class JakeCore:
         return self._execute_command(text, command)
 
     def _resolve_pronouns(self, text: str) -> str:
-        """'aprilo', 'chiudilo', 'leggilo', 'eliminalo': sostituisce il riferimento generico
-        con l'ultima entita' pertinente (file, app, finestra...) ricordata da conversation_state.
-        Se non c'e' nulla di adatto in memoria, lascia il testo com'era: meglio UNKNOWN (o una
-        domanda dell'agente) che un valore inventato."""
-        entities = self.conversation_state.get_entities()
-        if not entities:
-            return text
-        if self._PRONOUN_OPEN.match(text):
-            target = entities.get("path") or entities.get("app") or entities.get("url")
-            if target:
-                return f"apri {target}"
-        elif self._PRONOUN_CLOSE.match(text):
-            target = entities.get("app") or entities.get("title")
-            if target:
-                return f"chiudi {target}"
-        elif self._PRONOUN_READ.match(text):
-            target = entities.get("path")
-            if target:
-                return f"leggi il file {target}"
-        elif self._PRONOUN_DELETE.match(text):
-            target = entities.get("path")
-            if target:
-                return f"elimina {target}"
-        return text
+        return intent_patterns.resolve_pronouns(text, self.conversation_state.get_entities())
 
     def _resolve_and_execute(self, command: Command) -> tuple[Command, SkillResult | None, str | None]:
         """Esegue un comando applicando i ripieghi (v3.1, vedi core/fallbacks.py): riscrittura
@@ -491,20 +393,7 @@ class JakeCore:
         return self._run_agent(combined, remember_text=answer_text)
 
     def _match_meta_command(self, text: str) -> Command | None:
-        """Comandi su Jake stesso riconosciuti da regole precise (insegnare, correggere): troppo
-        importanti per lasciarli al modello, che a volte esegue invece di imparare."""
-        for pattern in self.LEARN_PATTERNS:
-            match = pattern.match(text)
-            if match:
-                phrase = match.group("phrase").strip(" ,:")
-                request = match.group("request").strip()
-                if phrase and request:
-                    return Command("LEARN_COMMAND", {"phrase": phrase, "request": request})
-        for pattern in self.CORRECTION_PATTERNS:
-            match = pattern.match(text)
-            if match and self.last_exchange is not None:
-                return Command("CORRECT_LAST", {"request": match.group("request").strip()})
-        return None
+        return intent_patterns.match_meta_command(text, has_last_exchange=self.last_exchange is not None)
 
     def _execute_command(self, text: str, command: Command, learn: bool = True) -> str:
         intent = command.intent
@@ -549,7 +438,7 @@ class JakeCore:
         if agent_response != self.NO_PLAN:
             return agent_response
 
-        if self.QUESTION_PATTERN.search(text):
+        if intent_patterns.is_question(text):
             return self._execute_command(text, Command("ASK_QUESTION", {"question": text}), learn=False)
 
         self.learning.commit_pending()
@@ -578,7 +467,7 @@ class JakeCore:
             self.conversation_state.clear_pending_action()
             return self._continue_agent(action, text)
 
-        if text in self.POSITIVE_ANSWERS:
+        if intent_patterns.is_positive_answer(text):
             self.conversation_state.clear_pending_action()
             result = self.skill_registry.execute(action["intent"], action["parameters"])
             # Una conferma puo' chiederne un'altra (CREATE_SKILL: "provo a imparare?" -> codice
@@ -599,7 +488,7 @@ class JakeCore:
                 self.learning.observe(action["text"], command, result, route="llm" if self.last_route == "llm" else "confirmed")
             self._remember_exchange(action.get("text", text), command, response)
             return response
-        if text in self.NEGATIVE_ANSWERS:
+        if intent_patterns.is_negative_answer(text):
             self.conversation_state.clear_pending_action()
             return "Va bene, annullato."
         # Ne' si' ne' no: l'utente e' passato ad altro. Annulla l'azione in sospeso e vai avanti.
