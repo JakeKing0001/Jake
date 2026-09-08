@@ -1,6 +1,6 @@
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -349,6 +349,26 @@ class MemoryManager:
         )
         self._connection.commit()
         return True
+
+    def purge_history_older_than(self, days: float) -> int:
+        """Elimina la cronologia di conversazione (e i suoi riassunti automatici, categoria
+        'summary') piu' vecchia di 'days' giorni: la politica di retention (v5.6, Privacy
+        Engine). Restituisce quante righe sono state rimosse in totale.
+
+        Deliberatamente SOLO su richiesta esplicita dell'utente (vedi PURGE_OLD_HISTORY in
+        skills/privacy.py), mai automatica in background: cancellare dati dell'utente senza che
+        li abbia chiesti sarebbe un danno silenzioso, non una funzionalita' di privacy. Non
+        tocca le altre categorie di ricordi (fact/preference/...): quelle l'utente le ha chieste
+        esplicitamente di ricordare, un limite di tempo automatico le tradirebbe."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        history_cursor = self._connection.execute(
+            "DELETE FROM conversation_history WHERE created_at < ?", (cutoff,)
+        )
+        summary_cursor = self._connection.execute(
+            "DELETE FROM memories WHERE category = 'summary' AND created_at < ?", (cutoff,)
+        )
+        self._connection.commit()
+        return history_cursor.rowcount + summary_cursor.rowcount
 
     def close(self) -> None:
         self._connection.close()

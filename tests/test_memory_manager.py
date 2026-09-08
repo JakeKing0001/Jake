@@ -155,5 +155,56 @@ class KnowledgeGraphTests(MemoryManagerTestCase):
         self.assertEqual(len(self.manager.related("Mario", "fact")), 1)
 
 
+class PurgeHistoryOlderThanTests(MemoryManagerTestCase):
+    """v5.6, Privacy Engine: retention su richiesta esplicita."""
+
+    def _log_turn_at(self, role, text, iso_timestamp):
+        self.manager.log_turn(role, text)
+        self.manager._connection.execute(
+            "UPDATE conversation_history SET created_at = ? WHERE id = (SELECT MAX(id) FROM conversation_history)",
+            (iso_timestamp,),
+        )
+        self.manager._connection.commit()
+
+    def test_old_turns_are_removed_recent_ones_kept(self):
+        self._log_turn_at("user", "vecchio messaggio", "2000-01-01T00:00:00+00:00")
+        self._log_turn_at("user", "messaggio recente", "2999-01-01T00:00:00+00:00")
+
+        removed = self.manager.purge_history_older_than(days=30)
+
+        self.assertEqual(removed, 1)
+        remaining = [row["text"] for row in self.manager.get_recent_history(limit=10)]
+        self.assertEqual(remaining, ["messaggio recente"])
+
+    def test_old_summaries_are_removed_too(self):
+        self.manager.remember("riassunto vecchio", "contenuto", category="summary")
+        self.manager._connection.execute(
+            "UPDATE memories SET created_at = ? WHERE key = ?", ("2000-01-01T00:00:00+00:00", "riassunto vecchio"),
+        )
+        self.manager._connection.commit()
+
+        removed = self.manager.purge_history_older_than(days=30)
+
+        self.assertEqual(removed, 1)
+        self.assertEqual(self.manager.count_memories(), 0)
+
+    def test_does_not_touch_facts_or_preferences(self):
+        """Solo cronologia/riassunti: un fatto salvato esplicitamente con REMEMBER non e' mai
+        cancellato da una politica di retention automatica, anche se molto vecchio."""
+        self.manager.remember("compleanno", "5 marzo", category="fact")
+        self.manager._connection.execute(
+            "UPDATE memories SET created_at = ? WHERE key = ?", ("2000-01-01T00:00:00+00:00", "compleanno"),
+        )
+        self.manager._connection.commit()
+
+        removed = self.manager.purge_history_older_than(days=30)
+
+        self.assertEqual(removed, 0)
+        self.assertEqual(self.manager.count_memories(), 1)
+
+    def test_nothing_to_remove_returns_zero(self):
+        self.assertEqual(self.manager.purge_history_older_than(days=30), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

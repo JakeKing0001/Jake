@@ -116,6 +116,7 @@ SKILL_RISK: dict[str, RiskLevel] = {
     "RECALL": RiskLevel.READ_ONLY,
     "FORGET": RiskLevel.DESTRUCTIVE,
     "LINK_MEMORY": RiskLevel.LOCAL_REVERSIBLE,
+    "PURGE_OLD_HISTORY": RiskLevel.DESTRUCTIVE,
     "ADD_NOTE": RiskLevel.LOCAL_REVERSIBLE,
     "LIST_NOTES": RiskLevel.READ_ONLY,
     "SEARCH_NOTES": RiskLevel.READ_ONLY,
@@ -271,6 +272,7 @@ SKILL_RISK: dict[str, RiskLevel] = {
     "HELP": RiskLevel.READ_ONLY,
     "STOP_TALKING": RiskLevel.READ_ONLY,
     "PAUSE_LISTENING": RiskLevel.LOCAL_REVERSIBLE,
+    "SET_PRIVATE_MODE": RiskLevel.LOCAL_REVERSIBLE,
     "START_DICTATION": RiskLevel.LOCAL_REVERSIBLE,
     "STOP_DICTATION": RiskLevel.LOCAL_REVERSIBLE,
     "CREATE_SKILL": RiskLevel.ADMIN,  # la Skill Forge scrive ed espone codice eseguibile nuovo
@@ -290,7 +292,7 @@ SKILL_RISK: dict[str, RiskLevel] = {
 SELF_CONFIRMING_INTENTS: frozenset[str] = frozenset({
     "DELETE_PATH", "RUN_COMMAND", "RUN_PYTHON_SCRIPT", "KILL_PROCESS_BY_PORT",
     "CLOSE_APP", "EMPTY_RECYCLE_BIN", "SYSTEM_POWER", "CREATE_SKILL",
-    "CLEAR_TEMP_FILES", "CLEAR_NOTES",
+    "CLEAR_TEMP_FILES", "CLEAR_NOTES", "PURGE_OLD_HISTORY",
 })
 
 

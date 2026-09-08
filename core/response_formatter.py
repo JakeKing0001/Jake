@@ -624,6 +624,13 @@ def _format_success(intent: str, result: SkillResult, registry=None) -> str | No
         return ""
     if intent == "PAUSE_LISTENING":
         return f"Ok, non ascolto per {data['minutes']} minuti. Per svegliarmi prima dì: Jake, svegliati."
+    if intent == "SET_PRIVATE_MODE":
+        return "Modalità privata attiva: non registro questa conversazione." if data["enabled"] else "Modalità privata disattivata: torno a registrare normalmente."
+    if intent == "PURGE_OLD_HISTORY":
+        removed = data.get("removed", 0)
+        if not removed:
+            return f"Non c'era nulla di più vecchio di {data['days']} giorni da eliminare."
+        return f"Eliminate {removed} voci di cronologia più vecchie di {data['days']} giorni."
     if intent == "START_DICTATION":
         return "Dettatura attiva: scrivo tutto quello che dici. Dì «fine dettatura» per uscire."
     if intent == "STOP_DICTATION":

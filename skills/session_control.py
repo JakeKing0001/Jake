@@ -103,6 +103,33 @@ class StartDictationSkill:
         return SkillResult(success=True, data={})
 
 
+class PrivateModeSkill:
+    """v5.6, Privacy Engine: mentre attiva, gli scambi non vengono scritti ne' nella memoria a
+    lungo termine ne' nel log operativo (vedi JakeCore.answer). Riparte sempre disattivata a
+    ogni avvio di Jake."""
+
+    metadata = {
+        "intent": "SET_PRIVATE_MODE",
+        "description": "Attiva o disattiva la modalità privata: mentre è attiva, la conversazione non viene "
+        "salvata ne' nella memoria a lungo termine ne' nel log. Usalo per 'modalità privata', 'non registrare "
+        "questa conversazione', 'niente log per un po'', 'torna a registrare normalmente'.",
+        "parameters": {
+            "enabled": {"type": "boolean", "required": True, "description": "true per attivarla, false per disattivarla."},
+        },
+    }
+
+    def __init__(self, core):
+        self.core = core
+
+    def execute(self, parameters: dict = None):
+        parameters = parameters or {}
+        enabled = parameters.get("enabled")
+        if not isinstance(enabled, bool):
+            return SkillResult(success=False, data={}, error="MISSING_PARAMETERS")
+        self.core.private_mode = enabled
+        return SkillResult(success=True, data={"enabled": enabled})
+
+
 class StopDictationSkill:
     metadata = {
         "intent": "STOP_DICTATION",
