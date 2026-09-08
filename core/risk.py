@@ -274,6 +274,8 @@ SKILL_RISK: dict[str, RiskLevel] = {
     "CREATE_SKILL": RiskLevel.ADMIN,  # la Skill Forge scrive ed espone codice eseguibile nuovo
     "LIST_CREATED_SKILLS": RiskLevel.READ_ONLY,
     "DELETE_CREATED_SKILL": RiskLevel.DESTRUCTIVE,
+    "SET_NOTIFICATION_MODE": RiskLevel.LOCAL_REVERSIBLE,
+    "GET_NOTIFICATION_MODE": RiskLevel.READ_ONLY,
 }
 
 

@@ -11,6 +11,7 @@ from core.nlu.examples import ExampleStore
 from core.nlu.index import lexical_similarity
 from core.nlu.normalizer import TranscriptNormalizer
 from core.nlu.retriever import CapabilityRetriever
+from core.notification_center import NotificationCenter
 from core.ollama_client import OllamaClient
 from core.plugin_loader import load_plugins
 from core.response_formatter import format_plan_outcome, format_skill_result
@@ -28,6 +29,7 @@ from skills.model_control import ListModelsSkill, SetModelSkill
 from skills.session_control import (
     HelpSkill, PauseListeningSkill, RepeatLastSkill, StartDictationSkill, StopDictationSkill, StopTalkingSkill,
 )
+from skills.notification_mode import GetNotificationModeSkill, SetNotificationModeSkill
 from skills.skill_forge_skills import CreateSkillSkill, DeleteCreatedSkillSkill, ListCreatedSkillsSkill
 
 
@@ -42,6 +44,12 @@ class JakeCore:
         self.config = config
         self.ollama = self.skill_registry.ollama_client
         self.model = config.get("ollama_model", "qwen2.5:7b")
+
+        # Modalita' di notifica (v4.3, Notification/Priority system): decide se un promemoria,
+        # un avviso proattivo o un'automazione partita da sola interrompe subito o resta in
+        # coda per dopo. Creato presto: sia lo scheduler dei promemoria sia il trigger scheduler
+        # sia il system advisor, costruiti piu' sotto, notificano gia' passando da qui.
+        self.notification_center = NotificationCenter()
 
         # Skill/plugin installabili (v2.0): un file .py in plugins/ con una funzione
         # register(registry) diventa una capacita' di Jake senza toccare il core.
@@ -155,6 +163,8 @@ class JakeCore:
             ("CREATE_SKILL", CreateSkillSkill(self.skill_forge)),
             ("LIST_CREATED_SKILLS", ListCreatedSkillsSkill(self.skill_forge)),
             ("DELETE_CREATED_SKILL", DeleteCreatedSkillSkill(self.skill_forge, self.learning)),
+            ("SET_NOTIFICATION_MODE", SetNotificationModeSkill(self.notification_center)),
+            ("GET_NOTIFICATION_MODE", GetNotificationModeSkill(self.notification_center)),
         ):
             self.skill_registry.register_skill(intent, skill)
 
@@ -182,8 +192,19 @@ class JakeCore:
 
     # ---- callback di default -------------------------------------------------------------
 
+    def notify(self, kind: str, message: str) -> str | None:
+        """Punto unico da cui passa ogni notifica proattiva (promemoria/avviso/automazione)
+        prima di essere presentata, sia in CLI (qui sotto) sia in voce (vedi WakeWordSession,
+        core/voice/wake_word_session.py, che chiama questo stesso metodo): applica la modalita'
+        di notifica corrente (v4.3). Restituisce il messaggio da presentare subito, o None se
+        e' stato solo messo in coda per quando la modalita' tornera' a permetterlo."""
+        return self.notification_center.gate(kind, message)
+
     def _default_on_reminder_due(self, reminder: dict) -> None:
-        print(f"\nJake > {self.format_due_reminder(reminder)}\nTu > ", end="", flush=True)
+        message = self.notify("reminder", self.format_due_reminder(reminder))
+        if message is None:
+            return
+        print(f"\nJake > {message}\nTu > ", end="", flush=True)
 
     @staticmethod
     def format_due_reminder(reminder: dict) -> str:
@@ -193,11 +214,17 @@ class JakeCore:
         return f"Promemoria: {reminder['text']}"
 
     def _default_on_advisory(self, message: str) -> None:
+        message = self.notify("advisory", message)
+        if message is None:
+            return
         print(f"\nJake > {message}\nTu > ", end="", flush=True)
 
     def _default_on_trigger_fired(self, trigger: dict, outcome, total_steps: int) -> None:
         summary = format_plan_outcome(outcome, total_steps, self.skill_registry)
-        print(f"\nJake > Ho eseguito automaticamente '{trigger.get('name')}':\n{summary}\nTu > ", end="", flush=True)
+        message = self.notify("trigger", f"Ho eseguito automaticamente '{trigger.get('name')}':\n{summary}")
+        if message is None:
+            return
+        print(f"\nJake > {message}\nTu > ", end="", flush=True)
 
     def _agent_context(self) -> str:
         parts = [part for part in (self.desktop_context.context_summary(), self.conversation_state.entities_summary()) if part]
