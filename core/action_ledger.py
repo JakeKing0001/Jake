@@ -15,6 +15,7 @@ derivata da segnali gia' presenti nel sistema (risk.py, i parametri "confirmed"/
 gia' usati da JakeCore._resolve_and_execute per riconoscere una richiesta gia' confermata), non
 un campo inventato: "none" quando l'azione non ha mai avuto bisogno di autorizzazione,
 "confirmed"/"passphrase" quando l'ha ricevuta, "pending"/"blocked" quando e' in attesa o negata."""
+import hashlib
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -59,6 +60,22 @@ def authorization_of(result: str, parameters: dict) -> str:
     return AUTHORIZATION_NONE
 
 
+def idempotency_key_of(intent: str, parameters: dict) -> str:
+    """Chiave stabile per la STESSA azione logica (stesso intent, stessi parametri): permette di
+    accorgersi - in audit, o in futuro per un'enforcement vera - se un'azione e' stata eseguita
+    piu' volte quando non doveva (un retry che non andava ripetuto, un trigger partito due volte
+    per una race, un agente che ripete un passo per un bug del modello). Non impedisce ancora
+    l'esecuzione doppia: farlo richiederebbe decidere cosa succede quando una chiave combacia
+    (rifiutare? restituire il risultato precedente? con quale scadenza?), una decisione di
+    policy che merita una revisione dedicata, non un effetto collaterale di questo campo - vedi
+    la fase F1 in ROADMAP.md. Per ora e' solo tracciata nel ledger, pronta per quando
+    quell'enforcement arrivera'; TaskAgent.run() ha gia' una propria protezione piu' debole e
+    locale (il set `seen` che ferma un passo identico ripetuto nello STESSO compito, non tra
+    compiti/sessioni diverse - vedi core/agent.py)."""
+    canonical = json.dumps({"intent": intent, "parameters": parameters or {}}, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
 @dataclass
 class ActionReceipt:
     action_id: str
@@ -69,6 +86,7 @@ class ActionReceipt:
     risk_decision: str
     authorization: str
     result: str
+    idempotency_key: Optional[str] = None
     verified: Optional[bool] = None
     duration_ms: Optional[float] = None
     model: Optional[str] = None
@@ -113,3 +131,30 @@ class ActionLedger:
             if record.get("action_id") == action_id:
                 return record
         return None
+
+    def by_idempotency_key(self, idempotency_key: str) -> list[dict]:
+        return [record for record in self.read_all() if record.get("idempotency_key") == idempotency_key]
+
+    def duplicate_idempotency_keys(self, within_seconds: float = 60) -> dict[str, list[dict]]:
+        """Chiavi di idempotenza comparse piu' di una volta entro `within_seconds` l'una
+        dall'altra - un aiuto per l'audit ("questa azione e' partita due volte per errore?"),
+        non un'enforcement (vedi idempotency_key_of): raggruppa le ricevute vicine nel tempo per
+        la stessa chiave, ignora ripetizioni legittime a distanza di ore/giorni (es. la stessa
+        skill con gli stessi parametri usata due volte in momenti scollegati e' normale, due
+        volte nello stesso minuto e' piu' probabile un bug)."""
+        by_key: dict[str, list[dict]] = {}
+        for record in self.read_all():
+            key = record.get("idempotency_key")
+            if key:
+                by_key.setdefault(key, []).append(record)
+
+        duplicates = {}
+        for key, records in by_key.items():
+            records = sorted(records, key=lambda r: r.get("ts", 0))
+            clustered = [
+                records[i] for i in range(1, len(records))
+                if records[i].get("ts", 0) - records[i - 1].get("ts", 0) <= within_seconds
+            ]
+            if clustered:
+                duplicates[key] = records
+        return duplicates

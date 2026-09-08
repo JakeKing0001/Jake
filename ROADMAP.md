@@ -333,10 +333,21 @@ pulita; smoke test installazione/avvio/arresto; dashboard locale con errori e la
   affrontato. `TaskAgent._schema()` (core/agent.py) genera già uno schema JSON per vincolare
   l'output del modello (v3.1), ma non c'è ancora una validazione formale, condivisa e applicata
   anche ai risultati/errori delle skill.
-- 🟡 `action_id`/prova post-condizione: `action_id` fatto (vedi sopra). Precondizioni esplicite,
-  timeout/retry per-azione dichiarati (oggi `execution_safety.MAX_ATTEMPTS`/`RETRYABLE_ERRORS`
-  sono globali, non per-azione), idempotency key e compensazione strutturata restano da fare -
-  il rollback esiste ma solo per il filesystem (`execution_safety.ROLLBACK_HANDLERS`).
+- 🟡 `action_id`/idempotency key/prova post-condizione: `action_id` fatto (vedi sopra).
+  `idempotency_key_of()` (`core/action_ledger.py`) aggiunge anche una chiave stabile per
+  "stesso intent, stessi parametri" a ogni ricevuta (hash SHA-256 troncato, ordine dei parametri
+  irrilevante), con `ActionLedger.by_idempotency_key()`/`duplicate_idempotency_keys()` per
+  scoprire in audit se un'azione e' partita due volte per errore (un retry che non doveva
+  ripetersi, un trigger partito due volte per una race) - verificato con due `GET_TIME` identici
+  di seguito su un `JakeCore` reale, correttamente segnalati come stessa chiave. **Non e' ancora
+  un'enforcement**: la chiave e' tracciata, non usata per RIFIUTARE una seconda esecuzione -
+  farlo richiede decidere cosa succede quando combacia (rifiutare? restituire il risultato
+  precedente? con quale scadenza?), una decisione di policy rimandata di proposito a una
+  revisione dedicata invece di improvvisarla come effetto collaterale di questo campo.
+  Precondizioni esplicite e timeout/retry per-azione (oggi `execution_safety.MAX_ATTEMPTS`/
+  `RETRYABLE_ERRORS` sono globali, non per-azione) restano da fare, cosi' come una compensazione
+  strutturata - il rollback esiste ma solo per il filesystem
+  (`execution_safety.ROLLBACK_HANDLERS`).
 - 🟡 Kill switch globale (`core/kill_switch.py`, `skills/kill_switch.py`): un interruttore
   condiviso, controllato tra un passo e il successivo (mai a metà - vedi il modulo sul perché non
   è un abort violento del thread) da `TaskAgent.run()` e `PlanExecutor.execute()`, che ferma

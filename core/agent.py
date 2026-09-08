@@ -13,7 +13,7 @@ import json
 import time
 from dataclasses import dataclass, field
 
-from core.action_ledger import ActionLedger, ActionReceipt, authorization_of, new_action_id
+from core.action_ledger import ActionLedger, ActionReceipt, authorization_of, idempotency_key_of, new_action_id
 from core.execution_safety import VERIFIABLE_INTENTS, execute_with_retry, rollback_effect, verify_effect
 from core.kill_switch import KillSwitch
 from core.logger import log_action, new_trace_id
@@ -234,6 +234,7 @@ class TaskAgent:
                 action_id=new_action_id(), trace_id=trace_id, ts=time.time(), intent=intent,
                 requested_by=f"agent:{self.agent_name}", risk_decision=risk,
                 authorization=authorization_of(result, parameters), result=result,
+                idempotency_key=idempotency_key_of(intent, parameters),
                 verified=verified, duration_ms=duration_ms, model=model,
             ),
             private=private,
