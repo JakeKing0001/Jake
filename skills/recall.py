@@ -50,4 +50,12 @@ class RecallSkill:
 
         if not results:
             return SkillResult(success=False, data={"key": key, "query": query}, error="NOT_FOUND")
+
+        # Un salto nel grafo di conoscenza personale (v4.4): se il ricordo trovato e' collegato
+        # ad altri (LINK_MEMORY), li include, cosi' ricordare "Mario" richiama anche "lavora per
+        # Acme" senza dover chiedere separatamente.
+        for entry in results:
+            related = self.memory_manager.related(entry["key"], entry.get("category", "fact"))
+            if related:
+                entry["related"] = related
         return SkillResult(success=True, data={"results": results})

@@ -47,6 +47,17 @@ class MemoryManager:
                 text TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS memory_relations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                subject_key TEXT NOT NULL,
+                subject_category TEXT NOT NULL,
+                predicate TEXT NOT NULL,
+                object_key TEXT NOT NULL,
+                object_category TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(subject_key, subject_category, predicate, object_key, object_category)
+            );
             """
         )
         self._connection.commit()
@@ -209,14 +220,81 @@ class MemoryManager:
             cursor = self._connection.execute(
                 "DELETE FROM memories WHERE key = ? AND category = ?", (key, category)
             )
+            self._connection.execute(
+                "DELETE FROM memory_relations WHERE (subject_key = ? AND subject_category = ?) "
+                "OR (object_key = ? AND object_category = ?)", (key, category, key, category),
+            )
         else:
             cursor = self._connection.execute("DELETE FROM memories WHERE key = ?", (key,))
+            # Senza categoria puo' esserci piu' di un ricordo con questa chiave: rimuove i
+            # collegamenti di ognuno, per non lasciare archi del grafo che puntano al nulla.
+            self._connection.execute(
+                "DELETE FROM memory_relations WHERE subject_key = ? OR object_key = ?", (key, key),
+            )
         self._connection.commit()
         return cursor.rowcount > 0
 
     def count_memories(self) -> int:
         row = self._connection.execute("SELECT COUNT(*) FROM memories").fetchone()
         return row[0] if row else 0
+
+    # ---- grafo di conoscenza personale (v4.4, Personal Knowledge Graph) -------------------
+    # Le altre memorie di Jake (ricordi, contatti, todo, automazioni...) restano ognuna nel
+    # proprio store separato senza alcun legame tra loro: un ricordo taggato project="NEST" non
+    # sa nulla dei contatti o degli altri ricordi collegati a quello stesso progetto. Questa
+    # tabella e' un semplice triple store (soggetto, predicato, oggetto) sopra ai ricordi
+    # esistenti: non un motore a grafo completo, ma abbastanza per rispondere a "cosa so su X,
+    # e cosa e' collegato a X?" seguendo un salto invece di dover ricordare ogni collegamento a
+    # mano ogni volta.
+
+    def link(self, subject_key: str, subject_category: str, predicate: str, object_key: str, object_category: str) -> None:
+        """Crea una relazione con nome tra due ricordi gia' esistenti (es. 'Mario' -lavora_per-> 'Acme')."""
+        self._connection.execute(
+            """
+            INSERT OR IGNORE INTO memory_relations
+                (subject_key, subject_category, predicate, object_key, object_category, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (subject_key, subject_category, predicate, object_key, object_category, self._now()),
+        )
+        self._connection.commit()
+
+    def unlink(self, subject_key: str, subject_category: str, predicate: str, object_key: str, object_category: str) -> bool:
+        cursor = self._connection.execute(
+            "DELETE FROM memory_relations WHERE subject_key = ? AND subject_category = ? AND predicate = ? "
+            "AND object_key = ? AND object_category = ?",
+            (subject_key, subject_category, predicate, object_key, object_category),
+        )
+        self._connection.commit()
+        return cursor.rowcount > 0
+
+    def related(self, key: str, category: str = "fact", predicate: str = None) -> list[dict]:
+        """Ricordi collegati a (key, category) come soggetto, con il predicato e il valore
+        attuale del ricordo collegato. value e' None se l'oggetto non esiste (piu') come
+        ricordo: forget() ripulisce sempre gli archi del nodo che cancella, quindi in pratica
+        capita solo se un arco e' stato creato verso una chiave mai salvata."""
+        clauses = ["subject_key = ?", "subject_category = ?"]
+        params = [key, category]
+        if predicate:
+            clauses.append("predicate = ?")
+            params.append(predicate)
+
+        rows = self._connection.execute(
+            f"SELECT predicate, object_key, object_category FROM memory_relations WHERE {' AND '.join(clauses)}"
+            " ORDER BY id ASC",
+            params,
+        ).fetchall()
+
+        related_entries = []
+        for row in rows:
+            target = self.recall(key=row["object_key"], category=row["object_category"], limit=1)
+            related_entries.append({
+                "predicate": row["predicate"],
+                "key": row["object_key"],
+                "category": row["object_category"],
+                "value": target[0]["value"] if target else None,
+            })
+        return related_entries
 
     def set_preference(self, name: str, value: str) -> None:
         self.remember(name, value, category="preference")
