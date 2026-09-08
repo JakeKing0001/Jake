@@ -5,23 +5,53 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-# Qt 6 may be installed outside the default CMake search paths on Windows.
-# Add common Qt locations before searching so CMake can find Qt6Config.cmake.
+# Qt 6 may be installed outside the default CMake search paths on Windows. Rather than pin this
+# file to whichever Qt versions happened to be installed when it was written (F0: "rilevamento Qt
+# non legato a versioni installate in percorsi fissi"), look it up:
+#   1. -DCMAKE_PREFIX_PATH=... or -DQt6_DIR=... passed explicitly (CI, CMakePresets.json) wins.
+#   2. QTDIR / Qt6_DIR environment variables, if set (aqtinstall and the Qt online installer both
+#      support setting these).
+#   3. Otherwise, glob every "<root>/<version>/<kit>" install under the common Qt root
+#      directories for a kit that actually ships Qt6Config.cmake, and take the newest version.
 if(DEFINED ENV{QTDIR})
     list(APPEND CMAKE_PREFIX_PATH "$ENV{QTDIR}")
 endif()
+if(DEFINED ENV{Qt6_DIR})
+    list(APPEND CMAKE_PREFIX_PATH "$ENV{Qt6_DIR}")
+endif()
 
-if(WIN32)
-    foreach(_qt_prefix
-        "C:/Qt/6.5.3/msvc2019_64"
-        "C:/Qt/6.5.3/msvc2022_64"
-        "C:/Qt/6.8.2/msvc2022_64"
-        "C:/Qt/6.9.0/msvc2022_64"
+if(WIN32 AND NOT Qt6_DIR AND NOT DEFINED ENV{QTDIR} AND NOT DEFINED ENV{Qt6_DIR})
+    # $ENV{PROGRAMFILES(X86)} non e' sintassi CMake valida: le parentesi nel nome non sono
+    # ammesse dentro $ENV{...} (errore reale trovato compilando questo file: "Invalid character
+    # ('(') in a variable name"). "Program Files (x86)" resta comunque coperto per un
+    #'x86' install perche' CMAKE_PREFIX_PATH di default (non toccato qui) lo include gia'.
+    set(_jake_qt_roots
+        "C:/Qt"
+        "$ENV{LOCALAPPDATA}/Qt"
+        "$ENV{USERPROFILE}/Qt"
+        "$ENV{PROGRAMFILES}/Qt"
     )
-        if(EXISTS "${_qt_prefix}")
-            list(APPEND CMAKE_PREFIX_PATH "${_qt_prefix}")
+    set(_jake_qt_candidates "")
+    foreach(_qt_root IN LISTS _jake_qt_roots)
+        if(EXISTS "${_qt_root}")
+            file(GLOB_RECURSE _jake_qt_configs
+                LIST_DIRECTORIES false
+                "${_qt_root}/*/Qt6Config.cmake"
+            )
+            foreach(_qt_config IN LISTS _jake_qt_configs)
+                get_filename_component(_qt_cmake_dir "${_qt_config}" DIRECTORY)
+                get_filename_component(_qt_prefix "${_qt_cmake_dir}" DIRECTORY)
+                list(APPEND _jake_qt_candidates "${_qt_prefix}")
+            endforeach()
         endif()
     endforeach()
+    # Ordina per numero di versione (il nome della cartella padre, es. "6.8.2") cosi' l'ultima
+    # candidata e' la piu' recente installata; find_package prova comunque tutte le candidate.
+    if(_jake_qt_candidates)
+        list(REMOVE_DUPLICATES _jake_qt_candidates)
+        list(SORT _jake_qt_candidates COMPARE NATURAL)
+        list(APPEND CMAKE_PREFIX_PATH ${_jake_qt_candidates})
+    endif()
 endif()
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 Network)

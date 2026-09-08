@@ -182,7 +182,8 @@ def _format_error(intent: str, result: SkillResult) -> str:
     if error == "INCOMPATIBLE_UNITS":
         return "Non posso convertire tra queste due unità di misura."
     if error == "HOST_UNREACHABLE":
-        return f"Non riesco a raggiungere {data.get('host', 'quell\'host')}."
+        host = data.get("host", "quell'host")
+        return f"Non riesco a raggiungere {host}."
     if error == "INVALID_JSON":
         return "Il testo fornito non è JSON valido."
     if error == "INVALID_DATE":

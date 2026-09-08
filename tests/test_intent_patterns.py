@@ -1,5 +1,5 @@
 """Test unitari del riconoscimento pattern estratto da JakeCore (v3.2): nessuna dipendenza
-da Ollama, microfono o GUI. Esecuzione: .venv\\Scripts\\python.exe -m unittest discover -s tests -v"""
+da Ollama, microfono o GUI. Esecuzione: .venv\\Scripts\\python.exe -m unittest discover -s tests -t . -v"""
 import unittest
 
 from core import intent_patterns

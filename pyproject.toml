@@ -1,0 +1,27 @@
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+# F0 (roadmap): lint come rete di sicurezza per errori reali (sintassi, nomi non definiti, import
+# morti), non come stile imposto a un codebase di ~200 skill mai passato da un linter finora.
+# Un select ampio (es. la "E" completa o "I") boccerebbe la CI su migliaia di preesistenze di
+# stile senza trovare un bug in piu': si allarga in seguito, un gruppo alla volta, quando quel
+# gruppo e' stato verificato pulito.
+select = ["E9", "F"]
+
+[tool.mypy]
+# F0: "type-check selettivo". mypy non e' ancora pulito su tutto il progetto (PySide6/win32/
+# faster-whisper hanno stub incompleti o assenti, e gran parte di core/ non ha mai visto un
+# type-checker). files elenca qui il sottoinsieme verificato pulito; la CI controlla solo questi
+# e la lista cresce quando un altro modulo viene passato in rassegna, invece di disattivare tutto
+# o accettare un run rumoroso che nessuno legge davvero.
+files = [
+    "core/event_bus.py",
+    "core/device_registry.py",
+    "core/hud_protocol.py",
+    "core/risk.py",
+    "core/logger.py",
+]
+ignore_missing_imports = true
+no_implicit_optional = true

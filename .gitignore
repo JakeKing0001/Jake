@@ -15,3 +15,11 @@ plugins/learned_*.py
 # HUD nativo (v4.9.x): output di build C++/CMake, rigenerabile con cmake --build
 hud/native/build/
 hud/native/build2/
+# Se uno strumento (es. estensione CMake Tools) configura dalla radice invece che da
+# hud/native/, l'output finisce qui per errore: va ignorato comunque, mai committato
+# (successo il 2026-09-08, vedi CMakePresets.json che fissa binaryDir).
+/build/
+
+# F0: risultati dei benchmark (benchmarks/*.py) - numeri specifici di QUESTA macchina in un
+# momento preciso, non fanno parte del codice versionato.
+benchmarks/results/

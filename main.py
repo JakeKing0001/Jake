@@ -1,8 +1,9 @@
 import sys
 
 from core.jake_core import JakeCore
+from core.version import VERSION
 
-USAGE = """Jake 3.0 - assistente personale locale
+USAGE = f"""Jake {VERSION} - assistente personale locale
 
   python main.py                 modalita' Jarvis (default): HUD in vetro + tray + voce continua
   python main.py --no-voice      solo HUD e barra comandi (Ctrl+Shift+J), senza microfono
@@ -53,7 +54,7 @@ def _dispatch():
 
 
 def run_cli_mode():
-    print("Jake avviato (modalita' testo). Scrivi 'esci' per chiudere.")
+    print(f"Jake {VERSION} avviato (modalita' testo). Scrivi 'esci' per chiudere.")
     core = JakeCore()
     while True:
         try:

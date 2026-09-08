@@ -9,7 +9,6 @@ import unittest
 from urllib import error, request
 
 from core.companion_server import CompanionServer
-from core.event_bus import EventBus
 from core.hud_protocol import EventType
 
 

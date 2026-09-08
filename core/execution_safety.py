@@ -15,6 +15,12 @@ from core.skill_result import SkillResult
 
 RETRYABLE_ERRORS = {"OPERATION_FAILED", "NETWORK_UNAVAILABLE"}
 MAX_ATTEMPTS = 2
+# Intent per cui verify_effect esegue un controllo indipendente vero (oggi solo il filesystem):
+# usato dai due esecutori (core/agent.py, core/plan_executor.py) per decidere quando il log
+# strutturato (F0, core/logger.log_action) puo' scrivere verified=True/False invece di lasciarlo
+# assente - verify_effect restituisce True anche quando non ha nessuna verifica da fare, e
+# riportarlo come verified=True affermerebbe una prova mai avvenuta per ogni altro intent.
+VERIFIABLE_INTENTS = {"CREATE_PATH", "RENAME_PATH", "MOVE_PATH", "DELETE_PATH"}
 
 
 def execute_with_retry(execute_fn, intent: str, parameters: dict) -> tuple[SkillResult, int]:

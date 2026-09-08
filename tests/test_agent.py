@@ -6,6 +6,7 @@ import json
 import shutil
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from core.agent import TaskAgent
@@ -200,6 +201,143 @@ class AuthRequiredPropagationTests(unittest.TestCase):
         self.assertIsNotNone(outcome.pending_confirmation)
         self.assertEqual(outcome.pending_confirmation["kind"], "AUTH_REQUIRED")
         self.assertEqual(outcome.pending_confirmation["message"], "Serve la passphrase.")
+
+
+class StructuredLoggingTests(unittest.TestCase):
+    """F0: ogni passo dell'agente scrive un record in jake_actions.jsonl (core/logger.log_
+    action), condividendo un solo trace_id per tutta la run - vedi anche tests/test_logger.py
+    per il formato del record. Qui si controlla solo CHE venga chiamato con i valori giusti,
+    non il file JSONL scritto davvero (gia' coperto da test_logger.py)."""
+
+    def test_verifiable_intent_records_verified_true_on_real_success(self):
+        registry = FakeRegistry()
+        target = str(Path(tempfile.gettempdir()) / "jake_test_structured_log_9911.txt")
+        self.addCleanup(lambda: Path(target).unlink(missing_ok=True))
+        client = ScriptedOllamaClient([
+            {"thought": "Creo il file", "action": {"intent": "CREATE_PATH", "parameters": {"path": target}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto.", "ask_user": ""},
+        ])
+        with unittest.mock.patch("core.agent.log_action") as mock_log:
+            _agent(registry, client).run("crea un file", trace_id="trace-1")
+
+        mock_log.assert_called_once()
+        _, kwargs = mock_log.call_args
+        self.assertEqual(kwargs["skill"], "CREATE_PATH")
+        self.assertEqual(kwargs["verified"], True)
+        self.assertEqual(kwargs["result"], "success")
+        self.assertEqual(mock_log.call_args.args[0], "trace-1")
+
+    def test_verifiable_intent_records_verified_false_when_effect_not_confirmed(self):
+        class LyingRegistry(FakeRegistry):
+            def execute(self, intent, parameters=None):
+                self.calls.append((intent, parameters))
+                return SkillResult(success=True, data={"path": parameters["path"]})
+
+        registry = LyingRegistry()
+        missing_path = str(Path(tempfile.gettempdir()) / "jake_test_non_esistente_5541.txt")
+        client = ScriptedOllamaClient([
+            {"thought": "Creo il file", "action": {"intent": "CREATE_PATH", "parameters": {"path": missing_path}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto.", "ask_user": ""},
+        ])
+        with unittest.mock.patch("core.agent.log_action") as mock_log:
+            _agent(registry, client).run("crea un file")
+
+        _, kwargs = mock_log.call_args
+        self.assertEqual(kwargs["verified"], False)
+
+    def test_non_verifiable_intent_leaves_verified_absent_instead_of_a_fabricated_true(self):
+        """ADD_NOTE non ha un controllo indipendente (vedi execution_safety.verify_effect):
+        anche se ha successo, verified deve restare None invece di ereditare il default
+        'nessuna verifica disponibile' di verify_effect come se fosse una prova vera."""
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
+        client = ScriptedOllamaClient([
+            {"thought": "Aggiungo l'appunto", "action": {"intent": "ADD_NOTE", "parameters": {"text": "prova"}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto.", "ask_user": ""},
+        ])
+        with unittest.mock.patch("core.agent.log_action") as mock_log:
+            _agent(registry, client).run("aggiungi un appunto")
+
+        _, kwargs = mock_log.call_args
+        self.assertIsNone(kwargs["verified"])
+
+    def test_private_flag_is_forwarded_to_every_step(self):
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
+        client = ScriptedOllamaClient([
+            {"thought": "Aggiungo l'appunto", "action": {"intent": "ADD_NOTE", "parameters": {"text": "prova"}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto.", "ask_user": ""},
+        ])
+        with unittest.mock.patch("core.agent.log_action") as mock_log:
+            _agent(registry, client).run("aggiungi un appunto", private=True)
+
+        _, kwargs = mock_log.call_args
+        self.assertTrue(kwargs["private"])
+
+    def test_multiple_steps_share_the_same_trace_id(self):
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
+        target = str(Path(tempfile.gettempdir()) / "jake_test_shared_trace_2231.txt")
+        self.addCleanup(lambda: Path(target).unlink(missing_ok=True))
+        client = ScriptedOllamaClient([
+            {"thought": "Aggiungo l'appunto", "action": {"intent": "ADD_NOTE", "parameters": {"text": "prova"}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "Creo il file", "action": {"intent": "CREATE_PATH", "parameters": {"path": target}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto.", "ask_user": ""},
+        ])
+        with unittest.mock.patch("core.agent.log_action") as mock_log:
+            _agent(registry, client).run("fai due cose", trace_id="shared-trace")
+
+        self.assertEqual(mock_log.call_count, 2)
+        trace_ids_used = {call.args[0] for call in mock_log.call_args_list}
+        self.assertEqual(trace_ids_used, {"shared-trace"})
+
+
+class SessionRecorderWiringTests(unittest.TestCase):
+    """A differenza di StructuredLoggingTests sopra (che verifica log_action), qui si verifica
+    che un passo fallito raggiunga davvero session_recorder.record_failure (F0, core/session_
+    recorder.py) - il pezzo che rende possibile tools/replay_session.py."""
+
+    def test_failed_step_calls_record_failure_with_the_real_parameters(self):
+        registry = FakeRegistry(add_note_results=[SkillResult(success=False, data={}, error="MISSING_PARAMETERS")])
+        client = ScriptedOllamaClient([
+            {"thought": "Aggiungo l'appunto", "action": {"intent": "ADD_NOTE", "parameters": {"text": "prova"}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Non riuscito.", "ask_user": ""},
+        ])
+        recorder = unittest.mock.Mock()
+        agent = _agent(registry, client)
+        agent.session_recorder = recorder
+
+        # log_action mascherato: non e' quello sotto test qui (vedi StructuredLoggingTests) e,
+        # se non mascherato, scriverebbe davvero su data/jake_actions.jsonl del contributore.
+        with unittest.mock.patch("core.agent.log_action"):
+            agent.run("aggiungi un appunto", trace_id="trace-fail")
+
+        recorder.record_failure.assert_called_once()
+        args, kwargs = recorder.record_failure.call_args
+        self.assertEqual(args[0], "trace-fail")
+        self.assertEqual(kwargs["intent"], "ADD_NOTE")
+        self.assertEqual(kwargs["parameters"], {"text": "prova"})
+        self.assertEqual(kwargs["error"], "error:MISSING_PARAMETERS")
+
+    def test_successful_step_does_not_call_record_failure(self):
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
+        client = ScriptedOllamaClient([
+            {"thought": "Aggiungo l'appunto", "action": {"intent": "ADD_NOTE", "parameters": {"text": "prova"}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto.", "ask_user": ""},
+        ])
+        recorder = unittest.mock.Mock()
+        agent = _agent(registry, client)
+        agent.session_recorder = recorder
+
+        with unittest.mock.patch("core.agent.log_action"):
+            agent.run("aggiungi un appunto")
+
+        recorder.record_failure.assert_not_called()
 
 
 class SpecializedAgentConfigurationTests(unittest.TestCase):

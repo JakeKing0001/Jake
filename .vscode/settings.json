@@ -1,3 +1,4 @@
 {
-    "cmake.sourceDirectory": "C:/Users/david/Desktop/Informatica/Jake/hud/native"
+    "cmake.sourceDirectory": "C:/Users/david/Desktop/Informatica/Jake/hud/native",
+    "cmake.buildDirectory": "C:/Users/david/Desktop/Informatica/Jake/hud/native/build"
 }

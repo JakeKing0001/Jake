@@ -1,0 +1,9 @@
+# Voce (F0, ex v0.5+v2.0): sintesi vocale offline (SAPI5 + OneCore) e riconoscimento vocale
+# locale (Whisper). webrtcvad-wheels e' webrtcvad con wheel Windows gia' pronte (stesso nome di
+# importazione 'import webrtcvad'): webrtcvad puro non ha wheel precompilata su PyPI per Windows.
+pyttsx3==2.99
+faster-whisper==1.2.1
+sounddevice==0.5.6
+keyboard==0.13.5
+winsdk==1.0.0b10
+webrtcvad-wheels==2.0.14

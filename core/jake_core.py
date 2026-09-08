@@ -1,3 +1,5 @@
+import time
+
 from core import fallbacks
 from core import intent_patterns
 from core.agent import TaskAgent
@@ -9,7 +11,7 @@ from core.desktop_context import DesktopContextTracker
 from core.event_bus import EventBus
 from core.hud_protocol import EventType, HudEvent
 from core.learning_manager import LearningManager
-from core.logger import get_logger
+from core.logger import get_logger, log_action, new_trace_id
 from core.nlu import chitchat
 from core.nlu.examples import ExampleStore
 from core.nlu.index import lexical_similarity
@@ -21,10 +23,11 @@ from core import orchestrator
 from core.orchestrator import JakeOrchestrator
 from core.plugin_loader import load_plugins
 from core.response_formatter import format_plan_outcome, format_skill_result
-from core.risk import needs_central_auth, needs_central_confirmation
+from core.risk import needs_central_auth, needs_central_confirmation, risk_of
 from core.router import Router
 from core.scheduler import ReminderScheduler
 from core.session_hooks import SessionHooks
+from core.session_recorder import SessionRecorder
 from core.skill_forge import SkillForge
 from core.skill_registry import SkillRegistry
 from core.skill_result import SkillResult
@@ -63,6 +66,20 @@ class JakeCore:
         # e' salvata su disco: riparte sempre disattivata a ogni avvio di Jake, cosi' non puo'
         # restare attiva per sbaglio senza che l'utente se ne accorga in una sessione successiva.
         self.private_mode = False
+
+        # Replay anonimizzato/deterministico delle sessioni fallite (F0): disattivato per
+        # default, come companion_server_enabled/system_advisor_enabled - va acceso di proposito
+        # in config/settings.json, non e' un log che parte da solo. session_recording_verbatim
+        # (anch'esso per default disattivato) toglie la redazione dei parametri: serve a chi sta
+        # davvero debuggando un fallimento su questa macchina e sa che sta scrivendo dati veri.
+        self.session_recorder = SessionRecorder(
+            enabled=bool(config.get("session_recording_enabled", False)),
+            verbatim=bool(config.get("session_recording_verbatim", False)),
+        )
+        # PlanExecutor e' costruito dentro SkillRegistry (self.skill_registry.plan_executor),
+        # prima che self.session_recorder esista qui: gli viene assegnato subito dopo, invece di
+        # passargli un secondo SessionRecorder scollegato che scriverebbe altrove.
+        self.skill_registry.plan_executor.session_recorder = self.session_recorder
 
         # Protocollo eventi + server companion (v4.9.1 HUD IPC transport, v5.8 Mobile
         # Companion, v5.9 Ambient Computing): qualsiasi presentazione esterna (HUD nativo,
@@ -105,6 +122,7 @@ class JakeCore:
             logger=self.logger,
             context_provider=lambda: self._agent_context(),
             executor=lambda intent, parameters: self._resolve_and_execute(Command(intent, parameters))[1],
+            session_recorder=self.session_recorder,
         )
         self.agent.on_step = self._on_agent_step
 
@@ -118,6 +136,7 @@ class JakeCore:
             logger=self.logger,
             context_provider=lambda: self._agent_context(),
             executor=lambda intent, parameters: self._resolve_and_execute(Command(intent, parameters))[1],
+            session_recorder=self.session_recorder,
         )
         self.coding_agent = TaskAgent(
             self.skill_registry, self.retriever, self.ollama,
@@ -514,7 +533,10 @@ class JakeCore:
         conclude nulla, ripiega sul vecchio planner a piano fisso; se fallisce anche quello, NO_PLAN."""
         remember_text = remember_text if remember_text is not None else request
         try:
-            outcome = self.orchestrator.run(request, history=self.conversation_state.get_short_term_history())
+            outcome = self.orchestrator.run(
+                request, history=self.conversation_state.get_short_term_history(),
+                trace_id=new_trace_id(), private=self.private_mode,
+            )
         except Exception:
             self.logger.exception("Errore nell'agente per: %s", request)
             outcome = None
@@ -561,12 +583,16 @@ class JakeCore:
 
     def _execute_command(self, text: str, command: Command, learn: bool = True) -> str:
         intent = command.intent
+        trace_id = new_trace_id()
+        started = time.monotonic()
         if intent in self.blocked_intents:
             self.logger.warning("Azione bloccata da policy: %s", intent)
+            self._log_action_outcome(trace_id, started, intent, command.parameters, result="blocked_by_policy")
             return f"L'azione {intent} è disabilitata nella configurazione."
 
         skill = self.skill_registry.get_skill(intent)
         if skill is None:
+            self._log_action_outcome(trace_id, started, intent, command.parameters, result="skill_not_found")
             return f"Skill non trovata per {intent}"
 
         resolved, result, note = self._resolve_and_execute(command)
@@ -579,6 +605,7 @@ class JakeCore:
                 "text": text,
             })
             self._remember_exchange(text, resolved, result.data.get("message", ""))
+            self._log_action_outcome(trace_id, started, resolved.intent, resolved.parameters, result=reason)
             return result.data.get("message", "Confermi questa azione?")
 
         response = format_skill_result(resolved.intent, result, self.skill_registry)
@@ -589,7 +616,40 @@ class JakeCore:
         if learn:
             self.learning.observe(text, resolved, result, route=self.router.last_route)
         self._remember_exchange(text, resolved, response)
+        outcome = "success" if (result is not None and result.success) else f"error:{result.error}" if result is not None else "no_result"
+        self._log_action_outcome(trace_id, started, resolved.intent, resolved.parameters, result=outcome)
         return response
+
+    # Un esito che non e' un vero fallimento da poter far ripartire (una conferma in attesa non
+    # e' un bug), ne' un successo: session_recorder.record_failure() li ignora entrambi.
+    _NOT_A_FAILURE = {"success", "confirmation_required", "auth_required"}
+
+    def _log_action_outcome(self, trace_id: str, started: float, intent: str, parameters: dict, *, result: str) -> None:
+        """Punto unico da cui _execute_command scrive in jake_actions.jsonl (F0: log strutturati
+        con trace_id, durata, modello, skill, decisione di rischio, risultato). verified resta
+        assente (vedi log_action): questo percorso a comando singolo non verifica ancora
+        l'effetto dell'azione (a differenza dell'agente a passi, core/agent.py/execution_safety.
+        py), quindi dichiara onestamente "non verificato" invece di inventare una prova.
+
+        Se il risultato e' un vero fallimento, la stessa chiamata alimenta anche core/session_
+        recorder.py (disattivato per default: vedi session_recording_enabled/_verbatim in
+        config/settings.json) con intent e parametri, cosi' tools/replay_session.py puo' farlo
+        ripartire davvero per verificare un fix - log_action da solo non basta, non porta i
+        parametri."""
+        log_action(
+            trace_id,
+            private=self.private_mode,
+            duration_ms=(time.monotonic() - started) * 1000,
+            model=self.model,
+            skill=intent,
+            risk_decision=risk_of(intent).value,
+            result=result,
+        )
+        if result not in self._NOT_A_FAILURE:
+            self.session_recorder.record_failure(
+                trace_id, intent=intent, parameters=parameters, error=result,
+                risk_decision=risk_of(intent).value, private=self.private_mode,
+            )
 
     def _handle_unknown(self, text: str) -> str:
         agent_response = self._run_agent(text)
@@ -614,6 +674,7 @@ class JakeCore:
             return self.NO_PLAN
         outcome = self.plan_executor.execute(
             plan, blocked_intents=self.blocked_intents, always_confirm_intents=self.always_confirm_intents,
+            trace_id=new_trace_id(), private=self.private_mode, model=self.model,
         )
         response = format_plan_outcome(outcome, len(plan.steps), self.skill_registry)
         self._remember_exchange(text, Command("PLAN", {"steps": len(plan.steps)}), response)

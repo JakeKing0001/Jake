@@ -10,7 +10,7 @@ capacita') e la corsia veloce a corrispondenza esatta, che evita del tutto la ch
 modello per le frasi gia' viste."""
 import json
 import re
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent

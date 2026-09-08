@@ -21,6 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from core.device_registry import DeviceRegistry
 from core.event_bus import EventBus
 from core.hud_protocol import EventType, HudEvent
+from core.version import VERSION
 
 DEFAULT_HOST = "127.0.0.1"
 SSE_KEEPALIVE_SECONDS = 15
@@ -99,6 +100,7 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/status":
             return self._json_response(200, {
                 "ok": True,
+                "version": VERSION,
                 "active_device": self.companion.devices.active_device_id,
                 "devices": self.companion.devices.list_devices(),
             })
@@ -141,6 +143,14 @@ class _Handler(BaseHTTPRequestHandler):
         self._json_response(200, {"active_device": device_id})
 
     def _handle_release(self, device_id: str):
+        # _read_json_body() scarta il risultato (release non ha ancora parametri), ma va
+        # comunque chiamato: se il client manda un body (anche vuoto, "{}") e il gestore non lo
+        # legge, quei byte restano non letti nel buffer TCP quando la connessione si chiude. Su
+        # Windows questo fa rispondere con un RST invece di una FIN pulita, e il client vede un
+        # ConnectionAbortedError [WinError 10053] intermittente (dipende dal timing con cui i
+        # byte del body arrivano rispetto alla chiusura) - il flake descritto nella roadmap F0,
+        # riprodotto qui in ~10% delle richieste su 400+ esecuzioni finche' non si legge il body.
+        self._read_json_body()
         released = self.companion.devices.release(device_id)
         self._json_response(200, {"released": released})
 

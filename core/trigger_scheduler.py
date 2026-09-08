@@ -1,7 +1,7 @@
 import threading
 from datetime import date, datetime
 
-from core.logger import get_logger
+from core.logger import get_logger, new_trace_id
 
 
 class TriggerScheduler:
@@ -111,8 +111,13 @@ class TriggerScheduler:
             )
             return
 
+        # model=None: un'automazione esegue un piano gia' costruito, senza mai chiamare il
+        # modello per decidere il passo successivo (a differenza dell'agente a passi) - non c'e'
+        # nessun modello da riportare nel log strutturato. private=False: un trigger che parte
+        # da solo non e' mai legato a una conversazione in modalita' privata.
         outcome = self.plan_executor.execute(
-            plan, blocked_intents=self.blocked_intents, always_confirm_intents=self.always_confirm_intents
+            plan, blocked_intents=self.blocked_intents, always_confirm_intents=self.always_confirm_intents,
+            trace_id=new_trace_id(), private=False, model=None,
         )
         self.trigger_manager.mark_fired(name, datetime.now().isoformat())
 

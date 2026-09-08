@@ -1,0 +1,27 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "windows-ninja",
+      "displayName": "Windows (Ninja, MSVC)",
+      "description": "Preset di default: fissa binaryDir dentro hud/native/build cosi' un tool che configura da qui (es. l'estensione CMake Tools di VS Code) non scrive mai fuori da questa cartella, gia' in .gitignore. Vedi il commit 'problem with cmake' dell'8 settembre 2026: build/ era finita, per errore, alla radice del repo.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-ninja",
+      "configurePreset": "windows-ninja"
+    }
+  ]
+}

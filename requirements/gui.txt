@@ -1,0 +1,4 @@
+# Tray icon e pannello di stato legacy (F0, ex v1.1, modalita' --tray): Pillow serve solo per le
+# icone della tray qui, l'HUD (requirements/hud.txt) non ne ha bisogno.
+pystray==0.19.5
+Pillow==12.3.0
