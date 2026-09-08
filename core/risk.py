@@ -305,6 +305,17 @@ def needs_central_confirmation(intent: str) -> bool:
     return is_at_least(risk_of(intent), RiskLevel.DESTRUCTIVE) and intent not in SELF_CONFIRMING_INTENTS
 
 
+def needs_central_auth(intent: str) -> bool:
+    """Vero se l'intent e' al livello di rischio piu' alto (ADMIN: spegnimento, esecuzione di
+    codice, installazione di una capacita' auto-generata) e non si autogestisce gia' da solo.
+    E' il gradino sopra needs_central_confirmation nel Permissions & Security Kernel (v5.4):
+    ALLOW per READ_ONLY/LOCAL_REVERSIBLE/EXTERNAL_ACTION, CONFIRM per DESTRUCTIVE, REQUIRE_AUTH
+    per ADMIN. L'enforcement vero (vedi core/auth_gate.py, v5.5) resta pero' opt-in: se l'utente
+    non ha mai configurato una passphrase, questi stessi intent continuano a passare solo dalla
+    conferma si'/no, non da un vicolo cieco senza via d'uscita."""
+    return risk_of(intent) == RiskLevel.ADMIN and intent not in SELF_CONFIRMING_INTENTS
+
+
 def risk_of(intent: str) -> RiskLevel:
     """Livello di rischio di un intent. Una skill non ancora censita qui (un plugin di terze
     parti, o una skill scritta dalla Skill Forge) ricade su ADMIN per difetto: e' la scelta

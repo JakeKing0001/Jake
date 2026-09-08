@@ -1,6 +1,7 @@
 from core import fallbacks
 from core import intent_patterns
 from core.agent import TaskAgent
+from core.auth_gate import AuthGate
 from core.command import Command
 from core.context_summarizer import ContextSummarizer
 from core.desktop_context import DesktopContextTracker
@@ -17,7 +18,7 @@ from core import orchestrator
 from core.orchestrator import JakeOrchestrator
 from core.plugin_loader import load_plugins
 from core.response_formatter import format_plan_outcome, format_skill_result
-from core.risk import needs_central_confirmation
+from core.risk import needs_central_auth, needs_central_confirmation
 from core.router import Router
 from core.scheduler import ReminderScheduler
 from core.session_hooks import SessionHooks
@@ -117,6 +118,12 @@ class JakeCore:
         self.context_summarizer = ContextSummarizer(model=self.router.primary_provider.model)
         self.blocked_intents = set(config.get("blocked_intents", []) or [])
         self.always_confirm_intents = set(config.get("always_confirm_intents", []) or [])
+        # Autenticazione per le azioni ADMIN (v5.4/5.5, Permissions & Security Kernel +
+        # Identity & Authentication): opt-in, vedi core/auth_gate.py. Senza una passphrase
+        # configurata (admin_passphrase in config.json) resta disabilitata e le azioni ADMIN
+        # continuano a passare solo dalla conferma si'/no, come prima di questa fase.
+        self.auth_gate = AuthGate(passphrase=config.get("admin_passphrase"))
+        self.require_auth_intents: set = set()
 
         # Jake proattivo (v1.2): di default stampa i promemoria scaduti; chi lancia Jake
         # (CLI, voce, tray, HUD) puo' sostituire questo callback per parlarli o mostrarli.
@@ -203,6 +210,14 @@ class JakeCore:
         # .update() lo aggiorna anche li'.
         self.always_confirm_intents.update(
             intent for intent in self.skill_registry.skills if needs_central_confirmation(intent)
+        )
+        # Gradino REQUIRE_AUTH (v5.4/5.5): le skill ADMIN non auto-confermanti finiscono anche
+        # qui. Restano PURE in always_confirm_intents sopra (needs_central_confirmation include
+        # ADMIN): se self.auth_gate non e' mai stato attivato, il gate su always_confirm_intents
+        # in _resolve_and_execute le gestisce comunque con la conferma si'/no di sempre, l'auth
+        # vera scatta solo quando auth_gate.enabled e' vero (vedi _resolve_and_execute).
+        self.require_auth_intents.update(
+            intent for intent in self.skill_registry.skills if needs_central_auth(intent)
         )
 
         # Indici del recupero semantico: costruiti dopo che TUTTE le skill sono registrate.
@@ -399,8 +414,24 @@ class JakeCore:
         classificazione del rischio, vedi core/risk.py) chiede conferma qui, PRIMA di eseguire
         davvero, invece che solo nel percorso a comando singolo di JakeCore._execute_command.
         Questo copre anche l'agente a passi (core/agent.py), che esegue le skill passando da
-        qui e non da _execute_command."""
+        qui e non da _execute_command. Il gradino REQUIRE_AUTH (v5.4/5.5) viene controllato
+        PRIMA di quello CONFIRM: un'azione ADMIN, quando l'autenticazione e' attiva, chiede la
+        passphrase invece della semplice conferma si'/no."""
         resolved = fallbacks.pre_execution_rewrite(command, self.skill_registry)
+        if (
+            self.auth_gate.enabled
+            and resolved.intent in self.require_auth_intents
+            and not (resolved.parameters or {}).get("authenticated")
+        ):
+            return resolved, SkillResult(
+                success=False,
+                data={
+                    "message": f"Serve l'autenticazione: {self.describe_command(resolved)}. Di' la passphrase per confermare.",
+                    "confirm_parameters": {**(resolved.parameters or {}), "authenticated": True},
+                    "confirm_intent": resolved.intent,
+                },
+                error="AUTH_REQUIRED",
+            ), None
         if resolved.intent in self.always_confirm_intents and not (resolved.parameters or {}).get("confirmed"):
             return resolved, SkillResult(
                 success=False,
@@ -448,10 +479,11 @@ class JakeCore:
             return self._try_plan(request)
 
         if outcome.pending_confirmation is not None:
+            reason = "auth_required" if outcome.pending_confirmation.get("kind") == "AUTH_REQUIRED" else "confirmation_required"
             self.conversation_state.set_pending_action({
                 "intent": outcome.pending_confirmation["intent"],
                 "parameters": outcome.pending_confirmation["parameters"],
-                "reason": "confirmation_required",
+                "reason": reason,
                 "text": remember_text,
             })
             message = outcome.pending_confirmation["message"]
@@ -494,11 +526,12 @@ class JakeCore:
             return f"Skill non trovata per {intent}"
 
         resolved, result, note = self._resolve_and_execute(command)
-        if result is not None and result.error == "CONFIRMATION_REQUIRED":
+        if result is not None and result.error in ("CONFIRMATION_REQUIRED", "AUTH_REQUIRED"):
+            reason = "auth_required" if result.error == "AUTH_REQUIRED" else "confirmation_required"
             self.conversation_state.set_pending_action({
                 "intent": result.data.get("confirm_intent", resolved.intent),
                 "parameters": result.data.get("confirm_parameters", resolved.parameters),
-                "reason": "confirmation_required",
+                "reason": reason,
                 "text": text,
             })
             self._remember_exchange(text, resolved, result.data.get("message", ""))
@@ -550,33 +583,49 @@ class JakeCore:
             self.conversation_state.clear_pending_action()
             return self._continue_agent(action, text)
 
+        # v5.4/5.5: un'azione ADMIN con l'autenticazione attiva aspetta la passphrase, non un
+        # si'/no. Un solo tentativo per turno (come per le conferme normali, che si annullano
+        # su qualunque risposta che non sia si'/no): niente tentativi ripetuti in loop.
+        if action.get("reason") == "auth_required":
+            self.conversation_state.clear_pending_action()
+            if self.auth_gate.check(text):
+                return self._finalize_pending_action(action, text)
+            return "Passphrase errata: azione annullata."
+
         if intent_patterns.is_positive_answer(text):
             self.conversation_state.clear_pending_action()
-            result = self.skill_registry.execute(action["intent"], action["parameters"])
-            # Una conferma puo' chiederne un'altra (CREATE_SKILL: "provo a imparare?" -> codice
-            # scritto -> "lo attivo?"): stessa gestione del percorso normale.
-            if result is not None and result.error == "CONFIRMATION_REQUIRED":
-                self.conversation_state.set_pending_action({
-                    "intent": result.data.get("confirm_intent", action["intent"]),
-                    "parameters": result.data.get("confirm_parameters", action["parameters"]),
-                    "reason": "confirmation_required",
-                    "text": action.get("text", ""),
-                })
-                return result.data.get("message", "Confermi questa azione?")
-            response = format_skill_result(action["intent"], result, self.skill_registry)
-            command = Command(action["intent"], action["parameters"])
-            if result is not None and result.success:
-                self.conversation_state.remember_entities(action["intent"], action["parameters"], result.data or {})
-            if action.get("reason") == "confirmation_required" and action.get("text"):
-                self.learning.observe(action["text"], command, result, route="llm" if self.last_route == "llm" else "confirmed")
-            self._remember_exchange(action.get("text", text), command, response)
-            return response
+            return self._finalize_pending_action(action, text)
         if intent_patterns.is_negative_answer(text):
             self.conversation_state.clear_pending_action()
             return "Va bene, annullato."
         # Ne' si' ne' no: l'utente e' passato ad altro. Annulla l'azione in sospeso e vai avanti.
         self.conversation_state.clear_pending_action()
         return self._process(text)
+
+    def _finalize_pending_action(self, action: dict, fallback_text: str) -> str:
+        """Esegue davvero un'azione in sospeso ormai confermata/autenticata (skill_registry.
+        execute diretto: il gate di _resolve_and_execute non deve scattare una seconda volta
+        su qualcosa che l'utente ha appena approvato)."""
+        result = self.skill_registry.execute(action["intent"], action["parameters"])
+        # Una conferma puo' chiederne un'altra (CREATE_SKILL: "provo a imparare?" -> codice
+        # scritto -> "lo attivo?"): stessa gestione del percorso normale.
+        if result is not None and result.error in ("CONFIRMATION_REQUIRED", "AUTH_REQUIRED"):
+            reason = "auth_required" if result.error == "AUTH_REQUIRED" else "confirmation_required"
+            self.conversation_state.set_pending_action({
+                "intent": result.data.get("confirm_intent", action["intent"]),
+                "parameters": result.data.get("confirm_parameters", action["parameters"]),
+                "reason": reason,
+                "text": action.get("text", ""),
+            })
+            return result.data.get("message", "Confermi questa azione?")
+        response = format_skill_result(action["intent"], result, self.skill_registry)
+        command = Command(action["intent"], action["parameters"])
+        if result is not None and result.success:
+            self.conversation_state.remember_entities(action["intent"], action["parameters"], result.data or {})
+        if action.get("reason") in ("confirmation_required", "auth_required") and action.get("text"):
+            self.learning.observe(action["text"], command, result, route="llm" if self.last_route == "llm" else "confirmed")
+        self._remember_exchange(action.get("text", fallback_text), command, response)
+        return response
 
     def _remember_exchange(self, text: str, command: Command, response: str) -> None:
         self.last_exchange = {"text": text, "command": command, "response": response}

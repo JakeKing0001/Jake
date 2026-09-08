@@ -288,12 +288,16 @@ class TaskAgent:
                     # che in realta' non e' successo.
                     result = SkillResult(success=False, data=result.data, error="VERIFICATION_FAILED")
                 step = AgentStep(intent=intent, parameters=parameters, thought=thought, result=result, attempts=attempts)
-                if result is not None and result.error == "CONFIRMATION_REQUIRED":
+                if result is not None and result.error in ("CONFIRMATION_REQUIRED", "AUTH_REQUIRED"):
                     outcome.steps.append(step)
                     outcome.pending_confirmation = {
                         "intent": intent,
                         "parameters": result.data.get("confirm_parameters", parameters),
                         "message": result.data.get("message", "Confermi questa azione?"),
+                        # v5.4/5.5: distingue una conferma si'/no da un'autenticazione vera,
+                        # cosi' JakeCore._run_agent puo' passare il tipo giusto di attesa
+                        # (vedi conversation_state pending_action.reason).
+                        "kind": result.error,
                     }
                     return outcome
                 step.observation = self._observe(intent, result)

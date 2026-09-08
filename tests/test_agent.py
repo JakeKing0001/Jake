@@ -178,6 +178,30 @@ class RollbackAfterFatalErrorTests(unittest.TestCase):
         self.assertIsNone(outcome.error)
 
 
+class AuthRequiredPropagationTests(unittest.TestCase):
+    """v5.4/5.5: un passo che torna AUTH_REQUIRED (vedi JakeCore._resolve_and_execute) deve
+    fermare l'agente e riportare il tipo giusto in pending_confirmation, non essere trattato
+    come un fallimento qualsiasi ne' confuso con una semplice conferma si'/no."""
+
+    def test_auth_required_step_sets_pending_confirmation_with_the_right_kind(self):
+        registry = FakeRegistry(add_note_results=[
+            SkillResult(
+                success=False,
+                data={"message": "Serve la passphrase.", "confirm_parameters": {"text": "prova", "authenticated": True}},
+                error="AUTH_REQUIRED",
+            ),
+        ])
+        client = ScriptedOllamaClient([
+            {"thought": "Aggiungo l'appunto", "action": {"intent": "ADD_NOTE", "parameters": {"text": "prova"}},
+             "final_answer": "", "ask_user": ""},
+        ])
+        outcome = _agent(registry, client).run("aggiungi un appunto rischioso")
+
+        self.assertIsNotNone(outcome.pending_confirmation)
+        self.assertEqual(outcome.pending_confirmation["kind"], "AUTH_REQUIRED")
+        self.assertEqual(outcome.pending_confirmation["message"], "Serve la passphrase.")
+
+
 class SpecializedAgentConfigurationTests(unittest.TestCase):
     """v5.0/5.1: un agente 'di dominio' (es. CodingAgent) e' lo stesso TaskAgent con
     fixed_tools/persona_line impostati, non una classe diversa (vedi core/orchestrator.py)."""
