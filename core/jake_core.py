@@ -2,6 +2,7 @@ import time
 
 from core import fallbacks
 from core import intent_patterns
+from core.action_ledger import ActionLedger, ActionReceipt, authorization_of, new_action_id
 from core.agent import TaskAgent
 from core.auth_gate import AuthGate
 from core.command import Command
@@ -81,6 +82,14 @@ class JakeCore:
         # passargli un secondo SessionRecorder scollegato che scriverebbe altrove.
         self.skill_registry.plan_executor.session_recorder = self.session_recorder
 
+        # Action ledger append-only (F1, Trustworthy Agent Core 3.0): "chi ha chiesto cosa,
+        # quale agente ha deciso, quale skill ha agito, con quale autorizzazione e quale
+        # risultato" - vedi core/action_ledger.py. Sempre attivo (a differenza di session_
+        # recorder, che e' un debug tool opt-in): un registro di responsabilita' non ha senso se
+        # e' disattivato per default. Rispetta comunque la modalita' privata, come tutto il resto.
+        self.action_ledger = ActionLedger()
+        self.skill_registry.plan_executor.action_ledger = self.action_ledger
+
         # Protocollo eventi + server companion (v4.9.1 HUD IPC transport, v5.8 Mobile
         # Companion, v5.9 Ambient Computing): qualsiasi presentazione esterna (HUD nativo,
         # app companion su un altro dispositivo) puo' iscriversi a self.event_bus senza essere
@@ -122,7 +131,7 @@ class JakeCore:
             logger=self.logger,
             context_provider=lambda: self._agent_context(),
             executor=lambda intent, parameters: self._resolve_and_execute(Command(intent, parameters))[1],
-            session_recorder=self.session_recorder,
+            session_recorder=self.session_recorder, action_ledger=self.action_ledger, agent_name="general",
         )
         self.agent.on_step = self._on_agent_step
 
@@ -136,18 +145,18 @@ class JakeCore:
             logger=self.logger,
             context_provider=lambda: self._agent_context(),
             executor=lambda intent, parameters: self._resolve_and_execute(Command(intent, parameters))[1],
-            session_recorder=self.session_recorder,
+            session_recorder=self.session_recorder, action_ledger=self.action_ledger,
         )
         self.coding_agent = TaskAgent(
             self.skill_registry, self.retriever, self.ollama,
             fixed_tools=list(orchestrator.CODING_TOOLS), persona_line=orchestrator.CODING_PERSONA,
-            **agent_kwargs,
+            agent_name="coding", **agent_kwargs,
         )
         self.coding_agent.on_step = self._on_agent_step
         self.research_agent = TaskAgent(
             self.skill_registry, self.retriever, self.ollama,
             fixed_tools=list(orchestrator.RESEARCH_TOOLS), persona_line=orchestrator.RESEARCH_PERSONA,
-            **agent_kwargs,
+            agent_name="research", **agent_kwargs,
         )
         self.research_agent.on_step = self._on_agent_step
         self.orchestrator = JakeOrchestrator(self.agent, self.coding_agent, self.research_agent)
@@ -551,6 +560,11 @@ class JakeCore:
                 "parameters": outcome.pending_confirmation["parameters"],
                 "reason": reason,
                 "text": remember_text,
+                # F1: ripreso da _finalize_pending_action per far comparire la ricevuta
+                # dell'esecuzione vera, dopo la conferma, correlata alla stessa richiesta invece
+                # di un trace_id scollegato - vedi TaskAgent._log_step per il trace_id dei passi
+                # dell'agente che hanno gia' portato a questa richiesta di conferma.
+                "trace_id": new_trace_id(),
             })
             message = outcome.pending_confirmation["message"]
             self._remember_exchange(remember_text, Command("AGENT", {"request": request}), message)
@@ -603,6 +617,7 @@ class JakeCore:
                 "parameters": result.data.get("confirm_parameters", resolved.parameters),
                 "reason": reason,
                 "text": text,
+                "trace_id": trace_id,  # F1: la ricevuta della conferma si correla a questa
             })
             self._remember_exchange(text, resolved, result.data.get("message", ""))
             self._log_action_outcome(trace_id, started, resolved.intent, resolved.parameters, result=reason)
@@ -635,20 +650,27 @@ class JakeCore:
         recorder.py (disattivato per default: vedi session_recording_enabled/_verbatim in
         config/settings.json) con intent e parametri, cosi' tools/replay_session.py puo' farlo
         ripartire davvero per verificare un fix - log_action da solo non basta, non porta i
-        parametri."""
+        parametri. Alimenta anche core/action_ledger.py (F1): una ricevuta con action_id,
+        richiedente ("user": e' sempre un comando diretto dell'utente su questo percorso) e
+        autorizzazione derivata da authorization_of()."""
+        duration_ms = (time.monotonic() - started) * 1000
+        risk = risk_of(intent).value
         log_action(
-            trace_id,
+            trace_id, private=self.private_mode, duration_ms=duration_ms, model=self.model,
+            skill=intent, risk_decision=risk, result=result,
+        )
+        self.action_ledger.record(
+            ActionReceipt(
+                action_id=new_action_id(), trace_id=trace_id, ts=time.time(), intent=intent,
+                requested_by="user", risk_decision=risk, authorization=authorization_of(result, parameters),
+                result=result, duration_ms=duration_ms, model=self.model,
+            ),
             private=self.private_mode,
-            duration_ms=(time.monotonic() - started) * 1000,
-            model=self.model,
-            skill=intent,
-            risk_decision=risk_of(intent).value,
-            result=result,
         )
         if result not in self._NOT_A_FAILURE:
             self.session_recorder.record_failure(
                 trace_id, intent=intent, parameters=parameters, error=result,
-                risk_decision=risk_of(intent).value, private=self.private_mode,
+                risk_decision=risk, private=self.private_mode,
             )
 
     def _handle_unknown(self, text: str) -> str:
@@ -664,6 +686,7 @@ class JakeCore:
         if self.skill_forge.is_available():
             self.conversation_state.set_pending_action({
                 "intent": "CREATE_SKILL", "parameters": {"request": text}, "reason": "offer_learn", "text": text,
+                "trace_id": new_trace_id(),
             })
             return "Non so ancora fare questa cosa. Vuoi che provi a impararla da solo, scrivendomi una nuova capacità?"
         return self.NO_PLAN
@@ -710,7 +733,18 @@ class JakeCore:
     def _finalize_pending_action(self, action: dict, fallback_text: str) -> str:
         """Esegue davvero un'azione in sospeso ormai confermata/autenticata (skill_registry.
         execute diretto: il gate di _resolve_and_execute non deve scattare una seconda volta
-        su qualcosa che l'utente ha appena approvato)."""
+        su qualcosa che l'utente ha appena approvato).
+
+        F1: fino a questa correzione, l'azione VERA - quella confermata, spesso la piu'
+        rischiosa (DESTRUCTIVE/ADMIN, altrimenti non avrebbe mai chiesto conferma) - non
+        produceva ne' un record in jake_actions.jsonl (F0) ne' una ricevuta nel ledger (F1):
+        solo la richiesta di conferma iniziale veniva registrata, non l'esecuzione dopo il si'/
+        la passphrase. Scoperto verificando davvero un DELETE_PATH confermato end-to-end (non
+        leggendo il codice), non un'ipotesi. trace_id viene dall'azione in sospeso (impostato da
+        chi ha chiesto la conferma, vedi _execute_command/_run_agent/_handle_unknown) cosi' la
+        ricevuta della conferma si correla a quella della richiesta originale nel ledger."""
+        trace_id = action.get("trace_id") or new_trace_id()
+        started = time.monotonic()
         result = self.skill_registry.execute(action["intent"], action["parameters"])
         # Una conferma puo' chiederne un'altra (CREATE_SKILL: "provo a imparare?" -> codice
         # scritto -> "lo attivo?"): stessa gestione del percorso normale.
@@ -721,8 +755,12 @@ class JakeCore:
                 "parameters": result.data.get("confirm_parameters", action["parameters"]),
                 "reason": reason,
                 "text": action.get("text", ""),
+                "trace_id": trace_id,
             })
+            self._log_action_outcome(trace_id, started, action["intent"], action["parameters"], result=reason)
             return result.data.get("message", "Confermi questa azione?")
+        outcome = "success" if (result is not None and result.success) else f"error:{result.error}" if result is not None else "no_result"
+        self._log_action_outcome(trace_id, started, action["intent"], action["parameters"], result=outcome)
         response = format_skill_result(action["intent"], result, self.skill_registry)
         command = Command(action["intent"], action["parameters"])
         if result is not None and result.success:

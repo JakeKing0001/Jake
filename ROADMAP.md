@@ -267,28 +267,74 @@ pulita; smoke test installazione/avvio/arresto; dashboard locale con errori e la
 
 **Priorità: P0. Obiettivo: ogni azione è tipizzata, autorizzata, verificata e spiegabile.**
 
-- Sostituire JSON “quasi strutturato” con JSON Schema validato per intent, tool call, risultato,
-  errore, prova, undo e richiesta di chiarimento.
-- Assegnare a ogni azione `action_id`, precondizioni, effetto atteso, timeout, politica retry,
-  idempotency key, compensazione e prova post-condizione.
-- Aggiungere un action ledger append-only: “chi ha chiesto cosa, quale agente ha deciso, quale
-  skill ha agito, con quale autorizzazione e quale risultato”.
-- Separare planner, policy engine ed executor: il modello propone; il kernel decide se può
-  eseguire; l'executor non può aumentare i propri privilegi.
-- Capability token per agente/skill/dispositivo, con scope su cartelle, app, contatti, domini,
-  Home Assistant e durata.
-- Proteggere segreti con Windows DPAPI/credential vault; migrazione sicura dei token già salvati.
-- Usare Windows Hello/passkey per operazioni admin e ad alto impatto. La voce può riconoscere
-  l'utente per comodità, ma non deve essere l'unico fattore di sicurezza.
-- Difese da prompt injection: separazione tra istruzioni e contenuti letti, taint tracking,
-  allowlist delle azioni, conferma quando una pagina/file tenta di impartire ordini.
-- Sandbox OS per plugin generati: processo a bassa integrità/AppContainer o ambiente dedicato,
-  filesystem e rete negati per default, limiti CPU/RAM/tempo.
-- Backup transazionale prima delle modifiche materiali e undo center nell'HUD.
-- Kill switch globale da tastiera, tray e voce; arresto immediato di agenti e automazioni.
+- ✅ Aggiunto un action ledger append-only (`core/action_ledger.py`, `data/jake_ledger.jsonl`):
+  "chi ha chiesto cosa, quale agente ha deciso, quale skill ha agito, con quale autorizzazione e
+  quale risultato". Ogni ricevuta (`ActionReceipt`) porta un `action_id` proprio (distinto dal
+  `trace_id` di F0, che correla invece TUTTI i passi di una stessa richiesta), `requested_by`
+  ("user" per un comando diretto, "agent:general/coding/research" per un passo deciso
+  dall'agente, "trigger:\<nome\>" per un'automazione partita da sola) e `authorization`, derivata
+  da `authorization_of()` dagli stessi segnali già usati da `core/risk.py`/
+  `JakeCore._resolve_and_execute` (none/confirmed/passphrase/pending/blocked), non dichiarata a
+  mano da chi registra. A differenza del log strutturato F0 (`core/logger.log_action`, che ruota:
+  max 2 MB × 4 file, pensato per il debug quotidiano), il ledger non ruota mai - un registro di
+  responsabilità non deve perdere silenziosamente le voci vecchie; la crescita illimitata resta
+  un limite noto e dichiarato, non risolto qui. Collegato agli stessi tre punti di esecuzione già
+  cablati in F0 (`JakeCore._execute_command`, `TaskAgent`, `PlanExecutor`/`TriggerScheduler`).
+  **Verificando questo collegamento end-to-end con un `DELETE_PATH` confermato davvero (non solo
+  testato in isolamento) è emerso un buco reale preesistente fin da F0**: `JakeCore.
+  _finalize_pending_action` - il punto che esegue l'azione VERA dopo un sì/una passphrase, quasi
+  sempre la più rischiosa (altrimenti non avrebbe mai chiesto conferma) - chiamava
+  `skill_registry.execute` direttamente, senza mai passare né da `log_action` né dal ledger: solo
+  la richiesta di conferma iniziale veniva registrata, mai l'esecuzione confermata. Corretto
+  propagando il `trace_id` della richiesta originale nell'azione in sospeso e registrando anche
+  lì; verificato di nuovo end-to-end (le due ricevute, "pending" poi "confirmed", ora compaiono
+  entrambe con lo stesso `trace_id`). Coperto da `tests/test_action_ledger.py` e da
+  `ActionLedgerWiringTests` in `tests/test_agent.py`/`tests/test_plan_executor.py`/
+  `tests/test_jake_core_permissions.py`.
+- ✅ Segreti protetti a riposo con Windows DPAPI (`core/secrets_vault.py`, via `win32crypt` - già
+  una dipendenza transitiva, nessun nuovo pacchetto): `admin_passphrase` e
+  `home_assistant_token` in `config/settings.json` restavano in chiaro prima di questa fase,
+  leggibili da chiunque avesse accesso al file (backup, sync cloud, un altro utente sullo stesso
+  PC). `Config.get`/`Config.set` (`core/config.py`) cifrano/decifrano in modo trasparente per
+  `SECRET_KEYS`, legandosi all'account Windows corrente (lo stesso blob non si decifra su
+  un'altra macchina o un altro utente). Migrazione automatica e silenziosa di un valore già
+  salvato in chiaro da una versione precedente (`Config._migrate_secrets`, alla prima apertura),
+  richiesta esplicitamente dalla roadmap ("migrazione sicura dei token già salvati") - verificato
+  con un file scritto a mano in chiaro, aperto con `Config()`, e ricontrollato che il file su
+  disco risultasse cifrato subito dopo. Le variabili d'ambiente `JAKE_<CHIAVE>` restano
+  volutamente in chiaro (sono già il modo per non scrivere affatto il segreto su disco). Non è un
+  vault generico: niente scadenza, rotazione o audit di accesso, dichiarato esplicitamente nel
+  modulo. Coperto da `tests/test_secrets_vault.py` (DPAPI vero, nessun mock) e
+  `tests/test_config.py` (nessun test esisteva prima per `core/config.py`).
+- ⬜ JSON Schema validato per intent/tool call/risultato/errore/prova/undo/chiarimento: non
+  affrontato. `TaskAgent._schema()` (core/agent.py) genera già uno schema JSON per vincolare
+  l'output del modello (v3.1), ma non c'è ancora una validazione formale, condivisa e applicata
+  anche ai risultati/errori delle skill.
+- 🟡 `action_id`/prova post-condizione: `action_id` fatto (vedi sopra). Precondizioni esplicite,
+  timeout/retry per-azione dichiarati (oggi `execution_safety.MAX_ATTEMPTS`/`RETRYABLE_ERRORS`
+  sono globali, non per-azione), idempotency key e compensazione strutturata restano da fare -
+  il rollback esiste ma solo per il filesystem (`execution_safety.ROLLBACK_HANDLERS`).
+- ⬜ Separazione formale planner/policy engine/executor, capability token per agente/skill/
+  dispositivo, Windows Hello/passkey, difese da prompt injection (taint tracking/allowlist),
+  sandbox OS per i plugin generati dalla fucina, backup transazionale + undo center nell'HUD, kill
+  switch globale: non affrontati in questa sessione. Sono i pezzi più grandi e rischiosi di F1
+  (un kernel di permessi vero, autenticazione forte, sandboxing a livello OS): meritano una
+  sessione dedicata con più tempo per la revisione di sicurezza, non un'implementazione affrettata
+  - meglio dichiararli apertamente qui che spacciare un abbozzo rischioso per fatto.
 
 **Criterio di uscita:** nessuna skill non classificata; nessuna azione esterna/admin senza
 ricevuta di policy; test d'attacco su prompt injection e plugin; restore verificato.
+
+- 🟡 Nessuna azione esterna/admin senza ricevuta di policy: vero per il percorso a comando
+  singolo e per l'agente a passi (incluso, ora, il percorso di conferma - vedi sopra). Non ancora
+  vero al 100%: un tentativo di autenticazione FALLITO (passphrase sbagliata) o una conferma
+  RIFIUTATA (l'utente dice "no") non produce ancora una ricevuta nel ledger - solo le azioni
+  eseguite o in attesa lo fanno. Un diniego è comunque un evento di sicurezza degno di una
+  ricevuta ("negato"), lasciato esplicitamente come lavoro futuro invece di essere aggiunto di
+  fretta senza una nuova categoria di `authorization` pensata bene.
+- ⬜ Nessuna skill non classificata, test d'attacco su prompt injection e plugin, restore
+  verificato: non affrontati in questa sessione (dipendono dai pezzi di sicurezza più grandi
+  ancora da fare, sopra).
 
 ## F2 — Voice Natural 3.0
 

@@ -340,6 +340,52 @@ class SessionRecorderWiringTests(unittest.TestCase):
         recorder.record_failure.assert_not_called()
 
 
+class ActionLedgerWiringTests(unittest.TestCase):
+    """F1 (Trustworthy Agent Core 3.0, vedi core/action_ledger.py): ogni passo produce una
+    ricevuta nel ledger, con requested_by che identifica QUESTO agente ("agent:<agent_name>",
+    non un generico "agent")."""
+
+    def test_step_records_a_receipt_with_agent_requested_by(self):
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
+        client = ScriptedOllamaClient([
+            {"thought": "Aggiungo l'appunto", "action": {"intent": "ADD_NOTE", "parameters": {"text": "prova"}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto.", "ask_user": ""},
+        ])
+        ledger = unittest.mock.Mock()
+        agent = _agent(registry, client)
+        agent.action_ledger = ledger
+        agent.agent_name = "coding"
+
+        with unittest.mock.patch("core.agent.log_action"):
+            agent.run("aggiungi un appunto", trace_id="trace-ledger")
+
+        ledger.record.assert_called_once()
+        (receipt,), kwargs = ledger.record.call_args
+        self.assertEqual(receipt.trace_id, "trace-ledger")
+        self.assertEqual(receipt.requested_by, "agent:coding")
+        self.assertEqual(receipt.intent, "ADD_NOTE")
+        self.assertEqual(receipt.authorization, "none")
+        self.assertTrue(receipt.action_id)
+        self.assertFalse(kwargs["private"])
+
+    def test_private_run_passes_private_true_to_the_ledger(self):
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
+        client = ScriptedOllamaClient([
+            {"thought": "Aggiungo l'appunto", "action": {"intent": "ADD_NOTE", "parameters": {"text": "prova"}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto.", "ask_user": ""},
+        ])
+        ledger = unittest.mock.Mock()
+        agent = _agent(registry, client)
+        agent.action_ledger = ledger
+
+        with unittest.mock.patch("core.agent.log_action"):
+            agent.run("aggiungi un appunto", private=True)
+
+        self.assertTrue(ledger.record.call_args.kwargs["private"])
+
+
 class SpecializedAgentConfigurationTests(unittest.TestCase):
     """v5.0/5.1: un agente 'di dominio' (es. CodingAgent) e' lo stesso TaskAgent con
     fixed_tools/persona_line impostati, non una classe diversa (vedi core/orchestrator.py)."""
