@@ -5,6 +5,7 @@ import unittest
 from unittest import mock
 
 from core.conversation_state import ConversationStateManager
+from core.event_bus import EventBus
 from core.jake_core import JakeCore
 from skills.privacy import PurgeOldHistorySkill
 from skills.session_control import PrivateModeSkill
@@ -108,12 +109,14 @@ def _bare_core_for_answer(private_mode: bool) -> JakeCore:
     core.context_summarizer = object()
     core.private_mode = private_mode
     core.last_response = None
+    core.event_bus = EventBus()  # v4.9.1: answer() pubblica USER_MESSAGE/JAKE_MESSAGE qui
     return core
 
 
 class PrivateModeSuppressesPersistenceTests(unittest.TestCase):
     def test_private_mode_writes_nothing_to_memory_or_log(self):
         core = _bare_core_for_answer(private_mode=True)
+        subscriber = core.event_bus.subscribe()
         with mock.patch.object(JakeCore, "_process", return_value="risposta"):
             response = core.answer("ciao")
 
@@ -121,6 +124,7 @@ class PrivateModeSuppressesPersistenceTests(unittest.TestCase):
         self.assertEqual(core.memory_manager.logged, [])
         self.assertEqual(core.memory_manager.summarize_calls, 0)
         self.assertTrue(any("privata" in m.lower() for m in core.logger.messages))
+        self.assertTrue(subscriber.empty(), "uno scambio privato non deve essere trasmesso sul bus eventi (v4.9.1)")
 
     def test_private_mode_still_updates_in_memory_short_term_history(self):
         """La cronologia in RAM serve alla sessione corrente (pronomi, agente): non e' una
@@ -136,11 +140,16 @@ class PrivateModeSuppressesPersistenceTests(unittest.TestCase):
 
     def test_normal_mode_persists_as_before(self):
         core = _bare_core_for_answer(private_mode=False)
+        subscriber = core.event_bus.subscribe()
         with mock.patch.object(JakeCore, "_process", return_value="risposta"):
             core.answer("ciao")
 
         self.assertEqual(core.memory_manager.logged, [("user", "ciao"), ("jake", "risposta")])
         self.assertEqual(core.memory_manager.summarize_calls, 1)
+        from core.hud_protocol import EventType
+        first, second = subscriber.get_nowait(), subscriber.get_nowait()
+        self.assertEqual((first.type, first.payload), (EventType.USER_MESSAGE, {"text": "ciao"}))
+        self.assertEqual((second.type, second.payload), (EventType.JAKE_MESSAGE, {"text": "risposta"}))
 
 
 if __name__ == "__main__":
