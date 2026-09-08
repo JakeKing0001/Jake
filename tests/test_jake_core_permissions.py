@@ -337,5 +337,68 @@ class HandleConfirmationAuthTests(unittest.TestCase):
         self.assertFalse(kwargs["private"])
 
 
+class FakeLoggerCapturingWarnings:
+    def __init__(self):
+        self.warnings = []
+
+    def warning(self, msg, *args):
+        self.warnings.append(msg % args if args else msg)
+
+    def exception(self, *args, **kwargs):
+        pass
+
+
+class SafeConfirmEnvelopeTests(unittest.TestCase):
+    """F1: JakeCore._safe_confirm_envelope valida la busta CONFIRMATION_REQUIRED/AUTH_REQUIRED
+    di una skill (core/schema_validation.py) prima di fidarsene - vedi anche
+    tests/test_schema_validation.py per la validazione in isolamento."""
+
+    def _core(self):
+        core = JakeCore.__new__(JakeCore)
+        core.skill_registry = FakeRegistry({"FORGET": FakeSkill()})
+        core.logger = FakeLoggerCapturingWarnings()
+        return core
+
+    def test_well_formed_envelope_passes_through_unchanged(self):
+        core = self._core()
+        result = SkillResult(
+            success=False, data={"message": "Confermi?", "confirm_parameters": {"confirmed": True}},
+            error="CONFIRMATION_REQUIRED",
+        )
+
+        envelope = core._safe_confirm_envelope("FORGET", {"topic": "tutto"}, result, "confirmation_required")
+
+        self.assertEqual(envelope, result.data)
+        self.assertEqual(core.logger.warnings, [])
+
+    def test_missing_fields_fall_back_to_a_safe_default_with_the_confirmed_marker(self):
+        core = self._core()
+        result = SkillResult(success=False, data={}, error="CONFIRMATION_REQUIRED")  # busta vuota, malformata
+
+        envelope = core._safe_confirm_envelope("FORGET", {"topic": "tutto"}, result, "confirmation_required")
+
+        self.assertEqual(envelope["confirm_parameters"], {"topic": "tutto", "confirmed": True})
+        self.assertTrue(envelope["message"])
+        self.assertEqual(len(core.logger.warnings), 1)
+        self.assertIn("FORGET", core.logger.warnings[0])
+
+    def test_auth_required_fallback_uses_the_authenticated_marker_not_confirmed(self):
+        core = self._core()
+        result = SkillResult(success=False, data={"confirm_parameters": "non un dict"}, error="AUTH_REQUIRED")
+
+        envelope = core._safe_confirm_envelope("FORGET", {"topic": "tutto"}, result, "auth_required")
+
+        self.assertEqual(envelope["confirm_parameters"], {"topic": "tutto", "authenticated": True})
+        self.assertNotIn("confirmed", envelope["confirm_parameters"])
+
+    def test_malformed_envelope_never_raises(self):
+        core = self._core()
+        for bad_data in (None, "una stringa", 42, ["una", "lista"]):
+            result = SkillResult(success=False, data=bad_data, error="CONFIRMATION_REQUIRED")
+            envelope = core._safe_confirm_envelope("FORGET", {}, result, "confirmation_required")
+            self.assertIn("message", envelope)
+            self.assertIn("confirm_parameters", envelope)
+
+
 if __name__ == "__main__":
     unittest.main()
