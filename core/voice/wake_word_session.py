@@ -259,10 +259,13 @@ class WakeWordSession:
             return
         self._logger.info("Sentito: %s", text)
 
-        # In pausa: si sveglia solo con "Jake, svegliati" (o simili).
+        # In pausa: si sveglia solo con "Jake, svegliati" (o simili). La wake word puo' stare
+        # ovunque nella frase (v4.1, Voice Natural 2.0: "scusa se ti disturbo, Jake, svegliati"
+        # e' un risveglio naturale quanto "Jake, svegliati"), non solo all'inizio come richiede
+        # _match_wake_word (che serve a isolare il comando che segue, qui non necessario: basta
+        # sapere che l'utente ha detto il nome E una frase di risveglio nella stessa frase).
         if now < self.paused_until:
-            remainder = self._match_wake_word(text)
-            if remainder is not None and WAKE_UP_PATTERN.search(remainder):
+            if self._contains_wake_word_anywhere(text, self._is_close_to_wake_word) and WAKE_UP_PATTERN.search(text.lower()):
                 self.resume_listening()
                 self._respond("Eccomi, ti ascolto di nuovo.")
             else:
