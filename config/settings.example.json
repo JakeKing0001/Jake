@@ -18,6 +18,8 @@
   "admin_passphrase": "",
   "companion_server_enabled": false,
   "companion_server_port": 8765,
+  "home_assistant_url": "",
+  "home_assistant_token": "",
   "hud_mode": "full",
   "hud_backdrop": "clear",
   "hud_quick_actions": [],
