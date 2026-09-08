@@ -2,7 +2,6 @@
 il ComputerAgent (v3.7, Computer Use Engine: vedi tests/test_computer_agent.py per il controller
 stesso). Nessun vero mouse/schermo."""
 import unittest
-from unittest import mock
 
 from core.computer_agent import ComputerActionResult
 from skills.screen_click import ClickTextSkill, find_text_on_screen

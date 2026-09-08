@@ -39,7 +39,6 @@ from skills.file_utils2 import FindLargeFilesSkill, FindDuplicateFilesSkill
 from skills.app_utils import ListRecentFilesSkill, OpenIncognitoWindowSkill, EmptyClipboardSkill
 from skills.print_utils import PrintFileSkill
 
-from skills.web_search import WebSearchSkill
 from skills.get_weather import GetWeatherSkill
 from skills.get_news import GetNewsSkill
 from skills.open_url import OpenUrlSkill

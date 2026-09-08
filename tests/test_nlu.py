@@ -1,5 +1,5 @@
 """Test unitari della comprensione (v3.0): non richiedono Ollama, microfono o GUI.
-Esecuzione: .venv\\Scripts\\python.exe -m unittest discover -s tests -v"""
+Esecuzione: .venv\\Scripts\\python.exe -m unittest discover -s tests -t . -v"""
 import json
 import tempfile
 import unittest

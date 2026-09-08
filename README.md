@@ -1,4 +1,8 @@
-# Jake 3.1
+# Jake
+
+> Il progetto include oggi avanzamenti delle fasi 3.x–5.x. Lo stato reale, ciò che era già
+> deciso e il piano completo verso un vero Jarvis sono mantenuti nella
+> **[roadmap del progetto](ROADMAP.md)**.
 
 Assistente personale vocale, locale, per Windows. Ascolta, capisce l'italiano parlato, **fa le cose al posto tuo** (apre programmi e siti, cerca, scrive, clicca, gestisce file, finestre, timer, promemoria, musica...), risponde a domande, **impara comandi nuovi** e, quando non sa fare qualcosa, **si scrive da solo una nuova capacità**. Per i compiti composti ("trova il file X e leggimelo") **ragiona a passi**: esegue un'azione, guarda il risultato vero, decide la successiva, e chiede a te solo se manca davvero un'informazione che solo tu conosci. Quando lo attivi compare un HUD a schermo intero in vetro liquido blu, stile Jarvis, sopra qualunque cosa: i suoi pannelli sono cliccabili, il resto dello schermo resta trasparente e utilizzabile.
 
@@ -23,6 +27,19 @@ Altre modalità:
 | `setup.ps1 -Autostart` | Jake parte a ogni accensione del PC |
 
 Requisiti: Windows 10/11, Python 3.11+, [Ollama](https://ollama.com) con `qwen2.5:7b`, `nomic-embed-text` (e opzionali `qwen2.5-coder:7b` per la fucina, `qwen2.5vl:7b` per la visione). Con una GPU NVIDIA `setup.ps1` installa le librerie CUDA e Jake usa Whisper `large-v3-turbo` (riconoscimento in meno di mezzo secondo).
+
+### Hardware
+
+| | Minimo (solo CPU) | Consigliato (con GPU) |
+|---|---|---|
+| Modelli Ollama | `qwen2.5:7b` + `nomic-embed-text` | anche `qwen2.5-coder:7b` (fucina) e `qwen2.5vl:7b` (visione) |
+| Whisper | `medium` int8 su CPU | `large-v3-turbo` float16 su GPU NVIDIA (CUDA) |
+| Spazio disco (solo modelli) | ~6,5 GB (4,7 + 0,27 + 1,5 GB) | ~18,8 GB con tutti i modelli opzionali sopra |
+| GPU | non richiesta | NVIDIA con almeno 8 GB di VRAM (testato su una RTX 4060 Laptop, 8 GB) |
+| RAM | 8 GB (soglia generica di Ollama per modelli 7B, non specifica di Jake) | 16 GB o più, per tenere insieme Ollama, Whisper, l'HUD e il resto di Windows senza swap |
+| VRAM occupata da Ollama a runtime | - | ~5 GB con `qwen2.5:7b` (classificatore/agente) e `nomic-embed-text` (recupero semantico) entrambi caricati insieme su GPU (misurato con `ollama ps`); `qwen2.5-coder:7b`/`qwen2.5vl:7b` si aggiungono solo quando usati, Ollama scarica i modelli inattivi da soli dopo un periodo di inattività |
+
+Le dimensioni dei modelli sopra sono misurate direttamente (`ollama list`/`ollama ps`, cache di `faster-whisper`), non stimate. Non ancora misurato: l'impronta RAM del processo Python di Jake stesso (HUD, agente, memoria) insieme a Ollama, ne' un profilo di latenza end-to-end dell'intera pipeline voce+NLU+agente in un'unica sessione - vedi `benchmarks/` per le latenze misurate dei singoli componenti (NLU, agente, percezione schermo), e la fase F0 nella [roadmap](ROADMAP.md) per cosa manca ancora.
 
 ## Cosa puoi dirgli
 
@@ -98,12 +115,13 @@ voce ──VAD──▶ Whisper (GPU) ──▶ TranscriptNormalizer ──▶ R
 | `companion_server_enabled` / `companion_server_port` | `false` / `8765` | server locale HTTP+SSE (core/companion_server.py) per un HUD nativo o un'app companion esterna: espone `/status`, `/events` (stream), `/command`, `/devices/<id>/claim|release`; ascolta solo su 127.0.0.1 |
 | `home_assistant_url` / `home_assistant_token` | `""` / `""` | collega Jake a un hub [Home Assistant](https://www.home-assistant.io/) esistente (LIST_SMART_DEVICES/CONTROL_SMART_DEVICE): url tipo `http://homeassistant.local:8123`, token da Profilo → Sicurezza → token di accesso a lunga durata |
 | `system_advisor_enabled` | `true` | avvisi proattivi (batteria scarica, disco quasi pieno): `false` per disattivarli |
+| `session_recording_enabled` / `session_recording_verbatim` | `false` / `false` | replay delle azioni fallite (F0, `core/session_recorder.py`, `data/jake_sessions.jsonl`): disattivato per default; se acceso, i parametri sono redatti (solo forma/lunghezza) a meno che `_verbatim` non sia acceso anch'esso (parametri veri, per rilanciare davvero un fallimento con `python -m tools.replay_session --replay`); mai attivo in modalità privata |
 | `JAKE_OLLAMA_URL` (variabile d'ambiente) | `http://127.0.0.1:11434` | usare sempre 127.0.0.1: `localhost` costa ~2 s a chiamata su Windows |
 
 ## Sviluppo
 
 ```powershell
-.venv\Scripts\python.exe -m unittest discover -s tests -v   # test unitari (niente Ollama/microfono)
+.venv\Scripts\python.exe -m unittest discover -s tests -t . -v   # test unitari (niente Ollama/microfono)
 ```
 
 Aggiungere una skill: un file in `skills/` con una classe (`metadata`, `execute`) registrata in `core/skill_registry.py`, più qualche frase in `training/intents.jsonl`; oppure un plugin in `plugins/` con `register(registry)` (vedi `plugins/example_coin_flip.py`).

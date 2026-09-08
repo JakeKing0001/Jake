@@ -9,7 +9,7 @@ basso). Sfondo (hud_backdrop): "clear" (desktop nitido fuori dai pannelli) o "im
 import time
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRect, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QRegion
+from PySide6.QtGui import QPainter, QPainterPath, QRegion
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from core.gui.hud import theme, win_effects

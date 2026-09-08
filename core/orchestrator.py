@@ -66,5 +66,5 @@ class JakeOrchestrator:
             return self.research_agent
         return self.general_agent
 
-    def run(self, request: str, history: list[dict] = None):
-        return self.pick_agent(request).run(request, history=history)
+    def run(self, request: str, history: list[dict] = None, trace_id: str = None, private: bool = False):
+        return self.pick_agent(request).run(request, history=history, trace_id=trace_id, private=private)

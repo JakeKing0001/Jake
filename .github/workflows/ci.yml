@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  python:
+    name: Python ${{ matrix.python-version }} (Windows)
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements/all.lock.txt
+
+      # F0: installazione riproducibile da requirements/all.lock.txt (pip-compile --generate-
+      # hashes su base+voice+gui+hud+dev insieme), non dai *.txt diretti - --require-hashes
+      # rifiuta qualunque pacchetto il cui hash non combaci, invece di fidarsi implicitamente di
+      # qualunque cosa risolva l'indice quel giorno. Compilato insieme apposta, non un lock per
+      # gruppo: compilarli separatamente aveva prodotto due versioni diverse di numpy (una da
+      # requirements/hud.txt, una transitiva da voice.txt) che install --require-hashes rifiutava
+      # come conflitto reale appena provate insieme - vedi requirements/*.txt per i sorgenti
+      # editabili, non hash-locked, usati da setup.ps1 per l'installazione normale. I lock sono
+      # stati generati con Python 3.12; le versioni restano identiche anche sotto 3.11 in questa
+      # matrice, pip sceglie da solo la wheel giusta per l'interprete.
+      # requirements/gpu.lock.txt e' escluso: i runner GitHub-hosted non hanno GPU NVIDIA, e Jake
+      # gira comunque su CPU senza quelle librerie (vedi README, faster-whisper su CPU).
+      - name: Installa le dipendenze (lock con hash)
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements/all.lock.txt
+
+      - name: Lint (ruff, solo errori reali - vedi pyproject.toml)
+        run: ruff check .
+
+      - name: Type-check selettivo (mypy - vedi [tool.mypy].files in pyproject.toml)
+        run: mypy
+
+      - name: Compila i moduli Python (rete di sicurezza per errori di sintassi 3.11-only)
+        run: python -m compileall -q core skills plugins tests main.py
+
+      - name: Test unitari (niente Ollama/microfono richiesti)
+        run: python -m unittest discover -s tests -t . -v
+
+      # F0: criterio di uscita "smoke test installazione/avvio/arresto". Non richiede Ollama
+      # (verificato localmente puntando JAKE_OLLAMA_URL a una porta inesistente): "che ore sono"
+      # e' gia' nella corsia a corrispondenza esatta di training/intents.jsonl, non tocca il
+      # modello - vedi tools/smoke_test.py.
+      - name: Smoke test (avvio, un comando, chiusura pulita)
+        run: python -m tools.smoke_test
+
+  native-hud-build:
+    name: HUD nativo C++/Qt6/QML - build health check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - uses: seanmiddleditch/gha-setup-ninja@v5
+
+      # Il prototipo C++/QML non ha ancora una suite di test (vedi hud/native/README.md): qui
+      # verifichiamo solo che compili ed esegua senza errori subito dopo l'avvio, non il
+      # comportamento visivo. E' la stessa verifica fatta manualmente per il commit 4.9.2,
+      # ora ripetuta a ogni push invece che una tantum.
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.7.3"
+          arch: "win64_msvc2019_64"
+
+      - name: Configura (CMakePresets.json)
+        working-directory: hud/native
+        run: cmake --preset windows-ninja
+
+      - name: Compila
+        working-directory: hud/native
+        run: cmake --build --preset windows-ninja
+
+      - name: Avvia e chiudi subito (fuma il binario, nessun server companion in questo job)
+        working-directory: hud/native/build
+        run: |
+          $proc = Start-Process -FilePath ".\JakeHud.exe" -PassThru
+          Start-Sleep -Seconds 3
+          $stillRunning = -not $proc.HasExited
+          Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          if (-not $stillRunning) {
+            Write-Error "JakeHud.exe e' terminato entro 3 secondi dall'avvio (dovrebbe restare aperto in attesa del companion server)."
+            exit 1
+          }

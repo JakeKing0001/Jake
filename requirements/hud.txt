@@ -1,0 +1,8 @@
+# HUD in vetro e voce neurale (F0, ex Jake 3.0): PySide6 per l'overlay Qt, edge-tts per la voce
+# online, pycaw/comtypes per il volume esatto via CoreAudio, numpy per l'indice semantico usato
+# anche fuori dall'HUD (core/nlu/). requirements/gui.txt copre invece la tray icon legacy.
+PySide6==6.11.2
+edge-tts==7.2.8
+pycaw==20251023
+comtypes==1.4.16
+numpy==2.5.2

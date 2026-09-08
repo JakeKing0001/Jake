@@ -13,9 +13,11 @@ import json
 import time
 from dataclasses import dataclass, field
 
-from core.command import Command
-from core.execution_safety import execute_with_retry, rollback_effect, verify_effect
+from core.execution_safety import VERIFIABLE_INTENTS, execute_with_retry, rollback_effect, verify_effect
+from core.logger import log_action, new_trace_id
 from core.ollama_client import OllamaClient, OllamaError
+from core.risk import risk_of
+from core.session_recorder import SessionRecorder
 from core.skill_result import SkillResult
 
 # Strumenti sempre offerti all'agente, oltre a quelli pertinenti alla richiesta: sono i
@@ -76,7 +78,7 @@ class TaskAgent:
 
     def __init__(self, registry, retriever, client: OllamaClient, model_provider, format_result,
                  logger=None, context_provider=None, executor=None, fixed_tools: list[str] = None,
-                 persona_line: str = None):
+                 persona_line: str = None, session_recorder=None):
         self.registry = registry
         self.retriever = retriever
         self.client = client
@@ -84,6 +86,10 @@ class TaskAgent:
         self.format_result = format_result
         self.logger = logger
         self.context_provider = context_provider
+        # Disattivato per default (vedi SessionRecorder.__init__): senza uno passato da chi
+        # costruisce l'agente (JakeCore, che condivide lo stesso SessionRecorder con
+        # _execute_command e PlanExecutor), record_failure() qui sotto e' semplicemente un no-op.
+        self.session_recorder = session_recorder or SessionRecorder()
         # executor(intent, parameters) -> SkillResult: di default il registry (con risoluzione
         # dei percorsi); il core puo' passare una versione con policy/ripieghi.
         self.executor = executor or (lambda intent, parameters: registry.execute(intent, parameters))
@@ -184,6 +190,29 @@ class TaskAgent:
 
     # ---- esecuzione ----------------------------------------------------------------------
 
+    # Vedi JakeCore._NOT_A_FAILURE (core/jake_core.py): stesso criterio, non duplicato per caso.
+    _NOT_A_FAILURE = {"confirmation_required", "auth_required"}
+
+    def _log_step(
+        self, trace_id: str, private: bool, started: float, model: str, intent: str, parameters: dict,
+        *, result: str, verified: bool | None,
+    ) -> None:
+        """Un record in jake_actions.jsonl per passo dell'agente (F0: log strutturati), stesso
+        formato e stesso trace_id condiviso con JakeCore._execute_command per il percorso a
+        comando singolo - cosi' un compito composto a piu' passi si legge come una sequenza
+        correlata invece che come eventi scollegati. Un passo fallito (non solo in attesa di
+        conferma) alimenta anche session_recorder, con gli stessi parametri del passo, per
+        tools/replay_session.py."""
+        log_action(
+            trace_id, private=private, duration_ms=(time.monotonic() - started) * 1000,
+            model=model, skill=intent, risk_decision=risk_of(intent).value, result=result, verified=verified,
+        )
+        if not result.startswith("success") and result not in self._NOT_A_FAILURE:
+            self.session_recorder.record_failure(
+                trace_id, intent=intent, parameters=parameters, error=result,
+                risk_decision=risk_of(intent).value, private=private,
+            )
+
     def _observe(self, intent: str, result: SkillResult | None) -> str:
         if result is None:
             return "Errore: strumento non disponibile."
@@ -207,7 +236,13 @@ class TaskAgent:
             text = text[: self.OBSERVATION_MAX_CHARS] + "…"
         return text
 
-    def run(self, request: str, history: list[dict] = None) -> AgentOutcome:
+    def run(self, request: str, history: list[dict] = None, trace_id: str = None, private: bool = False) -> AgentOutcome:
+        # trace_id/private (F0, log strutturati): chi chiama (JakeCore._run_agent, tramite
+        # JakeOrchestrator.run) passa lo stesso trace_id gia' generato per l'intera richiesta,
+        # cosi' tutti i passi di UN compito composto si correlano nel log strutturato invece di
+        # comparire come eventi scollegati; se nessuno lo passa (es. un test diretto su
+        # TaskAgent), se ne genera uno qui cosi' i passi restano comunque correlati tra loro.
+        trace_id = trace_id or new_trace_id()
         outcome = AgentOutcome()
         tools = self._tools(request)
         if not tools:
@@ -271,9 +306,11 @@ class TaskAgent:
             seen.add(signature)
 
             missing = [name for name, meta in metadata.items() if meta.get("required") and name not in parameters]
+            step_started = time.monotonic()
             if missing:
                 observation = f"FALLITO: mancano i parametri obbligatori {missing}. Chiedi all'utente (ask_user) se non li puoi ricavare."
                 step = AgentStep(intent=intent, parameters=parameters, thought=thought, result=None, observation=observation)
+                self._log_step(trace_id, private, step_started, model, intent, parameters, result="missing_parameters", verified=None)
             else:
                 if self.on_step is not None:
                     try:
@@ -281,12 +318,22 @@ class TaskAgent:
                     except Exception:
                         pass
                 result, attempts = execute_with_retry(self.executor, intent, parameters)
-                if result is not None and result.success and not verify_effect(intent, result.data or {}):
-                    # La skill dice di aver avuto successo, ma il controllo indipendente (v1.5,
-                    # oggi solo per il filesystem: vedi core/execution_safety.py) non conferma
-                    # l'effetto: meglio trattarlo come fallito che riportare all'utente qualcosa
-                    # che in realta' non e' successo.
-                    result = SkillResult(success=False, data=result.data, error="VERIFICATION_FAILED")
+                verified = None
+                if result is not None and result.success:
+                    effect_confirmed = verify_effect(intent, result.data or {})
+                    if intent in VERIFIABLE_INTENTS:
+                        # Solo per gli intent con un controllo indipendente vero (oggi il
+                        # filesystem, vedi execution_safety.verify_effect) verified riflette un
+                        # controllo davvero fatto: per tutti gli altri intent verify_effect
+                        # restituisce True per default assenza-di-verifica, e riportarlo come
+                        # verified=True nel log strutturato affermerebbe una prova mai avvenuta.
+                        verified = effect_confirmed
+                    if not effect_confirmed:
+                        # La skill dice di aver avuto successo, ma il controllo indipendente (v1.5,
+                        # oggi solo per il filesystem: vedi core/execution_safety.py) non conferma
+                        # l'effetto: meglio trattarlo come fallito che riportare all'utente qualcosa
+                        # che in realta' non e' successo.
+                        result = SkillResult(success=False, data=result.data, error="VERIFICATION_FAILED")
                 step = AgentStep(intent=intent, parameters=parameters, thought=thought, result=result, attempts=attempts)
                 if result is not None and result.error in ("CONFIRMATION_REQUIRED", "AUTH_REQUIRED"):
                     outcome.steps.append(step)
@@ -299,8 +346,11 @@ class TaskAgent:
                         # (vedi conversation_state pending_action.reason).
                         "kind": result.error,
                     }
+                    self._log_step(trace_id, private, step_started, model, intent, parameters, result=result.error.lower(), verified=verified)
                     return outcome
                 step.observation = self._observe(intent, result)
+                outcome_label = "success" if (result is not None and result.success) else f"error:{result.error}" if result is not None else "no_result"
+                self._log_step(trace_id, private, step_started, model, intent, parameters, result=outcome_label, verified=verified)
             outcome.steps.append(step)
             if self.logger:
                 self.logger.info("Agente passo %d: %s %s -> %s", step_index, intent, parameters, step.observation[:160])

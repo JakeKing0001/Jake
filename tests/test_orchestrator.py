@@ -11,8 +11,8 @@ class FakeAgent:
         self.name = name
         self.calls = []
 
-    def run(self, request, history=None):
-        self.calls.append((request, history))
+    def run(self, request, history=None, trace_id=None, private=False):
+        self.calls.append((request, history, trace_id, private))
         return f"outcome-di-{self.name}"
 
 
@@ -50,9 +50,9 @@ class RunDelegatesToPickedAgentTests(unittest.TestCase):
         orchestrator = JakeOrchestrator(general, coding, research)
         history = [{"role": "user", "text": "ciao"}]
 
-        result = orchestrator.run("fai un commit git", history=history)
+        result = orchestrator.run("fai un commit git", history=history, trace_id="abc123", private=True)
 
-        self.assertEqual(coding.calls, [("fai un commit git", history)])
+        self.assertEqual(coding.calls, [("fai un commit git", history, "abc123", True)])
         self.assertEqual(general.calls, [])
         self.assertEqual(research.calls, [])
         self.assertEqual(result, "outcome-di-c")

@@ -1,0 +1,6 @@
+# Librerie CUDA/cuDNN per far girare Whisper (faster-whisper/ctranslate2) sulla GPU NVIDIA (F0,
+# ex requirements-gpu.txt). Nessuna installazione di CUDA Toolkit necessaria: le DLL arrivano via
+# pip e Jake le carica da solo (core/voice/stt_provider.py). Con la GPU Jake usa il modello
+# large-v3-turbo (piu' preciso) in una frazione del tempo del modello medium su CPU.
+nvidia-cublas-cu12==12.9.2.10
+nvidia-cudnn-cu12==9.25.1.1
