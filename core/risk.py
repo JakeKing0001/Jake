@@ -191,6 +191,10 @@ SKILL_RISK: dict[str, RiskLevel] = {
     "GET_MAC_ADDRESS": RiskLevel.READ_ONLY,
     "LIST_DRIVES": RiskLevel.READ_ONLY,
 
+    # -- domotica: leggere lo stato e' innocuo, agire su un dispositivo tocca il mondo reale --
+    "LIST_SMART_DEVICES": RiskLevel.READ_ONLY,
+    "CONTROL_SMART_DEVICE": RiskLevel.EXTERNAL_ACTION,
+
     # -- dev tools: RUN_COMMAND/RUN_PYTHON_SCRIPT eseguono codice arbitrario -------------
     "GIT_STATUS": RiskLevel.READ_ONLY,
     "GIT_PULL": RiskLevel.EXTERNAL_ACTION,  # porta dentro contenuto da un remoto

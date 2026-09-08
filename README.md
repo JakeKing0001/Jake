@@ -96,6 +96,7 @@ voce ──VAD──▶ Whisper (GPU) ──▶ TranscriptNormalizer ──▶ R
 | `blocked_intents` / `always_confirm_intents` | `[]` | policy di sicurezza |
 | `admin_passphrase` | `""` | se impostata, le azioni a rischio ADMIN (spegnimento, comandi, skill auto-generate) chiedono questa passphrase invece della semplice conferma sì/no; vuota = disattivata |
 | `companion_server_enabled` / `companion_server_port` | `false` / `8765` | server locale HTTP+SSE (core/companion_server.py) per un HUD nativo o un'app companion esterna: espone `/status`, `/events` (stream), `/command`, `/devices/<id>/claim|release`; ascolta solo su 127.0.0.1 |
+| `home_assistant_url` / `home_assistant_token` | `""` / `""` | collega Jake a un hub [Home Assistant](https://www.home-assistant.io/) esistente (LIST_SMART_DEVICES/CONTROL_SMART_DEVICE): url tipo `http://homeassistant.local:8123`, token da Profilo → Sicurezza → token di accesso a lunga durata |
 | `system_advisor_enabled` | `true` | avvisi proattivi (batteria scarica, disco quasi pieno): `false` per disattivarli |
 | `JAKE_OLLAMA_URL` (variabile d'ambiente) | `http://127.0.0.1:11434` | usare sempre 127.0.0.1: `localhost` costa ~2 s a chiamata su Windows |
 

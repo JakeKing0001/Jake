@@ -75,6 +75,7 @@ from skills.volume_control import VolumeControlSkill
 from skills.volume_level import SetVolumeLevelSkill, GetVolumeLevelSkill
 from skills.media_control import MediaControlSkill
 
+from skills.smart_home import ListSmartDevicesSkill, ControlSmartDeviceSkill
 from skills.system_power import SystemPowerSkill
 from skills.brightness_control import SetBrightnessSkill
 from skills.recycle_bin import EmptyRecycleBinSkill
@@ -295,6 +296,21 @@ def build_system_skills() -> dict:
         "GET_ENVIRONMENT_VARIABLE": GetEnvironmentVariableSkill(),
         "GET_MAC_ADDRESS": GetMacAddressSkill(),
         "LIST_DRIVES": ListDrivesSkill(),
+    }
+
+
+def build_smart_home_skills(config) -> dict:
+    """v5.7, Home/IoT: le due skill condividono lo stesso HomeAssistantClient, costruito una
+    volta sola da (home_assistant_url, home_assistant_token) in config.json - entrambi vuoti per
+    default, quindi HomeAssistantClient.is_available() e' False finche' l'utente non li imposta."""
+    from core.home_assistant_client import HomeAssistantClient
+
+    client = HomeAssistantClient(
+        base_url=config.get("home_assistant_url", ""), token=config.get("home_assistant_token", ""),
+    )
+    return {
+        "LIST_SMART_DEVICES": ListSmartDevicesSkill(client),
+        "CONTROL_SMART_DEVICE": ControlSmartDeviceSkill(client),
     }
 
 

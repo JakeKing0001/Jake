@@ -5,7 +5,7 @@ from core.skill_catalog import (
     build_time_date_skills, build_app_window_skills, build_filesystem_skills, build_web_skills,
     build_memory_notes_todo_skills, build_automation_skills, build_screen_input_skills, build_media_skills,
     build_system_skills, build_dev_tools_skills, build_text_and_math_skills, build_fun_skills,
-    build_misc_skills, build_research_skills, build_communication_skills,
+    build_misc_skills, build_research_skills, build_communication_skills, build_smart_home_skills,
 )
 from core.ollama_client import OllamaClient
 from core.path_resolver import resolve_user_path
@@ -76,6 +76,7 @@ class SkillRegistry:
         self.skills.update(build_screen_input_skills(self.vision_provider))
         self.skills.update(build_media_skills())
         self.skills.update(build_system_skills())
+        self.skills.update(build_smart_home_skills(self.config))
         self.skills.update(build_dev_tools_skills())
         self.skills.update(build_text_and_math_skills(self.config, self.conversation_state))
         self.skills.update(build_fun_skills())

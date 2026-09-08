@@ -30,6 +30,7 @@ def format_plan_outcome(outcome, total_steps: int, registry=None) -> str:
 
 
 _NOT_FOUND_BY_INTENT = {
+    "LIST_SMART_DEVICES": "Non ho trovato nessun dispositivo smart home.",
     "RECALL": "Non ho trovato nulla su questo argomento.",
     "FORGET": "Non trovo nulla da dimenticare con quel nome.",
     "FIND_FILE": "Non ho trovato nessun file corrispondente.",
@@ -115,6 +116,8 @@ def _format_error(intent: str, result: SkillResult) -> str:
             return f"Non ho nessuna capacità creata da me che corrisponda a '{data.get('name', '')}'."
         if intent == "LINK_MEMORY":
             return f"Non trovo nessun ricordo chiamato '{data.get('key', '')}': salvalo prima con REMEMBER."
+        if intent == "CONTROL_SMART_DEVICE":
+            return f"Non trovo nessun dispositivo smart home chiamato '{data.get('name', '')}'."
         return _NOT_FOUND_BY_INTENT.get(intent, "Non ho trovato nulla.")
     if error == "INVALID_TIME":
         return f"'{data.get('at_time', '')}' non è un orario valido (usa HH:MM)."
@@ -141,6 +144,10 @@ def _format_error(intent: str, result: SkillResult) -> str:
         return "NEST non è disponibile su questo computer."
     if error == "NEST_ERROR":
         return f"NEST ha restituito un errore: {data.get('message', '')}"
+    if error == "HOME_ASSISTANT_UNAVAILABLE":
+        return "Home Assistant non è configurato: imposta home_assistant_url e home_assistant_token."
+    if error == "HOME_ASSISTANT_ERROR":
+        return "Home Assistant ha restituito un errore: controlla che l'indirizzo e il token siano corretti."
     if error == "NETWORK_UNAVAILABLE":
         return "Non ho accesso a internet in questo momento."
     if error == "OLLAMA_UNAVAILABLE":
@@ -552,6 +559,12 @@ def _format_success(intent: str, result: SkillResult, registry=None) -> str | No
     if intent == "LIST_DRIVES":
         formatted = "; ".join(f"{d['drive']} ({d['free_gb']}/{d['total_gb']} GB liberi)" for d in data["drives"])
         return f"Unità disco: {formatted}"
+    if intent == "LIST_SMART_DEVICES":
+        formatted = "; ".join(f"{d['name']}: {d['state']}" for d in data["devices"])
+        return f"Dispositivi smart home: {formatted}"
+    if intent == "CONTROL_SMART_DEVICE":
+        verb = {"on": "acceso", "off": "spento", "toggle": "alternato"}.get(data["action"], "cambiato")
+        return f"Ho {verb} {data['name']}."
     if intent == "FIND_LARGE_FILES":
         formatted = "; ".join(f"{f['path']} ({f['size_mb']} MB)" for f in data["files"])
         return f"File grandi trovati: {formatted}"
