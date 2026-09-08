@@ -10,9 +10,11 @@ strumenti; i risultati dei passi precedenti sono nel contesto del modello.
 Usato per le richieste composte ("e poi", "e aprilo"), per quelle che il classificatore non
 capisce, e quando una skill ha bisogno di un dato ricavabile da un'altra."""
 import json
+import time
 from dataclasses import dataclass, field
 
 from core.command import Command
+from core.execution_safety import execute_with_retry, rollback_effect, verify_effect
 from core.ollama_client import OllamaClient, OllamaError
 from core.skill_result import SkillResult
 
@@ -47,6 +49,7 @@ class AgentStep:
     thought: str
     result: SkillResult | None = None
     observation: str = ""
+    attempts: int = 1  # >1 se e' scattato un retry automatico su un errore transitorio (v3.3)
 
 
 @dataclass
@@ -56,6 +59,7 @@ class AgentOutcome:
     question: str | None = None            # chiarimento chiesto all'utente
     pending_confirmation: dict | None = None  # un passo ha chiesto conferma: si ferma qui
     error: str | None = None
+    rolled_back: list[AgentStep] = field(default_factory=list)  # (v3.3) passi annullati dopo un errore fatale
 
     @property
     def did_something(self) -> bool:
@@ -65,6 +69,10 @@ class AgentOutcome:
 class TaskAgent:
     MAX_STEPS = 6
     OBSERVATION_MAX_CHARS = 700
+    # Budget di tempo per l'intero compito (v3.3), non solo per la singola chiamata al modello
+    # (quella ha gia' il suo timeout=60 piu' sotto): un compito che continua a ragionare senza
+    # concludere non deve poter tenere Jake occupato all'infinito.
+    RUN_TIMEOUT_SECONDS = 90
 
     def __init__(self, registry, retriever, client: OllamaClient, model_provider, format_result,
                  logger=None, context_provider=None, executor=None):
@@ -202,8 +210,14 @@ class TaskAgent:
             messages.append({"role": role, "content": turn.get("text", "")})
         messages.append({"role": "user", "content": f"Richiesta: {request}"})
         seen = set()
+        start_time = time.monotonic()
 
         for step_index in range(1, self.MAX_STEPS + 1):
+            if time.monotonic() - start_time > self.RUN_TIMEOUT_SECONDS:
+                outcome.error = "TIMEOUT"
+                if self.logger:
+                    self.logger.warning("Agente: budget di tempo esaurito dopo %d passi per: %s", len(outcome.steps), request)
+                break
             try:
                 response = self.client.chat(
                     model, messages, format=self._schema(tools),
@@ -255,8 +269,14 @@ class TaskAgent:
                         self.on_step(step_index, thought or valid[intent].get("description", intent).split(".")[0])
                     except Exception:
                         pass
-                result = self.executor(intent, parameters)
-                step = AgentStep(intent=intent, parameters=parameters, thought=thought, result=result)
+                result, attempts = execute_with_retry(self.executor, intent, parameters)
+                if result is not None and result.success and not verify_effect(intent, result.data or {}):
+                    # La skill dice di aver avuto successo, ma il controllo indipendente (v1.5,
+                    # oggi solo per il filesystem: vedi core/execution_safety.py) non conferma
+                    # l'effetto: meglio trattarlo come fallito che riportare all'utente qualcosa
+                    # che in realta' non e' successo.
+                    result = SkillResult(success=False, data=result.data, error="VERIFICATION_FAILED")
+                step = AgentStep(intent=intent, parameters=parameters, thought=thought, result=result, attempts=attempts)
                 if result is not None and result.error == "CONFIRMATION_REQUIRED":
                     outcome.steps.append(step)
                     outcome.pending_confirmation = {
@@ -275,7 +295,32 @@ class TaskAgent:
         else:
             outcome.final_answer = self._summarize_steps(outcome) or "Ho fatto quello che potevo, ma non ho completato tutto."
 
+        if outcome.error is not None and outcome.steps:
+            # Il compito non e' arrivato in fondo (errore del modello, timeout...). Prima questo
+            # ramo lasciava final_answer vuoto anche quando dei passi erano gia' riusciti: chi
+            # chiama (JakeCore._run_agent) degradava allora a un generico "non so fare questa
+            # cosa", buttando via il lavoro reale gia' fatto. Ora si riassume comunque quello che
+            # e' successo, e gli effetti collaterali reversibili (vedi ROLLBACK_HANDLERS in
+            # core/execution_safety.py) vengono annullati invece di restare a meta', stessa
+            # filosofia gia' usata da PlanExecutor per il vecchio piano fisso.
+            if not outcome.final_answer:
+                outcome.final_answer = self._summarize_steps(outcome)
+            outcome.rolled_back = self._rollback(outcome.steps)
+            if outcome.rolled_back:
+                undone = ", ".join((step.thought or step.intent.replace("_", " ").lower()) for step in outcome.rolled_back)
+                prefix = f"{outcome.final_answer} " if outcome.final_answer else ""
+                outcome.final_answer = f"{prefix}Ho annullato per sicurezza: {undone}."
+
         return outcome
+
+    def _rollback(self, steps: list[AgentStep]) -> list[AgentStep]:
+        rolled_back = []
+        for step in reversed(steps):
+            if step.result is None or not step.result.success:
+                continue
+            if rollback_effect(self.registry, step.intent, step.result.data or {}):
+                rolled_back.append(step)
+        return rolled_back
 
     def _summarize_steps(self, outcome: AgentOutcome) -> str:
         done = [step for step in outcome.steps if step.result is not None and step.result.success]
