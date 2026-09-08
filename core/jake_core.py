@@ -185,10 +185,16 @@ class JakeCore:
         self.blocked_intents = set(config.get("blocked_intents", []) or [])
         self.always_confirm_intents = set(config.get("always_confirm_intents", []) or [])
         # Autenticazione per le azioni ADMIN (v5.4/5.5, Permissions & Security Kernel +
-        # Identity & Authentication): opt-in, vedi core/auth_gate.py. Senza una passphrase
-        # configurata (admin_passphrase in config.json) resta disabilitata e le azioni ADMIN
-        # continuano a passare solo dalla conferma si'/no, come prima di questa fase.
-        self.auth_gate = AuthGate(passphrase=config.get("admin_passphrase"))
+        # Identity & Authentication): opt-in, vedi core/auth_gate.py. Senza una passphrase ne'
+        # Windows Hello configurati (admin_passphrase/windows_hello_enabled in config.json)
+        # resta disabilitata e le azioni ADMIN continuano a passare solo dalla conferma si'/no,
+        # come prima di questa fase. windows_hello_enabled e' un fattore IN PIU', non un
+        # sostituto (F1): "la voce può riconoscere l'utente per comodità, ma non deve essere
+        # l'unico fattore di sicurezza", vedi la fase F1 in ROADMAP.md.
+        self.auth_gate = AuthGate(
+            passphrase=config.get("admin_passphrase"),
+            windows_hello_enabled=bool(config.get("windows_hello_enabled", False)),
+        )
         self.require_auth_intents: set = set()
 
         # Jake proattivo (v1.2): di default stampa i promemoria scaduti; chi lancia Jake
@@ -509,15 +515,32 @@ class JakeCore:
             and resolved.intent in self.require_auth_intents
             and not (resolved.parameters or {}).get("authenticated")
         ):
-            return resolved, SkillResult(
-                success=False,
-                data={
-                    "message": f"Serve l'autenticazione: {self.describe_command(resolved)}. Di' la passphrase per confermare.",
-                    "confirm_parameters": {**(resolved.parameters or {}), "authenticated": True},
-                    "confirm_intent": resolved.intent,
-                },
-                error="AUTH_REQUIRED",
-            ), None
+            # F1: Windows Hello tentato PRIMA della passphrase quando e' attivo - un fattore che
+            # non passa dalla voce (vedi core/auth_gate.py) e non richiede un secondo turno di
+            # conversazione. Se verifica, l'azione prosegue SUBITO (stesso turno): niente
+            # AUTH_REQUIRED, niente "ripeti la passphrase". confirmed=True insieme ad
+            # authenticated=True: un intent ADMIN e' quasi sempre anche in always_confirm_intents
+            # (needs_central_confirmation, vedi core/risk.py) e senza questo il passo successivo
+            # chiederebbe comunque un "confermi?" spoglio - ma verificare la propria impronta/
+            # volto/PIN specificamente per QUESTA azione (reason e' la descrizione dell'azione,
+            # non un messaggio generico) e' gia' di per se' un consenso esplicito, non solo una
+            # prova di identita': chiederne un altro sarebbe ridondante, non piu' sicuro. Se
+            # Windows Hello e' spento, non disponibile, o l'utente annulla il prompt, si ripiega
+            # sul flusso passphrase gia' esistente, invariato.
+            if self.auth_gate.verify_with_windows_hello(self.describe_command(resolved)):
+                resolved = Command(resolved.intent, {
+                    **(resolved.parameters or {}), "authenticated": True, "authenticated_via": "windows_hello", "confirmed": True,
+                })
+            else:
+                return resolved, SkillResult(
+                    success=False,
+                    data={
+                        "message": f"Serve l'autenticazione: {self.describe_command(resolved)}. Di' la passphrase per confermare.",
+                        "confirm_parameters": {**(resolved.parameters or {}), "authenticated": True, "authenticated_via": "passphrase"},
+                        "confirm_intent": resolved.intent,
+                    },
+                    error="AUTH_REQUIRED",
+                ), None
         if resolved.intent in self.always_confirm_intents and not (resolved.parameters or {}).get("confirmed"):
             return resolved, SkillResult(
                 success=False,

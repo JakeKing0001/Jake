@@ -35,5 +35,38 @@ class AuthGateTests(unittest.TestCase):
         self.assertFalse(gate.check("qualsiasi cosa"))
 
 
+class WindowsHelloTests(unittest.TestCase):
+    """F1: windows_hello_verify e' SEMPRE iniettato qui - vedi core/windows_hello.py sul perche'
+    un test non deve mai poter chiamare l'API vera di Windows Hello (mostra un prompt reale e
+    aspetta l'utente, scoperto a proprie spese durante lo sviluppo di questo modulo)."""
+
+    def test_enabled_true_when_only_windows_hello_is_on(self):
+        gate = AuthGate(windows_hello_enabled=True, windows_hello_verify=lambda reason: True)
+        self.assertTrue(gate.enabled)
+
+    def test_verify_returns_false_immediately_when_disabled_without_calling_anything(self):
+        calls = []
+        gate = AuthGate(windows_hello_enabled=False, windows_hello_verify=lambda reason: calls.append(reason) or True)
+
+        result = gate.verify_with_windows_hello("Spegni il computer")
+
+        self.assertFalse(result)
+        self.assertEqual(calls, [], "non deve chiamare la verifica se windows_hello_enabled e' spento")
+
+    def test_verify_forwards_the_reason_and_returns_the_injected_result(self):
+        gate = AuthGate(windows_hello_enabled=True, windows_hello_verify=lambda reason: reason == "Spegni il computer")
+
+        self.assertTrue(gate.verify_with_windows_hello("Spegni il computer"))
+        self.assertFalse(gate.verify_with_windows_hello("Un'altra richiesta"))
+
+    def test_both_factors_can_be_enabled_together(self):
+        gate = AuthGate(
+            passphrase="apri sesamo", windows_hello_enabled=True, windows_hello_verify=lambda reason: True,
+        )
+        self.assertTrue(gate.enabled)
+        self.assertTrue(gate.check("apri sesamo"))
+        self.assertTrue(gate.verify_with_windows_hello("qualunque cosa"))
+
+
 if __name__ == "__main__":
     unittest.main()

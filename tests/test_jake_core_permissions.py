@@ -147,7 +147,10 @@ class RequireAuthGateTests(unittest.TestCase):
         self.assertEqual(result.error, "AUTH_REQUIRED")
         self.assertEqual(skill.calls, [], "la skill non deve eseguire finche' non e' autenticata")
         self.assertEqual(result.data["confirm_intent"], "SET_POWER_PLAN")
-        self.assertEqual(result.data["confirm_parameters"], {"plan": "balanced", "authenticated": True})
+        self.assertEqual(
+            result.data["confirm_parameters"],
+            {"plan": "balanced", "authenticated": True, "authenticated_via": "passphrase"},
+        )
 
     def test_admin_intent_is_not_gated_by_auth_when_disabled(self):
         """Auth non configurata: nessun blocco qui, il flusso normale (CONFIRM, se applicabile)
@@ -186,6 +189,66 @@ class RequireAuthGateTests(unittest.TestCase):
 
         _, result, _ = core._resolve_and_execute(Command("SET_POWER_PLAN", {"plan": "balanced"}))
 
+        self.assertEqual(result.error, "AUTH_REQUIRED")
+
+
+class WindowsHelloAuthTests(unittest.TestCase):
+    """F1: Windows Hello e' tentato PRIMA della passphrase quando entrambi sono attivi
+    (JakeCore._resolve_and_execute) - windows_hello_verify e' SEMPRE iniettato in AuthGate qui,
+    non chiama mai l'API vera (vedi core/windows_hello.py)."""
+
+    def test_successful_windows_hello_executes_immediately_in_the_same_turn(self):
+        """A differenza della passphrase (che ferma tutto con AUTH_REQUIRED e aspetta un turno
+        in piu'), un Windows Hello riuscito non deve mai produrre AUTH_REQUIRED: esegue subito."""
+        skill = FakeSkill(SkillResult(success=True, data={}))
+        registry = FakeRegistry({"SET_POWER_PLAN": skill})
+        core = _bare_core(
+            registry, always_confirm_intents=set(),
+            auth_gate=AuthGate(windows_hello_enabled=True, windows_hello_verify=lambda reason: True),
+            require_auth_intents={"SET_POWER_PLAN"},
+        )
+
+        resolved, result, _ = core._resolve_and_execute(Command("SET_POWER_PLAN", {"plan": "balanced"}))
+
+        self.assertEqual(len(skill.calls), 1)
+        self.assertTrue(result.success)
+        self.assertEqual(resolved.parameters["authenticated_via"], "windows_hello")
+
+    def test_failed_windows_hello_falls_back_to_the_passphrase_flow_unchanged(self):
+        """Windows Hello annullato/non disponibile: deve ripiegare sul flusso passphrase
+        esistente esattamente come se Windows Hello non fosse mai stato configurato."""
+        skill = FakeSkill()
+        registry = FakeRegistry({"SET_POWER_PLAN": skill})
+        core = _bare_core(
+            registry, always_confirm_intents=set(),
+            auth_gate=AuthGate(
+                passphrase="apri sesamo", windows_hello_enabled=True, windows_hello_verify=lambda reason: False,
+            ),
+            require_auth_intents={"SET_POWER_PLAN"},
+        )
+
+        _, result, _ = core._resolve_and_execute(Command("SET_POWER_PLAN", {"plan": "balanced"}))
+
+        self.assertEqual(result.error, "AUTH_REQUIRED")
+        self.assertEqual(skill.calls, [], "la skill non deve eseguire finche' non e' autenticata")
+        self.assertEqual(result.data["confirm_parameters"]["authenticated_via"], "passphrase")
+
+    def test_windows_hello_disabled_never_calls_the_injected_verifier(self):
+        calls = []
+        skill = FakeSkill()
+        registry = FakeRegistry({"SET_POWER_PLAN": skill})
+        core = _bare_core(
+            registry, always_confirm_intents=set(),
+            auth_gate=AuthGate(
+                passphrase="apri sesamo", windows_hello_enabled=False,
+                windows_hello_verify=lambda reason: calls.append(reason) or True,
+            ),
+            require_auth_intents={"SET_POWER_PLAN"},
+        )
+
+        _, result, _ = core._resolve_and_execute(Command("SET_POWER_PLAN", {"plan": "balanced"}))
+
+        self.assertEqual(calls, [])
         self.assertEqual(result.error, "AUTH_REQUIRED")
 
 

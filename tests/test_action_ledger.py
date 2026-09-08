@@ -8,7 +8,7 @@ from pathlib import Path
 
 from core.action_ledger import (
     AUTHORIZATION_BLOCKED, AUTHORIZATION_CONFIRMED, AUTHORIZATION_NONE, AUTHORIZATION_PASSPHRASE,
-    AUTHORIZATION_PENDING, ActionLedger, ActionReceipt, authorization_of, new_action_id,
+    AUTHORIZATION_PENDING, AUTHORIZATION_WINDOWS_HELLO, ActionLedger, ActionReceipt, authorization_of, new_action_id,
 )
 
 
@@ -30,7 +30,21 @@ class AuthorizationOfTests(unittest.TestCase):
         self.assertEqual(authorization_of("success", {"confirmed": True}), AUTHORIZATION_CONFIRMED)
 
     def test_authenticated_parameter_means_passphrase(self):
+        """Senza authenticated_via (ricevute scritte prima che questo campo esistesse), il
+        default resta "passphrase" per compatibilita' con quelle vecchie."""
         self.assertEqual(authorization_of("success", {"authenticated": True}), AUTHORIZATION_PASSPHRASE)
+
+    def test_authenticated_via_windows_hello_is_distinguished_from_passphrase(self):
+        self.assertEqual(
+            authorization_of("success", {"authenticated": True, "authenticated_via": "windows_hello"}),
+            AUTHORIZATION_WINDOWS_HELLO,
+        )
+
+    def test_authenticated_via_passphrase_is_explicit_passphrase(self):
+        self.assertEqual(
+            authorization_of("success", {"authenticated": True, "authenticated_via": "passphrase"}),
+            AUTHORIZATION_PASSPHRASE,
+        )
 
     def test_authenticated_wins_over_confirmed_when_both_present(self):
         """Un'azione ADMIN autenticata con passphrase ha anche 'confirmed' storicamente

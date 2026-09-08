@@ -306,6 +306,29 @@ pulita; smoke test installazione/avvio/arresto; dashboard locale con errori e la
   vault generico: niente scadenza, rotazione o audit di accesso, dichiarato esplicitamente nel
   modulo. Coperto da `tests/test_secrets_vault.py` (DPAPI vero, nessun mock) e
   `tests/test_config.py` (nessun test esisteva prima per `core/config.py`).
+- ✅ Windows Hello per le azioni ADMIN (`core/windows_hello.py`, `windows_hello_enabled` in
+  config.json): usa `Windows.Security.Credentials.UI.UserConsentVerifier` (via `winsdk`, già una
+  dipendenza) - l'API minima per "chiedi all'utente di verificare la propria presenza con quello
+  che ha già in Windows Hello", non un intero flusso WebAuthn/FIDO2 con enrollment di credenziali
+  che Jake dovrebbe gestire da solo. Tentato PRIMA della passphrase in `JakeCore.
+  _resolve_and_execute` quando entrambi sono attivi: se verifica, l'azione esegue SUBITO nello
+  stesso turno (niente "ripeti la passphrase"), soddisfacendo insieme sia il gradino REQUIRE_AUTH
+  sia quello CONFIRM successivo (`confirmed=True` insieme ad `authenticated=True` -
+  un'autenticazione biometrica specifica PER QUESTA azione è già un consenso esplicito, chiederne
+  un altro sarebbe ridondante). Se Windows Hello e' spento, non disponibile o annullato, ripiega
+  sul flusso passphrase esistente, invariato. `authorization_of()` (`core/action_ledger.py`)
+  distingue `"windows_hello"` da `"passphrase"` nel ledger.
+  **Incidente reale durante lo sviluppo, non un rischio teorico**: un primo tentativo di testare
+  `verify()` sostituendo `winsdk.windows.security.credentials.ui` in `sys.modules` non ha
+  funzionato (winsdk usa un proprio meccanismo di import WinRT che non passa in modo affidabile
+  da lì) - il test ha finito per chiamare l'API vera, mostrando un prompt reale di Windows Hello
+  sullo schermo dell'utente e restando bloccato oltre il timeout di 120s in attesa di
+  un'impronta/PIN che nessuno poteva fornire. Scoperto perché il comando e' rimasto bloccato, non
+  a tavolino; il processo `CredentialUIBroker.exe` risultava davvero in esecuzione. Corretto
+  iniettando l'intera funzione di verifica (`verify(reason, _verified_synchronously=...)`) invece
+  di provare a intercettare l'import: nessun test in `tests/test_windows_hello.py`/
+  `tests/test_auth_gate.py`/`tests/test_jake_core_permissions.py` può più toccare l'API reale.
+  `is_available()` (nessun prompt, solo un controllo) resta invece chiamata per davvero nei test.
 - ⬜ JSON Schema validato per intent/tool call/risultato/errore/prova/undo/chiarimento: non
   affrontato. `TaskAgent._schema()` (core/agent.py) genera già uno schema JSON per vincolare
   l'output del modello (v3.1), ma non c'è ancora una validazione formale, condivisa e applicata
@@ -328,10 +351,11 @@ pulita; smoke test installazione/avvio/arresto; dashboard locale con errori e la
   verificata visivamente/interattivamente in questo ambiente - aggiungerla senza poterla vedere
   girare avrebbe significato dichiarare fatto qualcosa di verificato solo a metà.
 - ⬜ Separazione formale planner/policy engine/executor, capability token per agente/skill/
-  dispositivo, Windows Hello/passkey, difese da prompt injection (taint tracking/allowlist),
-  sandbox OS per i plugin generati dalla fucina, backup transazionale + undo center nell'HUD: non
-  affrontati in questa sessione. Sono i pezzi più grandi e rischiosi di F1 (un kernel di permessi
-  vero, autenticazione forte, sandboxing a livello OS): meritano una sessione dedicata con più
+  dispositivo, passkey/WebAuthn (Windows Hello per operazioni ADMIN è fatto, vedi sopra - un
+  passkey vero per un secondo dispositivo/servizio no), difese da prompt injection (taint
+  tracking/allowlist), sandbox OS per i plugin generati dalla fucina, backup transazionale + undo
+  center nell'HUD: non affrontati in questa sessione. Sono i pezzi più grandi e rischiosi di F1
+  (un kernel di permessi vero, sandboxing a livello OS): meritano una sessione dedicata con più
   tempo per la revisione di sicurezza, non un'implementazione affrettata - meglio dichiararli
   apertamente qui che spacciare un abbozzo rischioso per fatto.
 
