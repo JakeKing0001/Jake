@@ -3,6 +3,7 @@ v4.3) e per JakeCore.notify(), il punto unico da cui passano promemoria/avvisi/a
 di essere presentati in CLI o in voce."""
 import unittest
 
+from core.event_bus import EventBus
 from core.jake_core import JakeCore
 from core.notification_center import NotificationCenter, NotificationMode
 from skills.notification_mode import GetNotificationModeSkill, SetNotificationModeSkill
@@ -51,6 +52,7 @@ class JakeCoreNotifyTests(unittest.TestCase):
     def _bare_core(self, mode=NotificationMode.NORMAL) -> JakeCore:
         core = JakeCore.__new__(JakeCore)
         core.notification_center = NotificationCenter(mode=mode)
+        core.event_bus = EventBus()  # v4.9.1: notify() pubblica anche sul bus eventi
         return core
 
     def test_normal_mode_passes_the_message_through(self):

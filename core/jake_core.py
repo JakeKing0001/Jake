@@ -3,8 +3,11 @@ from core import intent_patterns
 from core.agent import TaskAgent
 from core.auth_gate import AuthGate
 from core.command import Command
+from core.companion_server import CompanionServer
 from core.context_summarizer import ContextSummarizer
 from core.desktop_context import DesktopContextTracker
+from core.event_bus import EventBus
+from core.hud_protocol import EventType, HudEvent
 from core.learning_manager import LearningManager
 from core.logger import get_logger
 from core.nlu import chitchat
@@ -60,6 +63,22 @@ class JakeCore:
         # e' salvata su disco: riparte sempre disattivata a ogni avvio di Jake, cosi' non puo'
         # restare attiva per sbaglio senza che l'utente se ne accorga in una sessione successiva.
         self.private_mode = False
+
+        # Protocollo eventi + server companion (v4.9.1 HUD IPC transport, v5.8 Mobile
+        # Companion, v5.9 Ambient Computing): qualsiasi presentazione esterna (HUD nativo,
+        # app companion su un altro dispositivo) puo' iscriversi a self.event_bus senza essere
+        # un processo Python nello stesso interprete (vedi core/hud_protocol.py, core/
+        # companion_server.py). Il server e' costruito sempre ma NON avviato per default:
+        # parte solo se companion_server_enabled e' esplicitamente vero in config.json, stesso
+        # pattern gia' usato da system_advisor_enabled.
+        self.event_bus = EventBus()
+        self.companion_server = CompanionServer(
+            event_bus=self.event_bus, command_handler=self.answer,
+            port=int(config.get("companion_server_port", 8765) or 8765),
+        )
+        if bool(config.get("companion_server_enabled", False)):
+            self.companion_server.start()
+            self.logger.info("Server companion in ascolto su 127.0.0.1:%d", self.companion_server.port)
 
         # Skill/plugin installabili (v2.0): un file .py in plugins/ con una funzione
         # register(registry) diventa una capacita' di Jake senza toccare il core.
@@ -248,7 +267,10 @@ class JakeCore:
         core/voice/wake_word_session.py, che chiama questo stesso metodo): applica la modalita'
         di notifica corrente (v4.3). Restituisce il messaggio da presentare subito, o None se
         e' stato solo messo in coda per quando la modalita' tornera' a permetterlo."""
-        return self.notification_center.gate(kind, message)
+        gated = self.notification_center.gate(kind, message)
+        if gated is not None:
+            self.event_bus.publish(HudEvent(EventType.NOTIFICATION, {"kind": kind, "text": gated}))
+        return gated
 
     def _default_on_reminder_due(self, reminder: dict) -> None:
         message = self.notify("reminder", self.format_due_reminder(reminder))
@@ -282,6 +304,7 @@ class JakeCore:
 
     def _on_agent_step(self, step_index: int, description: str) -> None:
         self.session_hooks.call("set_state", "working", description)
+        self.event_bus.publish(HudEvent(EventType.AGENT_STEP, {"step": step_index, "description": description}))
 
     def _on_skill_installed(self, draft) -> None:
         self.retriever.refresh()
@@ -306,14 +329,16 @@ class JakeCore:
             # e riportata all'utente con un messaggio comprensibile invece di terminare il processo.
             self.logger.exception("Errore imprevisto elaborando: %s", text)
             response = "Mi dispiace, si è verificato un errore imprevisto. L'ho registrato nel log."
+            self.event_bus.publish(HudEvent(EventType.ERROR, {"detail": "errore imprevisto"}))
 
         if response is None:
             response = ""
         # La cronologia in RAM (self.conversation_state) resta attiva anche in modalita' privata
         # (v5.6, Privacy Engine): serve alla sessione corrente per pronomi/riferimenti e sparisce
-        # comunque al riavvio. Cio' che la modalita' privata sospende e' la scrittura su DISCO,
-        # sia nella memoria a lungo termine sia nel log operativo: uno scambio in modalita'
-        # privata non deve lasciare traccia persistente da nessuna parte.
+        # comunque al riavvio. Cio' che la modalita' privata sospende e' la scrittura su DISCO E
+        # la trasmissione (v4.9.1: chi e' iscritto a self.event_bus, es. un HUD o un'app
+        # companion, non deve vedere in diretta uno scambio marcato come privato): uno scambio in
+        # modalita' privata non deve lasciare traccia da nessuna parte, ne' su disco ne' altrove.
         self.conversation_state.add_turn("user", text)
         if response != self.EXIT_SENTINEL:
             self.conversation_state.add_turn("jake", response)
@@ -322,6 +347,9 @@ class JakeCore:
         if self.private_mode:
             self.logger.info("Scambio in modalità privata: non registrato.")
         else:
+            self.event_bus.publish(HudEvent(EventType.USER_MESSAGE, {"text": text}))
+            if response and response != self.EXIT_SENTINEL:
+                self.event_bus.publish(HudEvent(EventType.JAKE_MESSAGE, {"text": response}))
             self.memory_manager.log_turn("user", text)
             if response != self.EXIT_SENTINEL:
                 self.memory_manager.log_turn("jake", response)
@@ -649,7 +677,9 @@ class JakeCore:
     # ---- chiusura ------------------------------------------------------------------------
 
     def shutdown(self) -> None:
-        for component in (self.scheduler, self.trigger_scheduler, self.system_advisor, self.desktop_context):
+        for component in (
+            self.scheduler, self.trigger_scheduler, self.system_advisor, self.desktop_context, self.companion_server,
+        ):
             try:
                 component.stop()
             except Exception:
