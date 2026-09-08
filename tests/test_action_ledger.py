@@ -8,7 +8,8 @@ from pathlib import Path
 
 from core.action_ledger import (
     AUTHORIZATION_BLOCKED, AUTHORIZATION_CONFIRMED, AUTHORIZATION_NONE, AUTHORIZATION_PASSPHRASE,
-    AUTHORIZATION_PENDING, AUTHORIZATION_WINDOWS_HELLO, ActionLedger, ActionReceipt, authorization_of, new_action_id,
+    AUTHORIZATION_PENDING, AUTHORIZATION_WINDOWS_HELLO, ActionLedger, ActionReceipt, authorization_of,
+    idempotency_key_of, new_action_id,
 )
 
 
@@ -64,6 +65,31 @@ class AuthorizationOfTests(unittest.TestCase):
 
     def test_none_parameters_does_not_crash(self):
         self.assertEqual(authorization_of("success", None), AUTHORIZATION_NONE)
+
+
+class IdempotencyKeyOfTests(unittest.TestCase):
+    def test_same_intent_and_parameters_produce_the_same_key(self):
+        key1 = idempotency_key_of("OPEN_APP", {"name": "spotify"})
+        key2 = idempotency_key_of("OPEN_APP", {"name": "spotify"})
+        self.assertEqual(key1, key2)
+
+    def test_parameter_order_does_not_matter(self):
+        key1 = idempotency_key_of("CREATE_PATH", {"path": "x", "confirmed": True})
+        key2 = idempotency_key_of("CREATE_PATH", {"confirmed": True, "path": "x"})
+        self.assertEqual(key1, key2)
+
+    def test_different_parameters_produce_different_keys(self):
+        key1 = idempotency_key_of("OPEN_APP", {"name": "spotify"})
+        key2 = idempotency_key_of("OPEN_APP", {"name": "discord"})
+        self.assertNotEqual(key1, key2)
+
+    def test_different_intents_produce_different_keys_even_with_the_same_parameters(self):
+        key1 = idempotency_key_of("OPEN_APP", {"name": "x"})
+        key2 = idempotency_key_of("CLOSE_APP", {"name": "x"})
+        self.assertNotEqual(key1, key2)
+
+    def test_none_parameters_does_not_crash(self):
+        self.assertTrue(idempotency_key_of("HELP", None))
 
 
 class ActionReceiptTests(unittest.TestCase):
@@ -132,6 +158,45 @@ class QueryTests(ActionLedgerTestCase):
 
         self.assertEqual(self.ledger.by_action_id("a1")["action_id"], "a1")
         self.assertIsNone(self.ledger.by_action_id("does-not-exist"))
+
+    def test_by_idempotency_key_filters_correctly(self):
+        self.ledger.record(self._receipt(action_id="a1", idempotency_key="k1"))
+        self.ledger.record(self._receipt(action_id="a2", idempotency_key="k1"))
+        self.ledger.record(self._receipt(action_id="a3", idempotency_key="k2"))
+
+        results = self.ledger.by_idempotency_key("k1")
+
+        self.assertEqual({r["action_id"] for r in results}, {"a1", "a2"})
+
+
+class DuplicateIdempotencyKeysTests(ActionLedgerTestCase):
+    def test_two_receipts_with_the_same_key_close_in_time_are_flagged(self):
+        self.ledger.record(self._receipt(action_id="a1", idempotency_key="k1", ts=100.0))
+        self.ledger.record(self._receipt(action_id="a2", idempotency_key="k1", ts=101.0))
+
+        duplicates = self.ledger.duplicate_idempotency_keys(within_seconds=60)
+
+        self.assertIn("k1", duplicates)
+        self.assertEqual({r["action_id"] for r in duplicates["k1"]}, {"a1", "a2"})
+
+    def test_same_key_far_apart_in_time_is_not_flagged(self):
+        self.ledger.record(self._receipt(action_id="a1", idempotency_key="k1", ts=100.0))
+        self.ledger.record(self._receipt(action_id="a2", idempotency_key="k1", ts=10000.0))
+
+        duplicates = self.ledger.duplicate_idempotency_keys(within_seconds=60)
+
+        self.assertNotIn("k1", duplicates)
+
+    def test_single_occurrence_is_not_a_duplicate(self):
+        self.ledger.record(self._receipt(action_id="a1", idempotency_key="k1", ts=100.0))
+
+        self.assertEqual(self.ledger.duplicate_idempotency_keys(), {})
+
+    def test_receipts_without_an_idempotency_key_are_ignored(self):
+        self.ledger.record(self._receipt(action_id="a1", idempotency_key=None, ts=100.0))
+        self.ledger.record(self._receipt(action_id="a2", idempotency_key=None, ts=101.0))
+
+        self.assertEqual(self.ledger.duplicate_idempotency_keys(), {})
 
 
 if __name__ == "__main__":
