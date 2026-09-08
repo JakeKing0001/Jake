@@ -95,6 +95,12 @@ class JakeCore:
         self.desktop_context.start()
         self.router.primary_provider.context_provider = self.desktop_context.context_summary
         self.planner_provider.context_provider = self.desktop_context.context_summary
+        # Cronologia recente nel classificatore (v4.0, Conversational Intelligence): stesso
+        # buffer breve gia' condiviso con l'agente a passi (self.conversation_state), cosi' un
+        # "e a Milano?" dopo "che tempo fa a Roma?" si puo' risolvere gia' in fase di
+        # classificazione, senza dover ricadere sull'agente.
+        if hasattr(self.router.primary_provider, "history_provider"):
+            self.router.primary_provider.history_provider = self.conversation_state.get_short_term_history
 
         # Jake proattivo (v3.0): un'automazione salvata puo' far partire se stessa.
         self.trigger_scheduler = TriggerScheduler(
