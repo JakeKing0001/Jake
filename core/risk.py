@@ -1,0 +1,285 @@
+"""Classificazione del rischio per skill (v3.2, fase Reliability & Architecture).
+
+Prima d'ora ogni skill decideva da sola, caso per caso, quando chiedere conferma
+(il pattern CONFIRMATION_REQUIRED sparso nei singoli file in skills/), config.json
+aveva un elenco a parte di always_confirm_intents, e core/command_safety.py
+copriva solo RUN_COMMAND. Nessuna di queste fonti sapeva delle altre due, e non
+c'era modo di chiedersi "quali skill di Jake possono fare danni?" senza leggere
+tutti i file uno per uno.
+
+Questo modulo e' la fonte di verita' unica: ogni skill built-in e' censita qui in
+uno dei 5 livelli usati anche dal futuro Permissions & Security Kernel (fase 5.4
+della roadmap), cosi' la stessa scala serve gia' da ora e restera' valida quando
+quella fase arrivera' a fare enforcement vero (ALLOW/DENY/CONFIRM/REQUIRE_AUTH).
+
+Per ora la classificazione e' solo informativa (esposta da SkillRegistry.list_
+capabilities, vedi core/skill_registry.py): non cambia ancora quali azioni
+richiedono conferma, quel comportamento resta quello gia' esistente in JakeCore
+e nelle singole skill. E' il censimento che deve esistere PRIMA di poter costruire
+un'enforcement centralizzata sopra, e tests/test_risk.py obbliga chi aggiunge una
+nuova skill built-in a classificarla esplicitamente qui, invece di lasciarla
+scoperta senza che nessuno se ne accorga."""
+
+from enum import Enum
+
+
+class RiskLevel(str, Enum):
+    """Ordine crescente di blast radius: READ_ONLY non cambia mai nulla, ADMIN puo'
+    spegnere la macchina o eseguire codice arbitrario."""
+
+    READ_ONLY = "read_only"
+    LOCAL_REVERSIBLE = "local_reversible"
+    EXTERNAL_ACTION = "external_action"
+    DESTRUCTIVE = "destructive"
+    ADMIN = "admin"
+
+
+_ORDER = {level: index for index, level in enumerate(RiskLevel)}
+
+
+def is_at_least(level: RiskLevel, threshold: RiskLevel) -> bool:
+    """Vero se level e' al livello di rischio di threshold o superiore (es. e' utile per un
+    futuro 'chiedi sempre conferma per le skill DESTRUCTIVE o piu' rischiose')."""
+    return _ORDER[level] >= _ORDER[threshold]
+
+
+# Un intent per riga cosi' com'e' raggruppato in core/skill_catalog.py, cosi' i due file si
+# possono confrontare a vista. Le skill che gia' implementano una propria conferma esplicita
+# (es. DELETE_PATH) restano comunque classificate con il livello di rischio reale dell'azione,
+# non con quello "attenuato" dalla conferma: la conferma e' un controllo, non cambia il rischio.
+SKILL_RISK: dict[str, RiskLevel] = {
+    # -- tempo/data: sola lettura --------------------------------------------------------
+    "GET_TIME": RiskLevel.READ_ONLY,
+    "GET_DATE": RiskLevel.READ_ONLY,
+    "GET_DAY_OF_WEEK": RiskLevel.READ_ONLY,
+    "DAYS_UNTIL": RiskLevel.READ_ONLY,
+    "GET_WEEK_NUMBER": RiskLevel.READ_ONLY,
+    "CONVERT_TIMEZONE": RiskLevel.READ_ONLY,
+
+    # -- app/finestre: locali e reversibili, tranne chiudere un processo -----------------
+    "OPEN_APP": RiskLevel.LOCAL_REVERSIBLE,
+    "FOCUS_WINDOW": RiskLevel.LOCAL_REVERSIBLE,
+    "MINIMIZE_WINDOW": RiskLevel.LOCAL_REVERSIBLE,
+    "LIST_PROCESSES": RiskLevel.READ_ONLY,
+    "CLOSE_APP": RiskLevel.DESTRUCTIVE,
+    "GET_ACTIVE_WINDOW": RiskLevel.READ_ONLY,
+    "LIST_OPEN_WINDOWS": RiskLevel.READ_ONLY,
+    "MAXIMIZE_WINDOW": RiskLevel.LOCAL_REVERSIBLE,
+    "RESTORE_WINDOW": RiskLevel.LOCAL_REVERSIBLE,
+    "SNAP_WINDOW_LEFT": RiskLevel.LOCAL_REVERSIBLE,
+    "SNAP_WINDOW_RIGHT": RiskLevel.LOCAL_REVERSIBLE,
+    "SWITCH_NEXT_WINDOW": RiskLevel.LOCAL_REVERSIBLE,
+    "MINIMIZE_ALL_WINDOWS": RiskLevel.LOCAL_REVERSIBLE,
+    "SET_WINDOW_ALWAYS_ON_TOP": RiskLevel.LOCAL_REVERSIBLE,
+    "RESIZE_WINDOW": RiskLevel.LOCAL_REVERSIBLE,
+    "CLOSE_WINDOW": RiskLevel.LOCAL_REVERSIBLE,
+
+    # -- filesystem: lettura libera, scrittura reversibile, cancellazione distruttiva ----
+    "OPEN_PATH": RiskLevel.LOCAL_REVERSIBLE,
+    "CREATE_PATH": RiskLevel.LOCAL_REVERSIBLE,
+    "RENAME_PATH": RiskLevel.LOCAL_REVERSIBLE,
+    "MOVE_PATH": RiskLevel.LOCAL_REVERSIBLE,
+    "DELETE_PATH": RiskLevel.DESTRUCTIVE,
+    "FIND_FILE": RiskLevel.READ_ONLY,
+    "SEARCH_FILES": RiskLevel.READ_ONLY,
+    "OPEN_SEARCH_RESULT": RiskLevel.LOCAL_REVERSIBLE,
+    "SEMANTIC_SEARCH_FILES": RiskLevel.READ_ONLY,
+    "BUILD_SEMANTIC_INDEX": RiskLevel.LOCAL_REVERSIBLE,
+    "COMPRESS_PATH": RiskLevel.LOCAL_REVERSIBLE,
+    "EXTRACT_ARCHIVE": RiskLevel.DESTRUCTIVE,  # puo' sovrascrivere file esistenti senza preavviso
+    "GET_FILE_INFO": RiskLevel.READ_ONLY,
+    "COUNT_WORDS_IN_FILE": RiskLevel.READ_ONLY,
+    "READ_FILE_TEXT": RiskLevel.READ_ONLY,
+    "DUPLICATE_FILE": RiskLevel.LOCAL_REVERSIBLE,
+    "GET_FOLDER_SIZE": RiskLevel.READ_ONLY,
+    "FIND_LARGE_FILES": RiskLevel.READ_ONLY,
+    "FIND_DUPLICATE_FILES": RiskLevel.READ_ONLY,
+    "LIST_RECENT_FILES": RiskLevel.READ_ONLY,
+    "PRINT_FILE": RiskLevel.EXTERNAL_ACTION,  # consuma una risorsa fisica esterna
+
+    # -- web: query in lettura, salvo azioni che aprono/inviano qualcosa -----------------
+    "WEB_SEARCH": RiskLevel.READ_ONLY,
+    "GET_WEATHER": RiskLevel.READ_ONLY,
+    "GET_NEWS": RiskLevel.READ_ONLY,
+    "OPEN_URL": RiskLevel.LOCAL_REVERSIBLE,
+    "GET_BROWSER_HISTORY": RiskLevel.READ_ONLY,
+    "PING_HOST": RiskLevel.READ_ONLY,
+    "TRACE_ROUTE": RiskLevel.READ_ONLY,
+    "CHECK_WEBSITE_STATUS": RiskLevel.READ_ONLY,
+    "SEARCH_IN_BROWSER": RiskLevel.LOCAL_REVERSIBLE,
+    "PLAY_MEDIA": RiskLevel.LOCAL_REVERSIBLE,
+    "OPEN_INCOGNITO_WINDOW": RiskLevel.LOCAL_REVERSIBLE,
+
+    # -- memoria/note/todo: cancellare e' l'unica azione distruttiva ---------------------
+    "REMEMBER": RiskLevel.LOCAL_REVERSIBLE,
+    "RECALL": RiskLevel.READ_ONLY,
+    "FORGET": RiskLevel.DESTRUCTIVE,
+    "ADD_NOTE": RiskLevel.LOCAL_REVERSIBLE,
+    "LIST_NOTES": RiskLevel.READ_ONLY,
+    "SEARCH_NOTES": RiskLevel.READ_ONLY,
+    "EXPORT_NOTES": RiskLevel.LOCAL_REVERSIBLE,
+    "CLEAR_NOTES": RiskLevel.DESTRUCTIVE,
+    "ADD_TODO": RiskLevel.LOCAL_REVERSIBLE,
+    "LIST_TODOS": RiskLevel.READ_ONLY,
+    "COMPLETE_TODO": RiskLevel.LOCAL_REVERSIBLE,
+    "DELETE_TODO": RiskLevel.DESTRUCTIVE,
+
+    # -- automazioni: definirle e' reversibile, farle partire eredita il rischio dei passi --
+    "SAVE_WORKFLOW": RiskLevel.LOCAL_REVERSIBLE,
+    "RUN_WORKFLOW": RiskLevel.EXTERNAL_ACTION,  # esegue passi salvati in precedenza, non ispezionati qui
+    "SET_TRIGGER": RiskLevel.LOCAL_REVERSIBLE,
+    "LIST_TRIGGERS": RiskLevel.READ_ONLY,
+    "DELETE_TRIGGER": RiskLevel.DESTRUCTIVE,
+    "SET_REMINDER": RiskLevel.LOCAL_REVERSIBLE,
+    "LIST_REMINDERS": RiskLevel.READ_ONLY,
+    "SNOOZE_REMINDER": RiskLevel.LOCAL_REVERSIBLE,
+    "DELETE_REMINDER": RiskLevel.DESTRUCTIVE,
+    "SET_DAILY_REMINDER": RiskLevel.LOCAL_REVERSIBLE,
+    "START_POMODORO": RiskLevel.LOCAL_REVERSIBLE,
+    "STOP_POMODORO": RiskLevel.LOCAL_REVERSIBLE,
+    "SET_TIMER": RiskLevel.LOCAL_REVERSIBLE,
+    "CANCEL_TIMER": RiskLevel.LOCAL_REVERSIBLE,
+    "LIST_TIMERS": RiskLevel.READ_ONLY,
+
+    # -- schermo/input: precursori del Computer Use Engine (fase 3.7) --------------------
+    "TAKE_SCREENSHOT": RiskLevel.LOCAL_REVERSIBLE,
+    "READ_SCREEN": RiskLevel.READ_ONLY,
+    "DESCRIBE_SCREEN": RiskLevel.READ_ONLY,
+    "CLICK_MOUSE": RiskLevel.LOCAL_REVERSIBLE,
+    "MOVE_MOUSE": RiskLevel.LOCAL_REVERSIBLE,
+    "TYPE_TEXT": RiskLevel.LOCAL_REVERSIBLE,
+    "PRESS_KEY": RiskLevel.LOCAL_REVERSIBLE,
+    "CLICK_TEXT": RiskLevel.LOCAL_REVERSIBLE,
+    "CLICK_ELEMENT": RiskLevel.LOCAL_REVERSIBLE,
+    "SCROLL": RiskLevel.LOCAL_REVERSIBLE,
+    "READ_SELECTION": RiskLevel.READ_ONLY,
+
+    # -- media --------------------------------------------------------------------------
+    "SET_VOLUME": RiskLevel.LOCAL_REVERSIBLE,
+    "MEDIA_CONTROL": RiskLevel.LOCAL_REVERSIBLE,
+    "SET_VOLUME_LEVEL": RiskLevel.LOCAL_REVERSIBLE,
+    "GET_VOLUME_LEVEL": RiskLevel.READ_ONLY,
+
+    # -- sistema: la maggior parte legge stato, poche toccano configurazione o spengono --
+    "SYSTEM_POWER": RiskLevel.ADMIN,  # spegnimento/riavvio/logoff
+    "SET_BRIGHTNESS": RiskLevel.LOCAL_REVERSIBLE,
+    "EMPTY_RECYCLE_BIN": RiskLevel.DESTRUCTIVE,
+    "LIST_WIFI_NETWORKS": RiskLevel.READ_ONLY,
+    "GET_WIFI_STATUS": RiskLevel.READ_ONLY,
+    "GET_BATTERY_STATUS": RiskLevel.READ_ONLY,
+    "GET_CPU_USAGE": RiskLevel.READ_ONLY,
+    "GET_MEMORY_USAGE": RiskLevel.READ_ONLY,
+    "GET_DISK_USAGE": RiskLevel.READ_ONLY,
+    "GET_UPTIME": RiskLevel.READ_ONLY,
+    "GET_SYSTEM_INFO": RiskLevel.READ_ONLY,
+    "GET_LOCAL_IP": RiskLevel.READ_ONLY,
+    "GET_PUBLIC_IP": RiskLevel.READ_ONLY,
+    "CLEAR_TEMP_FILES": RiskLevel.DESTRUCTIVE,
+    "RESTART_EXPLORER": RiskLevel.DESTRUCTIVE,  # termina e riavvia explorer.exe
+    "FLUSH_DNS": RiskLevel.LOCAL_REVERSIBLE,
+    "LIST_STARTUP_APPS": RiskLevel.READ_ONLY,
+    "LIST_INSTALLED_APPS": RiskLevel.READ_ONLY,
+    "SET_POWER_PLAN": RiskLevel.ADMIN,  # cambia una configurazione di sistema globale
+    "TOGGLE_DARK_MODE": RiskLevel.LOCAL_REVERSIBLE,
+    "GET_SCREEN_RESOLUTION": RiskLevel.READ_ONLY,
+    "GET_GPU_INFO": RiskLevel.READ_ONLY,
+    "GET_DNS_SERVERS": RiskLevel.READ_ONLY,
+    "GET_ENVIRONMENT_VARIABLE": RiskLevel.READ_ONLY,
+    "GET_MAC_ADDRESS": RiskLevel.READ_ONLY,
+    "LIST_DRIVES": RiskLevel.READ_ONLY,
+
+    # -- dev tools: RUN_COMMAND/RUN_PYTHON_SCRIPT eseguono codice arbitrario -------------
+    "GIT_STATUS": RiskLevel.READ_ONLY,
+    "GIT_PULL": RiskLevel.EXTERNAL_ACTION,  # porta dentro contenuto da un remoto
+    "GIT_LOG": RiskLevel.READ_ONLY,
+    "GIT_BRANCH": RiskLevel.READ_ONLY,
+    "GIT_DIFF": RiskLevel.READ_ONLY,
+    "OPEN_IN_EDITOR": RiskLevel.LOCAL_REVERSIBLE,
+    "RUN_COMMAND": RiskLevel.ADMIN,
+    "RUN_PYTHON_SCRIPT": RiskLevel.ADMIN,
+    "FORMAT_JSON": RiskLevel.READ_ONLY,
+    "COUNT_LINES_OF_CODE": RiskLevel.READ_ONLY,
+    "GENERATE_UUID": RiskLevel.READ_ONLY,
+    "CHECK_PORT_IN_USE": RiskLevel.READ_ONLY,
+    "KILL_PROCESS_BY_PORT": RiskLevel.DESTRUCTIVE,
+    "CHECK_PASSWORD_STRENGTH": RiskLevel.READ_ONLY,
+    "CHECK_FILE_HASH": RiskLevel.READ_ONLY,
+
+    # -- testo/matematica: quasi tutte pure funzioni di calcolo/trasformazione ----------
+    "ASK_QUESTION": RiskLevel.READ_ONLY,
+    "TRANSLATE_TEXT": RiskLevel.READ_ONLY,
+    "CALCULATE": RiskLevel.READ_ONLY,
+    "CONVERT_UNITS": RiskLevel.READ_ONLY,
+    "SUMMARIZE_CLIPBOARD": RiskLevel.READ_ONLY,
+    "CLIPBOARD_READ": RiskLevel.READ_ONLY,
+    "CLIPBOARD_WRITE": RiskLevel.LOCAL_REVERSIBLE,
+    "TRANSLATE_CLIPBOARD": RiskLevel.READ_ONLY,
+    "EMPTY_CLIPBOARD": RiskLevel.LOCAL_REVERSIBLE,
+    "COUNT_WORDS": RiskLevel.READ_ONLY,
+    "CONVERT_CASE": RiskLevel.READ_ONLY,
+    "GENERATE_PASSWORD": RiskLevel.READ_ONLY,
+    "PROOFREAD_TEXT": RiskLevel.READ_ONLY,
+    "SUMMARIZE_TEXT": RiskLevel.READ_ONLY,
+    "DETECT_LANGUAGE": RiskLevel.READ_ONLY,
+    "EXTRACT_URLS_FROM_TEXT": RiskLevel.READ_ONLY,
+    "CONVERT_NUMBER_TO_WORDS": RiskLevel.READ_ONLY,
+    "CONVERT_ROMAN_NUMERAL": RiskLevel.READ_ONLY,
+    "CONVERT_MORSE_CODE": RiskLevel.READ_ONLY,
+    "CALCULATE_BMI": RiskLevel.READ_ONLY,
+    "CALCULATE_TIP": RiskLevel.READ_ONLY,
+    "CALCULATE_AGE": RiskLevel.READ_ONLY,
+    "CALCULATE_DISCOUNT": RiskLevel.READ_ONLY,
+    "IS_PRIME": RiskLevel.READ_ONLY,
+    "FIBONACCI": RiskLevel.READ_ONLY,
+    "GCD_LCM": RiskLevel.READ_ONLY,
+    "CALCULATE_PERCENTAGE": RiskLevel.READ_ONLY,
+    "RANDOM_NUMBER": RiskLevel.READ_ONLY,
+
+    # -- fun/misc: sempre sola lettura o generazione locale effimera --------------------
+    "TELL_JOKE": RiskLevel.READ_ONLY,
+    "ROLL_DICE": RiskLevel.READ_ONLY,
+    "FLIP_COIN": RiskLevel.READ_ONLY,
+    "RANDOM_QUOTE": RiskLevel.READ_ONLY,
+    "RANDOM_FACT": RiskLevel.READ_ONLY,
+    "MAGIC_8_BALL": RiskLevel.READ_ONLY,
+    "CHOOSE_RANDOM": RiskLevel.READ_ONLY,
+    "ROCK_PAPER_SCISSORS": RiskLevel.READ_ONLY,
+    "GET_SUNRISE_SUNSET": RiskLevel.READ_ONLY,
+    "GET_MOON_PHASE": RiskLevel.READ_ONLY,
+    "CONVERT_CURRENCY": RiskLevel.READ_ONLY,
+    "GET_NEXT_HOLIDAY": RiskLevel.READ_ONLY,
+
+    "RESEARCH": RiskLevel.READ_ONLY,
+
+    # -- comunicazione: inviare un messaggio e' l'unica azione visibile a terzi ---------
+    "CHITCHAT": RiskLevel.READ_ONLY,
+    "SAVE_CONTACT": RiskLevel.LOCAL_REVERSIBLE,
+    "LIST_CONTACTS": RiskLevel.READ_ONLY,
+    "SEND_WHATSAPP": RiskLevel.EXTERNAL_ACTION,
+    "SEND_EMAIL": RiskLevel.EXTERNAL_ACTION,
+
+    # -- skill registrate direttamente in JakeCore (non nel catalogo, vedi jake_core.py) --
+    "LIST_MODELS": RiskLevel.READ_ONLY,
+    "SET_MODEL": RiskLevel.LOCAL_REVERSIBLE,
+    "LEARN_COMMAND": RiskLevel.LOCAL_REVERSIBLE,
+    "LIST_LEARNED": RiskLevel.READ_ONLY,
+    "FORGET_LEARNED": RiskLevel.DESTRUCTIVE,
+    "CORRECT_LAST": RiskLevel.LOCAL_REVERSIBLE,
+    "REPEAT_LAST": RiskLevel.READ_ONLY,
+    "HELP": RiskLevel.READ_ONLY,
+    "STOP_TALKING": RiskLevel.READ_ONLY,
+    "PAUSE_LISTENING": RiskLevel.LOCAL_REVERSIBLE,
+    "START_DICTATION": RiskLevel.LOCAL_REVERSIBLE,
+    "STOP_DICTATION": RiskLevel.LOCAL_REVERSIBLE,
+    "CREATE_SKILL": RiskLevel.ADMIN,  # la Skill Forge scrive ed espone codice eseguibile nuovo
+    "LIST_CREATED_SKILLS": RiskLevel.READ_ONLY,
+    "DELETE_CREATED_SKILL": RiskLevel.DESTRUCTIVE,
+}
+
+
+def risk_of(intent: str) -> RiskLevel:
+    """Livello di rischio di un intent. Una skill non ancora censita qui (un plugin di terze
+    parti, o una skill scritta dalla Skill Forge) ricade su ADMIN per difetto: e' la scelta
+    piu' prudente finche' un umano non la classifica esplicitamente, invece di trattare per
+    errore qualcosa di potenzialmente pericoloso come se fosse a sola lettura."""
+    return SKILL_RISK.get(intent, RiskLevel.ADMIN)

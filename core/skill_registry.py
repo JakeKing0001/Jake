@@ -21,6 +21,7 @@ from core.workflow_manager import WorkflowManager
 from core.trigger_manager import TriggerManager
 from core.reminder_manager import ReminderManager
 from core.todo_manager import TodoManager
+from core.risk import risk_of
 from copy import deepcopy
 
 
@@ -100,15 +101,23 @@ class SkillRegistry:
         return bool(getattr(skill, "metadata", {}).get("remote", False))
 
     def list_capabilities(self) -> list[dict]:
-        """Restituisce i metadata delle skill registrate."""
+        """Restituisce i metadata delle skill registrate, incluso il livello di rischio
+        (v3.2, vedi core/risk.py: READ_ONLY/LOCAL_REVERSIBLE/EXTERNAL_ACTION/DESTRUCTIVE/ADMIN)."""
         capabilities = []
         for intent, skill in self.skills.items():
             metadata = deepcopy(getattr(skill, "metadata", {}))
             metadata.setdefault("intent", intent)
             metadata.setdefault("description", "")
             metadata.setdefault("parameters", {})
+            metadata["risk"] = risk_of(intent).value
             capabilities.append(metadata)
         return capabilities
+
+    def risk_of(self, intent: str):
+        """Livello di rischio (core.risk.RiskLevel) dell'intent, ADMIN per default se non
+        censito: punto d'accesso unico, cosi' chi deve decidere se chiedere conferma non deve
+        importare core/risk.py direttamente."""
+        return risk_of(intent)
 
     PATH_PARAMETERS = ("path", "destination")
 
