@@ -515,6 +515,33 @@ pulita; smoke test installazione/avvio/arresto; dashboard locale con errori e la
   reale (BLOCK/CONFIRM/KILLED - il dry-run mostra la sequenza VERA, non una finta ottimistica),
   nessuna ricevuta nel ledger per un passo mai avvenuto per davvero. Esposto come parametro
   opzionale `dry_run` di `RUN_WORKFLOW`. Coperto da `DryRunTests` in `tests/test_plan_executor.py`.
+- ✅ Difesa in profondita' (non un buco gia' sfruttabile con il codice attuale): in
+  `JakeCore._resolve_and_execute`, l'alternativa proposta da `core/fallbacks.py::alternative_for`
+  dopo un fallimento (es. `OPEN_APP` su un nome non riconosciuto -> `OPEN_URL`) veniva eseguita
+  chiamando `skill_registry.execute()` direttamente, saltando `decide_interactive()` del tutto.
+  Oggi `alternative_for` restituisce solo alternative fisse a basso rischio (`OPEN_URL`/
+  `OPEN_APP`/`CLICK_ELEMENT`/`CLOSE_WINDOW`, tutte `LOCAL_REVERSIBLE`), quindi non era uno dei
+  quattro buchi riprodotti in questa sessione - ma era un punto cieco strutturale: se una futura
+  alternativa mappasse verso un intent DESTRUCTIVE/ADMIN, partirebbe senza conferma. Ora
+  l'alternativa passa dalla stessa `decide_interactive()`; se la policy la fermerebbe, si
+  ripiega sul fallimento originale invece di aprire una seconda richiesta di conferma per
+  qualcosa che l'utente non ha chiesto direttamente. Coperto da `FallbackAlternativeGateTests`
+  in `tests/test_jake_core_permissions.py` (con un'alternativa finta forzata via mock, dato che
+  quelle vere sono tutte innocue oggi).
+- ✅ **Buco reale trovato e corretto in `core/filesystem_policy.py::is_protected_path`** (usato da
+  `DELETE_PATH`/`RENAME_PATH`/`MOVE_PATH` per rifiutare a priori un'operazione su una cartella
+  critica, PRIMA della normale conferma si'/no): la docstring ha sempre promesso "radice del
+  disco" in generale, ma il controllo verificava solo `SystemDrive` (tipicamente `C:\`) - la
+  radice di un secondo disco (`D:\`, un SSD esterno, una chiavetta USB...) non era mai protetta.
+  `DELETE_PATH` su `D:\` passava dalla normale conferma invece di essere rifiutato a priori come
+  `C:\`: una singola risposta affermativa (anche fraintesa da un comando vocale, o da un
+  workflow con `confirmed: true` prima delle correzioni sopra) avrebbe cancellato un intero
+  disco. **Verificato per davvero prima e dopo la correzione**: `is_protected_path(Path("D:\\"))`
+  restituiva `False`, ora `True` - corretto sostituendo il confronto con `SystemDrive` con
+  `resolved.parent == resolved` (vero per la radice di QUALSIASI filesystem, non solo quella
+  calcolata da una variabile d'ambiente specifica). Il modulo non aveva ancora nessun test:
+  aggiunto `tests/test_filesystem_policy.py` (10 test: radice di qualunque disco, home,
+  sottoalberi di sistema come WINDIR/ProgramFiles, percorsi ordinari non protetti).
 - ⬜ Completare la separazione planner/policy engine/executor (planner escluso, policy non ancora
   un oggetto), capability token per agente/skill/dispositivo, passkey/WebAuthn (Windows Hello per
   operazioni ADMIN è fatto, vedi sopra - un passkey vero per un secondo dispositivo/servizio no),
