@@ -7,9 +7,9 @@ import unittest
 from pathlib import Path
 
 from core.action_ledger import (
-    AUTHORIZATION_BLOCKED, AUTHORIZATION_CONFIRMED, AUTHORIZATION_NONE, AUTHORIZATION_PASSPHRASE,
-    AUTHORIZATION_PENDING, AUTHORIZATION_WINDOWS_HELLO, ActionLedger, ActionReceipt, authorization_of,
-    idempotency_key_of, new_action_id,
+    AUTHORIZATION_BLOCKED, AUTHORIZATION_CONFIRMED, AUTHORIZATION_DENIED, AUTHORIZATION_NONE,
+    AUTHORIZATION_PASSPHRASE, AUTHORIZATION_PENDING, AUTHORIZATION_WINDOWS_HELLO, ActionLedger,
+    ActionReceipt, authorization_of, idempotency_key_of, new_action_id,
 )
 
 
@@ -62,6 +62,14 @@ class AuthorizationOfTests(unittest.TestCase):
     def test_blocked_by_policy_is_blocked(self):
         self.assertEqual(authorization_of("blocked_by_policy", {}), AUTHORIZATION_BLOCKED)
         self.assertEqual(authorization_of("policy_blocked", {}), AUTHORIZATION_BLOCKED)
+
+    def test_denied_results_are_denied_not_pending(self):
+        """Un diniego vero (passphrase sbagliata, "no" a una conferma) e' distinto da
+        AUTHORIZATION_PENDING: li' l'azione aspetta ancora una risposta, qui non partira' piu'
+        per questo turno (vedi ROADMAP.md, F1: "un diniego e' comunque un evento di sicurezza
+        degno di una ricevuta")."""
+        self.assertEqual(authorization_of("denied_auth", {}), AUTHORIZATION_DENIED)
+        self.assertEqual(authorization_of("denied_confirmation", {}), AUTHORIZATION_DENIED)
 
     def test_none_parameters_does_not_crash(self):
         self.assertEqual(authorization_of("success", None), AUTHORIZATION_NONE)

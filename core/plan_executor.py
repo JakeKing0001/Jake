@@ -6,6 +6,7 @@ from core.execution_safety import VERIFIABLE_INTENTS, execute_with_retry, rollba
 from core.kill_switch import KillSwitch
 from core.logger import log_action, new_trace_id
 from core.planner import PlanStep
+from core.policy_engine import PolicyDecision, decide_automated, strip_authorization_signals
 from core.risk import risk_of
 from core.session_recorder import SessionRecorder
 from core.skill_result import SkillResult
@@ -72,6 +73,10 @@ class PlanExecutor:
         trace_id = trace_id or new_trace_id()
         outcome = PlanOutcome()
         for step in plan.steps:
+            # F1: mai i parametri originali del passo da qui in poi (esecuzione E logging) - vedi
+            # core/policy_engine.py sul perche' un piano automatico non puo' mai arrivare gia'
+            # "confirmed"/"authenticated".
+            safe_parameters = strip_authorization_signals(step.parameters)
             if self.kill_switch.is_active():
                 # F1: controllato SOLO tra un passo e il successivo (vedi core/kill_switch.py).
                 outcome.stopped_step = StepOutcome(
@@ -79,11 +84,18 @@ class PlanExecutor:
                 )
                 outcome.rolled_back = self._rollback(outcome.completed)
                 self._log_step(
-                    trace_id, private, model, requested_by, time.monotonic(), step.intent, step.parameters,
+                    trace_id, private, model, requested_by, time.monotonic(), step.intent, safe_parameters,
                     result="error:KILLED", verified=None,
                 )
                 return outcome
-            if blocked_intents and step.intent in blocked_intents:
+            # F1 (core/policy_engine.py): stessa decisione usata dal percorso interattivo di
+            # JakeCore (decide_interactive), nella sua variante senza REQUIRE_AUTH - qui nessuno
+            # e' pronto a rispondere "confermi?" in tempo reale, quindi un intent DESTRUCTIVE/
+            # ADMIN si ferma sempre, un intent bloccato dall'utente in config.json pure.
+            decision = decide_automated(
+                step.intent, blocked_intents=blocked_intents, always_confirm_intents=always_confirm_intents,
+            )
+            if decision == PolicyDecision.BLOCK:
                 outcome.stopped_step = StepOutcome(
                     step=step,
                     result=SkillResult(success=False, data={}, error="POLICY_BLOCKED"),
@@ -91,11 +103,11 @@ class PlanExecutor:
                 )
                 outcome.rolled_back = self._rollback(outcome.completed)
                 self._log_step(
-                    trace_id, private, model, requested_by, time.monotonic(), step.intent, step.parameters,
+                    trace_id, private, model, requested_by, time.monotonic(), step.intent, safe_parameters,
                     result="policy_blocked", verified=None,
                 )
                 return outcome
-            if always_confirm_intents and step.intent in always_confirm_intents:
+            if decision == PolicyDecision.CONFIRM:
                 outcome.stopped_step = StepOutcome(
                     step=step,
                     result=SkillResult(
@@ -105,13 +117,13 @@ class PlanExecutor:
                     attempts=0,
                 )
                 self._log_step(
-                    trace_id, private, model, requested_by, time.monotonic(), step.intent, step.parameters,
+                    trace_id, private, model, requested_by, time.monotonic(), step.intent, safe_parameters,
                     result="confirmation_required", verified=None,
                 )
                 return outcome
 
             step_started = time.monotonic()
-            step_outcome = self._execute_step(step)
+            step_outcome = self._execute_step(step, safe_parameters)
             verified = None
             if step_outcome.result.success:
                 effect_confirmed = verify_effect(step.intent, step_outcome.result.data)
@@ -125,7 +137,7 @@ class PlanExecutor:
             if step_outcome.result.success:
                 outcome.completed.append(step_outcome)
                 self._log_step(
-                    trace_id, private, model, requested_by, step_started, step.intent, step.parameters,
+                    trace_id, private, model, requested_by, step_started, step.intent, safe_parameters,
                     result="success", verified=verified,
                 )
                 continue
@@ -134,7 +146,7 @@ class PlanExecutor:
             if step_outcome.result.error != "CONFIRMATION_REQUIRED":
                 outcome.rolled_back = self._rollback(outcome.completed)
             self._log_step(
-                trace_id, private, model, requested_by, step_started, step.intent, step.parameters,
+                trace_id, private, model, requested_by, step_started, step.intent, safe_parameters,
                 result=f"error:{step_outcome.result.error}", verified=verified,
             )
             return outcome
@@ -176,8 +188,12 @@ class PlanExecutor:
                 risk_decision=risk, private=private,
             )
 
-    def _execute_step(self, step) -> StepOutcome:
-        result, attempts = execute_with_retry(self.skill_registry.execute, step.intent, step.parameters)
+    def _execute_step(self, step, parameters: dict = None) -> StepOutcome:
+        """parameters e' quello che va davvero eseguito (sanificato da execute(), vedi sopra);
+        step.parameters resta quello originale del piano solo per riferimento/descrizione -
+        StepOutcome.step lo conserva per format_plan_outcome, non per essere rieseguito."""
+        parameters = step.parameters if parameters is None else parameters
+        result, attempts = execute_with_retry(self.skill_registry.execute, step.intent, parameters)
         return StepOutcome(step=step, result=result, attempts=attempts)
 
     def _rollback(self, completed_steps: list) -> list:

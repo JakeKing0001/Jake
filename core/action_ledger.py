@@ -36,6 +36,7 @@ AUTHORIZATION_PASSPHRASE = "passphrase"
 AUTHORIZATION_WINDOWS_HELLO = "windows_hello"
 AUTHORIZATION_PENDING = "pending"
 AUTHORIZATION_BLOCKED = "blocked"
+AUTHORIZATION_DENIED = "denied"
 
 
 def authorization_of(result: str, parameters: dict) -> str:
@@ -45,10 +46,17 @@ def authorization_of(result: str, parameters: dict) -> str:
 
     authenticated_via (F1) distingue Windows Hello dalla passphrase quando entrambi sono attivi
     (core/auth_gate.py): "passphrase" resta il default per compatibilita' con le ricevute scritte
-    prima che questo campo esistesse (authenticated=True senza authenticated_via)."""
+    prima che questo campo esistesse (authenticated=True senza authenticated_via).
+
+    "denied_auth"/"denied_confirmation" (F1) distinguono un diniego vero - passphrase sbagliata,
+    o l'utente che risponde "no" a una richiesta di conferma - da una richiesta ancora in attesa
+    (AUTHORIZATION_PENDING): a differenza di quella, qui l'azione non partira' piu' per questo
+    turno, ed e' comunque un evento di sicurezza degno di una ricevuta (vedi ROADMAP.md, F1)."""
     parameters = parameters or {}
     if result in ("blocked_by_policy", "policy_blocked"):
         return AUTHORIZATION_BLOCKED
+    if result in ("denied_auth", "denied_confirmation"):
+        return AUTHORIZATION_DENIED
     if result in ("confirmation_required", "auth_required"):
         return AUTHORIZATION_PENDING
     if parameters.get("authenticated"):

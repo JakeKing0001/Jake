@@ -5,6 +5,7 @@ from core import intent_patterns
 from core.action_ledger import ActionLedger, ActionReceipt, authorization_of, idempotency_key_of, new_action_id
 from core.agent import TaskAgent
 from core.auth_gate import AuthGate
+from core.autonomy_budget import AutonomyBudget
 from core.command import Command
 from core.companion_server import CompanionServer
 from core.context_summarizer import ContextSummarizer
@@ -23,9 +24,10 @@ from core.notification_center import NotificationCenter
 from core.ollama_client import OllamaClient
 from core import orchestrator
 from core.orchestrator import JakeOrchestrator
+from core import policy_engine
 from core.plugin_loader import load_plugins
 from core.response_formatter import format_plan_outcome, format_skill_result
-from core.risk import needs_central_auth, needs_central_confirmation, risk_of
+from core.risk import risk_of
 from core.router import Router
 from core.scheduler import ReminderScheduler
 from core.schema_validation import validate_confirm_envelope
@@ -217,6 +219,12 @@ class JakeCore:
         if hasattr(self.router.primary_provider, "history_provider"):
             self.router.primary_provider.history_provider = self.conversation_state.get_short_term_history
 
+        # F6 (Proactive Intelligence & Autonomy, core/autonomy_budget.py): limite condiviso al
+        # numero di automazioni che possono partire da sole in una finestra di tempo - creato
+        # qui (non dentro TriggerScheduler) cosi' reset_kill_switch() puo' azzerarlo insieme al
+        # kill switch vero e proprio, vedi sotto.
+        self.autonomy_budget = AutonomyBudget()
+
         # Jake proattivo (v3.0): un'automazione salvata puo' far partire se stessa.
         self.trigger_scheduler = TriggerScheduler(
             self.skill_registry.trigger_manager,
@@ -226,6 +234,7 @@ class JakeCore:
             on_trigger=self._default_on_trigger_fired,
             blocked_intents=self.blocked_intents,
             always_confirm_intents=self.always_confirm_intents,
+            autonomy_budget=self.autonomy_budget,
         )
         self.trigger_scheduler.start()
 
@@ -278,23 +287,20 @@ class JakeCore:
         ):
             self.skill_registry.register_skill(intent, skill)
 
-        # Modello di permessi centralizzato (v3.2, vedi core/risk.py): ogni skill DESTRUCTIVE o
-        # ADMIN che non gestisce gia' da sola una conferma su misura finisce qui automaticamente,
-        # invece di dover essere elencata a mano in always_confirm_intents. self.always_confirm_
-        # intents e' lo STESSO oggetto set gia' passato per riferimento a trigger_scheduler
-        # (costruito sopra, prima che tutte le skill fossero registrate): aggiornarlo qui via
-        # .update() lo aggiorna anche li'.
-        self.always_confirm_intents.update(
-            intent for intent in self.skill_registry.skills if needs_central_confirmation(intent)
-        )
-        # Gradino REQUIRE_AUTH (v5.4/5.5): le skill ADMIN non auto-confermanti finiscono anche
-        # qui. Restano PURE in always_confirm_intents sopra (needs_central_confirmation include
-        # ADMIN): se self.auth_gate non e' mai stato attivato, il gate su always_confirm_intents
-        # in _resolve_and_execute le gestisce comunque con la conferma si'/no di sempre, l'auth
-        # vera scatta solo quando auth_gate.enabled e' vero (vedi _resolve_and_execute).
-        self.require_auth_intents.update(
-            intent for intent in self.skill_registry.skills if needs_central_auth(intent)
-        )
+        # Modello di permessi centralizzato (v3.2, F1: core/policy_engine.py): ogni skill
+        # DESTRUCTIVE o ADMIN che non gestisce gia' da sola una conferma su misura finisce qui
+        # automaticamente, invece di dover essere elencata a mano in always_confirm_intents.
+        # self.always_confirm_intents/require_auth_intents sono gli STESSI oggetti set gia'
+        # passati per riferimento a trigger_scheduler (costruito sopra, prima che tutte le skill
+        # fossero registrate): aggiornarli qui li aggiorna anche li'. Se self.auth_gate non e'
+        # mai stato attivato, il gradino REQUIRE_AUTH (v5.4/5.5, require_auth_intents) resta
+        # comunque gestito dal CONFIRM ordinario su always_confirm_intents in
+        # _resolve_and_execute - l'auth vera scatta solo quando auth_gate.enabled e' vero.
+        for intent in self.skill_registry.skills:
+            policy_engine.register_intent(
+                intent, always_confirm_intents=self.always_confirm_intents,
+                require_auth_intents=self.require_auth_intents,
+            )
 
         # Indici del recupero semantico: costruiti dopo che TUTTE le skill sono registrate.
         self.retriever.refresh()
@@ -356,6 +362,22 @@ class JakeCore:
         self.event_bus.publish(HudEvent(EventType.AGENT_STEP, {"step": step_index, "description": description}))
 
     def _on_skill_installed(self, draft) -> None:
+        # F1: always_confirm_intents/require_auth_intents (vedi sopra) sono popolati una sola
+        # volta in __init__, leggendo self.skill_registry.skills COM'ERA in quel momento - una
+        # skill installata piu' tardi dalla Skill Forge non ci finiva mai dentro. risk_of()
+        # ricade su ADMIN per un intent non censito in core/risk.py (vedi il modulo), quindi
+        # needs_central_confirmation()/needs_central_auth() sarebbero comunque vere per lei -
+        # ma senza questo aggiornamento _resolve_and_execute non lo saprebbe mai ed eseguirebbe
+        # la skill appena creata (codice scritto da un modello, non rivisto da un umano) SENZA
+        # alcuna conferma ne' autenticazione al primo utilizzo: esattamente il tipo di buco che
+        # il censimento del rischio dovrebbe rendere impossibile. Scoperto rileggendo il ciclo
+        # di vita di una skill forgiata, non da un test che falliva. Stessa funzione usata per il
+        # censimento iniziale in __init__ (core/policy_engine.py, register_intent): un solo posto
+        # invece di due copie della stessa logica che potrebbero divergere.
+        policy_engine.register_intent(
+            draft.intent, always_confirm_intents=self.always_confirm_intents,
+            require_auth_intents=self.require_auth_intents,
+        )
         self.retriever.refresh()
         for example in draft.examples:
             try:
@@ -502,20 +524,26 @@ class JakeCore:
         prima dell'esecuzione (es. OPEN_URL su un nome di app installata -> OPEN_APP), e se
         fallisce prova un'alternativa sensata o propone un'azione da confermare, invece di
         fermarsi al primo 'non trovato'. Restituisce (comando davvero eseguito, risultato, nota
-        da anteporre alla risposta o None). Questo e' anche il punto in cui entra il modello di
-        permessi centralizzato (v3.2): un intent in always_confirm_intents (config manuale +
-        classificazione del rischio, vedi core/risk.py) chiede conferma qui, PRIMA di eseguire
-        davvero, invece che solo nel percorso a comando singolo di JakeCore._execute_command.
-        Questo copre anche l'agente a passi (core/agent.py), che esegue le skill passando da
-        qui e non da _execute_command. Il gradino REQUIRE_AUTH (v5.4/5.5) viene controllato
-        PRIMA di quello CONFIRM: un'azione ADMIN, quando l'autenticazione e' attiva, chiede la
-        passphrase invece della semplice conferma si'/no."""
+        da anteporre alla risposta o None). Questo e' anche il punto in cui entra il motore di
+        policy centralizzato (v3.2, F1: core/policy_engine.py, decide_interactive()) - un intent
+        in always_confirm_intents (config manuale + classificazione del rischio, vedi
+        core/risk.py) chiede conferma qui, PRIMA di eseguire davvero, invece che solo nel
+        percorso a comando singolo di JakeCore._execute_command. Questo copre anche l'agente a
+        passi (core/agent.py), che esegue le skill passando da qui e non da _execute_command -
+        F1: e' anche il motivo per cui blocked_intents va ricontrollato qui, non solo a monte in
+        _execute_command: un intent disabilitato dall'utente in config.json restava altrimenti
+        eseguibile da un compito composto, che non passa mai da li'. Il gradino REQUIRE_AUTH
+        (v5.4/5.5) viene controllato PRIMA di quello CONFIRM: un'azione ADMIN, quando
+        l'autenticazione e' attiva, chiede la passphrase invece della semplice conferma si'/no."""
         resolved = fallbacks.pre_execution_rewrite(command, self.skill_registry)
-        if (
-            self.auth_gate.enabled
-            and resolved.intent in self.require_auth_intents
-            and not (resolved.parameters or {}).get("authenticated")
-        ):
+        decision = policy_engine.decide_interactive(
+            resolved.intent, resolved.parameters,
+            blocked_intents=self.blocked_intents, always_confirm_intents=self.always_confirm_intents,
+            require_auth_intents=self.require_auth_intents, auth_gate=self.auth_gate,
+        )
+        if decision == policy_engine.PolicyDecision.BLOCK:
+            return resolved, SkillResult(success=False, data={}, error="POLICY_BLOCKED"), None
+        if decision == policy_engine.PolicyDecision.REQUIRE_AUTH:
             # F1: Windows Hello tentato PRIMA della passphrase quando e' attivo - un fattore che
             # non passa dalla voce (vedi core/auth_gate.py) e non richiede un secondo turno di
             # conversazione. Se verifica, l'azione prosegue SUBITO (stesso turno): niente
@@ -532,6 +560,7 @@ class JakeCore:
                 resolved = Command(resolved.intent, {
                     **(resolved.parameters or {}), "authenticated": True, "authenticated_via": "windows_hello", "confirmed": True,
                 })
+                decision = policy_engine.PolicyDecision.ALLOW
             else:
                 return resolved, SkillResult(
                     success=False,
@@ -542,7 +571,7 @@ class JakeCore:
                     },
                     error="AUTH_REQUIRED",
                 ), None
-        if resolved.intent in self.always_confirm_intents and not (resolved.parameters or {}).get("confirmed"):
+        if decision == policy_engine.PolicyDecision.CONFIRM:
             return resolved, SkillResult(
                 success=False,
                 data={
@@ -781,6 +810,7 @@ class JakeCore:
             self.conversation_state.clear_pending_action()
             if self.auth_gate.check(text):
                 return self._finalize_pending_action(action, text)
+            self._log_denied_action(action, result="denied_auth")
             return "Passphrase errata: azione annullata."
 
         if intent_patterns.is_positive_answer(text):
@@ -788,10 +818,35 @@ class JakeCore:
             return self._finalize_pending_action(action, text)
         if intent_patterns.is_negative_answer(text):
             self.conversation_state.clear_pending_action()
+            self._log_denied_action(action, result="denied_confirmation")
             return "Va bene, annullato."
         # Ne' si' ne' no: l'utente e' passato ad altro. Annulla l'azione in sospeso e vai avanti.
         self.conversation_state.clear_pending_action()
         return self._process(text)
+
+    def _log_denied_action(self, action: dict, *, result: str) -> None:
+        """F1: una passphrase sbagliata o un "no" a una richiesta di conferma non fanno mai
+        partire l'azione, ma sono comunque un evento di sicurezza degno di una ricevuta nel
+        ledger (vedi ROADMAP.md, F1: "un diniego e' comunque un evento di sicurezza degno di
+        una ricevuta"), distinto da AUTHORIZATION_PENDING (che invece aspetta ancora una
+        risposta). trace_id viene dall'azione in sospeso, come per _finalize_pending_action,
+        cosi' il diniego si correla alla richiesta di conferma originale nel ledger.
+
+        Non alimenta core/logger.log_action ne' core/session_recorder.py: quei due esistono per
+        il debug/replay di comandi falliti per un bug (vedi _log_action_outcome), non per una
+        scelta legittima e volontaria dell'utente - un "no" non e' un fallimento da riprodurre."""
+        trace_id = action.get("trace_id") or new_trace_id()
+        intent = action["intent"]
+        parameters = action["parameters"]
+        self.action_ledger.record(
+            ActionReceipt(
+                action_id=new_action_id(), trace_id=trace_id, ts=time.time(), intent=intent,
+                requested_by="user", risk_decision=risk_of(intent).value,
+                authorization=authorization_of(result, parameters), result=result,
+                idempotency_key=idempotency_key_of(intent, parameters),
+            ),
+            private=self.private_mode,
+        )
 
     def _finalize_pending_action(self, action: dict, fallback_text: str) -> str:
         """Esegue davvero un'azione in sospeso ormai confermata/autenticata (skill_registry.
@@ -854,8 +909,14 @@ class JakeCore:
 
     def reset_kill_switch(self) -> None:
         """Disattiva il kill switch e fa ripartire gli scheduler fermati da activate_kill_
-        switch() - non riparte da sola: e' una scelta esplicita, cosi' come lo e' stata fermarli."""
+        switch() - non riparte da sola: e' una scelta esplicita, cosi' come lo e' stata fermarli.
+
+        F6: azzera anche il budget di autonomia (core/autonomy_budget.py) - se un'automazione
+        impazzita aveva esaurito il budget prima o durante lo stop di emergenza, un "riprendi"
+        esplicito dell'utente deve dare un budget pieno, non farla ripartire gia' bloccata senza
+        che l'utente lo sappia."""
         self.kill_switch.reset()
+        self.autonomy_budget.reset()
         for scheduler in (self.scheduler, self.trigger_scheduler):
             try:
                 scheduler.start()

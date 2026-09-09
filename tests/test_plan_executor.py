@@ -271,5 +271,100 @@ class KillSwitchStopsThePlanTests(unittest.TestCase):
         self.assertEqual(registry.calls, [])
 
 
+class AuthorizationSignalStrippingTests(unittest.TestCase):
+    """F1: un piano eseguito qui (il ripiego di JakeCore._try_plan, un'automazione salvata con
+    RUN_WORKFLOW, o un trigger che parte da solo) non ha MAI nessuno pronto a confermare in
+    tempo reale - a differenza del percorso interattivo di JakeCore. Prima di questa correzione,
+    un passo che arrivava GIA' con "confirmed": True dentro ai parametri (es. un planner/LLM
+    indotto da un prompt costruito ad arte nella richiesta originale: core/planner_provider.py
+    non limita quali chiavi puo' contenere 'parameters') eseguiva SUBITO una skill
+    self-confirming come DELETE_PATH - che non finisce mai in always_confirm_intents per design
+    (vedi core/risk.py SELF_CONFIRMING_INTENTS) perche' si presume controlli da sola la propria
+    conferma - aggirando del tutto la sicurezza che la docstring di PlanExecutor.execute()
+    promette di non aggirare mai. Usa la skill VERA (skills/delete_path.py), non una sua
+    reimplementazione (vedi tests/test_execution_safety.py per lo stesso principio): solo la
+    skill vera controlla davvero parameters.get('confirmed') prima di agire."""
+
+    def _real_delete_registry(self):
+        from skills.delete_path import DeletePathSkill
+
+        class RealDeleteRegistry:
+            def __init__(self):
+                self.skill = DeletePathSkill()
+
+            def execute(self, intent, parameters=None):
+                assert intent == "DELETE_PATH"
+                return self.skill.execute(parameters or {})
+
+        return RealDeleteRegistry()
+
+    def test_preset_confirmed_parameter_does_not_bypass_a_self_confirming_skill(self):
+        target = Path(tempfile.gettempdir()) / "jake_test_plan_auth_strip_9412.txt"
+        target.write_text("dati importanti")
+        self.addCleanup(lambda: target.unlink(missing_ok=True))
+
+        plan = Plan(steps=[PlanStep(intent="DELETE_PATH", parameters={"path": str(target), "confirmed": True})])
+
+        outcome = PlanExecutor(self._real_delete_registry()).execute(plan, always_confirm_intents=set())
+
+        self.assertFalse(outcome.success, "il passo doveva fermarsi in attesa di conferma, non eseguire")
+        self.assertEqual(outcome.stopped_step.result.error, "CONFIRMATION_REQUIRED")
+        self.assertTrue(target.exists(), "il file non doveva essere cancellato senza una conferma reale")
+
+    def test_preset_authenticated_parameter_is_also_stripped(self):
+        """Stessa protezione per il gradino REQUIRE_AUTH (authenticated/authenticated_via,
+        v5.4/5.5): un piano automatico non deve poter auto-autenticarsi piu' di quanto non
+        possa auto-confermarsi."""
+        target = Path(tempfile.gettempdir()) / "jake_test_plan_auth_strip_9413.txt"
+        target.write_text("dati importanti")
+        self.addCleanup(lambda: target.unlink(missing_ok=True))
+
+        plan = Plan(steps=[
+            PlanStep(intent="DELETE_PATH", parameters={
+                "path": str(target), "authenticated": True, "authenticated_via": "windows_hello",
+            }),
+        ])
+
+        outcome = PlanExecutor(self._real_delete_registry()).execute(plan, always_confirm_intents=set())
+
+        self.assertFalse(outcome.success)
+        self.assertEqual(outcome.stopped_step.result.error, "CONFIRMATION_REQUIRED")
+        self.assertTrue(target.exists())
+
+    def test_the_ledger_reflects_no_real_authorization_not_the_spoofed_one(self):
+        """Anche il ledger (F1) non deve mai mostrare 'confirmed'/'passphrase' per un'azione
+        che in realta' non ha mai ricevuto nessuna conferma reale - vedi
+        ActionLedgerWiringTests sopra per lo stesso schema di test."""
+        target = Path(tempfile.gettempdir()) / "jake_test_plan_auth_strip_9414.txt"
+        target.write_text("dati importanti")
+        self.addCleanup(lambda: target.unlink(missing_ok=True))
+
+        plan = Plan(steps=[PlanStep(intent="DELETE_PATH", parameters={"path": str(target), "confirmed": True})])
+        ledger = unittest.mock.Mock()
+        executor = PlanExecutor(self._real_delete_registry())
+        executor.action_ledger = ledger
+
+        with unittest.mock.patch("core.plan_executor.log_action"):
+            executor.execute(plan, always_confirm_intents=set())
+
+        ledger.record.assert_called_once()
+        (receipt,), _ = ledger.record.call_args
+        self.assertEqual(receipt.authorization, "none")
+
+    def test_non_authorization_parameters_of_the_same_step_are_left_untouched(self):
+        """La sanificazione toglie solo le chiavi di autorizzazione, non altri parametri
+        legittimi dello stesso passo. F1: la funzione vive ora in core/policy_engine.py
+        (condivisa con JakeCore, vedi tests/test_policy_engine.py per la copertura completa) -
+        qui si verifica solo che PlanExecutor la importi e usi davvero da li'."""
+        from core.policy_engine import strip_authorization_signals
+
+        cleaned = strip_authorization_signals({
+            "path": "C:/tmp/file.txt", "confirmed": True, "authenticated": True,
+            "authenticated_via": "passphrase", "destination": "C:/tmp",
+        })
+
+        self.assertEqual(cleaned, {"path": "C:/tmp/file.txt", "destination": "C:/tmp"})
+
+
 if __name__ == "__main__":
     unittest.main()

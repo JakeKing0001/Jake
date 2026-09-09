@@ -44,12 +44,15 @@ class FakeRegistry:
         return None if skill is None else skill.execute(parameters)
 
 
-def _bare_core(skill_registry, always_confirm_intents, auth_gate=None, require_auth_intents=None) -> JakeCore:
+def _bare_core(
+    skill_registry, always_confirm_intents, auth_gate=None, require_auth_intents=None, blocked_intents=None,
+) -> JakeCore:
     core = JakeCore.__new__(JakeCore)
     core.skill_registry = skill_registry
     core.always_confirm_intents = set(always_confirm_intents)
     core.auth_gate = auth_gate or AuthGate()  # disabilitata per default: nessuna passphrase
     core.require_auth_intents = set(require_auth_intents or set())
+    core.blocked_intents = set(blocked_intents or set())
     return core
 
 
@@ -127,6 +130,50 @@ class SharedGateCoversAgentAndDirectPathsTests(unittest.TestCase):
 
         self.assertEqual(result.error, "CONFIRMATION_REQUIRED")
         self.assertEqual(skill.calls, [])
+
+
+class BlockedIntentsGateTests(unittest.TestCase):
+    """F1 (core/policy_engine.py): buco reale trovato e corretto, non un'ipotesi. Prima di questa
+    correzione blocked_intents veniva controllato SOLO in JakeCore._execute_command, mai dentro
+    _resolve_and_execute - esattamente come il gate di conferma prima del refactor sopra
+    (SharedGateCoversAgentAndDirectPathsTests), ma per blocked_intents nessuno lo aveva ancora
+    spostato: un intent che l'utente aveva esplicitamente disabilitato in config.json restava
+    comunque eseguibile dall'agente a passi (generale, coding, ricerca), che passa da
+    _resolve_and_execute e non da _execute_command. Riprodotto per davvero con un JakeCore reale
+    prima di correggere: la skill veniva eseguita nonostante blocked_intents la contenesse."""
+
+    def test_blocked_intent_is_never_executed_via_the_agent_style_direct_call(self):
+        skill = FakeSkill()
+        registry = FakeRegistry({"CLEAR_TEMP_FILES": skill})
+        core = _bare_core(registry, always_confirm_intents=set(), blocked_intents={"CLEAR_TEMP_FILES"})
+
+        executor = lambda intent, parameters: core._resolve_and_execute(Command(intent, parameters))[1]
+        result = executor("CLEAR_TEMP_FILES", {})
+
+        self.assertEqual(result.error, "POLICY_BLOCKED")
+        self.assertEqual(skill.calls, [])
+
+    def test_blocked_wins_over_an_already_confirmed_parameter(self):
+        """Un blocco di policy non e' aggirabile nemmeno se i parametri arrivano gia' con
+        confirmed=True (es. un secondo passo di un'azione gia' avviata)."""
+        skill = FakeSkill()
+        registry = FakeRegistry({"CLEAR_TEMP_FILES": skill})
+        core = _bare_core(registry, always_confirm_intents=set(), blocked_intents={"CLEAR_TEMP_FILES"})
+
+        _, result, _ = core._resolve_and_execute(Command("CLEAR_TEMP_FILES", {"confirmed": True}))
+
+        self.assertEqual(result.error, "POLICY_BLOCKED")
+        self.assertEqual(skill.calls, [])
+
+    def test_intent_not_in_blocked_intents_is_unaffected(self):
+        skill = FakeSkill(SkillResult(success=True, data={}))
+        registry = FakeRegistry({"GET_TIME": skill})
+        core = _bare_core(registry, always_confirm_intents=set(), blocked_intents={"CLEAR_TEMP_FILES"})
+
+        _, result, _ = core._resolve_and_execute(Command("GET_TIME", {}))
+
+        self.assertTrue(result.success)
+        self.assertEqual(len(skill.calls), 1)
 
 
 class RequireAuthGateTests(unittest.TestCase):
@@ -309,6 +356,32 @@ class HandleConfirmationAuthTests(unittest.TestCase):
         self.assertIn("errata", response.lower())
         self.assertFalse(core.conversation_state.has_pending_action())
 
+    def test_wrong_passphrase_writes_a_denied_receipt_to_the_ledger(self):
+        """F1: fino a questa correzione, una passphrase sbagliata annullava l'azione senza
+        lasciare alcuna traccia nel ledger - solo la richiesta di autenticazione iniziale vi
+        compariva. Un diniego e' comunque un evento di sicurezza (vedi ROADMAP.md, F1),
+        distinto da AUTHORIZATION_PENDING."""
+        import unittest.mock
+
+        skill = FakeSkill()
+        registry = FakeRegistry({"SET_POWER_PLAN": skill})
+        core = _bare_core_for_confirmation(registry, AuthGate(passphrase="apri sesamo"))
+        core.action_ledger = unittest.mock.Mock()
+        core.conversation_state.set_pending_action({
+            "intent": "SET_POWER_PLAN", "parameters": {"plan": "balanced", "authenticated": True},
+            "reason": "auth_required", "text": "metti il pc in risparmio energetico",
+            "trace_id": "trace-from-the-original-request",
+        })
+
+        core._handle_confirmation("password sbagliata")
+
+        core.action_ledger.record.assert_called_once()
+        (receipt,), kwargs = core.action_ledger.record.call_args
+        self.assertEqual(receipt.trace_id, "trace-from-the-original-request")
+        self.assertEqual(receipt.authorization, "denied")
+        self.assertEqual(receipt.result, "denied_auth")
+        self.assertFalse(kwargs["private"])
+
     def test_confirmed_execution_writes_a_ledger_receipt_correlated_to_the_pending_action(self):
         """F1: prima di questa correzione, _finalize_pending_action eseguiva l'azione vera (qui,
         dopo la passphrase corretta) senza scriverne mai una ricevuta - solo la richiesta di
@@ -334,6 +407,37 @@ class HandleConfirmationAuthTests(unittest.TestCase):
         self.assertEqual(receipt.trace_id, "trace-from-the-original-request")
         self.assertEqual(receipt.authorization, "passphrase")
         self.assertEqual(receipt.result, "success")
+        self.assertFalse(kwargs["private"])
+
+
+class HandleConfirmationDenialTests(unittest.TestCase):
+    """F1: un "no" a una richiesta di conferma normale (non ADMIN/auth_required) e' un diniego
+    quanto una passphrase sbagliata, e merita la stessa ricevuta nel ledger - vedi ROADMAP.md,
+    F1 ("un diniego e' comunque un evento di sicurezza degno di una ricevuta")."""
+
+    def test_negative_answer_writes_a_denied_receipt_to_the_ledger(self):
+        import unittest.mock
+
+        skill = FakeSkill()
+        registry = FakeRegistry({"DELETE_PATH": skill})
+        core = _bare_core_for_confirmation(registry, AuthGate())
+        core.action_ledger = unittest.mock.Mock()
+        core.conversation_state.set_pending_action({
+            "intent": "DELETE_PATH", "parameters": {"path": "C:/tmp/foo", "confirmed": True},
+            "reason": "confirmation_required", "text": "cancella C:/tmp/foo",
+            "trace_id": "trace-from-the-original-request",
+        })
+
+        response = core._handle_confirmation("no")
+
+        self.assertEqual(skill.calls, [])
+        self.assertIn("annullato", response.lower())
+        self.assertFalse(core.conversation_state.has_pending_action())
+        core.action_ledger.record.assert_called_once()
+        (receipt,), kwargs = core.action_ledger.record.call_args
+        self.assertEqual(receipt.trace_id, "trace-from-the-original-request")
+        self.assertEqual(receipt.authorization, "denied")
+        self.assertEqual(receipt.result, "denied_confirmation")
         self.assertFalse(kwargs["private"])
 
 
@@ -398,6 +502,77 @@ class SafeConfirmEnvelopeTests(unittest.TestCase):
             envelope = core._safe_confirm_envelope("FORGET", {}, result, "confirmation_required")
             self.assertIn("message", envelope)
             self.assertIn("confirm_parameters", envelope)
+
+
+class FakeRetriever:
+    def __init__(self):
+        self.refreshed = False
+
+    def refresh(self):
+        self.refreshed = True
+
+
+class FakeDraft:
+    def __init__(self, intent, examples=None):
+        self.intent = intent
+        self.examples = examples or []
+
+
+class OnSkillInstalledGateWiringTests(unittest.TestCase):
+    """F1: always_confirm_intents/require_auth_intents si popolano una sola volta in
+    JakeCore.__init__, leggendo self.skill_registry.skills COM'ERA in quel momento (vedi sopra
+    in JakeCore, subito dopo la registrazione delle skill built-in/plugin). Una skill installata
+    piu' tardi dalla Skill Forge (JakeCore._on_skill_installed, chiamata da core/skill_forge.py
+    dopo install()) non ci finiva mai dentro: risk_of() classifica un intent non censito come
+    ADMIN per difetto (core/risk.py), ma senza aggiornare questi due insiemi anche qui,
+    _resolve_and_execute non lo sapeva ed eseguiva la skill appena scritta da un modello -
+    codice mai rivisto da un umano - SENZA conferma ne' autenticazione al primo utilizzo."""
+
+    def _core(self, skill_registry, auth_gate=None):
+        core = JakeCore.__new__(JakeCore)
+        core.skill_registry = skill_registry
+        core.always_confirm_intents = set()
+        core.require_auth_intents = set()
+        core.blocked_intents = set()
+        core.auth_gate = auth_gate or AuthGate()
+        core.retriever = FakeRetriever()
+        core.learning = FakeLearning()
+        return core
+
+    def test_newly_forged_unclassified_intent_is_added_to_both_gates(self):
+        core = self._core(FakeRegistry({}))
+
+        core._on_skill_installed(FakeDraft("SOME_BRAND_NEW_FORGED_SKILL"))
+
+        self.assertIn("SOME_BRAND_NEW_FORGED_SKILL", core.always_confirm_intents)
+        self.assertIn("SOME_BRAND_NEW_FORGED_SKILL", core.require_auth_intents)
+        self.assertTrue(core.retriever.refreshed)
+
+    def test_newly_forged_skill_is_actually_gated_not_just_listed(self):
+        """Non basta che l'intent finisca negli insiemi giusti: deve anche impedire davvero
+        l'esecuzione diretta, come per qualunque altro intent ADMIN gia' noto a risk.py."""
+        skill = FakeSkill(SkillResult(success=True, data={}))
+        registry = FakeRegistry({"SOME_BRAND_NEW_FORGED_SKILL": skill})
+        core = self._core(registry)
+        core._on_skill_installed(FakeDraft("SOME_BRAND_NEW_FORGED_SKILL"))
+
+        _, result, _ = core._resolve_and_execute(Command("SOME_BRAND_NEW_FORGED_SKILL", {}))
+
+        self.assertEqual(skill.calls, [], "la skill forgiata non deve eseguire prima di conferma/auth")
+        self.assertIsNotNone(result)
+        self.assertFalse(result.success)
+
+    def test_read_only_intent_is_not_added_to_either_gate(self):
+        """La correzione non deve trasformare ogni skill installata in un ADMIN a prescindere:
+        un intent gia' censito come READ_ONLY in core/risk.py resta libero da conferma/auth
+        (qui GET_TIME serve solo a testare la classificazione esistente, non e' realistico che
+        la Forge lo rigeneri davvero: gli intent nuovi restano ADMIN per difetto)."""
+        core = self._core(FakeRegistry({}))
+
+        core._on_skill_installed(FakeDraft("GET_TIME"))
+
+        self.assertNotIn("GET_TIME", core.always_confirm_intents)
+        self.assertNotIn("GET_TIME", core.require_auth_intents)
 
 
 if __name__ == "__main__":

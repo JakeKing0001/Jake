@@ -1,6 +1,7 @@
 import threading
 from datetime import date, datetime
 
+from core.autonomy_budget import AutonomyBudget
 from core.logger import get_logger, new_trace_id
 
 
@@ -26,6 +27,7 @@ class TriggerScheduler:
         blocked_intents: set = None,
         always_confirm_intents: set = None,
         interval_seconds: float = 30,
+        autonomy_budget: AutonomyBudget = None,
     ):
         self.trigger_manager = trigger_manager
         self.workflow_manager = workflow_manager
@@ -35,6 +37,12 @@ class TriggerScheduler:
         self.blocked_intents = blocked_intents
         self.always_confirm_intents = always_confirm_intents
         self.interval_seconds = interval_seconds
+        # F6 (Proactive Intelligence & Autonomy, vedi core/autonomy_budget.py): un limite al
+        # numero di automazioni che possono partire da sole in una finestra di tempo, condiviso
+        # con JakeCore se passato (un solo budget per tutte le automazioni), altrimenti
+        # un'istanza locale con i default - mai disattivato del tutto, a differenza di
+        # blocked_intents/always_confirm_intents che possono restare None.
+        self.autonomy_budget = autonomy_budget or AutonomyBudget()
         self._thread = None
         self._stop_event = threading.Event()
         self._logger = get_logger()
@@ -103,6 +111,19 @@ class TriggerScheduler:
 
     def _fire(self, trigger: dict) -> None:
         name = trigger.get("name")
+        # F6 (Proactive Intelligence & Autonomy, core/autonomy_budget.py): controllato PRIMA di
+        # caricare/eseguire il piano, non dopo - un trigger che scatta ripetutamente (una
+        # condizione mal scritta, un bug) non deve continuare a far partire automazioni solo
+        # perche' la precedente e' gia' finita. Niente mark_fired() qui: la prossima chiamata di
+        # _run() (tra interval_seconds) ritentera' da sola quando il budget si sara' liberato,
+        # invece di saltare questo trigger per il resto della giornata come se fosse gia' partito.
+        if self.autonomy_budget.is_exceeded():
+            self._logger.warning(
+                "Trigger %s non fatto partire: budget di autonomia esaurito (%d azioni/%.0fs).",
+                name, self.autonomy_budget.max_actions, self.autonomy_budget.window_seconds,
+            )
+            return
+
         workflow_name = trigger.get("workflow_name")
         plan = self.workflow_manager.load(workflow_name)
         if plan is None:
@@ -111,6 +132,7 @@ class TriggerScheduler:
             )
             return
 
+        self.autonomy_budget.record()
         # model=None: un'automazione esegue un piano gia' costruito, senza mai chiamare il
         # modello per decidere il passo successivo (a differenza dell'agente a passi) - non c'e'
         # nessun modello da riportare nel log strutturato. private=False: un trigger che parte
