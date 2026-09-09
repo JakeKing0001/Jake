@@ -542,6 +542,18 @@ pulita; smoke test installazione/avvio/arresto; dashboard locale con errori e la
   calcolata da una variabile d'ambiente specifica). Il modulo non aveva ancora nessun test:
   aggiunto `tests/test_filesystem_policy.py` (10 test: radice di qualunque disco, home,
   sottoalberi di sistema come WINDIR/ProgramFiles, percorsi ordinari non protetti).
+- ✅ `core/plugin_loader.py` non aveva ancora nessun test, nonostante sia il punto d'ingresso di
+  codice di terze parti (plugin scritti a mano, o dalla Skill Forge) nel processo di Jake.
+  Nessun bug trovato (il modulo isola gia' correttamente un plugin rotto senza fermare gli
+  altri, come promette il suo stesso docstring), ma quella garanzia era solo dichiarata, non
+  verificata. Aggiunto `tests/test_plugin_loader.py` (10 test, con file `.py` veri scritti su
+  disco temporaneo e caricati per davvero con `importlib`, non una simulazione): plugin valido,
+  plugin senza `register()`, plugin che solleva un'eccezione all'import, `register()` che
+  solleva, file che iniziano con `_` saltati, un plugin rotto che non impedisce agli altri di
+  caricarsi. Controllato anche `core/device_registry.py` (claim/release dei dispositivi, v5.9):
+  nessuna autenticazione su chi puo' reclamare un dispositivo, ma e' esattamente il gap gia'
+  dichiarato per il companion server ("non ha pairing, identita' client... autorizzazioni per
+  dispositivo") - non una scoperta nuova, lasciato dove il documento lo aveva gia' messo.
 - ⬜ Completare la separazione planner/policy engine/executor (planner escluso, policy non ancora
   un oggetto), capability token per agente/skill/dispositivo, passkey/WebAuthn (Windows Hello per
   operazioni ADMIN è fatto, vedi sopra - un passkey vero per un secondo dispositivo/servizio no),
