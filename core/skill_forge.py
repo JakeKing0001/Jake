@@ -41,7 +41,18 @@ FORBIDDEN_PATTERNS = [
     (re.compile(r"\bsocket\b"), "rete a basso livello"),
     (re.compile(r"\bshutdown\b"), "spegnimento del sistema"),
     (re.compile(r"\bformat\s*[a-z]:"), "formattazione dischi"),
-    (re.compile(r"\bsubprocess\.(Popen|run|call|check_output)\s*\([^)]*shell\s*=\s*True"), "shell=True"),
+    # F1: buco reale trovato e corretto - il controllo originale bloccava SOLO
+    # subprocess.Popen/run/call/check_output con shell=True esplicito, ma nessuno di questi ha
+    # davvero bisogno di shell=True per lanciare un programma arbitrario (shell=True serve solo
+    # per l'interpretazione di pipe/redirezioni, non per l'esecuzione in se'): subprocess.run(
+    # ["cmd", "/c", "del", "qualsiasi.txt"]) - SENZA shell=True - passava indenne. Verificato per
+    # davvero, non ipotizzato: nessun pattern di questa lista intercettava quella riga prima
+    # della correzione. Ora blocca la chiamata a prescindere da come e' invocata la shell -
+    # subprocess non ha nessun uso legittimo in una skill generata (RUN_COMMAND/
+    # RUN_PYTHON_SCRIPT sono gia' il percorso sorvegliato e con conferma per eseguire qualcosa).
+    (re.compile(r"\bsubprocess\.(Popen|run|call|check_call|check_output|getoutput|getstatusoutput)\b"), "avvio di un processo esterno (subprocess)"),
+    (re.compile(r"\bos\.(popen[0-9]?|spawn[lv]e?p?|exec[lv]e?p?)\b"), "avvio di un processo esterno (os.popen/spawn/exec)"),
+    (re.compile(r"\bmultiprocessing\b"), "avvio di processi (multiprocessing)"),
     (re.compile(r"\bopen\s*\([^)]*['\"][wa]"), "scrittura di file (usa solo lettura)"),
     (re.compile(r"\bpathlib[^\n]*write_(text|bytes)|\.write_(text|bytes)\("), "scrittura di file"),
     (re.compile(r"\bkeyboard\.|pyautogui\."), "controllo di tastiera/mouse (usa le skill esistenti)"),

@@ -97,5 +97,49 @@ class FullValidatePipelineTests(unittest.TestCase):
             _forge()._validate(malicious)
 
 
+class ProcessExecutionIsBlockedTests(unittest.TestCase):
+    """F1: buco reale trovato e corretto - FORBIDDEN_PATTERNS bloccava
+    subprocess.Popen/run/call/check_output SOLO con shell=True esplicito, ma nessuno di questi
+    ha davvero bisogno di shell=True per lanciare un programma arbitrario (serve solo per
+    l'interpretazione di pipe/redirezioni). subprocess.run(["cmd", "/c", "del", "x"]) - senza
+    shell=True - passava indenne la validazione statica ed veniva eseguito PER DAVVERO, con i
+    privilegi dell'utente, dentro _sandbox_import() (che nonostante il nome esegue execute()
+    in un processo separato solo per isolare i crash, non per limitarne i privilegi - vedi
+    ROADMAP.md, "sandbox OS per i plugin generati dalla fucina" resta dichiarato non fatto).
+    os.popen/os.spawn*/multiprocessing avevano lo stesso buco, mai bloccati affatto."""
+
+    def _rejects(self, dangerous_line: str) -> None:
+        malicious = VALID_PLUGIN.replace(
+            'return SkillResult(success=True, data={"ok": True})',
+            f'{dangerous_line}\n        return SkillResult(success=True, data={{"ok": True}})',
+        )
+        with self.assertRaises(ForgeError, msg=dangerous_line):
+            _forge()._validate(malicious)
+
+    def test_subprocess_run_without_shell_true_is_now_rejected(self):
+        self._rejects('subprocess.run(["cmd", "/c", "del", "qualsiasi.txt"])')
+
+    def test_subprocess_popen_without_shell_true_is_now_rejected(self):
+        self._rejects('subprocess.Popen(["notepad.exe"])')
+
+    def test_subprocess_check_output_is_now_rejected(self):
+        self._rejects('subprocess.check_output(["whoami"])')
+
+    def test_os_popen_is_now_rejected(self):
+        self._rejects('os.popen("del qualsiasi.txt")')
+
+    def test_os_spawn_is_now_rejected(self):
+        self._rejects('os.spawnl(os.P_NOWAIT, "cmd.exe")')
+
+    def test_multiprocessing_is_rejected(self):
+        self._rejects('import multiprocessing\n        multiprocessing.Process(target=print).start()')
+
+    def test_legitimate_plugin_without_process_calls_is_unaffected(self):
+        """La correzione non deve rompere il caso normale: nessuna delle skill legittime ha
+        bisogno di lanciare un processo esterno."""
+        intent, _, _ = _forge()._validate(VALID_PLUGIN)
+        self.assertEqual(intent, "SAMPLE_TEST_SKILL")
+
+
 if __name__ == "__main__":
     unittest.main()
