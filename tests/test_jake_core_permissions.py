@@ -132,6 +132,54 @@ class SharedGateCoversAgentAndDirectPathsTests(unittest.TestCase):
         self.assertEqual(skill.calls, [])
 
 
+class FallbackAlternativeGateTests(unittest.TestCase):
+    """F1 (difesa in profondita', non un buco gia' sfruttabile: vedi ROADMAP.md): core/
+    fallbacks.py::alternative_for restituisce oggi solo alternative fisse a basso rischio
+    (OPEN_URL/OPEN_APP/CLICK_ELEMENT/CLOSE_WINDOW), ma _resolve_and_execute la eseguiva
+    saltando decide_interactive() del tutto - un punto cieco strutturale se una futura
+    alternativa mappasse verso un intent DESTRUCTIVE/ADMIN. Qui si forza alternative_for (con
+    un mock) a restituire un intent rischioso, per verificare che la policy lo fermi comunque,
+    indipendentemente da cosa la funzione vera restituisce oggi."""
+
+    def test_risky_alternative_is_not_executed_without_confirmation(self):
+        import unittest.mock
+
+        original_skill = FakeSkill(SkillResult(success=False, data={}, error="NOT_FOUND"))
+        risky_alt_skill = FakeSkill(SkillResult(success=True, data={}))
+        registry = FakeRegistry({"OPEN_APP": original_skill, "RISKY_ALT": risky_alt_skill})
+        core = _bare_core(registry, always_confirm_intents={"RISKY_ALT"})
+
+        with unittest.mock.patch(
+            "core.jake_core.fallbacks.alternative_for",
+            return_value=(Command("RISKY_ALT", {}), None),
+        ):
+            _, result, note = core._resolve_and_execute(Command("OPEN_APP", {"app": "x"}))
+
+        self.assertEqual(risky_alt_skill.calls, [], "l'alternativa rischiosa non deve eseguire senza conferma")
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "NOT_FOUND", "ripiega sul fallimento originale, non su una nuova richiesta di conferma")
+
+    def test_safe_alternative_still_executes_as_before(self):
+        """Verifica che l'indurimento non rompa il caso normale: un'alternativa che la policy
+        lascia passare (ALLOW) deve continuare a eseguire, come sempre."""
+        import unittest.mock
+
+        original_skill = FakeSkill(SkillResult(success=False, data={}, error="NOT_FOUND"))
+        safe_alt_skill = FakeSkill(SkillResult(success=True, data={"opened": True}))
+        registry = FakeRegistry({"OPEN_APP": original_skill, "OPEN_URL": safe_alt_skill})
+        core = _bare_core(registry, always_confirm_intents=set())
+
+        with unittest.mock.patch(
+            "core.jake_core.fallbacks.alternative_for",
+            return_value=(Command("OPEN_URL", {"url": "https://example.com"}), None),
+        ):
+            resolved, result, note = core._resolve_and_execute(Command("OPEN_APP", {"app": "example.com"}))
+
+        self.assertEqual(len(safe_alt_skill.calls), 1)
+        self.assertTrue(result.success)
+        self.assertEqual(resolved.intent, "OPEN_URL")
+
+
 class BlockedIntentsGateTests(unittest.TestCase):
     """F1 (core/policy_engine.py): buco reale trovato e corretto, non un'ipotesi. Prima di questa
     correzione blocked_intents veniva controllato SOLO in JakeCore._execute_command, mai dentro
