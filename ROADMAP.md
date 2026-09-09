@@ -650,16 +650,39 @@ pulita; smoke test installazione/avvio/arresto; dashboard locale con errori e la
   strutturalmente. `core/planner_provider.py` non aveva ancora nessuna suite di test: aggiunto
   `tests/test_planner_provider.py` (4 test); aggiunti anche test dedicati in
   `tests/test_llm_classifier_history.py` e `tests/test_agent.py`.
+- ✅ **Buco reale trovato e corretto nella validazione statica della Skill Forge**
+  (`core/skill_forge.py`, `FORBIDDEN_PATTERNS`): il controllo bloccava
+  `subprocess.Popen/run/call/check_output` SOLO con `shell=True` esplicito nel testo - ma
+  nessuno di questi ha bisogno di `shell=True` per lanciare un programma arbitrario (serve solo
+  per l'interpretazione di pipe/redirezioni, non per l'esecuzione in se'):
+  `subprocess.run(["cmd", "/c", "del", "qualsiasi.txt"])` **senza** `shell=True` passava
+  indenne. `os.popen`/`os.spawn*`/`multiprocessing` non erano MAI controllati, in nessuna forma.
+  Questo e' particolarmente grave perche' `_sandbox_import()` (il passo che dovrebbe fare da
+  "sandbox" prima dell'approvazione dell'utente) **esegue davvero `execute()`** dentro un
+  processo separato - separato solo per isolare un crash/loop infinito dal processo di Jake,
+  NON per limitarne i privilegi: quel processo ha gli stessi permessi dell'utente. Una skill
+  generata con una di queste chiamate avrebbe eseguito comandi reali sul sistema DURANTE la
+  validazione stessa, prima ancora che l'utente vedesse o approvasse il codice. **Verificato per
+  davvero, non ipotizzato**: nessun pattern della lista intercettava
+  `subprocess.run(["cmd", "/c", "del", ...])` prima della correzione (controllato contro la
+  lista vera, senza eseguire nulla). Corretto ampliando i pattern per bloccare questi costrutti
+  a prescindere da `shell=`. Coperto da `ProcessExecutionIsBlockedTests` (7 test nuovi) in
+  `tests/test_skill_forge.py`, incluso un test che conferma che una skill legittima senza
+  chiamate a processi esterni non viene toccata dalla correzione. Resta 🟡/⬜ il problema di
+  fondo dichiarato altrove in questo documento: la lista nera testuale/AST resta aggirabile con
+  tecniche non ancora previste, e `_sandbox_import()` non isola i privilegi - solo i crash. Un
+  vero sandbox OS (Job Object/AppContainer/token ristretto) resta il modo corretto di chiudere
+  questo per davvero, non un'altra correzione puntuale alla lista nera.
 - ⬜ Passkey/WebAuthn vero (Windows Hello per operazioni ADMIN e' fatto, vedi sopra - un passkey
   per un secondo dispositivo/servizio no, richiederebbe un vero secondo dispositivo/browser/
   relying party da testare, non disponibile in questo ambiente), un vero taint tracking/
   allowlist STRUTTURALE (non solo un avviso nel prompt) per le difese da prompt injection - i
   canali chiusi finora (bypass di `PlanExecutor`, contesto desktop, risultati degli strumenti)
   restano mitigazioni puntuali, non una difesa sistemica che segua i dati non fidati ovunque
-  vadano nella pipeline, sandbox OS per i plugin generati dalla fucina (richiede
-  primitive di isolamento a livello di sistema operativo - Job Object/AppContainer/token
-  ristretto su Windows - che meritano tempo dedicato per non dare una falsa sicurezza peggiore
-  di nessun sandbox), backup transazionale + undo center nell'HUD (l'undo center nell'HUD
+  vadano nella pipeline, un vero sandbox OS con primitive di isolamento a livello di sistema
+  operativo (Job Object/AppContainer/token ristretto su Windows - vedi il buco chiuso appena
+  sopra/sotto per la parte di validazione statica, non ancora per l'isolamento vero e proprio),
+  backup transazionale + undo center nell'HUD (l'undo center nell'HUD
   richiede una GUI che non posso verificare qui; un "annulla l'ultima azione" senza interfaccia
   e' stato deliberatamente scartato in questa sessione per la stessa ragione dell'idempotency
   enforcement: l'ambiguita' su cosa conti come "ultima azione" e come si concatenano piu' undo
