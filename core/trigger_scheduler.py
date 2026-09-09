@@ -24,8 +24,7 @@ class TriggerScheduler:
         plan_executor,
         desktop_context,
         on_trigger=None,
-        blocked_intents: set = None,
-        always_confirm_intents: set = None,
+        policy_engine=None,
         interval_seconds: float = 30,
         autonomy_budget: AutonomyBudget = None,
     ):
@@ -34,8 +33,11 @@ class TriggerScheduler:
         self.plan_executor = plan_executor
         self.desktop_context = desktop_context
         self.on_trigger = on_trigger
-        self.blocked_intents = blocked_intents
-        self.always_confirm_intents = always_confirm_intents
+        # F1 (core/policy_engine.py): UN riferimento condiviso con JakeCore, non piu' due
+        # insiemi (blocked_intents/always_confirm_intents) da tenere sincronizzati a mano - vedi
+        # il docstring di core/policy_engine.py sul perche' questa frammentazione e' esattamente
+        # cio' che ha causato il bug di RunWorkflowSkill.
+        self.policy_engine = policy_engine
         self.interval_seconds = interval_seconds
         # F6 (Proactive Intelligence & Autonomy, vedi core/autonomy_budget.py): un limite al
         # numero di automazioni che possono partire da sole in una finestra di tempo, condiviso
@@ -138,7 +140,7 @@ class TriggerScheduler:
         # nessun modello da riportare nel log strutturato. private=False: un trigger che parte
         # da solo non e' mai legato a una conversazione in modalita' privata.
         outcome = self.plan_executor.execute(
-            plan, blocked_intents=self.blocked_intents, always_confirm_intents=self.always_confirm_intents,
+            plan, policy_engine=self.policy_engine,
             trace_id=new_trace_id(), private=False, model=None, requested_by=f"trigger:{name}",
         )
         self.trigger_manager.mark_fired(name, datetime.now().isoformat())

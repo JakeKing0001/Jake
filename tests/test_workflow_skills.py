@@ -1,13 +1,14 @@
 """Test unitari per skills/workflow.py (SAVE_WORKFLOW/RUN_WORKFLOW). Il modulo non aveva
 ancora nessuna suite dedicata - esattamente come e' potuto restare inosservato il buco reale
-verificato qui sotto (F1, vedi ROADMAP.md): RunWorkflowSkill non passava mai blocked_intents/
-always_confirm_intents a PlanExecutor.execute(), che senza quei due argomenti non applica nessun
-controllo (core/policy_engine.py, decide_automated). Un'automazione con un passo DESTRUCTIVE/
-ADMIN non self-confirming (es. FORGET) eseguiva quel passo senza alcuna conferma, con un comando
-diretto dell'utente - non serviva nemmeno un prompt costruito ad arte."""
+verificato qui sotto (F1, vedi ROADMAP.md): RunWorkflowSkill non passava mai policy_engine a
+PlanExecutor.execute(), che senza di esso non applica nessun controllo (core/policy_engine.py).
+Un'automazione con un passo DESTRUCTIVE/ADMIN non self-confirming (es. FORGET) eseguiva quel
+passo senza alcuna conferma, con un comando diretto dell'utente - non serviva nemmeno un prompt
+costruito ad arte."""
 import unittest
 
 from core.planner import Plan, PlanStep
+from core.policy_engine import PolicyEngine
 from skills.workflow import RunWorkflowSkill, SaveWorkflowSkill
 
 
@@ -61,26 +62,23 @@ class RunWorkflowSkillTests(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertEqual(result.error, "NOT_FOUND")
 
-    def test_forwards_blocked_and_always_confirm_intents_to_the_executor(self):
+    def test_forwards_the_policy_engine_to_the_executor(self):
         """Il buco reale: senza questo, un'automazione con un passo DESTRUCTIVE/ADMIN non
         self-confirming (es. FORGET) eseguiva senza alcuna conferma."""
         plan = Plan(steps=[PlanStep(intent="FORGET", parameters={"key": "segreto"})])
         workflow_manager = FakeWorkflowManager({"pulizia": plan})
         plan_executor = FakePlanExecutor()
-        skill = RunWorkflowSkill(
-            workflow_manager, plan_executor,
-            blocked_intents={"RUN_COMMAND"}, always_confirm_intents={"FORGET"},
-        )
+        policy_engine = PolicyEngine(blocked_intents={"RUN_COMMAND"}, always_confirm_intents={"FORGET"})
+        skill = RunWorkflowSkill(workflow_manager, plan_executor, policy_engine=policy_engine)
 
         skill.execute({"name": "pulizia"})
 
         self.assertEqual(len(plan_executor.calls), 1)
         _, kwargs = plan_executor.calls[0]
-        self.assertEqual(kwargs["blocked_intents"], {"RUN_COMMAND"})
-        self.assertEqual(kwargs["always_confirm_intents"], {"FORGET"})
+        self.assertIs(kwargs["policy_engine"], policy_engine)
 
-    def test_default_policy_sets_are_none_when_never_wired(self):
-        """Chi costruisce la skill in isolamento senza collegare le policy (nessun JakeCore
+    def test_default_policy_engine_is_none_when_never_wired(self):
+        """Chi costruisce la skill in isolamento senza collegare la policy (nessun JakeCore
         intorno) ottiene 'nessun controllo', non un crash - stesso comportamento di prima per
         chi non passa da JakeCore, ma esplicito, non un'omissione a runtime."""
         plan = Plan(steps=[PlanStep(intent="GET_TIME", parameters={})])
@@ -91,8 +89,7 @@ class RunWorkflowSkillTests(unittest.TestCase):
         skill.execute({"name": "semplice"})
 
         _, kwargs = plan_executor.calls[0]
-        self.assertIsNone(kwargs["blocked_intents"])
-        self.assertIsNone(kwargs["always_confirm_intents"])
+        self.assertIsNone(kwargs["policy_engine"])
 
     def test_dry_run_parameter_is_forwarded(self):
         plan = Plan(steps=[PlanStep(intent="GET_TIME", parameters={})])

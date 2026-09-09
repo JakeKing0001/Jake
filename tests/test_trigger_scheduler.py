@@ -8,11 +8,12 @@ from unittest import mock
 
 from core.autonomy_budget import AutonomyBudget
 from core.planner import Plan, PlanStep
+from core.policy_engine import PolicyEngine
 from core.trigger_scheduler import TriggerScheduler
 
 
 class FireTests(unittest.TestCase):
-    def _scheduler(self, autonomy_budget=None, plan=None):
+    def _scheduler(self, autonomy_budget=None, plan=None, policy_engine=None):
         self.trigger_manager = mock.Mock()
         self.workflow_manager = mock.Mock()
         self.plan_executor = mock.Mock()
@@ -23,8 +24,19 @@ class FireTests(unittest.TestCase):
         self.on_trigger = mock.Mock()
         return TriggerScheduler(
             self.trigger_manager, self.workflow_manager, self.plan_executor, None,
-            on_trigger=self.on_trigger, autonomy_budget=autonomy_budget,
+            on_trigger=self.on_trigger, autonomy_budget=autonomy_budget, policy_engine=policy_engine,
         )
+
+    def test_fire_forwards_the_policy_engine_to_the_executor(self):
+        """F1 (core/policy_engine.py): stesso principio di RunWorkflowSkillTests - un riferimento
+        solo da collegare, non piu' due insiemi separati che si potevano dimenticare a meta'."""
+        policy_engine = PolicyEngine(blocked_intents={"RUN_COMMAND"})
+        scheduler = self._scheduler(policy_engine=policy_engine)
+
+        scheduler._fire({"name": "buonanotte", "workflow_name": "buonanotte"})
+
+        _, kwargs = self.plan_executor.execute.call_args
+        self.assertIs(kwargs["policy_engine"], policy_engine)
 
     def test_fire_executes_the_plan_and_marks_fired_when_budget_allows(self):
         scheduler = self._scheduler()

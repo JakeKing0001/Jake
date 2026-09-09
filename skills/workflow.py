@@ -44,16 +44,18 @@ class RunWorkflowSkill:
     """Riesegue un'automazione salvata in precedenza, passo per passo.
 
     F1: buco reale trovato e corretto - prima non passava MAI blocked_intents/
-    always_confirm_intents a plan_executor.execute(), che senza quei due argomenti non applica
-    nessun controllo (vedi core/policy_engine.py, decide_automated). Un'automazione salvata con
-    un passo DESTRUCTIVE/ADMIN non self-confirming (es. FORGET, SET_POWER_PLAN, DELETE_TODO...)
-    eseguiva quel passo SENZA alcuna conferma, con un comando diretto dell'utente ("esegui
-    l'automazione X") - non serviva nemmeno un prompt costruito ad arte. Riprodotto per davvero
-    prima di correggere: un'automazione con un passo FORGET ha cancellato un ricordo vero senza
-    chiedere nulla. blocked_intents/always_confirm_intents sono iniettati DOPO la costruzione
-    (JakeCore li popola solo a valle, come gia' fa per plan_executor.kill_switch/action_ledger,
-    vedi core/jake_core.py) - restano None (nessun controllo) solo per chi costruisce questa
-    skill in isolamento senza mai collegarli, non per omissione silenziosa a runtime."""
+    always_confirm_intents a plan_executor.execute(), che senza quei argomenti non applica
+    nessun controllo (vedi core/policy_engine.py). Un'automazione salvata con un passo
+    DESTRUCTIVE/ADMIN non self-confirming (es. FORGET, SET_POWER_PLAN, DELETE_TODO...) eseguiva
+    quel passo SENZA alcuna conferma, con un comando diretto dell'utente ("esegui l'automazione
+    X") - non serviva nemmeno un prompt costruito ad arte. Riprodotto per davvero prima di
+    correggere: un'automazione con un passo FORGET ha cancellato un ricordo vero senza chiedere
+    nulla. policy_engine e' iniettato DOPO la costruzione (JakeCore lo popola solo a valle, come
+    gia' fa per plan_executor.kill_switch/action_ledger, vedi core/jake_core.py) - resta None
+    (nessun controllo) solo per chi costruisce questa skill in isolamento senza mai collegarlo,
+    non per omissione silenziosa a runtime. Un riferimento SOLO, non piu' due insiemi separati
+    da collegare a mano: quella frammentazione (dimenticarne uno dei due) e' esattamente la
+    causa originale di questo bug."""
 
     metadata = {
         "intent": "RUN_WORKFLOW",
@@ -76,11 +78,10 @@ class RunWorkflowSkill:
         },
     }
 
-    def __init__(self, workflow_manager, plan_executor, blocked_intents: set = None, always_confirm_intents: set = None):
+    def __init__(self, workflow_manager, plan_executor, policy_engine=None):
         self.workflow_manager = workflow_manager
         self.plan_executor = plan_executor
-        self.blocked_intents = blocked_intents
-        self.always_confirm_intents = always_confirm_intents
+        self.policy_engine = policy_engine
 
     def execute(self, parameters: dict = None):
         parameters = parameters or {}
@@ -93,7 +94,6 @@ class RunWorkflowSkill:
             return SkillResult(success=False, data={"name": name}, error="NOT_FOUND")
 
         outcome = self.plan_executor.execute(
-            plan, blocked_intents=self.blocked_intents, always_confirm_intents=self.always_confirm_intents,
-            dry_run=bool(parameters.get("dry_run")),
+            plan, policy_engine=self.policy_engine, dry_run=bool(parameters.get("dry_run")),
         )
         return SkillResult(success=True, data={"name": name, "outcome": outcome, "total_steps": len(plan.steps)})

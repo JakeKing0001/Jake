@@ -10,6 +10,7 @@ from pathlib import Path
 
 from core.plan_executor import PlanExecutor
 from core.planner import Plan, PlanStep
+from core.policy_engine import PolicyEngine
 from core.skill_result import SkillResult
 
 
@@ -40,7 +41,7 @@ class PolicyTests(unittest.TestCase):
         registry = FakeRegistry()
         plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
 
-        outcome = PlanExecutor(registry).execute(plan, blocked_intents={"ADD_NOTE"})
+        outcome = PlanExecutor(registry).execute(plan, policy_engine=PolicyEngine(blocked_intents={"ADD_NOTE"}))
 
         self.assertFalse(outcome.success)
         self.assertEqual(outcome.stopped_step.result.error, "POLICY_BLOCKED")
@@ -50,7 +51,7 @@ class PolicyTests(unittest.TestCase):
         registry = FakeRegistry()
         plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
 
-        outcome = PlanExecutor(registry).execute(plan, always_confirm_intents={"ADD_NOTE"})
+        outcome = PlanExecutor(registry).execute(plan, policy_engine=PolicyEngine(always_confirm_intents={"ADD_NOTE"}))
 
         self.assertEqual(outcome.stopped_step.result.error, "CONFIRMATION_REQUIRED")
         self.assertEqual(registry.calls, [])
@@ -129,7 +130,7 @@ class StructuredLoggingTests(unittest.TestCase):
         plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
 
         with unittest.mock.patch("core.plan_executor.log_action") as mock_log:
-            PlanExecutor(registry).execute(plan, blocked_intents={"ADD_NOTE"})
+            PlanExecutor(registry).execute(plan, policy_engine=PolicyEngine(blocked_intents={"ADD_NOTE"}))
 
         mock_log.assert_called_once()
         self.assertEqual(mock_log.call_args.kwargs["result"], "policy_blocked")
@@ -177,7 +178,7 @@ class SessionRecorderWiringTests(unittest.TestCase):
         executor.session_recorder = recorder
 
         with unittest.mock.patch("core.plan_executor.log_action"):
-            executor.execute(plan, always_confirm_intents={"ADD_NOTE"})
+            executor.execute(plan, policy_engine=PolicyEngine(always_confirm_intents={"ADD_NOTE"}))
 
         recorder.record_failure.assert_not_called()
 
@@ -305,7 +306,7 @@ class AuthorizationSignalStrippingTests(unittest.TestCase):
 
         plan = Plan(steps=[PlanStep(intent="DELETE_PATH", parameters={"path": str(target), "confirmed": True})])
 
-        outcome = PlanExecutor(self._real_delete_registry()).execute(plan, always_confirm_intents=set())
+        outcome = PlanExecutor(self._real_delete_registry()).execute(plan)
 
         self.assertFalse(outcome.success, "il passo doveva fermarsi in attesa di conferma, non eseguire")
         self.assertEqual(outcome.stopped_step.result.error, "CONFIRMATION_REQUIRED")
@@ -325,7 +326,7 @@ class AuthorizationSignalStrippingTests(unittest.TestCase):
             }),
         ])
 
-        outcome = PlanExecutor(self._real_delete_registry()).execute(plan, always_confirm_intents=set())
+        outcome = PlanExecutor(self._real_delete_registry()).execute(plan)
 
         self.assertFalse(outcome.success)
         self.assertEqual(outcome.stopped_step.result.error, "CONFIRMATION_REQUIRED")
@@ -345,7 +346,7 @@ class AuthorizationSignalStrippingTests(unittest.TestCase):
         executor.action_ledger = ledger
 
         with unittest.mock.patch("core.plan_executor.log_action"):
-            executor.execute(plan, always_confirm_intents=set())
+            executor.execute(plan)
 
         ledger.record.assert_called_once()
         (receipt,), _ = ledger.record.call_args
@@ -390,7 +391,9 @@ class DryRunTests(unittest.TestCase):
         registry = FakeRegistry()
         plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
 
-        outcome = PlanExecutor(registry).execute(plan, blocked_intents={"ADD_NOTE"}, dry_run=True)
+        outcome = PlanExecutor(registry).execute(
+            plan, policy_engine=PolicyEngine(blocked_intents={"ADD_NOTE"}), dry_run=True,
+        )
 
         self.assertFalse(outcome.success)
         self.assertEqual(outcome.stopped_step.result.error, "POLICY_BLOCKED")
@@ -400,7 +403,9 @@ class DryRunTests(unittest.TestCase):
         registry = FakeRegistry()
         plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
 
-        outcome = PlanExecutor(registry).execute(plan, always_confirm_intents={"ADD_NOTE"}, dry_run=True)
+        outcome = PlanExecutor(registry).execute(
+            plan, policy_engine=PolicyEngine(always_confirm_intents={"ADD_NOTE"}), dry_run=True,
+        )
 
         self.assertFalse(outcome.success)
         self.assertEqual(outcome.stopped_step.result.error, "CONFIRMATION_REQUIRED")
@@ -429,7 +434,9 @@ class DryRunTests(unittest.TestCase):
             PlanStep(intent="ADD_NOTE", parameters={"text": "mai raggiunto"}),
         ])
 
-        outcome = PlanExecutor(registry).execute(plan, blocked_intents={"DELETE_PATH"}, dry_run=True)
+        outcome = PlanExecutor(registry).execute(
+            plan, policy_engine=PolicyEngine(blocked_intents={"DELETE_PATH"}), dry_run=True,
+        )
 
         self.assertEqual(outcome.completed, [])
         self.assertEqual(outcome.stopped_step.step.intent, "DELETE_PATH")

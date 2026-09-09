@@ -6,7 +6,7 @@ from core.execution_safety import VERIFIABLE_INTENTS, execute_with_retry, rollba
 from core.kill_switch import KillSwitch
 from core.logger import log_action, new_trace_id
 from core.planner import PlanStep
-from core.policy_engine import PolicyDecision, decide_automated, strip_authorization_signals
+from core.policy_engine import PolicyDecision, strip_authorization_signals
 from core.risk import risk_of
 from core.session_recorder import SessionRecorder
 from core.skill_result import SkillResult
@@ -53,17 +53,22 @@ class PlanExecutor:
         self.kill_switch = kill_switch or KillSwitch()
 
     def execute(
-        self, plan, blocked_intents: set = None, always_confirm_intents: set = None,
+        self, plan, policy_engine=None,
         trace_id: str = None, private: bool = False, model: str = None, requested_by: str = "user",
         dry_run: bool = False,
     ) -> PlanOutcome:
-        """blocked_intents/always_confirm_intents sono opzionali (default None = nessun
-        controllo, comportamento identico a prima) perche' oggi solo JakeCore._process()
-        applica questa policy sui comandi singoli: RUN_WORKFLOW la aggirava del tutto.
-        Un trigger che fa partire un'automazione da solo (v3.0), pero', non ha nessuno li'
-        pronto a rispondere "confermi?": un passo in always_confirm_intents va quindi trattato
-        come se richiedesse conferma (il piano si mette in pausa su quel passo, senza
-        eseguirlo), e uno in blocked_intents va bloccato allo stesso modo di un fallimento.
+        """policy_engine (core/policy_engine.py::PolicyEngine) e' opzionale (default None =
+        nessun controllo, comportamento identico a prima di F1) perche' non tutti i chiamanti
+        di questo metodo esistevano ancora quando fu introdotto. Un passo che la policy
+        classifica CONFIRM va trattato come se richiedesse conferma (il piano si mette in pausa
+        su quel passo, senza eseguirlo: nessuno e' pronto a rispondere "confermi?" in un
+        percorso automatico), e uno BLOCK va bloccato allo stesso modo di un fallimento.
+
+        F1: prima era blocked_intents/always_confirm_intents, due insiemi separati passati a
+        mano - esattamente la frammentazione che ha causato il bug di RunWorkflowSkill (che ne
+        riceveva solo due su tre, dimenticando i risultati, prima ancora che questo refactor
+        unificasse tutto in un riferimento solo). Un chiamante ora ha UN riferimento da passare,
+        non piu' due sincronizzati a mano.
 
         trace_id/private/model (F0, log strutturati): se nessuno li passa (es. i test esistenti,
         o un chiamante che non se ne cura ancora) se ne genera uno locale, cosi' i passi restano
@@ -103,9 +108,7 @@ class PlanExecutor:
             # JakeCore (decide_interactive), nella sua variante senza REQUIRE_AUTH - qui nessuno
             # e' pronto a rispondere "confermi?" in tempo reale, quindi un intent DESTRUCTIVE/
             # ADMIN si ferma sempre, un intent bloccato dall'utente in config.json pure.
-            decision = decide_automated(
-                step.intent, blocked_intents=blocked_intents, always_confirm_intents=always_confirm_intents,
-            )
+            decision = policy_engine.decide_automated(step.intent) if policy_engine is not None else PolicyDecision.ALLOW
             if decision == PolicyDecision.BLOCK:
                 outcome.stopped_step = StepOutcome(
                     step=step,
