@@ -596,17 +596,62 @@ pulita; smoke test installazione/avvio/arresto; dashboard locale con errori e la
   resta volutamente fuori da `PolicyEngine`: propone piani, non decide se eseguirli - non ha
   bisogno di diventarne un consumatore per completare la separazione "chi propone" / "chi
   decide" / "chi esegue".
-- ⬜ Capability token per agente/skill/dispositivo, passkey/WebAuthn (Windows Hello per
-  operazioni ADMIN è fatto, vedi sopra - un passkey vero per un secondo dispositivo/servizio no),
-  un vero taint tracking/allowlist generale per le difese da prompt injection (il bypass di
-  `PlanExecutor` e la mitigazione nel prompt dell'agente sopra chiudono/riducono due canali
-  concreti e verificati, ma non sono una difesa sistemica: un testo non fidato potrebbe ancora
-  influenzare un agente in altri modi non coperti qui), sandbox OS per i plugin generati dalla
-  fucina, backup transazionale + undo center nell'HUD: non affrontati ulteriormente in questa
-  sessione. Sono i pezzi più grandi e rischiosi di F1 rimasti (un kernel di permessi con
-  capability vere, sandboxing a livello OS): meritano una sessione dedicata con più tempo per
-  la revisione di sicurezza, non un'implementazione affrettata - meglio dichiararli apertamente
-  qui che spacciare un abbozzo rischioso per fatto.
+- 🟡 **Capability token per agente**: verificato che esiste gia' - non e' una scoperta nuova, ma
+  non era mai stato riconosciuto come tale finche' non l'ho controllato per rispondere a
+  "capability token per agente/skill/dispositivo". `core/agent.py` ha gia' due meccanismi reali,
+  non solo consultivi: `NEVER_FOR_AGENT` (una lista fissa bandita per QUALUNQUE agente a
+  prescindere dal tipo: `SYSTEM_POWER`, `RUN_COMMAND`, `CREATE_SKILL`, il kill switch...) e
+  `fixed_tools` (per gli agenti specializzati coding/ricerca, vedi `core/orchestrator.py`
+  `CODING_TOOLS`/`RESEARCH_TOOLS`: l'agente di ricerca non ha proprio `DELETE_PATH` o
+  `RUN_COMMAND` nel proprio elenco). L'enforcement e' A DUE LIVELLI, non uno solo: lo schema JSON
+  passato al modello vincola gia' l'`intent` a un `enum` dei soli intent ammessi (il modello non
+  puo' letteralmente produrne un altro se lo strutturato viene rispettato), E `TaskAgent.run()`
+  controlla di nuovo `intent not in valid` prima di eseguire (`valid` viene dagli stessi
+  `tools`) - una difesa indipendente dal fatto che il modello abbia davvero rispettato lo schema.
+  Resta 🟡, non ✅: e' reale ma non e' un oggetto nominato/testato come "capability token" - vive
+  sparso tra una costante a livello di modulo e una lista per istanza, senza un test dedicato che
+  lo blocchi esplicitamente (rischio di regressione silenziosa se qualcuno lo modifica senza
+  sapere cosa protegge).
+- ✅ **Capability/identity token per dispositivo**: buco reale trovato e corretto in
+  `core/companion_server.py` - NESSUN endpoint (`/command`, `/status`, `/events`,
+  `/devices/<id>/claim`, `/devices/<id>/release`) richiedeva alcuna autenticazione. Qualunque
+  processo capace di raggiungere la porta (oggi solo altri processi sulla stessa macchina:
+  verificato che `companion_server_host` NON e' mai stato esposto in `config.json`, quindi
+  l'esposizione alla LAN richiederebbe gia' oggi una modifica manuale al codice, non solo alla
+  configurazione - un rischio piu' teorico che immediato, ma la stessa mancanza di
+  autenticazione vale anche in locale, tra processi/utenti diversi sulla stessa macchina)
+  poteva mandare comandi a Jake con gli stessi privilegi dell'utente, incluso rivendicare la
+  sessione attiva, senza nessuna verifica. Aggiunto un token opt-in (`companion_token` in
+  `config.json`, cifrato a riposo via DPAPI come `admin_passphrase` - stesso meccanismo,
+  `SECRET_KEYS` in `core/config.py`): se non configurato, comportamento invariato (nessun
+  controllo, come prima). Ogni richiesta deve presentare `Authorization: Bearer <token>`,
+  confrontato con `hmac.compare_digest` (non `==`, per non regalare un canale laterale
+  temporale). L'autenticazione si controlla PRIMA del routing, e per le richieste POST il body
+  viene comunque drenato quando il rifiuto e' immediato - altrimenti byte non letti nel buffer
+  di ricezione causano lo stesso flake `WinError 10053` gia' descritto e risolto in F0 per
+  `_handle_release`. **Verificato end-to-end per davvero**: un `JakeCore` reale con
+  `companion_token` impostato rifiuta con 401 una richiesta senza il token e accetta con 200
+  quella con il token corretto; confermato anche che il valore resta cifrato sul disco e viene
+  decifrato correttamente da `Config.get()`. Coperto da 8 nuovi test in
+  `tests/test_companion_server.py` (`TokenAuthenticationTests` +
+  `NoTokenConfiguredIsBackwardCompatibleTests`, quest'ultima sulle classi di test gia' esistenti
+  per confermare che non impostare mai un token resta il comportamento di sempre).
+- ⬜ Passkey/WebAuthn vero (Windows Hello per operazioni ADMIN e' fatto, vedi sopra - un passkey
+  per un secondo dispositivo/servizio no, richiederebbe un vero secondo dispositivo/browser/
+  relying party da testare, non disponibile in questo ambiente), un vero taint tracking/
+  allowlist generale per le difese da prompt injection (il bypass di `PlanExecutor` e la
+  mitigazione nel prompt dell'agente sopra chiudono/riducono due canali concreti e verificati,
+  ma non sono una difesa sistemica), sandbox OS per i plugin generati dalla fucina (richiede
+  primitive di isolamento a livello di sistema operativo - Job Object/AppContainer/token
+  ristretto su Windows - che meritano tempo dedicato per non dare una falsa sicurezza peggiore
+  di nessun sandbox), backup transazionale + undo center nell'HUD (l'undo center nell'HUD
+  richiede una GUI che non posso verificare qui; un "annulla l'ultima azione" senza interfaccia
+  e' stato deliberatamente scartato in questa sessione per la stessa ragione dell'idempotency
+  enforcement: l'ambiguita' su cosa conti come "ultima azione" e come si concatenano piu' undo
+  e' una decisione di prodotto, non da improvvisare come effetto collaterale): non affrontati
+  ulteriormente in questa sessione. Meritano una sessione dedicata con più tempo per la
+  revisione di sicurezza (o, per l'undo, di design), non un'implementazione affrettata - meglio
+  dichiararli apertamente qui che spacciare un abbozzo rischioso per fatto.
 
 **Criterio di uscita:** nessuna skill non classificata; nessuna azione esterna/admin senza
 ricevuta di policy; test d'attacco su prompt injection e plugin; restore verificato.
