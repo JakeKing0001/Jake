@@ -1,4 +1,5 @@
 from core.skill_result import SkillResult
+from core.temporal_parser import parse_relative_range
 
 
 class RecallSkill:
@@ -19,6 +20,15 @@ class RecallSkill:
                     "(non tradurre e non parafrasare)."
                 ),
             },
+            "when": {
+                "type": "string",
+                "required": False,
+                "description": (
+                    "Riferimento temporale relativo a 'adesso', con le parole dell'utente: "
+                    "'oggi', 'ieri', 'questa settimana', 'il mese scorso', 'ultimi 3 giorni'... "
+                    "Omesso se l'utente non ha detto quando."
+                ),
+            },
         },
     }
 
@@ -32,12 +42,23 @@ class RecallSkill:
         parameters = parameters or {}
         key = (parameters.get("key") or "").strip()
         query = (parameters.get("query") or "").strip()
+        when = (parameters.get("when") or "").strip()
 
-        results = self.memory_manager.recall(key=key or None, query=query or None)
+        # F5 (Memory 2.0, linguaggio naturale per il tempo - vedi core/temporal_parser.py):
+        # un'espressione non riconosciuta (None) non e' un errore, e' semplicemente nessun
+        # vincolo di tempo - meglio ignorarla che rifiutare l'intera richiesta per un "when"
+        # che il parser non capisce ancora (es. "prima della riunione").
+        since = until = None
+        if when:
+            parsed_range = parse_relative_range(when)
+            if parsed_range is not None:
+                since, until = parsed_range
+
+        results = self.memory_manager.recall(key=key or None, query=query or None, since=since, until=until)
         if not results and key and not query:
             # La corrispondenza esatta di 'key' e' fragile quando il testo arriva da un LLM
             # che puo' riformulare leggermente la chiave: ripiega su una ricerca libera.
-            results = self.memory_manager.recall(query=key)
+            results = self.memory_manager.recall(query=key, since=since, until=until)
             query = query or key
 
         if not results and query and self.embedding_provider is not None:

@@ -74,6 +74,81 @@ class TemporalQueryTests(MemoryManagerTestCase):
         )
 
 
+class ProvenanceAndExpiryTests(MemoryManagerTestCase):
+    """F5 (Memory 2.0, provenienza e scadenza - vedi ROADMAP.md): source dice chi ha detto un
+    fatto (utente/inferenza/agente), expires_at (da ttl_days) quando smette di valere da solo."""
+
+    def test_default_source_is_user(self):
+        self.manager.remember("colore preferito", "blu")
+
+        self.assertEqual(self.manager.recall(key="colore preferito")[0]["source"], "user")
+
+    def test_explicit_source_is_stored(self):
+        self.manager.remember("umore probabile", "stanco", source="inferred")
+
+        self.assertEqual(self.manager.recall(key="umore probabile")[0]["source"], "inferred")
+
+    def test_memory_without_ttl_never_expires(self):
+        self.manager.remember("compleanno", "5 marzo")
+
+        self.assertIsNone(self.manager.recall(key="compleanno")[0]["expires_at"])
+
+    def test_expired_memory_is_hidden_from_recall_by_default(self):
+        self.manager.remember("meteo oggi", "piove", ttl_days=1)
+        self.manager._connection.execute(
+            "UPDATE memories SET expires_at = ? WHERE key = ?", ("2020-01-01T00:00:00+00:00", "meteo oggi"),
+        )
+        self.manager._connection.commit()
+
+        self.assertEqual(self.manager.recall(key="meteo oggi"), [])
+
+    def test_expired_memory_is_visible_with_include_expired(self):
+        self.manager.remember("meteo oggi", "piove", ttl_days=1)
+        self.manager._connection.execute(
+            "UPDATE memories SET expires_at = ? WHERE key = ?", ("2020-01-01T00:00:00+00:00", "meteo oggi"),
+        )
+        self.manager._connection.commit()
+
+        results = self.manager.recall(key="meteo oggi", include_expired=True)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["value"], "piove")
+
+    def test_not_yet_expired_memory_stays_visible(self):
+        self.manager.remember("meteo oggi", "piove", ttl_days=1)
+
+        self.assertEqual(len(self.manager.recall(key="meteo oggi")), 1)
+
+    def test_purge_expired_removes_only_expired_memories(self):
+        self.manager.remember("meteo oggi", "piove", ttl_days=1)
+        self.manager.remember("compleanno", "5 marzo")
+        self.manager._connection.execute(
+            "UPDATE memories SET expires_at = ? WHERE key = ?", ("2020-01-01T00:00:00+00:00", "meteo oggi"),
+        )
+        self.manager._connection.commit()
+
+        removed = self.manager.purge_expired()
+
+        self.assertEqual(removed, 1)
+        self.assertEqual(self.manager.recall(key="meteo oggi", include_expired=True), [])
+        self.assertEqual(len(self.manager.recall(key="compleanno")), 1)
+
+    def test_purge_expired_with_nothing_to_remove_returns_zero(self):
+        self.manager.remember("compleanno", "5 marzo")
+
+        self.assertEqual(self.manager.purge_expired(), 0)
+
+    def test_semantic_recall_also_hides_expired_memories_by_default(self):
+        self.manager.remember("nota", "scade oggi", embedding=SAME_MEANING, ttl_days=1)
+        self.manager._connection.execute(
+            "UPDATE memories SET expires_at = ? WHERE key = ?", ("2020-01-01T00:00:00+00:00", "nota"),
+        )
+        self.manager._connection.commit()
+
+        self.assertEqual(self.manager.semantic_recall(SAME_MEANING), [])
+        self.assertEqual(len(self.manager.semantic_recall(SAME_MEANING, include_expired=True)), 1)
+
+
 class KnowledgeGraphTests(MemoryManagerTestCase):
     """v4.4, Personal Knowledge Graph: link()/related()/unlink()."""
 
