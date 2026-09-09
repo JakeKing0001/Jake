@@ -3,9 +3,12 @@ JakeCore._resolve_and_execute e JakeCore._handle_confirmation.
 
 Costruisce un JakeCore "spoglio" con JakeCore.__new__ invece di passare da __init__ (che
 istanzierebbe l'intero registro di skill, Ollama, NEST...): i metodi testati qui usano solo
-pochi attributi (skill_registry, always_confirm_intents, auth_gate, require_auth_intents,
-conversation_state, learning, last_route), quindi bastano quelli per testare la logica del gate
-senza toccare nulla di esterno (stesso approccio delle fake minimali in tests/test_agentics.py)."""
+pochi attributi (skill_registry, policy_engine, auth_gate, conversation_state, learning,
+last_route), quindi bastano quelli per testare la logica del gate senza toccare nulla di
+esterno (stesso approccio delle fake minimali in tests/test_agentics.py). policy_engine e'
+un core.policy_engine.PolicyEngine vero (F1: la separazione formale planner/policy/executor
+completata in questa sessione), non piu' tre insiemi (blocked_intents/always_confirm_intents/
+require_auth_intents) impostati direttamente su core."""
 import unittest
 
 from core.action_ledger import ActionLedger
@@ -13,6 +16,7 @@ from core.auth_gate import AuthGate
 from core.command import Command
 from core.conversation_state import ConversationStateManager
 from core.jake_core import JakeCore
+from core.policy_engine import PolicyEngine
 from core.session_recorder import SessionRecorder
 from core.skill_result import SkillResult
 
@@ -49,10 +53,11 @@ def _bare_core(
 ) -> JakeCore:
     core = JakeCore.__new__(JakeCore)
     core.skill_registry = skill_registry
-    core.always_confirm_intents = set(always_confirm_intents)
     core.auth_gate = auth_gate or AuthGate()  # disabilitata per default: nessuna passphrase
-    core.require_auth_intents = set(require_auth_intents or set())
-    core.blocked_intents = set(blocked_intents or set())
+    core.policy_engine = PolicyEngine(
+        auth_gate=core.auth_gate, blocked_intents=blocked_intents,
+        always_confirm_intents=always_confirm_intents, require_auth_intents=require_auth_intents,
+    )
     return core
 
 
@@ -579,10 +584,8 @@ class OnSkillInstalledGateWiringTests(unittest.TestCase):
     def _core(self, skill_registry, auth_gate=None):
         core = JakeCore.__new__(JakeCore)
         core.skill_registry = skill_registry
-        core.always_confirm_intents = set()
-        core.require_auth_intents = set()
-        core.blocked_intents = set()
         core.auth_gate = auth_gate or AuthGate()
+        core.policy_engine = PolicyEngine(auth_gate=core.auth_gate)
         core.retriever = FakeRetriever()
         core.learning = FakeLearning()
         return core
@@ -592,8 +595,8 @@ class OnSkillInstalledGateWiringTests(unittest.TestCase):
 
         core._on_skill_installed(FakeDraft("SOME_BRAND_NEW_FORGED_SKILL"))
 
-        self.assertIn("SOME_BRAND_NEW_FORGED_SKILL", core.always_confirm_intents)
-        self.assertIn("SOME_BRAND_NEW_FORGED_SKILL", core.require_auth_intents)
+        self.assertIn("SOME_BRAND_NEW_FORGED_SKILL", core.policy_engine.always_confirm_intents)
+        self.assertIn("SOME_BRAND_NEW_FORGED_SKILL", core.policy_engine.require_auth_intents)
         self.assertTrue(core.retriever.refreshed)
 
     def test_newly_forged_skill_is_actually_gated_not_just_listed(self):
@@ -619,8 +622,8 @@ class OnSkillInstalledGateWiringTests(unittest.TestCase):
 
         core._on_skill_installed(FakeDraft("GET_TIME"))
 
-        self.assertNotIn("GET_TIME", core.always_confirm_intents)
-        self.assertNotIn("GET_TIME", core.require_auth_intents)
+        self.assertNotIn("GET_TIME", core.policy_engine.always_confirm_intents)
+        self.assertNotIn("GET_TIME", core.policy_engine.require_auth_intents)
 
 
 if __name__ == "__main__":

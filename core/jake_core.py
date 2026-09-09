@@ -24,7 +24,7 @@ from core.notification_center import NotificationCenter
 from core.ollama_client import OllamaClient
 from core import orchestrator
 from core.orchestrator import JakeOrchestrator
-from core import policy_engine
+from core.policy_engine import PolicyDecision, PolicyEngine
 from core.plugin_loader import load_plugins
 from core.response_formatter import format_plan_outcome, format_skill_result
 from core.risk import risk_of
@@ -185,8 +185,6 @@ class JakeCore:
         self.planner_provider = self.skill_registry.planner_provider
         self.plan_executor = self.skill_registry.plan_executor
         self.context_summarizer = ContextSummarizer(model=self.router.primary_provider.model)
-        self.blocked_intents = set(config.get("blocked_intents", []) or [])
-        self.always_confirm_intents = set(config.get("always_confirm_intents", []) or [])
         # Autenticazione per le azioni ADMIN (v5.4/5.5, Permissions & Security Kernel +
         # Identity & Authentication): opt-in, vedi core/auth_gate.py. Senza una passphrase ne'
         # Windows Hello configurati (admin_passphrase/windows_hello_enabled in config.json)
@@ -198,7 +196,20 @@ class JakeCore:
             passphrase=config.get("admin_passphrase"),
             windows_hello_enabled=bool(config.get("windows_hello_enabled", False)),
         )
-        self.require_auth_intents: set = set()
+        # F1 (separazione formale planner/policy engine/executor, core/policy_engine.py): UN
+        # oggetto condiviso PER RIFERIMENTO con tutto cio' che deve decidere se un intent puo'
+        # eseguire (qui stesso, PlanExecutor, TriggerScheduler, RunWorkflowSkill), invece di
+        # blocked_intents/always_confirm_intents/require_auth_intents passati a mano come tre
+        # insiemi separati - esattamente la frammentazione che ha causato il bug di
+        # RunWorkflowSkill (che ne riceveva solo due su tre, dimenticando il terzo). Chi ha
+        # bisogno di leggere/aggiornare uno di quei tre insiemi lo fa ora via
+        # self.policy_engine.blocked_intents/always_confirm_intents/require_auth_intents, non
+        # piu' via self.blocked_intents/... direttamente su JakeCore.
+        self.policy_engine = PolicyEngine(
+            auth_gate=self.auth_gate,
+            blocked_intents=config.get("blocked_intents", []) or [],
+            always_confirm_intents=config.get("always_confirm_intents", []) or [],
+        )
 
         # Jake proattivo (v1.2): di default stampa i promemoria scaduti; chi lancia Jake
         # (CLI, voce, tray, HUD) puo' sostituire questo callback per parlarli o mostrarli.
@@ -232,8 +243,7 @@ class JakeCore:
             self.plan_executor,
             self.desktop_context,
             on_trigger=self._default_on_trigger_fired,
-            blocked_intents=self.blocked_intents,
-            always_confirm_intents=self.always_confirm_intents,
+            policy_engine=self.policy_engine,
             autonomy_budget=self.autonomy_budget,
         )
         self.trigger_scheduler.start()
@@ -289,32 +299,26 @@ class JakeCore:
 
         # Modello di permessi centralizzato (v3.2, F1: core/policy_engine.py): ogni skill
         # DESTRUCTIVE o ADMIN che non gestisce gia' da sola una conferma su misura finisce qui
-        # automaticamente, invece di dover essere elencata a mano in always_confirm_intents.
-        # self.always_confirm_intents/require_auth_intents sono gli STESSI oggetti set gia'
-        # passati per riferimento a trigger_scheduler (costruito sopra, prima che tutte le skill
-        # fossero registrate): aggiornarli qui li aggiorna anche li'. Se self.auth_gate non e'
-        # mai stato attivato, il gradino REQUIRE_AUTH (v5.4/5.5, require_auth_intents) resta
-        # comunque gestito dal CONFIRM ordinario su always_confirm_intents in
-        # _resolve_and_execute - l'auth vera scatta solo quando auth_gate.enabled e' vero.
-        for intent in self.skill_registry.skills:
-            policy_engine.register_intent(
-                intent, always_confirm_intents=self.always_confirm_intents,
-                require_auth_intents=self.require_auth_intents,
-            )
+        # automaticamente, invece di dover essere elencata a mano. self.policy_engine e' lo
+        # STESSO oggetto gia' passato per riferimento a trigger_scheduler (costruito sopra,
+        # prima che tutte le skill fossero registrate): aggiornarlo qui lo aggiorna anche li'.
+        # Se self.auth_gate non e' mai stato attivato, il gradino REQUIRE_AUTH (v5.4/5.5) resta
+        # comunque gestito dal CONFIRM ordinario in _resolve_and_execute - l'auth vera scatta
+        # solo quando auth_gate.enabled e' vero.
+        self.policy_engine.sync_with_registry(self.skill_registry)
 
         # F1: buco reale trovato e corretto - RUN_WORKFLOW non passava MAI blocked_intents/
         # always_confirm_intents a PlanExecutor.execute() (vedi skills/workflow.py,
         # RunWorkflowSkill), che senza quei due argomenti non applica nessun controllo. Un
         # comando diretto ("esegui l'automazione X") su un'automazione con un passo DESTRUCTIVE/
         # ADMIN non self-confirming eseguiva quel passo senza alcuna conferma. Stesso schema
-        # gia' usato per plan_executor.kill_switch/action_ledger sopra: iniettati DOPO la
-        # costruzione, perche' SkillRegistry costruisce le skill prima che questi due insiemi
-        # esistano. Riferimento allo STESSO oggetto set (non una copia): un intent installato
-        # piu' tardi dalla Skill Forge (vedi _on_skill_installed) resta visto anche qui.
+        # gia' usato per plan_executor.kill_switch/action_ledger sopra: iniettato DOPO la
+        # costruzione, perche' SkillRegistry costruisce le skill prima che policy_engine esista.
+        # UN riferimento solo (non piu' due insiemi separati): un intent installato piu' tardi
+        # dalla Skill Forge (vedi _on_skill_installed) resta visto anche qui.
         run_workflow_skill = self.skill_registry.get_skill("RUN_WORKFLOW")
         if run_workflow_skill is not None:
-            run_workflow_skill.blocked_intents = self.blocked_intents
-            run_workflow_skill.always_confirm_intents = self.always_confirm_intents
+            run_workflow_skill.policy_engine = self.policy_engine
 
         # Indici del recupero semantico: costruiti dopo che TUTTE le skill sono registrate.
         self.retriever.refresh()
@@ -385,13 +389,10 @@ class JakeCore:
         # la skill appena creata (codice scritto da un modello, non rivisto da un umano) SENZA
         # alcuna conferma ne' autenticazione al primo utilizzo: esattamente il tipo di buco che
         # il censimento del rischio dovrebbe rendere impossibile. Scoperto rileggendo il ciclo
-        # di vita di una skill forgiata, non da un test che falliva. Stessa funzione usata per il
-        # censimento iniziale in __init__ (core/policy_engine.py, register_intent): un solo posto
-        # invece di due copie della stessa logica che potrebbero divergere.
-        policy_engine.register_intent(
-            draft.intent, always_confirm_intents=self.always_confirm_intents,
-            require_auth_intents=self.require_auth_intents,
-        )
+        # di vita di una skill forgiata, non da un test che falliva. Stesso metodo usato per il
+        # censimento iniziale in __init__ (core/policy_engine.py, PolicyEngine.sync_with_registry):
+        # un solo posto invece di due copie della stessa logica che potrebbero divergere.
+        self.policy_engine.register_intent(draft.intent)
         self.retriever.refresh()
         for example in draft.examples:
             try:
@@ -550,14 +551,10 @@ class JakeCore:
         (v5.4/5.5) viene controllato PRIMA di quello CONFIRM: un'azione ADMIN, quando
         l'autenticazione e' attiva, chiede la passphrase invece della semplice conferma si'/no."""
         resolved = fallbacks.pre_execution_rewrite(command, self.skill_registry)
-        decision = policy_engine.decide_interactive(
-            resolved.intent, resolved.parameters,
-            blocked_intents=self.blocked_intents, always_confirm_intents=self.always_confirm_intents,
-            require_auth_intents=self.require_auth_intents, auth_gate=self.auth_gate,
-        )
-        if decision == policy_engine.PolicyDecision.BLOCK:
+        decision = self.policy_engine.decide_interactive(resolved.intent, resolved.parameters)
+        if decision == PolicyDecision.BLOCK:
             return resolved, SkillResult(success=False, data={}, error="POLICY_BLOCKED"), None
-        if decision == policy_engine.PolicyDecision.REQUIRE_AUTH:
+        if decision == PolicyDecision.REQUIRE_AUTH:
             # F1: Windows Hello tentato PRIMA della passphrase quando e' attivo - un fattore che
             # non passa dalla voce (vedi core/auth_gate.py) e non richiede un secondo turno di
             # conversazione. Se verifica, l'azione prosegue SUBITO (stesso turno): niente
@@ -574,7 +571,7 @@ class JakeCore:
                 resolved = Command(resolved.intent, {
                     **(resolved.parameters or {}), "authenticated": True, "authenticated_via": "windows_hello", "confirmed": True,
                 })
-                decision = policy_engine.PolicyDecision.ALLOW
+                decision = PolicyDecision.ALLOW
             else:
                 return resolved, SkillResult(
                     success=False,
@@ -585,7 +582,7 @@ class JakeCore:
                     },
                     error="AUTH_REQUIRED",
                 ), None
-        if decision == policy_engine.PolicyDecision.CONFIRM:
+        if decision == PolicyDecision.CONFIRM:
             return resolved, SkillResult(
                 success=False,
                 data={
@@ -607,12 +604,8 @@ class JakeCore:
                 # senza conferma. Un'alternativa che la policy fermerebbe viene semplicemente
                 # scartata (si ripiega sul fallimento originale) invece di aprire una SECONDA
                 # richiesta di conferma per qualcosa che l'utente non ha chiesto direttamente.
-                alt_decision = policy_engine.decide_interactive(
-                    alt_command.intent, alt_command.parameters,
-                    blocked_intents=self.blocked_intents, always_confirm_intents=self.always_confirm_intents,
-                    require_auth_intents=self.require_auth_intents, auth_gate=self.auth_gate,
-                )
-                if alt_decision == policy_engine.PolicyDecision.ALLOW:
+                alt_decision = self.policy_engine.decide_interactive(alt_command.intent, alt_command.parameters)
+                if alt_decision == PolicyDecision.ALLOW:
                     alt_result = self.skill_registry.execute(alt_command.intent, alt_command.parameters)
                     if alt_result is not None and alt_result.success:
                         return alt_command, alt_result, note
@@ -694,7 +687,7 @@ class JakeCore:
         intent = command.intent
         trace_id = new_trace_id()
         started = time.monotonic()
-        if intent in self.blocked_intents:
+        if intent in self.policy_engine.blocked_intents:
             self.logger.warning("Azione bloccata da policy: %s", intent)
             self._log_action_outcome(trace_id, started, intent, command.parameters, result="blocked_by_policy")
             return f"L'azione {intent} è disabilitata nella configurazione."
@@ -816,7 +809,7 @@ class JakeCore:
         if plan is None or len(plan.steps) < 2:
             return self.NO_PLAN
         outcome = self.plan_executor.execute(
-            plan, blocked_intents=self.blocked_intents, always_confirm_intents=self.always_confirm_intents,
+            plan, policy_engine=self.policy_engine,
             trace_id=new_trace_id(), private=self.private_mode, model=self.model,
         )
         response = format_plan_outcome(outcome, len(plan.steps), self.skill_registry)
