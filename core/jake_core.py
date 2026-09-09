@@ -111,9 +111,15 @@ class JakeCore:
         # parte solo se companion_server_enabled e' esplicitamente vero in config.json, stesso
         # pattern gia' usato da system_advisor_enabled.
         self.event_bus = EventBus()
+        # F1 (Identity & Authentication, "capability token... per dispositivo" - vedi
+        # ROADMAP.md): opt-in - se companion_token non e' mai stato impostato in config.json,
+        # il server resta come prima di questa fase (nessuna autenticazione), per non cambiare
+        # comportamento a chi ha gia' un uso locale/fidato. Cifrato a riposo via DPAPI come
+        # admin_passphrase (core/config.py, SECRET_KEYS).
         self.companion_server = CompanionServer(
             event_bus=self.event_bus, command_handler=self.answer,
             port=int(config.get("companion_server_port", 8765) or 8765),
+            token=config.get("companion_token"),
         )
         if bool(config.get("companion_server_enabled", False)):
             self.companion_server.start()

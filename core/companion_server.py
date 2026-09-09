@@ -13,7 +13,19 @@ leggibile da qualunque client HTTP capace di leggere uno stream via chunked tran
 Disattivato per default: va avviato esplicitamente (CompanionServer.start()), non parte da solo
 con Jake. Ascolta solo su 127.0.0.1 per default: esporlo alla rete locale (per un telefono sulla
 stessa Wi-Fi) e' una scelta esplicita di chi lo avvia (host="0.0.0.0"), non il comportamento
-predefinito."""
+predefinito.
+
+F1 (Identity & Authentication, "capability token... per dispositivo" in ROADMAP.md): fino a
+questa correzione NESSUN endpoint richiedeva alcuna autenticazione - qualunque processo capace
+di raggiungere la porta (oggi solo altri processi sulla stessa macchina, dato che
+companion_server_host non e' ancora esposto in config.json; domani, quando lo sara' per un
+telefono sulla stessa Wi-Fi, chiunque su quella rete) poteva mandare comandi a Jake con gli
+stessi privilegi dell'utente - inclusa la possibilita' di rivendicare la sessione attiva
+(/devices/<id>/claim) senza autorizzazione. Il token (config.json: companion_token, cifrato a
+riposo via DPAPI come admin_passphrase, vedi core/config.py SECRET_KEYS) e' opt-in: se non
+configurato, il comportamento resta invariato (nessun controllo, come prima di questa fase) -
+chi ha gia' un uso locale/fidato del server non vede alcun cambiamento."""
+import hmac
 import json
 import queue
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -30,14 +42,21 @@ SSE_KEEPALIVE_SECONDS = 15
 class CompanionServer:
     """command_handler(text) -> str e' tipicamente JakeCore.answer: iniettabile cosi' i test non
     devono costruire un intero JakeCore per verificare il server (vedi tests/test_companion_
-    server.py). port=0 (default) lascia scegliere una porta libera al sistema operativo."""
+    server.py). port=0 (default) lascia scegliere una porta libera al sistema operativo.
 
-    def __init__(self, event_bus: EventBus = None, command_handler=None, host: str = DEFAULT_HOST, port: int = 0):
+    token (F1, opt-in): se impostato, ogni richiesta deve presentare "Authorization: Bearer
+    <token>", altrimenti riceve 401 - vedi il docstring del modulo."""
+
+    def __init__(
+        self, event_bus: EventBus = None, command_handler=None, host: str = DEFAULT_HOST, port: int = 0,
+        token: str = None,
+    ):
         self.event_bus = event_bus or EventBus()
         self.command_handler = command_handler or (lambda text: "")
         self.devices = DeviceRegistry()
         self.host = host
         self.port = port
+        self.token = token
         self._httpd: "_Server | None" = None
 
     @property
@@ -94,9 +113,25 @@ class _Handler(BaseHTTPRequestHandler):
     def companion(self) -> CompanionServer:
         return self.server.companion
 
+    # ---- autenticazione (F1, opt-in - vedi il docstring del modulo) ----------------------
+
+    def _is_authorized(self) -> bool:
+        """Vero se non e' configurato nessun token (comportamento invariato) o se la richiesta
+        presenta il token giusto in 'Authorization: Bearer <token>'. hmac.compare_digest invece
+        di '==': un confronto normale su stringhe non e' a tempo costante, e anche su una rete
+        locale non c'e' motivo di regalare un canale laterale temporale a chi indovina un
+        token un carattere alla volta."""
+        token = self.companion.token
+        if not token:
+            return True
+        header = self.headers.get("Authorization", "")
+        return hmac.compare_digest(header, f"Bearer {token}")
+
     # ---- routing ------------------------------------------------------------------------
 
     def do_GET(self):
+        if not self._is_authorized():
+            return self._json_response(401, {"error": "unauthorized"})
         if self.path == "/status":
             return self._json_response(200, {
                 "ok": True,
@@ -109,6 +144,13 @@ class _Handler(BaseHTTPRequestHandler):
         self._json_response(404, {"error": "not_found"})
 
     def do_POST(self):
+        if not self._is_authorized():
+            # Drena comunque il body: byte non letti nel buffer di ricezione quando la
+            # connessione si chiude fanno rispondere con un RST su Windows invece di una FIN
+            # pulita (lo stesso flake intermittente [WinError 10053] gia' descritto e risolto
+            # per _handle_release in F0 - vedi ROADMAP.md).
+            self._read_json_body()
+            return self._json_response(401, {"error": "unauthorized"})
         if self.path == "/command":
             return self._handle_command()
         if self.path.startswith("/devices/") and self.path.endswith("/claim"):

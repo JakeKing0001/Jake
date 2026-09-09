@@ -12,17 +12,19 @@ from core.companion_server import CompanionServer
 from core.hud_protocol import EventType
 
 
-def _get(url: str, timeout: float = 5) -> tuple[int, dict]:
+def _get(url: str, timeout: float = 5, headers: dict = None) -> tuple[int, dict]:
+    req = request.Request(url, headers=headers or {})
     try:
-        with request.urlopen(url, timeout=timeout) as response:
+        with request.urlopen(req, timeout=timeout) as response:
             return response.status, json.loads(response.read().decode("utf-8"))
     except error.HTTPError as exc:
         return exc.code, json.loads(exc.read().decode("utf-8"))
 
 
-def _post(url: str, payload: dict, timeout: float = 5) -> tuple[int, dict]:
+def _post(url: str, payload: dict, timeout: float = 5, headers: dict = None) -> tuple[int, dict]:
     body = json.dumps(payload).encode("utf-8")
-    req = request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+    all_headers = {"Content-Type": "application/json", **(headers or {})}
+    req = request.Request(url, data=body, headers=all_headers, method="POST")
     try:
         with request.urlopen(req, timeout=timeout) as response:
             return response.status, json.loads(response.read().decode("utf-8"))
@@ -151,6 +153,84 @@ class EventStreamTests(CompanionServerTestCase):
         payload = json.loads(received[0])
         self.assertEqual(payload["type"], "THINKING")
         self.assertEqual(payload["payload"], {"detail": "prova"})
+
+
+class TokenAuthenticationTests(unittest.TestCase):
+    """F1 (Identity & Authentication, "capability token... per dispositivo" - vedi ROADMAP.md):
+    fino a questa correzione NESSUN endpoint richiedeva autenticazione - qualunque processo
+    capace di raggiungere la porta poteva mandare comandi a Jake con gli stessi privilegi
+    dell'utente. token e' opt-in: senza (vedi le classi sopra, CompanionServerTestCase non lo
+    imposta mai) il comportamento resta invariato."""
+
+    def setUp(self):
+        self.command_calls = []
+        self.server = CompanionServer(command_handler=self._fake_answer, token="segreto-di-test")
+        self.server.start()
+        self.addCleanup(self.server.stop)
+        self.base_url = f"http://127.0.0.1:{self.server.port}"
+
+    def _fake_answer(self, text: str) -> str:
+        self.command_calls.append(text)
+        return f"risposta a: {text}"
+
+    def _auth_header(self, token: str) -> dict:
+        return {"Authorization": f"Bearer {token}"}
+
+    def test_command_without_any_authorization_header_is_rejected(self):
+        status, body = _post(f"{self.base_url}/command", {"text": "che ore sono"})
+
+        self.assertEqual(status, 401)
+        self.assertEqual(self.command_calls, [], "il comando non deve mai raggiungere il gestore senza autorizzazione")
+
+    def test_command_with_the_wrong_token_is_rejected(self):
+        status, body = _post(
+            f"{self.base_url}/command", {"text": "che ore sono"}, headers=self._auth_header("token-sbagliato"),
+        )
+
+        self.assertEqual(status, 401)
+        self.assertEqual(self.command_calls, [])
+
+    def test_command_with_the_correct_token_succeeds(self):
+        status, body = _post(
+            f"{self.base_url}/command", {"text": "che ore sono"}, headers=self._auth_header("segreto-di-test"),
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(self.command_calls, ["che ore sono"])
+
+    def test_status_endpoint_also_requires_the_token(self):
+        unauthorized_status, _ = _get(f"{self.base_url}/status")
+        authorized_status, body = _get(f"{self.base_url}/status", headers=self._auth_header("segreto-di-test"))
+
+        self.assertEqual(unauthorized_status, 401)
+        self.assertEqual(authorized_status, 200)
+        self.assertTrue(body["ok"])
+
+    def test_device_claim_without_the_token_is_rejected_and_does_not_claim_anything(self):
+        status, _ = _post(f"{self.base_url}/devices/telefono/claim", {"name": "Telefono"})
+
+        self.assertEqual(status, 401)
+        self.assertIsNone(self.server.devices.active_device_id, "il dispositivo non deve risultare rivendicato")
+
+    def test_unknown_path_is_401_before_404_when_unauthorized(self):
+        """L'autenticazione si controlla PRIMA del routing: un percorso inesistente non deve
+        rivelare la propria non-esistenza a chi non e' nemmeno autorizzato a chiedere."""
+        status, _ = _get(f"{self.base_url}/non-esiste")
+
+        self.assertEqual(status, 401)
+
+
+class NoTokenConfiguredIsBackwardCompatibleTests(CompanionServerTestCase):
+    """CompanionServerTestCase (in cima al file) costruisce il server senza mai passare
+    token=...: verifica esplicitamente che il default resti None, non una stringa vuota o
+    un'altra sorpresa silenziosa."""
+
+    def test_token_defaults_to_none(self):
+        self.assertIsNone(self.server.token)
+
+    def test_requests_succeed_without_any_authorization_header(self):
+        status, _ = _get(f"{self.base_url}/status")
+        self.assertEqual(status, 200)
 
 
 if __name__ == "__main__":
