@@ -554,6 +554,15 @@ pulita; smoke test installazione/avvio/arresto; dashboard locale con errori e la
   nessuna autenticazione su chi puo' reclamare un dispositivo, ma e' esattamente il gap gia'
   dichiarato per il companion server ("non ha pairing, identita' client... autorizzazioni per
   dispositivo") - non una scoperta nuova, lasciato dove il documento lo aveva gia' messo.
+- ✅ `core/embedding_provider.py` non aveva ancora nessun test, nonostante `cosine_similarity()`
+  sia la funzione su cui si basa tutto il dedup semantico e il recupero per similarita' di F5
+  (`core/memory_manager.py`, costruito/esteso in questa sessione stessa) - un bug li' avrebbe
+  minato silenziosamente tutto quel lavoro senza che nessun test se ne accorgesse. Nessun bug
+  trovato (vettori identici/opposti/ortogonali, scala invariante, vettori vuoti/di lunghezza
+  diversa/nulli gestiti senza crash), ma ora e' verificato invece che presunto. Aggiunto
+  `tests/test_embedding_provider.py` (15 test, `embed()` mockando `urllib.request.urlopen` con
+  lo stesso confine gia' usato per `HomeAssistantClient`/`NestClient`/`OllamaClient` - nessuna
+  vera chiamata a Ollama in un test automatico).
 - ⬜ Completare la separazione planner/policy engine/executor (planner escluso, policy non ancora
   un oggetto), capability token per agente/skill/dispositivo, passkey/WebAuthn (Windows Hello per
   operazioni ADMIN è fatto, vedi sopra - un passkey vero per un secondo dispositivo/servizio no),
