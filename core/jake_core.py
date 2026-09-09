@@ -599,9 +599,23 @@ class JakeCore:
         if result is not None and not result.success and result.error != "CONFIRMATION_REQUIRED":
             alt_command, note = fallbacks.alternative_for(resolved, result, self.skill_registry)
             if alt_command is not None:
-                alt_result = self.skill_registry.execute(alt_command.intent, alt_command.parameters)
-                if alt_result is not None and alt_result.success:
-                    return alt_command, alt_result, note
+                # F1 (difesa in profondita', non un buco gia' sfruttabile oggi): core/fallbacks.py
+                # ::alternative_for restituisce oggi solo alternative fisse a basso rischio
+                # (OPEN_URL/OPEN_APP/CLICK_ELEMENT/CLOSE_WINDOW, tutte LOCAL_REVERSIBLE), ma
+                # eseguirla saltando decide_interactive() e' un punto cieco strutturale - se in
+                # futuro un'alternativa mappasse verso un intent DESTRUCTIVE/ADMIN, partirebbe
+                # senza conferma. Un'alternativa che la policy fermerebbe viene semplicemente
+                # scartata (si ripiega sul fallimento originale) invece di aprire una SECONDA
+                # richiesta di conferma per qualcosa che l'utente non ha chiesto direttamente.
+                alt_decision = policy_engine.decide_interactive(
+                    alt_command.intent, alt_command.parameters,
+                    blocked_intents=self.blocked_intents, always_confirm_intents=self.always_confirm_intents,
+                    require_auth_intents=self.require_auth_intents, auth_gate=self.auth_gate,
+                )
+                if alt_decision == policy_engine.PolicyDecision.ALLOW:
+                    alt_result = self.skill_registry.execute(alt_command.intent, alt_command.parameters)
+                    if alt_result is not None and alt_result.success:
+                        return alt_command, alt_result, note
             else:
                 offer = fallbacks.offer_after_failure(resolved, result)
                 if offer is not None:
