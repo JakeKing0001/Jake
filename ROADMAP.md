@@ -489,6 +489,32 @@ pulita; smoke test installazione/avvio/arresto; dashboard locale con errori e la
   ancora la separazione FORMALE planner/policy/executor completa (il planner - core/
   planner_provider.py - non passa da qui, e la policy non e' ancora un oggetto iniettato ma due
   funzioni pure): un passo concreto e verificato, non l'intero pezzo grande.
+- ✅ **QUARTO buco della stessa famiglia, il piu' facile da innescare di tutti**: `RunWorkflowSkill`
+  (`skills/workflow.py`, l'intent `RUN_WORKFLOW`) non passava MAI `blocked_intents`/
+  `always_confirm_intents` a `PlanExecutor.execute()`, che senza quei due argomenti non applica
+  NESSUN controllo (`decide_automated` tratta `None` come "nessuna policy", vedi
+  `core/policy_engine.py`). Un'automazione salvata con un passo DESTRUCTIVE/ADMIN non
+  self-confirming (`FORGET`, `SET_POWER_PLAN`, `DELETE_TODO`, `DELETE_TRIGGER`,
+  `RESTART_EXPLORER`...) eseguiva quel passo SENZA alcuna conferma con un comando diretto
+  dell'utente ("esegui l'automazione X") - a differenza degli altri tre buchi di questa sessione,
+  qui non serviva nemmeno un prompt costruito ad arte o un plugin manomesso: un'automazione
+  salvata normalmente con `SAVE_WORKFLOW` (che non chiede conferma per essere SALVATA, solo
+  l'esecuzione e' rischiosa) bastava da sola. **Riprodotto per davvero**: un'automazione con un
+  singolo passo `FORGET` (DESTRUCTIVE, non self-confirming) eseguita via `RUN_WORKFLOW` ha
+  cancellato un ricordo vero senza chiedere nulla, `outcome.success == True`. Corretto iniettando
+  i due insiemi in `RunWorkflowSkill` DOPO la costruzione (`JakeCore.__init__`, stesso schema gia'
+  usato per `plan_executor.kill_switch`/`action_ledger`: `SkillRegistry` costruisce le skill prima
+  che questi due insiemi esistano) - riferimento allo stesso oggetto `set`, non una copia, cosi'
+  un intent aggiunto piu' tardi dalla Skill Forge resta visto anche qui. Riverificato dopo la
+  correzione: `outcome.success == False`, ricordo intatto. Coperto da `tests/test_workflow_skills.py`
+  (nuovo, `skills/workflow.py` non aveva ancora NESSUNA suite - esattamente come e' potuto restare
+  inosservato). Approfittando della stessa modifica, aggiunta anche la modalita' **dry-run**
+  ("mostrami prima cosa farebbe", F6/F3 - vedi lo scenario di accettazione "quando esco, spegni
+  tutto tranne il server" in cima a questo documento): `PlanExecutor.execute(..., dry_run=True)`
+  non esegue mai nessuna skill vera, si ferma comunque esattamente dove si fermerebbe un run
+  reale (BLOCK/CONFIRM/KILLED - il dry-run mostra la sequenza VERA, non una finta ottimistica),
+  nessuna ricevuta nel ledger per un passo mai avvenuto per davvero. Esposto come parametro
+  opzionale `dry_run` di `RUN_WORKFLOW`. Coperto da `DryRunTests` in `tests/test_plan_executor.py`.
 - ⬜ Completare la separazione planner/policy engine/executor (planner escluso, policy non ancora
   un oggetto), capability token per agente/skill/dispositivo, passkey/WebAuthn (Windows Hello per
   operazioni ADMIN è fatto, vedi sopra - un passkey vero per un secondo dispositivo/servizio no),
