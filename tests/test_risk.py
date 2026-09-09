@@ -8,7 +8,10 @@ import re
 import unittest
 from pathlib import Path
 
-from core.risk import SELF_CONFIRMING_INTENTS, SKILL_RISK, RiskLevel, is_at_least, needs_central_auth, risk_of
+from core.risk import (
+    SELF_CONFIRMING_INTENTS, SKILL_RISK, RiskLevel, is_at_least, needs_central_auth,
+    needs_central_confirmation, risk_of,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 INTENT_KEY_RE = re.compile(r'"([A-Z][A-Z0-9_]*)"\s*:')
@@ -55,6 +58,17 @@ class TestRiskOf(unittest.TestCase):
 
     def test_unclassified_intent_defaults_to_admin(self):
         self.assertEqual(risk_of("SOME_BRAND_NEW_PLUGIN_INTENT"), RiskLevel.ADMIN)
+
+    def test_unclassified_intent_is_actually_gated_not_just_labeled(self):
+        """Il default ADMIN non serve a niente se non triggera anche l'enforcement vera: questo
+        e' esattamente cio' su cui si basa JakeCore._on_skill_installed (F1, vedi ROADMAP.md) per
+        garantire che una skill installata a runtime dalla Skill Forge - o un plugin di terze
+        parti mai censito qui - chieda sempre conferma/autenticazione al primo utilizzo. Se in
+        futuro il default o needs_central_confirmation/needs_central_auth cambiassero in un modo
+        che rompe questa garanzia, deve fallire un test qui, non riaprire in silenzio il buco
+        gia' corretto in tests/test_jake_core_permissions.py::OnSkillInstalledGateWiringTests."""
+        self.assertTrue(needs_central_confirmation("SOME_BRAND_NEW_PLUGIN_INTENT"))
+        self.assertTrue(needs_central_auth("SOME_BRAND_NEW_PLUGIN_INTENT"))
 
 
 class TestEveryRegisteredSkillIsClassified(unittest.TestCase):
