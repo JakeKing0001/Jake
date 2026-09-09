@@ -5,6 +5,7 @@ coperto anche da tests/test_agent.py/tests/test_plan_executor.py con scenari piu
 import unittest
 from unittest import mock
 
+from core.autonomy_budget import AutonomyBudget
 from core.kill_switch import KillSwitch
 from skills.kill_switch import KillSwitchSkill, ResetKillSwitchSkill
 
@@ -65,6 +66,7 @@ class JakeCoreActivateResetTests(unittest.TestCase):
 
         core = JakeCore.__new__(JakeCore)
         core.kill_switch = KillSwitch()
+        core.autonomy_budget = AutonomyBudget()
         core.scheduler = mock.Mock()
         core.trigger_scheduler = mock.Mock()
         core.logger = mock.Mock()
@@ -88,6 +90,18 @@ class JakeCoreActivateResetTests(unittest.TestCase):
         self.assertFalse(core.kill_switch.is_active())
         core.scheduler.start.assert_called_once()
         core.trigger_scheduler.start.assert_called_once()
+
+    def test_reset_also_clears_an_exhausted_autonomy_budget(self):
+        """F6: se un'automazione impazzita aveva esaurito il budget (core/autonomy_budget.py)
+        prima o durante lo stop di emergenza, 'riprendi' deve dare un budget pieno."""
+        core = self._bare_core()
+        core.autonomy_budget = AutonomyBudget(max_actions=1)
+        core.autonomy_budget.record()
+        self.assertTrue(core.autonomy_budget.is_exceeded())
+
+        core.reset_kill_switch()
+
+        self.assertFalse(core.autonomy_budget.is_exceeded())
 
     def test_activate_does_not_crash_if_a_scheduler_stop_raises(self):
         core = self._bare_core()
