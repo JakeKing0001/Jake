@@ -9,7 +9,7 @@ from core.secrets_vault import is_protected, protect, unprotect
 # due credenziali vere che Config gestisce oggi. Aggiungere qui una nuova chiave la protegge
 # automaticamente, sia in lettura (get) sia in scrittura (set) sia alla migrazione di un valore
 # gia' salvato in chiaro da una versione precedente (_migrate_secrets).
-SECRET_KEYS = {"admin_passphrase", "home_assistant_token"}
+SECRET_KEYS = {"admin_passphrase", "home_assistant_token", "companion_token"}
 
 
 class Config:
