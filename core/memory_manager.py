@@ -71,6 +71,16 @@ class MemoryManager:
             self._connection.execute("ALTER TABLE memories ADD COLUMN embedding TEXT")
         if "project" not in existing_columns:
             self._connection.execute("ALTER TABLE memories ADD COLUMN project TEXT")
+        # F5 (Memory 2.0, provenienza e scadenza - vedi ROADMAP.md): source dice CHI ha detto
+        # questo fatto ("user": l'utente lo ha detto esplicitamente, "inferred": Jake lo ha
+        # dedotto, "agent:<nome>": deciso da un agente autonomo) - senza, un ricordo dedotto da
+        # un'ipotesi del modello e uno detto esplicitamente dall'utente sono indistinguibili in
+        # audit. expires_at (nullable = mai) e' quando il ricordo smette di valere da solo, per
+        # fatti con una scadenza naturale (es. "oggi piove" non deve restare vero per sempre).
+        if "source" not in existing_columns:
+            self._connection.execute("ALTER TABLE memories ADD COLUMN source TEXT NOT NULL DEFAULT 'user'")
+        if "expires_at" not in existing_columns:
+            self._connection.execute("ALTER TABLE memories ADD COLUMN expires_at TEXT")
         self._connection.commit()
 
     @staticmethod
@@ -85,15 +95,30 @@ class MemoryManager:
         importance: int = 1,
         embedding: list = None,
         project: str = None,
+        source: str = "user",
+        ttl_days: float = None,
     ) -> None:
         """Salva o aggiorna un ricordo (upsert su key+category). Se e' fornito un embedding e
         un ricordo esistente nella stessa categoria/progetto e' semanticamente quasi identico
         (v3.4, vedi DEDUP_SIMILARITY_THRESHOLD), aggiorna QUELLO invece di crearne uno nuovo con
         una chiave diversa: altrimenti "il mio compleanno e' il 5 marzo" seguito da "ricordati
         che compio gli anni il 5 di marzo" produrrebbe due ricordi separati per lo stesso fatto,
-        che invecchiando in modo indipendente potrebbero anche finire per contraddirsi."""
+        che invecchiando in modo indipendente potrebbero anche finire per contraddirsi.
+
+        source (F5, Memory 2.0, provenienza): "user" per default (un comando esplicito
+        dell'utente e' la fonte piu' comune), "inferred" per un'ipotesi dedotta da Jake,
+        "agent:<nome>" per una decisione autonoma di un agente - vedi core/system_advisor.py per
+        il primo chiamante reale con source="inferred". ttl_days (F5, scadenza): giorni da ora
+        dopo cui il ricordo smette di comparire in recall()/semantic_recall() (vedi
+        include_expired la' sotto) - None (default) significa 'nessuna scadenza', non 'scade
+        subito'. Un ttl esplicito e' una decisione presa da CHI SALVA il ricordo (sa gia' che
+        quel fatto ha vita breve, es. 'oggi piove'), diverso da purge_history_older_than (una
+        policy di retention decisa DOPO, dall'utente, per la privacy)."""
         now = self._now()
         embedding_json = json.dumps(embedding) if embedding else None
+        expires_at = (
+            (datetime.now(timezone.utc) + timedelta(days=ttl_days)).isoformat() if ttl_days is not None else None
+        )
 
         if embedding:
             duplicate_key = self._find_duplicate_key(embedding, category, project, exclude_key=key)
@@ -102,16 +127,19 @@ class MemoryManager:
 
         self._connection.execute(
             """
-            INSERT INTO memories (key, value, category, importance, created_at, updated_at, embedding, project)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO memories
+                (key, value, category, importance, created_at, updated_at, embedding, project, source, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(key, category) DO UPDATE SET
                 value = excluded.value,
                 importance = excluded.importance,
                 updated_at = excluded.updated_at,
                 embedding = excluded.embedding,
-                project = excluded.project
+                project = excluded.project,
+                source = excluded.source,
+                expires_at = excluded.expires_at
             """,
-            (key, value, category, importance, now, now, embedding_json, project),
+            (key, value, category, importance, now, now, embedding_json, project, source, expires_at),
         )
         self._connection.commit()
 
@@ -142,16 +170,23 @@ class MemoryManager:
                 best_key, best_score = row["key"], score
         return best_key if best_score >= self.DEDUP_SIMILARITY_THRESHOLD else None
 
+    _RETURNED_COLUMNS = "key, value, category, importance, updated_at, project, source, expires_at"
+
     def recall(
         self, key: str = None, category: str = None, query: str = None, project: str = None, limit: int = 5,
-        since: str = None, until: str = None,
+        since: str = None, until: str = None, include_expired: bool = False,
     ) -> list[dict]:
         """Recupera ricordi per chiave esatta e/o ricerca libera su chiave/valore.
 
         since/until (v3.4, query temporali): stringhe ISO 8601, confrontate su updated_at (il
         campo che riflette quando il ricordo e' stato detto o corretto l'ultima volta, non solo
         quando e' stato creato la prima volta). Il confronto testuale funziona perche' ISO 8601
-        e' ordinabile lessicograficamente."""
+        e' ordinabile lessicograficamente.
+
+        include_expired (F5, scadenza): False di default - un ricordo con un ttl_days passato
+        (vedi remember()) non deve piu' comparire nelle risposte normali, esattamente come se
+        non ci fosse, ma resta sul disco finche' purge_expired() non lo rimuove per davvero
+        (permette un audit/recupero, invece di una cancellazione istantanea e silenziosa)."""
         clauses = []
         params = []
         if key:
@@ -172,20 +207,27 @@ class MemoryManager:
         if until:
             clauses.append("updated_at <= ?")
             params.append(until)
+        if not include_expired:
+            clauses.append("(expires_at IS NULL OR expires_at >= ?)")
+            params.append(self._now())
 
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = self._connection.execute(
-            f"SELECT key, value, category, importance, updated_at, project FROM memories "
+            f"SELECT {self._RETURNED_COLUMNS} FROM memories "
             f"{where} ORDER BY importance DESC, updated_at DESC LIMIT ?",
             (*params, limit),
         ).fetchall()
         return [dict(row) for row in rows]
 
-    def semantic_recall(self, query_embedding: list, category: str = None, project: str = None, limit: int = 5) -> list[dict]:
+    def semantic_recall(
+        self, query_embedding: list, category: str = None, project: str = None, limit: int = 5,
+        include_expired: bool = False,
+    ) -> list[dict]:
         """Recupera i ricordi piu' simili semanticamente a un embedding di query.
 
         Calcola la similarita' coseno in Python: adeguato alla scala di una memoria personale
-        (centinaia/migliaia di ricordi), non a un vero indice vettoriale su larga scala."""
+        (centinaia/migliaia di ricordi), non a un vero indice vettoriale su larga scala.
+        include_expired: stesso significato di recall() sopra."""
         from core.embedding_provider import EmbeddingProvider
 
         clauses = ["embedding IS NOT NULL"]
@@ -196,9 +238,12 @@ class MemoryManager:
         if project:
             clauses.append("project = ?")
             params.append(project)
+        if not include_expired:
+            clauses.append("(expires_at IS NULL OR expires_at >= ?)")
+            params.append(self._now())
 
         rows = self._connection.execute(
-            f"SELECT key, value, category, importance, updated_at, project, embedding "
+            f"SELECT {self._RETURNED_COLUMNS}, embedding "
             f"FROM memories WHERE {' AND '.join(clauses)}",
             params,
         ).fetchall()
@@ -207,12 +252,24 @@ class MemoryManager:
         for row in rows:
             embedding = json.loads(row["embedding"])
             score = EmbeddingProvider.cosine_similarity(query_embedding, embedding)
-            entry = {k: row[k] for k in ("key", "value", "category", "importance", "updated_at", "project")}
+            entry = {k: row[k] for k in ("key", "value", "category", "importance", "updated_at", "project", "source", "expires_at")}
             entry["score"] = score
             scored.append(entry)
 
         scored.sort(key=lambda entry: entry["score"], reverse=True)
         return scored[:limit]
+
+    def purge_expired(self) -> int:
+        """Rimuove per davvero i ricordi la cui scadenza (expires_at, vedi remember() ttl_days)
+        e' passata. Non automatico ad ogni avvio (nessun chiamante lo invoca da solo oggi):
+        recall()/semantic_recall() gia' li nascondono di default, quindi non c'e' fretta di
+        cancellarli - questo metodo esiste per una pulizia periodica esplicita (es. un futuro
+        hook di manutenzione in core/system_advisor.py), non per essere invocato ad ogni turno."""
+        cursor = self._connection.execute(
+            "DELETE FROM memories WHERE expires_at IS NOT NULL AND expires_at < ?", (self._now(),)
+        )
+        self._connection.commit()
+        return cursor.rowcount
 
     def forget(self, key: str, category: str = None) -> bool:
         """Elimina i ricordi con la chiave indicata. Restituisce True se qualcosa e' stato rimosso."""
