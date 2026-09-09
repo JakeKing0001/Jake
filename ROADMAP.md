@@ -827,12 +827,30 @@ della lista sopra, non l'intera fase.
   la finestra scorrevole) e da `tests/test_trigger_scheduler.py` (nuovo, il modulo non aveva
   ancora nessuna suite - 5 test sull'integrazione in `_fire()`), oltre a
   `test_reset_also_clears_an_exhausted_autonomy_budget` in `tests/test_kill_switch.py`.
+- ✅ La modalita' dry-run ("mostrami prima cosa farebbe") e' stata aggiunta insieme al bug di
+  `RUN_WORKFLOW` corretto in F1 sopra - vedi quella voce per i dettagli, non ripetuti qui.
+- 🟡 Digital housekeeping, primo pezzo (`core/system_advisor.py`, `_check_downloads_clutter`):
+  nota da solo se la cartella Download ha accumulato troppo spazio (soglia 5 GB) o troppi file
+  vecchi (>30 giorni, soglia 20 file) - un SUGGERIMENTO, mai un'azione: Jake non cancella nulla
+  da solo. Legge solo dimensione/data di modifica (`os.stat`), mai il contenuto dei file, e solo
+  il livello piu' alto della cartella (non ricorsivo) - a differenza di `FIND_DUPLICATE_FILES`
+  (che hasha ogni file, va bene per una richiesta esplicita, troppo costoso per un controllo
+  periodico ogni pochi minuti in background). **Verificato con la cartella Download vera di
+  questa macchina** (sola lettura, nessuna modifica): rilevati correttamente 4,2 GB e 73 file
+  piu' vecchi di 30 giorni, avviso generato. Coperto da 7 nuovi test in
+  `tests/test_system_advisor.py` (cartella mancante, cartella piccola silenziosa, soglia
+  dimensione, soglia conteggio file vecchi, riarmo dopo pulizia, sottocartelle non scandite -
+  con soglie abbassate via mock invece di scrivere file da 5+ GB veri su disco). Resta 🟡, non
+  ✅: solo Download e solo due segnali (spazio/eta'); duplicati, cartelle diverse da Download,
+  aggiornamenti e sicurezza del sistema restano non affrontati.
 - ⬜ Tutto il resto: event engine multi-connettore, daily brief, commitment tracking, goal
-  manager, routine apprese, focus assistant, meeting copilot, digital housekeeping, quiet policy
-  appresa/cooldown/digest, simulazione/dry-run con finestra di annullamento: non affrontati.
-  Molti di questi (in particolare "routine apprese" e "quiet policy appresa") richiedono dati
-  d'uso reali per "imparare" qualunque cosa - non sono implementabili in modo verificabile senza
-  quei dati, a differenza dell'autonomy budget sopra (una regola fissa, non appresa).
+  manager, routine apprese, focus assistant, meeting copilot, resto del digital housekeeping
+  (duplicati, aggiornamenti, sicurezza), quiet policy appresa/cooldown/digest, finestra di
+  annullamento dopo l'esecuzione (il dry-run PRIMA di eseguire c'e' gia', l'undo DOPO no): non
+  affrontati. Molti di questi (in particolare "routine apprese" e "quiet policy appresa")
+  richiedono dati d'uso reali per "imparare" qualunque cosa - non sono implementabili in modo
+  verificabile senza quei dati, a differenza dell'autonomy budget e del controllo Download sopra
+  (regole fisse, non apprese).
 
 ## F7 — Mobile, Home & Ambient Computing
 
