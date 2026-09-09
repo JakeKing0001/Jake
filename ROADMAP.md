@@ -573,18 +573,40 @@ pulita; smoke test installazione/avvio/arresto; dashboard locale con errori e la
   come "mai visitato" invece che come l'epoca WebKit 1601), ma ora verificato con un vero
   database sqlite scritto su disco temporaneo con lo schema reale di Chrome, non simulato.
   Aggiunto `tests/test_browser_history.py` (9 test).
-- ⬜ Completare la separazione planner/policy engine/executor (planner escluso, policy non ancora
-  un oggetto), capability token per agente/skill/dispositivo, passkey/WebAuthn (Windows Hello per
+- ✅ **Separazione policy engine/executor completata (`core/policy_engine.py`, `PolicyEngine`),
+  con un QUARTO buco reale trovato e corretto**: `decide_interactive()`/`decide_automated()`/
+  `register_intent()` erano funzioni pure che prendevano `blocked_intents`/
+  `always_confirm_intents`/`require_auth_intents` come argomenti separati - ogni consumatore
+  (`JakeCore`, `PlanExecutor.execute()`, `TriggerScheduler`, `RunWorkflowSkill`) doveva
+  riceverli e ripassarli a mano, DUE insiemi paralleli invece di uno. **Questo e' esattamente
+  cio' che ha causato il bug di `RunWorkflowSkill`** (sopra): riceveva un solo riferimento
+  invece di due, senza che nulla lo segnalasse finche' non l'ho verificato per davvero.
+  Trasformate in un vero oggetto `PolicyEngine` con stato proprio (`blocked_intents`/
+  `always_confirm_intents`/`require_auth_intents`/`auth_gate`), costruito UNA volta in
+  `JakeCore.__init__` e condiviso PER RIFERIMENTO (mai copiato) con `PlanExecutor.execute()`
+  (nuovo parametro `policy_engine`, sostituisce i due insiemi separati),
+  `TriggerScheduler` e `RunWorkflowSkill` (stesso cambio): ora c'e' UN riferimento da collegare
+  per ogni nuovo consumatore, non piu' due che si possono dimenticare a meta'. Refactor esteso
+  (`core/jake_core.py`, `core/plan_executor.py`, `core/trigger_scheduler.py`,
+  `skills/workflow.py` e i rispettivi test), verificato ad ogni passo con la suite esistente
+  (602 test) prima di procedere al successivo, poi end-to-end su un `JakeCore` reale: confermato
+  con `is` che `trigger_scheduler.policy_engine`/`run_workflow_skill.policy_engine` sono lo
+  STESSO oggetto di `core.policy_engine` (non copie), e che i bug 1 e 4 di questa sessione
+  restano chiusi dopo il refactor, non solo prima. Il planner (`core/planner_provider.py`)
+  resta volutamente fuori da `PolicyEngine`: propone piani, non decide se eseguirli - non ha
+  bisogno di diventarne un consumatore per completare la separazione "chi propone" / "chi
+  decide" / "chi esegue".
+- ⬜ Capability token per agente/skill/dispositivo, passkey/WebAuthn (Windows Hello per
   operazioni ADMIN è fatto, vedi sopra - un passkey vero per un secondo dispositivo/servizio no),
   un vero taint tracking/allowlist generale per le difese da prompt injection (il bypass di
   `PlanExecutor` e la mitigazione nel prompt dell'agente sopra chiudono/riducono due canali
   concreti e verificati, ma non sono una difesa sistemica: un testo non fidato potrebbe ancora
   influenzare un agente in altri modi non coperti qui), sandbox OS per i plugin generati dalla
   fucina, backup transazionale + undo center nell'HUD: non affrontati ulteriormente in questa
-  sessione. Sono i pezzi più grandi e rischiosi di F1 (un kernel di permessi vero, sandboxing a
-  livello OS): meritano una sessione dedicata con più tempo per la revisione di sicurezza, non
-  un'implementazione affrettata - meglio dichiararli apertamente qui che spacciare un abbozzo
-  rischioso per fatto.
+  sessione. Sono i pezzi più grandi e rischiosi di F1 rimasti (un kernel di permessi con
+  capability vere, sandboxing a livello OS): meritano una sessione dedicata con più tempo per
+  la revisione di sicurezza, non un'implementazione affrettata - meglio dichiararli apertamente
+  qui che spacciare un abbozzo rischioso per fatto.
 
 **Criterio di uscita:** nessuna skill non classificata; nessuna azione esterna/admin senza
 ricevuta di policy; test d'attacco su prompt injection e plugin; restore verificato.
