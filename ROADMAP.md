@@ -563,6 +563,16 @@ pulita; smoke test installazione/avvio/arresto; dashboard locale con errori e la
   `tests/test_embedding_provider.py` (15 test, `embed()` mockando `urllib.request.urlopen` con
   lo stesso confine gia' usato per `HomeAssistantClient`/`NestClient`/`OllamaClient` - nessuna
   vera chiamata a Ollama in un test automatico).
+- ✅ `core/browser_history.py` (`GET_BROWSER_HISTORY`) legge dati privati dell'utente (la
+  cronologia di navigazione, da una copia del file `History` sqlite di Chrome/Edge, mai
+  l'originale in place perche' il browser lo tiene bloccato mentre gira) e non aveva ancora
+  nessun test - in particolare la conversione dei timestamp WebKit (microsecondi dal
+  1601-01-01, non l'epoca Unix: una classica fonte di bug silenziosi da un giorno/anno
+  sbagliato). Nessun bug trovato (query parametrizzata contro SQL injection, copia sempre letta
+  invece dell'originale, database corrotto gestito senza crash, timestamp zero interpretato
+  come "mai visitato" invece che come l'epoca WebKit 1601), ma ora verificato con un vero
+  database sqlite scritto su disco temporaneo con lo schema reale di Chrome, non simulato.
+  Aggiunto `tests/test_browser_history.py` (9 test).
 - ⬜ Completare la separazione planner/policy engine/executor (planner escluso, policy non ancora
   un oggetto), capability token per agente/skill/dispositivo, passkey/WebAuthn (Windows Hello per
   operazioni ADMIN è fatto, vedi sopra - un passkey vero per un secondo dispositivo/servizio no),
