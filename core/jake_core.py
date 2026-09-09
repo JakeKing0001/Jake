@@ -302,6 +302,20 @@ class JakeCore:
                 require_auth_intents=self.require_auth_intents,
             )
 
+        # F1: buco reale trovato e corretto - RUN_WORKFLOW non passava MAI blocked_intents/
+        # always_confirm_intents a PlanExecutor.execute() (vedi skills/workflow.py,
+        # RunWorkflowSkill), che senza quei due argomenti non applica nessun controllo. Un
+        # comando diretto ("esegui l'automazione X") su un'automazione con un passo DESTRUCTIVE/
+        # ADMIN non self-confirming eseguiva quel passo senza alcuna conferma. Stesso schema
+        # gia' usato per plan_executor.kill_switch/action_ledger sopra: iniettati DOPO la
+        # costruzione, perche' SkillRegistry costruisce le skill prima che questi due insiemi
+        # esistano. Riferimento allo STESSO oggetto set (non una copia): un intent installato
+        # piu' tardi dalla Skill Forge (vedi _on_skill_installed) resta visto anche qui.
+        run_workflow_skill = self.skill_registry.get_skill("RUN_WORKFLOW")
+        if run_workflow_skill is not None:
+            run_workflow_skill.blocked_intents = self.blocked_intents
+            run_workflow_skill.always_confirm_intents = self.always_confirm_intents
+
         # Indici del recupero semantico: costruiti dopo che TUTTE le skill sono registrate.
         self.retriever.refresh()
         self.logger.info(

@@ -366,5 +366,82 @@ class AuthorizationSignalStrippingTests(unittest.TestCase):
         self.assertEqual(cleaned, {"path": "C:/tmp/file.txt", "destination": "C:/tmp"})
 
 
+class DryRunTests(unittest.TestCase):
+    """F6 ("mostrami prima" - vedi ROADMAP.md): dry_run=True non deve MAI eseguire una skill
+    vera, ma deve comunque fermarsi esattamente dove si fermerebbe un run reale (BLOCK/CONFIRM/
+    KILLED), cosi' l'utente vede la sequenza VERA che accadrebbe, non una finta ottimistica."""
+
+    def test_allowed_steps_are_simulated_without_touching_the_registry(self):
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
+        plan = Plan(steps=[
+            PlanStep(intent="ADD_NOTE", parameters={"text": "prova"}),
+            PlanStep(intent="ADD_NOTE", parameters={"text": "prova2"}),
+        ])
+
+        outcome = PlanExecutor(registry).execute(plan, dry_run=True)
+
+        self.assertEqual(registry.calls, [], "nessuna skill deve essere eseguita davvero in dry-run")
+        self.assertTrue(outcome.success)
+        self.assertEqual(len(outcome.completed), 2)
+        self.assertTrue(outcome.completed[0].result.data["dry_run"])
+        self.assertEqual(outcome.completed[0].result.data["intent"], "ADD_NOTE")
+
+    def test_blocked_step_still_stops_the_preview_at_the_same_point(self):
+        registry = FakeRegistry()
+        plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
+
+        outcome = PlanExecutor(registry).execute(plan, blocked_intents={"ADD_NOTE"}, dry_run=True)
+
+        self.assertFalse(outcome.success)
+        self.assertEqual(outcome.stopped_step.result.error, "POLICY_BLOCKED")
+        self.assertEqual(registry.calls, [])
+
+    def test_step_needing_confirmation_still_stops_the_preview(self):
+        registry = FakeRegistry()
+        plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
+
+        outcome = PlanExecutor(registry).execute(plan, always_confirm_intents={"ADD_NOTE"}, dry_run=True)
+
+        self.assertFalse(outcome.success)
+        self.assertEqual(outcome.stopped_step.result.error, "CONFIRMATION_REQUIRED")
+        self.assertEqual(registry.calls, [])
+
+    def test_dry_run_never_writes_to_the_ledger(self):
+        """Niente e' successo per davvero: una ricevuta nel ledger per un passo simulato
+        affermerebbe un'azione mai avvenuta."""
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
+        plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
+        ledger = unittest.mock.Mock()
+        executor = PlanExecutor(registry)
+        executor.action_ledger = ledger
+
+        executor.execute(plan, dry_run=True)
+
+        ledger.record.assert_not_called()
+
+    def test_dry_run_stops_at_the_first_blocking_step_not_after(self):
+        """Se il primo passo e' bloccato, i successivi non vengono nemmeno simulati - la
+        sequenza mostrata deve essere quella che accadrebbe DAVVERO, dove un passo bloccato
+        interrompe tutto il resto."""
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
+        plan = Plan(steps=[
+            PlanStep(intent="DELETE_PATH", parameters={"path": "x"}),
+            PlanStep(intent="ADD_NOTE", parameters={"text": "mai raggiunto"}),
+        ])
+
+        outcome = PlanExecutor(registry).execute(plan, blocked_intents={"DELETE_PATH"}, dry_run=True)
+
+        self.assertEqual(outcome.completed, [])
+        self.assertEqual(outcome.stopped_step.step.intent, "DELETE_PATH")
+
+    def test_default_dry_run_is_false_and_executes_for_real(self):
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
+        plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "prova"})])
+
+        PlanExecutor(registry).execute(plan)
+
+        self.assertEqual(registry.calls, [("ADD_NOTE", {"text": "prova"})])
+
+
 if __name__ == "__main__":
     unittest.main()

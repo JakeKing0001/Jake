@@ -55,6 +55,7 @@ class PlanExecutor:
     def execute(
         self, plan, blocked_intents: set = None, always_confirm_intents: set = None,
         trace_id: str = None, private: bool = False, model: str = None, requested_by: str = "user",
+        dry_run: bool = False,
     ) -> PlanOutcome:
         """blocked_intents/always_confirm_intents sono opzionali (default None = nessun
         controllo, comportamento identico a prima) perche' oggi solo JakeCore._process()
@@ -69,7 +70,16 @@ class PlanExecutor:
         comunque correlati tra loro anche senza collegamento a una richiesta piu' ampia.
         requested_by (F1, action ledger): "user" di default (il ripiego di JakeCore._try_plan,
         sempre partito da una richiesta diretta), "trigger:<nome>" quando e' TriggerScheduler a
-        far partire un'automazione da sola."""
+        far partire un'automazione da sola.
+
+        dry_run (F6, "mostrami prima" - vedi ROADMAP.md): quando vero, NESSUNA skill viene
+        davvero eseguita - ogni passo che la policy lascerebbe passare (ALLOW) viene solo
+        annotato come simulato in outcome.completed, cosi' l'utente vede l'intera sequenza che
+        girerebbe per davvero PRIMA di attivarla (lo scenario "quando esco, spegni tutto tranne
+        il server: mostrami cosa faresti, poi testala"). Un passo che la policy fermerebbe
+        comunque (BLOCK/CONFIRM) si ferma anche qui, senza differenze: il dry-run mostra la
+        sequenza REALE che accadrebbe, non una finta in cui tutto va sempre bene. Nessun
+        log_action/ricevuta nel ledger per un passo simulato: non e' mai successo per davvero."""
         trace_id = trace_id or new_trace_id()
         outcome = PlanOutcome()
         for step in plan.steps:
@@ -82,11 +92,12 @@ class PlanExecutor:
                 outcome.stopped_step = StepOutcome(
                     step=step, result=SkillResult(success=False, data={}, error="KILLED"), attempts=0,
                 )
-                outcome.rolled_back = self._rollback(outcome.completed)
-                self._log_step(
-                    trace_id, private, model, requested_by, time.monotonic(), step.intent, safe_parameters,
-                    result="error:KILLED", verified=None,
-                )
+                if not dry_run:
+                    outcome.rolled_back = self._rollback(outcome.completed)
+                    self._log_step(
+                        trace_id, private, model, requested_by, time.monotonic(), step.intent, safe_parameters,
+                        result="error:KILLED", verified=None,
+                    )
                 return outcome
             # F1 (core/policy_engine.py): stessa decisione usata dal percorso interattivo di
             # JakeCore (decide_interactive), nella sua variante senza REQUIRE_AUTH - qui nessuno
@@ -101,11 +112,12 @@ class PlanExecutor:
                     result=SkillResult(success=False, data={}, error="POLICY_BLOCKED"),
                     attempts=0,
                 )
-                outcome.rolled_back = self._rollback(outcome.completed)
-                self._log_step(
-                    trace_id, private, model, requested_by, time.monotonic(), step.intent, safe_parameters,
-                    result="policy_blocked", verified=None,
-                )
+                if not dry_run:
+                    outcome.rolled_back = self._rollback(outcome.completed)
+                    self._log_step(
+                        trace_id, private, model, requested_by, time.monotonic(), step.intent, safe_parameters,
+                        result="policy_blocked", verified=None,
+                    )
                 return outcome
             if decision == PolicyDecision.CONFIRM:
                 outcome.stopped_step = StepOutcome(
@@ -116,11 +128,20 @@ class PlanExecutor:
                     ),
                     attempts=0,
                 )
-                self._log_step(
-                    trace_id, private, model, requested_by, time.monotonic(), step.intent, safe_parameters,
-                    result="confirmation_required", verified=None,
-                )
+                if not dry_run:
+                    self._log_step(
+                        trace_id, private, model, requested_by, time.monotonic(), step.intent, safe_parameters,
+                        result="confirmation_required", verified=None,
+                    )
                 return outcome
+
+            if dry_run:
+                outcome.completed.append(StepOutcome(
+                    step=step,
+                    result=SkillResult(success=True, data={"dry_run": True, "intent": step.intent, "parameters": safe_parameters}),
+                    attempts=0,
+                ))
+                continue
 
             step_started = time.monotonic()
             step_outcome = self._execute_step(step, safe_parameters)
