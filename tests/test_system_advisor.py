@@ -1,7 +1,12 @@
 """Test per gli avvisi proattivi (vedi core/system_advisor.py): un avviso scatta una sola
 volta per 'episodio' sotto soglia, non ad ogni controllo, e si riarma quando si torna sopra
 soglia."""
+import os
+import shutil
+import tempfile
+import time
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -132,6 +137,93 @@ class SystemAdvisorStaleTodoTests(unittest.TestCase):
         advisor.todo_manager = FakeTodoManager([{"id": 1, "text": "prima", "created_at": "2020-01-01"}])
         advisor._check_stale_todos()
         self.assertEqual(len(self.messages), 2)
+
+
+class SystemAdvisorDownloadsClutterTests(unittest.TestCase):
+    """F6 (Proactive Intelligence & Autonomy: "digital housekeeping... prima come suggerimenti"
+    - vedi ROADMAP.md). File veri su disco temporaneo (mai la vera cartella Download
+    dell'utente): dimensione e data di modifica reali, non mockate, perche' e' esattamente
+    cio' che _check_downloads_clutter legge davvero (os.stat, non il contenuto)."""
+
+    def setUp(self):
+        self.messages = []
+        self.tmp_dir = Path(tempfile.mkdtemp(prefix="jake_downloads_test_"))
+        self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
+
+    def _advisor(self):
+        return SystemAdvisor(on_advisory=self.messages.append, enabled=False, downloads_dir=self.tmp_dir)
+
+    def _write_file(self, name: str, size_bytes: int, age_days: float = 0) -> None:
+        path = self.tmp_dir / name
+        path.write_bytes(b"0" * size_bytes)
+        if age_days:
+            old_time = time.time() - age_days * 86400
+            os.utime(path, (old_time, old_time))
+
+    def test_missing_downloads_folder_is_silent(self):
+        advisor = SystemAdvisor(on_advisory=self.messages.append, enabled=False, downloads_dir=self.tmp_dir / "non_esiste")
+
+        advisor._check_downloads_clutter()
+
+        self.assertEqual(self.messages, [])
+
+    def test_small_recent_folder_is_silent(self):
+        self._write_file("appunti.txt", size_bytes=1024)
+        advisor = self._advisor()
+
+        advisor._check_downloads_clutter()
+
+        self.assertEqual(self.messages, [])
+
+    def test_warns_once_when_total_size_exceeds_the_threshold(self):
+        # Soglia abbassata via mock invece di scrivere davvero un file da 5+ GB su disco.
+        self._write_file("grande.bin", size_bytes=2048)
+        advisor = self._advisor()
+
+        with mock.patch("core.system_advisor.DOWNLOADS_SIZE_WARN_GB", 2048 / (1024 ** 3)):
+            advisor._check_downloads_clutter()
+            advisor._check_downloads_clutter()
+
+        self.assertEqual(len(self.messages), 1)
+        self.assertIn("GB", self.messages[0])
+
+    def test_warns_when_many_old_files_accumulate_even_if_small(self):
+        for i in range(25):
+            self._write_file(f"vecchio_{i}.txt", size_bytes=10, age_days=60)
+        advisor = self._advisor()
+
+        advisor._check_downloads_clutter()
+
+        self.assertEqual(len(self.messages), 1)
+        self.assertIn("vecchi", self.messages[0])
+
+    def test_rearms_after_cleanup(self):
+        small_threshold_gb = 2048 / (1024 ** 3)
+        with mock.patch("core.system_advisor.DOWNLOADS_SIZE_WARN_GB", small_threshold_gb):
+            self._write_file("grande.bin", size_bytes=2048)
+            advisor = self._advisor()
+            advisor._check_downloads_clutter()
+
+            (self.tmp_dir / "grande.bin").unlink()
+            advisor._check_downloads_clutter()  # sotto soglia ora: riarma
+            self._write_file("grande2.bin", size_bytes=2048)
+            advisor._check_downloads_clutter()
+
+        self.assertEqual(len(self.messages), 2)
+
+    def test_subfolders_are_not_scanned(self):
+        """Solo il livello piu' alto: una sottocartella con un file grande non deve far scattare
+        l'avviso, ne' far fallire lo scan (entry.is_file() e' False per una directory)."""
+        small_threshold_gb = 2048 / (1024 ** 3)
+        subfolder = self.tmp_dir / "sottocartella"
+        subfolder.mkdir()
+        (subfolder / "grande.bin").write_bytes(b"0" * 2048)
+        advisor = self._advisor()
+
+        with mock.patch("core.system_advisor.DOWNLOADS_SIZE_WARN_GB", small_threshold_gb):
+            advisor._check_downloads_clutter()
+
+        self.assertEqual(self.messages, [])
 
 
 if __name__ == "__main__":

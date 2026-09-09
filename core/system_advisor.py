@@ -9,25 +9,41 @@ minuti. Rientra sopra soglia (batteria messa in carica, spazio liberato) riarma 
 la prossima volta."""
 import os
 import threading
+import time
+from pathlib import Path
 
 from core.logger import get_logger
 
 BATTERY_LOW_PERCENT = 15
 DISK_FREE_LOW_GB = 3.0
 STALE_TODO_DAYS = 3
+# F6 (Proactive Intelligence & Autonomy, "digital housekeeping... prima come suggerimenti" -
+# vedi ROADMAP.md): soglie deliberatamente larghe, per non diventare invadenti su una cartella
+# che quasi tutti lasciano accumulare per settimane senza che sia un problema reale.
+DOWNLOADS_SIZE_WARN_GB = 5.0
+DOWNLOADS_OLD_FILE_DAYS = 30
+DOWNLOADS_OLD_FILES_WARN_COUNT = 20
+DOWNLOADS_MAX_SCANNED = 2000
 
 
 class SystemAdvisor:
-    def __init__(self, on_advisory=None, interval_seconds: float = 300, enabled: bool = True, todo_manager=None):
+    def __init__(
+        self, on_advisory=None, interval_seconds: float = 300, enabled: bool = True, todo_manager=None,
+        downloads_dir: Path = None,
+    ):
         self.on_advisory = on_advisory
         self.interval_seconds = interval_seconds
         self.enabled = enabled
         self.todo_manager = todo_manager
+        # F6: iniettabile per i test (mai la vera cartella Download dell'utente in un test
+        # automatico), default alla cartella Download reale altrimenti.
+        self.downloads_dir = Path(downloads_dir) if downloads_dir else Path.home() / "Downloads"
         self._thread = None
         self._stop_event = threading.Event()
         self._logger = get_logger()
         self._battery_warned = False
         self._disk_warned = False
+        self._downloads_warned = False
         self._stale_todo_ids_warned: set = set()  # (v4.2) gia' segnalate: non ripeterle ogni giro
 
     def start(self) -> None:
@@ -56,6 +72,10 @@ class SystemAdvisor:
                 self._check_stale_todos()
             except Exception:
                 self._logger.exception("Errore controllando le attivita' in sospeso")
+            try:
+                self._check_downloads_clutter()
+            except Exception:
+                self._logger.exception("Errore controllando la cartella Download")
             self._stop_event.wait(self.interval_seconds)
 
     def _check_battery(self) -> None:
@@ -106,6 +126,54 @@ class SystemAdvisor:
         else:
             oldest = new_ones[0]["text"]
             self._advise(f"Hai {len(new_ones)} attivita' in sospeso da un po' nella todo list, la piu' vecchia e': \"{oldest}\".")
+
+    def _check_downloads_clutter(self) -> None:
+        """Nota da solo se la cartella Download ha accumulato troppo spazio o troppi file
+        vecchi (F6, Proactive Intelligence & Autonomy: "digital housekeeping... prima come
+        suggerimenti", vedi ROADMAP.md) - un suggerimento, non un'azione: Jake non cancella
+        nulla da solo. Legge solo dimensione/data di modifica (os.stat), MAI il contenuto dei
+        file: a differenza di FIND_DUPLICATE_FILES (skills/file_utils2.py, che legge e hasha
+        ogni file per confrontarne il contenuto - va bene per una richiesta esplicita
+        dell'utente, troppo costoso per un controllo periodico ogni pochi minuti in background).
+        Solo il livello piu' alto della cartella (non ricorsivo), con lo stesso limite di
+        sicurezza (DOWNLOADS_MAX_SCANNED) gia' usato altrove per non scandire all'infinito una
+        cartella enorme."""
+        if not self.downloads_dir.is_dir():
+            return
+
+        total_bytes = 0
+        old_count = 0
+        scanned = 0
+        cutoff = time.time() - DOWNLOADS_OLD_FILE_DAYS * 86400
+        try:
+            with os.scandir(self.downloads_dir) as entries:
+                for entry in entries:
+                    scanned += 1
+                    if scanned > DOWNLOADS_MAX_SCANNED:
+                        break
+                    try:
+                        if not entry.is_file():
+                            continue
+                        stat = entry.stat()
+                    except OSError:
+                        continue
+                    total_bytes += stat.st_size
+                    if stat.st_mtime < cutoff:
+                        old_count += 1
+        except OSError:
+            return
+
+        total_gb = total_bytes / (1024 ** 3)
+        cluttered = total_gb >= DOWNLOADS_SIZE_WARN_GB or old_count >= DOWNLOADS_OLD_FILES_WARN_COUNT
+        if cluttered and not self._downloads_warned:
+            self._downloads_warned = True
+            detail = f" ({old_count} più vecchi di {DOWNLOADS_OLD_FILE_DAYS} giorni)" if old_count else ""
+            self._advise(
+                f"La cartella Download ha accumulato {total_gb:.1f} GB{detail}: "
+                "potresti fare un po' di pulizia quando hai tempo."
+            )
+        elif not cluttered:
+            self._downloads_warned = False
 
     def _advise(self, message: str) -> None:
         self._logger.info("Avviso proattivo: %s", message)
