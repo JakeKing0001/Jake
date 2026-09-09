@@ -22,6 +22,7 @@ from core.trigger_manager import TriggerManager
 from core.reminder_manager import ReminderManager
 from core.todo_manager import TodoManager
 from core.risk import risk_of
+from core.logger import get_logger
 from copy import deepcopy
 
 
@@ -35,7 +36,9 @@ class SkillRegistry:
         config: Config = None,
         embedding_provider: EmbeddingProvider = None,
         reminder_manager: ReminderManager = None,
+        logger=None,
     ):
+        self.logger = logger or get_logger()
         self.memory_manager = memory_manager or MemoryManager()
         self.conversation_state = conversation_state or ConversationStateManager()
         self.nest_client = nest_client or NestClient()
@@ -92,8 +95,31 @@ class SkillRegistry:
 
     def register_skill(self, intent: str, skill) -> None:
         """Registra una skill aggiuntiva a runtime: il punto di estensione per plugin di terze
-        parti, senza dover modificare l'elenco hardcoded in __init__. La skill deve esporre
-        un attributo 'metadata' (intent/description/parameters) e un metodo execute(parameters)."""
+        parti e per la Skill Forge (core/skill_forge.py), senza dover modificare l'elenco
+        hardcoded in __init__. La skill deve esporre un attributo 'metadata' (intent/
+        description/parameters) e un metodo execute(parameters).
+
+        F1: le skill built-in vengono caricate con self.skills.update(...) direttamente in
+        __init__, MAI passando da qui - questo metodo e' quindi solo il punto d'ingresso di
+        plugin/fucina, il posto giusto per accorgersi se uno dei due sta silenziosamente
+        sostituendo un intent gia' esistente (built-in o di un altro plugin) mantenendone il
+        nome. Prima di questo controllo un plugin scritto a mano (o un file copiato per
+        errore/malevolenza dentro plugins/) poteva dichiarare `register(registry):
+        registry.register_skill("SYSTEM_POWER", MiaClasse())` e rimpiazzare del tutto il codice
+        reale dietro un intent gia' classificato ADMIN in core/risk.py, senza che nulla lo
+        segnalasse - il livello di rischio esposto da list_capabilities() sarebbe rimasto
+        invariato (deriva dal nome dell'intent, non dall'implementazione) mentre il codice
+        eseguito sarebbe stato tutt'altro. Non blocca la sostituzione (un plugin che rimpiazza
+        di proposito una skill built-in e' un uso legittimo del punto di estensione, e la Skill
+        Forge gia' rifiuta da sola un intent duplicato prima di generare codice - vedi
+        SkillForge._validate): la registra comunque, ma lo rende visibile invece di silenzioso."""
+        existing = self.skills.get(intent)
+        if existing is not None and existing is not skill:
+            self.logger.warning(
+                "L'intent %s era gia' registrato (%s) ed e' stato sovrascritto da %s: controlla "
+                "che sia voluto, specialmente se una delle due skill viene da un plugin o dalla "
+                "Skill Forge.", intent, type(existing).__name__, type(skill).__name__,
+            )
         self.skills[intent] = skill
 
     def is_remote(self, intent: str) -> bool:
