@@ -327,6 +327,20 @@ pulita; smoke test installazione/avvio/arresto; dashboard locale con errori e la
   `tests/test_notes_skills.py` (19 test): ogni test patcha `skills.notes.NOTES_PATH` su un file
   temporaneo (e' una costante di modulo puntata alla vera `data/notes.md`, senza iniezione via
   costruttore - verificato che il file reale dell'utente non venga mai toccato).
+- 🟡 Copertura per `skills/todo.py` (13 test, nessuna suite esisteva finora - ne' per la skill
+  ne' per gran parte di `core/todo_manager.py`, che aveva solo `list_stale_pending` coperto).
+  Documentato (non corretto) un limite noto: `complete_matching`/`delete_matching`
+  (`core/todo_manager.py`) cercano per sottostringa (SQL `LIKE '%query%'`) senza un limite di
+  lunghezza minimo, e prendono il PIU' VECCHIO risultato che corrisponde - una query ambigua
+  (es. "pan" con sia "comprare il pane" sia "comprare il panettone" in lista) puo' risolvere al
+  task sbagliato, verificato con un test esplicito. A differenza del buco analogo e CORRETTO in
+  questa sessione per `CLOSE_APP` (`skills/process_control.py`), qui non esiste un valore minimo
+  "sicuro" gia' curato da cui dedurre una soglia (li' il piu' corto alias legittimo era lungo 3
+  caratteri), e il rischio resta contenuto alla lista todo dell'utente stesso, non a finestre/
+  processi di terzi - `DELETE_TODO` passa comunque dal gate centrale di conferma (anche se quella
+  conferma echeggia il testo cercato, non il task gia' risolto). Una soglia arbitraria senza un
+  valore di riferimento sarebbe stata un'invenzione, non una correzione: dichiarato onestamente
+  invece di far finta che il problema non esista o di improvvisare un numero a caso.
 
 ## F1 — Trustworthy Agent Core 3.0
 
