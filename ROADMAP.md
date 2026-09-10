@@ -1033,6 +1033,26 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   iniziasse a fidarsi di quel valore. Corretto controllando il valore di ritorno di entrambe le
   API di fallback. Aggiunto `tests/test_win_dpi.py` (9 test nuovi, mockando le vere funzioni
   `ctypes.windll.<dll>.<api>` invece di reimplementarle).
+- ✅ **Buco reale, SISTEMICO, trovato e corretto in 7 file**: lo stesso bug di
+  `core/vision_provider.py` (corretto in precedenza in questa sessione) esisteva copiaincollato
+  identico in `skills/clipboard.py` (`TranslateClipboardSkill`), `skills/ask_question.py`,
+  `skills/research.py`, `skills/summarize_clipboard.py`, `skills/text_utils.py` (la base comune
+  `_OllamaTextSkill`, condivisa da `ProofreadTextSkill`/`SummarizeTextSkill`/
+  `DetectLanguageSkill`), `skills/translate_text.py` e `core/context_summarizer.py`: tutti
+  chiamano Ollama direttamente (non tramite `core/ollama_client.py`, gia' al sicuro) e
+  intercettavano `(URLError, TimeoutError, JSONDecodeError, KeyError)` ma non `TypeError`.
+  **Verificato per davvero su ognuno dei 7**: un corpo JSON valido ma non nella forma attesa
+  (`"null"`, `"[]"`, un numero, `{"message": null}`) fa sollevare un `TypeError` da
+  `result["message"]["content"]`, non un `KeyError` - ognuna delle 7 chiamate sollevava
+  un'eccezione mai gestita invece di degradare a `None` come promesso (l'utente vedeva il
+  generico errore imprevisto di `JakeCore.answer()` invece dell'esito atteso, es.
+  `OLLAMA_UNAVAILABLE`). Corretto aggiungendo `TypeError` a ogni except clause. Nessuna delle 7
+  aree toccate aveva una suite prima: aggiunti `tests/test_ask_question_skill.py` (6 test),
+  `tests/test_research_skill.py` (6 test), `tests/test_summarize_clipboard_skill.py` (5 test),
+  `tests/test_text_utils_ollama_skills.py` (9 test, copre le tre sottoclassi condivise),
+  `tests/test_translate_text_skill.py` (5 test), `tests/test_clipboard_skills.py` (15 test,
+  copre anche `ClipboardReadSkill`/`ClipboardWriteSkill`) e `tests/test_context_summarizer.py`
+  (4 test) - ognuno con un test dedicato che riproduce esattamente il crash pre-correzione.
 
 ## F2 — Voice Natural 3.0
 
