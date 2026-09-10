@@ -54,9 +54,11 @@ class ListNotesSkill:
         },
     }
 
+    DEFAULT_LIMIT = 10
+
     def execute(self, parameters: dict = None):
         parameters = parameters or {}
-        limit = parameters.get("limit") or 10
+        limit = self._parse_limit(parameters.get("limit"))
 
         if not NOTES_PATH.is_file():
             return SkillResult(success=False, data={}, error="NOT_FOUND")
@@ -65,7 +67,21 @@ class ListNotesSkill:
         if not lines:
             return SkillResult(success=False, data={}, error="NOT_FOUND")
 
-        return SkillResult(success=True, data={"notes": lines[-int(limit):]})
+        return SkillResult(success=True, data={"notes": lines[-limit:]})
+
+    @classmethod
+    def _parse_limit(cls, raw) -> int:
+        """Riprodotto per davvero, corretto: un limite non numerico (es. il modello che scrive
+        'tutti' invece di un numero) sollevava un ValueError mai catturato, e limit=0 restituiva
+        TUTTI gli appunti invece di zero (lines[-0:] in Python e' l'intera lista, non l'ultimo
+        zero elementi - la stessa insidia di '-0 == 0'). Un valore mancante o invalido ricade sul
+        default, coerente con come altri parametri facoltativi malformati degradano altrove in
+        questo progetto invece di far fallire l'intera richiesta."""
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return cls.DEFAULT_LIMIT
+        return value if value > 0 else cls.DEFAULT_LIMIT
 
 
 class SearchNotesSkill:
