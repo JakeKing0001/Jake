@@ -1053,6 +1053,14 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   `tests/test_translate_text_skill.py` (5 test), `tests/test_clipboard_skills.py` (15 test,
   copre anche `ClipboardReadSkill`/`ClipboardWriteSkill`) e `tests/test_context_summarizer.py`
   (4 test) - ognuno con un test dedicato che riproduce esattamente il crash pre-correzione.
+- ✅ Copertura per `skills/window_control.py` (8 test), `skills/close_window.py` (7 test) e
+  `skills/window_layout.py` (15 test) - nessuno dei tre aveva una suite. Tutti wrapper sottili su
+  win32gui/win32con/keyboard, sempre mockati. Nessun bug trovato: `_find_window` (condivisa dai
+  tre file) cerca per sottostringa nel titolo senza un limite minimo, stesso schema di
+  `CLOSE_APP`/`skills/todo.py`, ma qui il rischio resta a intent LOCAL_REVERSIBLE (focus/
+  minimizza/massimizza/ridimensiona una finestra sbagliata e' un fastidio banalmente reversibile,
+  non un'azione distruttiva senza conferma) - non giustifica la stessa soglia minima imposta per
+  CLOSE_APP.
 
 ## F2 — Voice Natural 3.0
 
