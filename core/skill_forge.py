@@ -16,7 +16,6 @@ import ast
 import importlib.util
 import json
 import re
-import subprocess
 import sys
 import uuid
 from dataclasses import dataclass, field
@@ -24,8 +23,10 @@ from datetime import datetime
 from pathlib import Path
 
 from core.ollama_client import OllamaClient
+from core.process_sandbox import run_probe_with_reduced_privileges
 
 PLUGINS_DIR = Path(__file__).resolve().parent.parent / "plugins"
+FORGE_PROBE_PATH = Path(__file__).resolve().parent / "forge_probe.py"
 FORGE_PREFIX = "learned_"
 DEFAULT_CODER_MODEL = "qwen2.5-coder:7b"
 
@@ -316,41 +317,29 @@ class SkillForge:
         return intent, description, examples
 
     def _sandbox_import(self, code: str) -> None:
-        """Importa il plugin in un interprete separato (timeout 20s): un errore all'import o
-        un execute() che esplode non devono mai toccare il processo di Jake."""
+        """Importa il plugin ed esegue execute()/format_result() in un processo separato
+        (timeout 20s): un errore all'import o un execute() che esplode non devono mai toccare
+        il processo di Jake. Quando le API di Windows lo permettono, il processo di prova gira
+        anche a integrita' 'Low' (Mandatory Integrity Control) - vedi core/process_sandbox.py:
+        un secondo strato indipendente dal blocklist testuale/AST di FORBIDDEN_PATTERNS, che
+        blocca a livello di sistema operativo le scritture su file/registro anche per tecniche
+        di evasione non ancora previste dal blocklist. Se quelle API non sono disponibili, si
+        ripiega sull'esecuzione normale (solo isolamento dai crash) con un avviso nel log."""
         root = str(self.plugins_dir.parent)
-        probe = (
-            "import sys, json, importlib.util\n"
-            f"sys.path.insert(0, {root!r})\n"
-            "code = sys.stdin.read()\n"
-            "spec = importlib.util.spec_from_loader('jake_forge_probe', loader=None)\n"
-            "module = importlib.util.module_from_spec(spec)\n"
-            "exec(compile(code, 'forge_probe.py', 'exec'), module.__dict__)\n"
-            "registered = {}\n"
-            "class R:\n"
-            "    def register_skill(self, intent, skill): registered[intent] = skill\n"
-            "module.register(R())\n"
-            "assert registered, 'register() non ha registrato nulla'\n"
-            "for intent, skill in registered.items():\n"
-            "    result = skill.execute({})\n"
-            "    assert hasattr(result, 'success'), 'execute non ritorna SkillResult'\n"
-            "    if result.success and hasattr(skill, 'format_result'):\n"
-            "        text = skill.format_result(result)\n"
-            "        assert isinstance(text, str), 'format_result non ritorna una stringa'\n"
-            "print(json.dumps(list(registered)))\n"
+        outcome = run_probe_with_reduced_privileges(
+            FORGE_PROBE_PATH, code, cwd=root, timeout=20, extra_args=[root],
         )
-        try:
-            completed = subprocess.run(
-                [sys.executable, "-c", probe], input=code, capture_output=True, text=True,
-                timeout=20, encoding="utf-8", errors="replace", cwd=root,
-            )
-        except subprocess.TimeoutExpired:
+        if outcome.launch_error:
+            raise ForgeError(outcome.launch_error)
+        if outcome.timed_out:
             raise ForgeError("l'import del plugin non termina (loop infinito?)")
-        except OSError as exc:
-            raise ForgeError(f"impossibile avviare la sandbox: {exc}")
-        if completed.returncode != 0:
-            tail = (completed.stderr or completed.stdout or "").strip().splitlines()
-            raise ForgeError("errore in esecuzione: " + (tail[-1] if tail else "sconosciuto"))
+        if not outcome.integrity_restricted and self.logger:
+            self.logger.warning(
+                "Skill Forge: sandbox a integrita' ridotta non disponibile, "
+                "il plugin di prova gira con i privilegi normali (solo isolamento dai crash)."
+            )
+        if not outcome.ok:
+            raise ForgeError("errore in esecuzione: " + (outcome.error or "sconosciuto"))
 
     # ---- installazione -----------------------------------------------------------------
 
