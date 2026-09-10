@@ -261,6 +261,7 @@ class JakeCore:
             on_advisory=self._default_on_advisory,
             enabled=bool(config.get("system_advisor_enabled", True)),
             todo_manager=self.skill_registry.todo_manager,
+            memory_manager=self.memory_manager,
         )
         self.system_advisor.start()
 

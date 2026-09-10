@@ -29,7 +29,7 @@ DOWNLOADS_MAX_SCANNED = 2000
 class SystemAdvisor:
     def __init__(
         self, on_advisory=None, interval_seconds: float = 300, enabled: bool = True, todo_manager=None,
-        downloads_dir: Path = None,
+        downloads_dir: Path = None, memory_manager=None,
     ):
         self.on_advisory = on_advisory
         self.interval_seconds = interval_seconds
@@ -38,6 +38,11 @@ class SystemAdvisor:
         # F6: iniettabile per i test (mai la vera cartella Download dell'utente in un test
         # automatico), default alla cartella Download reale altrimenti.
         self.downloads_dir = Path(downloads_dir) if downloads_dir else Path.home() / "Downloads"
+        # F5 (Memory 2.0, scadenza): il "futuro hook di manutenzione" gia' previsto nel docstring
+        # di MemoryManager.purge_expired() - senza questo, un ricordo con ttl_days (skills/
+        # remember.py) smetteva di COMPARIRE in recall() alla scadenza ma restava per sempre sul
+        # disco, mai davvero rimosso.
+        self.memory_manager = memory_manager
         self._thread = None
         self._stop_event = threading.Event()
         self._logger = get_logger()
@@ -76,6 +81,10 @@ class SystemAdvisor:
                 self._check_downloads_clutter()
             except Exception:
                 self._logger.exception("Errore controllando la cartella Download")
+            try:
+                self._purge_expired_memories()
+            except Exception:
+                self._logger.exception("Errore ripulendo i ricordi scaduti")
             self._stop_event.wait(self.interval_seconds)
 
     def _check_battery(self) -> None:
@@ -174,6 +183,19 @@ class SystemAdvisor:
             )
         elif not cluttered:
             self._downloads_warned = False
+
+    def _purge_expired_memories(self) -> None:
+        """Rimuove per davvero i ricordi con ttl_days scaduto (F5, Memory 2.0). Silenzioso, non
+        un avviso: a differenza di batteria/disco/Download, un ricordo scaduto e' esattamente
+        cio' che l'utente ha chiesto impostando quella scadenza al momento di salvarlo (skills/
+        remember.py) - non e' 'disordine' da segnalare, e' manutenzione di routine attesa. Resta
+        comunque loggato (quanti e quando) per audit, coerente con 'memoria sotto il controllo
+        dell'utente' (principi non negoziabili in cima a ROADMAP.md)."""
+        if self.memory_manager is None:
+            return
+        removed = self.memory_manager.purge_expired()
+        if removed:
+            self._logger.info("Rimossi %d ricordi scaduti.", removed)
 
     def _advise(self, message: str) -> None:
         self._logger.info("Avviso proattivo: %s", message)

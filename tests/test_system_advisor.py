@@ -226,5 +226,60 @@ class SystemAdvisorDownloadsClutterTests(unittest.TestCase):
         self.assertEqual(self.messages, [])
 
 
+class SystemAdvisorExpiredMemoryPurgeTests(unittest.TestCase):
+    """F5 (Memory 2.0, scadenza): il 'futuro hook di manutenzione' gia' previsto nel docstring di
+    MemoryManager.purge_expired() - senza questo, un ricordo con ttl_days (skills/remember.py,
+    collegato in questa stessa sessione) smetteva di COMPARIRE in recall() alla scadenza ma
+    restava per sempre sul disco, mai davvero rimosso. Usa un MemoryManager vero su file
+    temporaneo, non un finto: e' proprio l'interazione reale con purge_expired() a contare."""
+
+    def setUp(self):
+        from core.memory_manager import MemoryManager
+
+        self.messages = []
+        tmp_dir = Path(tempfile.mkdtemp(prefix="jake_system_advisor_memory_test_"))
+        self.addCleanup(shutil.rmtree, tmp_dir, ignore_errors=True)
+        self.memory_manager = MemoryManager(db_path=tmp_dir / "memory.db")
+
+    def _advisor(self, memory_manager=None) -> SystemAdvisor:
+        return SystemAdvisor(on_advisory=self.messages.append, enabled=False, memory_manager=memory_manager)
+
+    def test_without_a_memory_manager_the_hook_is_a_silent_no_op(self):
+        advisor = self._advisor(memory_manager=None)
+        advisor._purge_expired_memories()  # non deve sollevare
+        self.assertEqual(self.messages, [])
+
+    def test_an_expired_memory_is_actually_removed_from_disk(self):
+        self.memory_manager.remember("oggi piove", "vero", ttl_days=0.0000001)
+        time.sleep(0.01)
+        advisor = self._advisor(memory_manager=self.memory_manager)
+
+        advisor._purge_expired_memories()
+
+        self.assertEqual(self.memory_manager.recall(key="oggi piove", include_expired=True), [])
+
+    def test_a_non_expired_memory_is_left_alone(self):
+        self.memory_manager.remember("compleanno", "5 marzo")  # nessun ttl
+        self.memory_manager.remember("prossima settimana", "vero", ttl_days=7)
+        advisor = self._advisor(memory_manager=self.memory_manager)
+
+        advisor._purge_expired_memories()
+
+        self.assertIsNotNone(self.memory_manager.recall(key="compleanno"))
+        self.assertNotEqual(self.memory_manager.recall(key="prossima settimana"), [])
+
+    def test_purging_is_silent_not_an_advisory(self):
+        """A differenza di batteria/disco/Download, la pulizia dei ricordi scaduti non deve
+        interrompere l'utente: e' manutenzione di routine attesa (l'utente stesso ha impostato
+        quella scadenza al momento di salvare il ricordo), non 'disordine' da segnalare."""
+        self.memory_manager.remember("oggi piove", "vero", ttl_days=0.0000001)
+        time.sleep(0.01)
+        advisor = self._advisor(memory_manager=self.memory_manager)
+
+        advisor._purge_expired_memories()
+
+        self.assertEqual(self.messages, [])
+
+
 if __name__ == "__main__":
     unittest.main()
