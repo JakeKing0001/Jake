@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import string
 import subprocess
 import threading
@@ -128,6 +129,16 @@ class AppResolver:
 
     # ---- risoluzione -------------------------------------------------------------------
 
+    # L'elisione con apostrofo ("l'esplora file") va riconosciuta sul testo GREZZO, prima che
+    # normalize_name() tolga la punteggiatura: normalize_name("l'esplora file") produce
+    # "lesplora file" (l'apostrofo sparisce senza lasciare uno spazio), quindi il controllo
+    # storico "normalized_name.startswith('l ')" piu' sotto non scattava MAI per questo caso -
+    # riprodotto per davvero: resolve("l'esplora file") tornava None nonostante "esplora file"
+    # sia in KNOWN_APP_ALIASES, mentre resolve("il pannello di controllo") (articolo con spazio,
+    # non elisione) funzionava gia' correttamente. Il vecchio controllo su "il "/"la "/"lo "/"l "
+    # resta com'era per il caso senza apostrofo, questo lo affianca per quello con apostrofo.
+    _ELIDED_ARTICLE_PATTERN = re.compile(r"^l['’]\s*(.+)$", re.IGNORECASE)
+
     def resolve(self, app_name: str) -> AppMatch | None:
         """Restituisce il launcher piu' simile sopra la soglia configurata."""
         normalized_name = self.normalize_name(app_name)
@@ -137,6 +148,10 @@ class AppResolver:
         alias = KNOWN_APP_ALIASES.get(normalized_name)
         if alias is None and normalized_name.startswith(("il ", "la ", "lo ", "l ")):
             alias = KNOWN_APP_ALIASES.get(normalized_name.split(" ", 1)[1])
+        if alias is None:
+            elided = self._ELIDED_ARTICLE_PATTERN.match(app_name.strip())
+            if elided:
+                alias = KNOWN_APP_ALIASES.get(self.normalize_name(elided.group(1)))
         if alias is not None:
             return AppMatch(requested=app_name, matched_app=app_name.strip().capitalize(), score=1.0, launcher=alias)
 
