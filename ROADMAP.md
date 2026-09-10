@@ -820,9 +820,14 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   ADMIN - il livello piu' prudente, non il piu' permissivo - per qualunque intent non censito
   (plugin di terze parti, skill della fucina). La correzione sopra (gate della Skill Forge)
   chiude il buco per cui quella classificazione ADMIN non veniva davvero applicata a runtime.
-  Resta 🟡, non ✅: non c'e' un test equivalente a `test_risk.py` per i plugin caricati da
-  `core/plugin_loader.py` (un plugin scritto a mano da un umano puo' comunque dichiarare un
-  intent gia' esistente o ambiguo senza che nulla lo segnali), e "classificato" qui significa
+  L'equivalente end-to-end per i plugin caricati da `core/plugin_loader.py` e' stato aggiunto
+  piu' avanti in questa sessione: `tests/test_plugin_loader.py::
+  UnclassifiedPluginIntentIsStillGatedTests` carica per davvero un plugin con un intent mai
+  visto da `core/risk.py` (`load_plugins()` -> `SkillRegistry.register_skill()` vero ->
+  `PolicyEngine.sync_with_registry()` vero, lo stesso ordine usato da `JakeCore.__init__`) e
+  verifica che finisca comunque dietro conferma E autenticazione. Resta 🟡, non ✅: un plugin
+  scritto a mano puo' ancora dichiarare un intent gia' esistente senza che nulla lo blocchi
+  (solo un avviso nel log, vedi `tests/test_skill_registry.py`), e "classificato" qui significa
   solo "ha un livello di rischio", non "il livello e' quello corretto per l'azione reale" - quel
   giudizio resta umano.
 - 🟡 **Test d'attacco su plugin e prompt injection** (aggiornato piu' avanti in questa sessione
