@@ -890,6 +890,31 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   correttamente come errore invece che come successo. Aggiunti `tests/test_run_command_skill.py`
   (10 test) e `tests/test_run_python_script_skill.py` (7 test), nessuno dei due file aveva una
   suite prima.
+- ✅ **Buco reale, grave, trovato e corretto in `CLOSE_APP`** (`skills/process_control.py::
+  _matching_processes`, nessuna suite esisteva finora per l'intero file). Il confronto tra il
+  nome del processo cercato e i processi in esecuzione era per SOTTOSTRINGA, senza un limite di
+  lunghezza minimo. Piu' grave del solito perche' il ramo di "chiusura gentile" (`WM_CLOSE` alle
+  finestre, prima di dover terminare il processo) NON chiede mai conferma per design - un difetto
+  nel trovare le finestre giuste si traduce in un'azione reale sull'utente senza alcun avviso,
+  non solo in una risposta sbagliata. **Verificato per davvero su questa macchina, non
+  ipotizzato**: un filtro banale come la singola lettera "a" corrispondeva a ~150 processi VERI
+  (quasi ogni nome eseguibile la contiene), e enumerando le finestre reali di quei processi sono
+  emerse finestre visibili autentiche - una scheda Opera aperta su YouTube, Impostazioni,
+  Nahimic, l'overlay NVIDIA. Un comando vocale mal trascritto o troppo generico ("chiudi a")
+  avrebbe chiuso finestre reali dell'utente in silenzio, zero conferma, zero avviso. Corretto
+  imponendo una lunghezza minima di 3 caratteri al confronto (il valore piu' corto gia' curato in
+  `PROCESS_ALIASES`, es. "cmd"/"vlc", e' lungo esattamente 3: la soglia non rompe nessun alias
+  esistente). Aggiunto `tests/test_process_control_skill.py` (16 test): il caso di regressione
+  esatto (un filtro di un carattere non deve piu' corrispondere a nulla), oltre alla copertura di
+  base per `CloseAppSkill`/`ListProcessesSkill` che mancava del tutto.
+- ✅ Copertura di test per altre tre skill ad alto rischio prive di qualunque suite -
+  `skills/system_power.py` (ADMIN, self-confirming: spegnimento/riavvio/sospensione/blocco - 12
+  test, `subprocess.run` sempre mockato: un test che lo chiamasse per davvero spegnerebbe la
+  macchina che esegue la suite), `skills/recycle_bin.py` (DESTRUCTIVE, self-confirming - 5 test,
+  `SHEmptyRecycleBinW` mockato), `skills/forget.py` (DESTRUCTIVE, non self-confirming, l'unica
+  barriera e' il gate centrale - 4 test, `MemoryManager` vero su file temporaneo). Nessun bug
+  trovato in nessuna delle tre: il valore e' la copertura di codice che poteva letteralmente
+  spegnere il PC o cancellare dati senza che nulla lo verificasse mai.
 - ✅ **Copertura di test per l'apprendimento continuo** (`core/learning_manager.py`): nessuna
   suite dedicata esisteva, nonostante governi cosa Jake impara da solo dai comandi eseguiti con
   successo - un'associazione frase->intent imparata a torto sopravvive ai riavvii e prende la
