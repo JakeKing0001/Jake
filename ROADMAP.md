@@ -293,6 +293,17 @@ pulita; smoke test installazione/avvio/arresto; dashboard locale con errori e la
   `PATH` vuoto e configurazione delle fonti. Prova locale su Python 3.12.6: test mirati 29/29,
   suite completa 1.262/1.262 e 20/20 esecuzioni complete consecutive verdi; ruff, mypy
   selettivo, compileall e smoke test verdi. F0.1 non e' marcata `DONE` prima dei due job CI.
+- ✅ **F0.2 locale riprodotto e diagnostica CI aggiunta** (11/09/2026; remoto bloccato per
+  scelta esplicita dell'utente). Il tracciato Git e' stato controllato per nomi e dimensioni:
+  nessun log, database, token, registrazione, modello, binario o build artifact e' versionato;
+  i soli match testuali per "secret" sono il modulo `secrets_vault` e i relativi test. Il lock
+  con hash e' installabile e ha riallineato l'ambiente; nell'ordine della CI sono passati ruff,
+  mypy selettivo, compileall, 1.262 test e smoke CLI. Anche configure/build dell'HUD e avvio
+  reale del binario per tre secondi sono verdi. Il job Python ora pubblica sempre un artifact
+  per versione con `unittest.log` completo e `summary.txt` sintetico (commit, Python, durata,
+  exit code); verificati localmente la produzione del log e il mantenimento di un exit code
+  non-zero attraverso la pipeline PowerShell. L'artifact resta `VERIFY` finche' non e' osservato
+  su GitHub; nessun push o cambio alla protezione di `master` e' stato eseguito.
 - ✅ Copertura di test per `core/network.py` (5 test, `socket.create_connection` mockato) e per
   l'assemblaggio del catalogo di skill built-in (`core/skill_catalog.py`, `tests/
   test_skill_catalog.py`, 5 test): quest'ultimo non testa le singole skill (hanno gia' le proprie

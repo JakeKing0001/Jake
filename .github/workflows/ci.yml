@@ -50,7 +50,34 @@ jobs:
         run: python -m compileall -q core skills plugins tests main.py
 
       - name: Test unitari (niente Ollama/microfono richiesti)
-        run: python -m unittest discover -s tests -t . -v
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path .ci-artifacts | Out-Null
+          $startedAt = Get-Date
+          $pythonVersion = python --version
+          python -m unittest discover -s tests -t . -v 2>&1 |
+            Tee-Object -FilePath .ci-artifacts/unittest.log
+          $testExitCode = $LASTEXITCODE
+          $durationSeconds = [math]::Round(((Get-Date) - $startedAt).TotalSeconds, 3)
+          @(
+            "commit=${{ github.sha }}"
+            "python=$pythonVersion"
+            "duration_seconds=$durationSeconds"
+            "exit_code=$testExitCode"
+          ) | Set-Content -Encoding utf8 .ci-artifacts/summary.txt
+          exit $testExitCode
+
+      # F0.2.7: il log verboso permette di trovare il test preciso; summary.txt resta piccolo e
+      # leggibile anche dalla pagina dell'artifact. `always()` conserva la prova pure se la suite
+      # fallisce, mentre if-no-files-found=error impedisce un falso verde senza diagnostica.
+      - name: Pubblica diagnostica test
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-${{ matrix.python-version }}-test-diagnostics
+          path: .ci-artifacts/
+          if-no-files-found: error
+          retention-days: 14
 
       # F0: criterio di uscita "smoke test installazione/avvio/arresto". Non richiede Ollama
       # (verificato localmente puntando JAKE_OLLAMA_URL a una porta inesistente): "che ore sono"
