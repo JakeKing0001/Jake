@@ -20,6 +20,12 @@ CAPABILITIES = {
     "CREATE_PATH": {"intent": "CREATE_PATH", "description": "Crea un file o una cartella.", "parameters": {
         "path": {"type": "string", "required": True, "description": "Percorso da creare."},
     }},
+    # Registrata per davvero (non solo assente dal catalogo): serve a dimostrare che
+    # NEVER_FOR_AGENT esclude un intent anche quando la skill esiste ed e' altrimenti
+    # eseguibile, non solo quando manca dal registro (vedi CapabilityTokenEnforcementTests).
+    "RUN_COMMAND": {"intent": "RUN_COMMAND", "description": "Esegue un comando di sistema.", "parameters": {
+        "command": {"type": "string", "required": True, "description": "Comando da eseguire."},
+    }},
 }
 
 
@@ -495,6 +501,77 @@ class SpecializedAgentConfigurationTests(unittest.TestCase):
         agent = _agent(registry, ScriptedOllamaClient([]))
         prompt = agent._system_prompt(agent._tools("qualsiasi richiesta"))
         self.assertTrue(prompt.startswith("Sei Jake, un agente che controlla un PC Windows"))
+
+
+class CapabilityTokenEnforcementTests(unittest.TestCase):
+    """F1: NEVER_FOR_AGENT/fixed_tools sono, di fatto, il capability token per agente di Jake
+    (vedi ROADMAP.md) - ma finora vivevano senza un test dedicato che li blocchi esplicitamente,
+    quindi una modifica futura poteva restringerne la copertura senza che nessuna suite se ne
+    accorgesse. Qui si verificano per davvero ENTRAMBI gli strati dichiarati: (1) la lista degli
+    strumenti offerti al modello (e quindi anche l'enum dello schema JSON, costruito dagli
+    stessi `tools`) non contiene mai un intent bandito, anche quando la skill esiste per davvero
+    nel registro e il recupero semantico la suggerisce esplicitamente; (2) anche se un modello
+    'disonesto' ignorasse lo schema e restituisse comunque quell'intent nella risposta JSON
+    grezza (qui simulato restituendolo direttamente da ScriptedOllamaClient, senza passare dallo
+    schema), l'agente non lo esegue comunque - il controllo `intent not in valid` a runtime e'
+    indipendente dal fatto che il modello abbia rispettato l'enum, non un doppione ridondante."""
+
+    def test_never_for_agent_intent_is_excluded_even_when_registered_and_suggested(self):
+        registry = FakeRegistry()
+        agent = TaskAgent(
+            registry, FakeRetriever(["RUN_COMMAND", "CREATE_PATH"]), ScriptedOllamaClient([]),
+            model_provider=lambda: "fake-model", format_result=lambda intent, result: str(result.data),
+        )
+        tools = agent._tools("esegui un comando qualsiasi")
+        intents = [t["intent"] for t in tools]
+        self.assertNotIn("RUN_COMMAND", intents)
+        self.assertIn("CREATE_PATH", intents)
+
+    def test_fixed_tools_cannot_reintroduce_a_never_for_agent_intent(self):
+        registry = FakeRegistry()
+        agent = TaskAgent(
+            registry, None, ScriptedOllamaClient([]), model_provider=lambda: "fake-model",
+            format_result=lambda intent, result: str(result.data),
+            fixed_tools=["RUN_COMMAND", "CREATE_PATH"],
+        )
+        tools = agent._tools("qualsiasi richiesta")
+        self.assertEqual([t["intent"] for t in tools], ["CREATE_PATH"])
+
+    def test_model_naming_a_banned_intent_directly_is_still_not_executed(self):
+        """Anche bypassando lo schema (il modello finto restituisce RUN_COMMAND senza che sia
+        mai stato offerto tra i tools), il secondo strato indipendente (`intent not in valid`
+        in TaskAgent.run()) deve impedire l'esecuzione: l'executor non va mai chiamato con
+        RUN_COMMAND."""
+        calls = []
+
+        def recording_executor(intent, parameters):
+            calls.append((intent, dict(parameters or {})))
+            return SkillResult(success=True, data={})
+
+        client = ScriptedOllamaClient([
+            {"thought": "eseguo il comando richiesto", "action": {"intent": "RUN_COMMAND", "parameters": {"command": "del /f *"}}},
+        ])
+        agent = TaskAgent(
+            FakeRegistry(), FakeRetriever(["RUN_COMMAND", "CREATE_PATH"]), client,
+            model_provider=lambda: "fake-model", format_result=lambda intent, result: str(result.data),
+            executor=recording_executor,
+        )
+        outcome = agent.run("esegui un comando qualsiasi")
+
+        self.assertEqual(calls, [])
+        self.assertNotIn("RUN_COMMAND", [step.intent for step in outcome.steps])
+
+    def test_specialized_agents_never_offer_the_banned_intents_via_fixed_tools(self):
+        """Non un mock: legge le costanti VERE usate per configurare CodingAgent/ResearchAgent
+        in JakeCore (vedi core/orchestrator.py) e verifica che nessun intent di NEVER_FOR_AGENT
+        vi compaia - la garanzia dichiarata in ROADMAP.md per 'RUN_COMMAND non e' incluso: e'
+        bandito per ogni agente'."""
+        from core import orchestrator
+        from core.agent import NEVER_FOR_AGENT
+
+        for name, tools in (("CODING_TOOLS", orchestrator.CODING_TOOLS), ("RESEARCH_TOOLS", orchestrator.RESEARCH_TOOLS)):
+            banned_present = set(tools) & NEVER_FOR_AGENT
+            self.assertEqual(banned_present, set(), f"{name} contiene intent banditi: {banned_present}")
 
 
 class RecordingOllamaClient(ScriptedOllamaClient):
