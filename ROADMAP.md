@@ -287,6 +287,28 @@ pulita; smoke test installazione/avvio/arresto; dashboard locale con errori e la
   (insieme a `intent_provider`/`vision_provider`/`win_dpi`/`learning_manager`/`reminder_manager`/
   `trigger_manager`/`workflow_manager`/`app_resolver`/`device_registry` sopra, tutti trattati in
   questa stessa sessione).
+- ✅ **Buco reale, grave, trovato e corretto: LEARN_COMMAND era completamente rotto**
+  (`skills/learn.py::LearnCommandSkill`, nessuna suite esisteva per l'intero file). La skill
+  leggeva `self.core.MULTI_STEP_PATTERN`, un attributo che `JakeCore` non ha MAI avuto - il
+  pattern vive in `core/intent_patterns.py`, e `JakeCore` lo usa altrove solo tramite la
+  funzione `intent_patterns.is_multi_step_request()`, mai riesposto come attributo di istanza
+  (probabilmente un residuo di un refactoring che ha spostato il pattern fuori da `JakeCore`
+  senza aggiornare questo unico chiamante rimasto). **Verificato per davvero, non ipotizzato**:
+  chiamare `LearnCommandSkill.execute()` con QUALUNQUE combinazione ragionevole di parametri
+  sollevava un `AttributeError` - non un caso limite, l'intera funzionalita' "impara che quando
+  dico X fai Y" era inutilizzabile al 100%. `JakeCore.answer()` cattura tutte le eccezioni
+  impreviste (per buona ragione: Jake non deve mai crashare), quindi l'utente vedeva solo un
+  generico "mi dispiace, si e' verificato un errore imprevisto" - mai il vero motivo, mai un
+  indizio che fosse un bug del codice e non un problema suo. Corretto usando
+  `intent_patterns.is_multi_step_request(request)`, la stessa funzione gia' usata da `JakeCore`
+  per la stessa identica decisione altrove (instradare al planner invece che a un intent
+  singolo) - piu' corretta del pattern grezzo perche' esclude anche le frasi che sono
+  definizioni di automazione o il combo browser, non solo i marcatori multi-step. **Verificato
+  end-to-end su un `JakeCore` reale** (non solo con test isolati): insegnato un comando vero,
+  confermato `success=True` e il comando taggato correttamente, poi ripulito subito dopo
+  (verificato che non sia rimasta traccia nel file reale dei comandi imparati). Aggiunto
+  `tests/test_learn_skills.py` (15 test, copre anche `ListLearnedSkill`/`ForgetLearnedSkill`/
+  `CorrectLastSkill`, nello stesso file e senza alcuna suite prima).
 
 ## F1 — Trustworthy Agent Core 3.0
 
