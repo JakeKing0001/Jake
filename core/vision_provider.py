@@ -50,5 +50,13 @@ class VisionProvider:
         except (error.URLError, TimeoutError, json.JSONDecodeError):
             return None
 
-        content = result.get("message", {}).get("content")
+        # Riprodotto per davvero: un corpo JSON valido ma non nella forma attesa (es. Ollama
+        # giu' dietro un proxy che risponde "null", o un cambio futuro dell'API) faceva uscire
+        # un AttributeError da describe(), rompendo la promessa dichiarata sopra ("nessuna
+        # eccezione esce da describe()") - la skill chiamante (skills/describe_screen.py) non
+        # ha un try/except attorno a questa chiamata, si fida di quella promessa.
+        if not isinstance(result, dict):
+            return None
+        message = result.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
         return content.strip() if isinstance(content, str) and content.strip() else None
