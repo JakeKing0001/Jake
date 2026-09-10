@@ -17,12 +17,20 @@ def ensure_dpi_aware() -> bool:
     except (AttributeError, OSError):
         pass
     try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)
-        return True
+        # SetProcessDpiAwareness ritorna un HRESULT, non solleva se fallisce (es.
+        # E_ACCESSDENIED se la DPI awareness e' gia' stata impostata, dal manifest o da una
+        # chiamata precedente nello stesso processo): un valore diverso da S_OK (0) qui veniva
+        # ignorato e la funzione riportava comunque True, l'esatto genere di falso positivo che
+        # questo modulo esiste per evitare (schermata e mouse disallineati, "clicca su Accedi"
+        # clicca altrove) - riprodotto per davvero chiamando l'API due volte di fila.
+        if ctypes.windll.shcore.SetProcessDpiAwareness(2) == 0:
+            return True
     except (AttributeError, OSError):
         pass
     try:
-        ctypes.windll.user32.SetProcessDPIAware()
-        return True
+        # SetProcessDPIAware ritorna un BOOL (0 = fallito), stesso principio di sopra.
+        if ctypes.windll.user32.SetProcessDPIAware():
+            return True
     except (AttributeError, OSError):
-        return False
+        pass
+    return False
