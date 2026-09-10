@@ -1080,6 +1080,12 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   grandi/trova duplicati per hash del contenuto) - nessuno dei due aveva una suite. File/cartelle
   VERI su disco temporaneo (compressione, estrazione, hashing reali), non simulati. Nessun bug
   trovato.
+- ✅ Copertura per `skills/open_app.py` (14 test, la skill dietro OPEN_APP - una delle piu'
+  usate) e `skills/open_url.py` (12 test, incluso il blocco di schemi pericolosi `javascript:`/
+  `data:`/`file:`/`vbscript:`) - nessuno dei due aveva una suite. `AppResolver` finto (ha gia' la
+  propria suite), `os.startfile`/`subprocess.Popen`/`webbrowser.open` sempre mockati. Nessun bug
+  trovato in nessuno dei due (la catena di fallback separata da `|` in `OpenAppSkill._launch` e'
+  scritta in modo poco leggibile ma si comporta correttamente).
 
 ## F2 — Voice Natural 3.0
 
