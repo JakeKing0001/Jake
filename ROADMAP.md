@@ -823,6 +823,19 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   questa fase. Resta 🟡 il quadro piu' ampio: il rollback esiste solo per il filesystem, non per
   azioni esterne (email, WhatsApp, domotica) o per l'esecuzione di comandi/script, dove un
   "annulla" non ha un inverso naturale.
+- ✅ **Copertura di test per l'apprendimento continuo** (`core/learning_manager.py`): nessuna
+  suite dedicata esisteva, nonostante governi cosa Jake impara da solo dai comandi eseguiti con
+  successo - un'associazione frase->intent imparata a torto sopravvive ai riavvii e prende la
+  corsia veloce (nessuna chiamata al modello) la volta successiva. Aggiunto
+  `tests/test_learning_manager.py` (37 test nuovi, `ExampleStore` vero con file temporanei, non
+  un finto) che blocca esplicitamente le garanzie dichiarate nel modulo ma mai verificate prima:
+  un parametro allucinato dal modello (non presente letteralmente nella frase dell'utente) non
+  viene mai imparato; un'osservazione automatica non sovrascrive mai un esempio insegnato/
+  corretto esplicitamente; solo il percorso `route="llm"` e gli intent fuori da
+  `NON_LEARNABLE_INTENTS` vengono imparati; un fallimento dell'indice semantico
+  (`retriever.add_example`/`refresh()`) non impedisce comunque all'esempio di essere salvato su
+  disco. Nessun bug trovato - il valore e' rendere queste garanzie verificate invece che solo
+  presunte leggendo il codice, coerente con l'obiettivo di 3.2 Reliability & Architecture.
 
 ## F2 — Voice Natural 3.0
 
