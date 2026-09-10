@@ -836,6 +836,29 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   (`retriever.add_example`/`refresh()`) non impedisce comunque all'esempio di essere salvato su
   disco. Nessun bug trovato - il valore e' rendere queste garanzie verificate invece che solo
   presunte leggendo il codice, coerente con l'obiettivo di 3.2 Reliability & Architecture.
+- ✅ **Buco reale trovato e corretto nel classificatore a regole di riserva**
+  (`core/intent_provider.py::RuleBasedProvider`, il percorso preso davvero quando Ollama non e'
+  raggiungibile - `core/router.py::fallback_provider` - non codice morto, nessuna suite di test
+  esisteva finora). I trigger corti venivano cercati come sottostringa qualunque (`trigger in
+  text`), senza confine di parola: un trigger che e' anche una radice verbale italiana scattava
+  pure dentro una parola piu' lunga con un significato diverso. **Verificato per davvero, non
+  ipotizzato**: `"vorrei cancellare tutto"` veniva misclassificato `DELETE_PATH` (un intent
+  DESTRUCTIVE) con un percorso spazzatura ("re tutto", il testo dopo la sottostringa "cancella"
+  dentro "cancellare"); `"il 3 aprile e' il mio compleanno, dimmi il risultato della partita"`
+  misclassificato `OPEN_SEARCH_RESULT` (sottostringa "apri" dentro "aprile"); frasi con
+  "eliminato"/"ricordissima" misclassificate allo stesso modo. Corretto cercando ogni trigger ai
+  confini di parola (`\b`), non piu' come sottostringa. Un caso NON risolvibile con un confine di
+  parola e' emerso durante la verifica: "termina" e' anche la forma indicativa del verbo
+  terminare ("il contratto termina...", non solo l'imperativo "termina Spotify"), quindi
+  "quando termina la partita" restava misclassificato `CLOSE_APP` anche dopo la correzione - tolto
+  il trigger ambiguo da `close_app_triggers` (resta "chiudi", non ambiguo allo stesso modo)
+  invece di tentare un'euristica fragile (es. "solo se e' la prima parola") che avrebbe solo
+  spostato il problema. Gravita' contenuta dal gate centrale gia' testato altrove in questo
+  documento (`DELETE_PATH`/`CLOSE_APP` sono DESTRUCTIVE, quindi comunque dietro conferma anche
+  se il fallback li classifica per sbaglio), ma un misfire resta un fastidio concreto in
+  modalita' degradata, non solo un dettaglio teorico. Aggiunto `tests/test_intent_provider.py`
+  (20 test nuovi, il modulo non aveva ancora nessuna suite): blocca esplicitamente sia i casi di
+  falso positivo corretti sia i percorsi legittimi che devono continuare a funzionare.
 
 ## F2 — Voice Natural 3.0
 
