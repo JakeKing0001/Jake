@@ -304,6 +304,16 @@ pulita; smoke test installazione/avvio/arresto; dashboard locale con errori e la
   exit code); verificati localmente la produzione del log e il mantenimento di un exit code
   non-zero attraverso la pipeline PowerShell. L'artifact resta `VERIFY` finche' non e' osservato
   su GitHub; nessun push o cambio alla protezione di `master` e' stato eseguito.
+- ✅ **F0.3 versione e release notes ricondotte a una fonte unica** (11/09/2026).
+  `config/release.json` e' il manifest neutrale letto sia da `core/version.py` sia da CMake:
+  versione prodotto e protocollo non sono piu' valori privati duplicati tra Python e HUD.
+  `main.py --version`, il banner, la risposta "chi sei", `/status`, `HudEvent.schema_version`,
+  la build nativa e `CHANGELOG.md` sono collegati allo stesso contratto. Il client C++ rifiuta
+  status/eventi con protocol version incompatibile invece di interpretarli silenziosamente.
+  Aggiunto `tests/test_release_consistency.py` e ampliati i test di protocollo, companion e NLU:
+  23 test mirati e 1.269 test complessivi verdi; ruff, mypy selettivo, compileall e build C++
+  dentro l'ambiente MSVC verdi. Il changelog adotta Added/Changed/Fixed/Security e rimanda a
+  questo audit per la storia precedente alla baseline 5.9.
 - ✅ Copertura di test per `core/network.py` (5 test, `socket.create_connection` mockato) e per
   l'assemblaggio del catalogo di skill built-in (`core/skill_catalog.py`, `tests/
   test_skill_catalog.py`, 5 test): quest'ultimo non testa le singole skill (hanno gia' le proprie

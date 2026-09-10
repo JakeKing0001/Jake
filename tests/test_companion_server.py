@@ -10,6 +10,7 @@ from urllib import error, request
 
 from core.companion_server import CompanionServer
 from core.hud_protocol import EventType
+from core.version import PROTOCOL_VERSION, VERSION
 
 
 def _get(url: str, timeout: float = 5, headers: dict = None) -> tuple[int, dict]:
@@ -67,6 +68,8 @@ class StatusEndpointTests(CompanionServerTestCase):
         status, body = _get(f"{self.base_url}/status")
         self.assertEqual(status, 200)
         self.assertTrue(body["ok"])
+        self.assertEqual(body["version"], VERSION)
+        self.assertEqual(body["protocol_version"], PROTOCOL_VERSION)
         self.assertIsNone(body["active_device"])
         self.assertEqual(body["devices"], [])
 

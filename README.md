@@ -24,6 +24,7 @@ Altre modalità:
 | `main.py --cli` | Testo nel terminale |
 | `main.py --voice` | Push-to-talk nel terminale (F9) |
 | `main.py --voice --wake-word` | Voce continua nel terminale, senza HUD |
+| `main.py --version` | Versione corrente di Jake e del protocollo companion/HUD, lette da `config/release.json` |
 | `setup.ps1 -Autostart` | Jake parte a ogni accensione del PC |
 
 Requisiti: Windows 10/11, Python 3.11+, [Ollama](https://ollama.com) con `qwen2.5:7b`, `nomic-embed-text` (e opzionali `qwen2.5-coder:7b` per la fucina, `qwen2.5vl:7b` per la visione). Con una GPU NVIDIA `setup.ps1` installa le librerie CUDA e Jake usa Whisper `large-v3-turbo` (riconoscimento in meno di mezzo secondo).

@@ -1,9 +1,11 @@
 """Test unitari per il protocollo eventi (v4.9.1, core/hud_protocol.py) e il bus multi-
 consumatore (core/event_bus.py). Pura logica, nessuna rete."""
+import json
 import unittest
 
-from core.hud_protocol import EventType, HudEvent
 from core.event_bus import EventBus
+from core.hud_protocol import EventType, HudEvent
+from core.version import PROTOCOL_VERSION
 
 
 class HudEventSerializationTests(unittest.TestCase):
@@ -16,6 +18,16 @@ class HudEventSerializationTests(unittest.TestCase):
     def test_to_json_uses_the_plain_string_value_not_the_enum_repr(self):
         event = HudEvent(type=EventType.NOTIFICATION, payload={})
         self.assertIn('"type": "NOTIFICATION"', event.to_json())
+
+    def test_to_json_carries_the_shared_protocol_version(self):
+        payload = json.loads(HudEvent(type=EventType.IDLE).to_json())
+        self.assertEqual(payload["schema_version"], PROTOCOL_VERSION)
+
+    def test_from_json_rejects_an_unsupported_protocol_version(self):
+        with self.assertRaisesRegex(ValueError, "versione protocollo non supportata"):
+            HudEvent.from_json(
+                '{"schema_version": 999, "type": "IDLE", "payload": {}, "at": 1}'
+            )
 
     def test_from_json_rejects_an_unknown_type(self):
         with self.assertRaises(ValueError):

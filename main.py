@@ -1,7 +1,7 @@
 import sys
 
 from core.jake_core import JakeCore
-from core.version import VERSION
+from core.version import PROTOCOL_VERSION, VERSION
 
 USAGE = f"""Jake {VERSION} - assistente personale locale
 
@@ -11,6 +11,7 @@ USAGE = f"""Jake {VERSION} - assistente personale locale
   python main.py --voice         push-to-talk nel terminale (tieni premuto F9)
   python main.py --voice --wake-word   voce continua nel terminale, senza HUD
   python main.py --tray          vecchia icona tray con pannello Tk (v1.1)
+  python main.py --version       versione di prodotto e protocollo companion/HUD
   opzioni: --character jake      voce del personaggio via RVC (se installata)
 """
 
@@ -38,6 +39,9 @@ def main():
 
 
 def _dispatch():
+    if "--version" in sys.argv:
+        print(f"Jake {VERSION} (protocollo {PROTOCOL_VERSION})")
+        return
     if "--help" in sys.argv or "-h" in sys.argv:
         print(USAGE)
         return

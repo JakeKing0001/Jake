@@ -5,6 +5,7 @@
 int main(int argc, char *argv[]) {
     QGuiApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("Jake HUD"));
+    app.setApplicationVersion(QString::fromLatin1(JAKE_PRODUCT_VERSION));
     app.setOrganizationName(QStringLiteral("Jake"));
 
     QQmlApplicationEngine engine;

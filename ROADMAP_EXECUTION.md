@@ -261,6 +261,15 @@ Criterio di uscita: HEAD locale coincide con un commit remoto i cui job Python e
 
 Dipende da: F0.1.
 
+- Stato: `DOING`; `F0.3.1`, `F0.3.3` e `F0.3.4` conclusi localmente; `F0.3.2` attende il gate,
+  `F0.3.5`–`F0.3.6` sono i prossimi passi.
+- Fonte canonica: `config/release.json` contiene versione prodotto e protocollo. Python, CLI,
+  risposta identitaria, endpoint `/status`, eventi HUD e CMake/HUD nativo la consumano; il
+  changelog e' verificato da contract test contro la stessa versione.
+- Prova 11/09/2026: 23 contract test mirati e 1.269 test completi verdi; ruff, mypy selettivo e
+  compileall verdi; CMake ha configurato dal manifest e la build C++ e' passata dentro
+  l'ambiente MSVC. `CHANGELOG.md` usa Added/Changed/Fixed/Security.
+
 1. `F0.3.1` Rendere questo file il piano attivo e `ROADMAP.md` lo storico/audit.
 2. `F0.3.2` Aggiornare la tabella “stato corrente” a ogni gate, non a ogni micro-commit.
 3. `F0.3.3` Collegare versione, protocol version e release notes senza duplicare numeri hardcoded.
@@ -1563,5 +1572,6 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 Il gate remoto resta la prima azione necessaria per chiudere `F0.1`/`F0.2`, ma il push e le
 impostazioni GitHub sono esplicitamente esclusi dall'utente. La prossima attività locale e'
-`F0.3.1`: consolidare la fonte unica di verita' e poi collegare versione, protocol version,
-release notes e `--version`, senza dichiarare G0 superato e senza iniziare nuove feature.
+`F0.3.5`: creare gli ADR iniziali per UIA, sandbox, trasporto, cifratura e memoria, quindi
+`F0.3.6` con owner logico e stato di ogni pacchetto. Non dichiarare G0 superato e non iniziare
+nuove feature.

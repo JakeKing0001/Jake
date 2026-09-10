@@ -5,6 +5,8 @@ import random
 import re
 from datetime import datetime
 
+from core.version import VERSION
+
 _RULES = [
     ("thanks", re.compile(r"\b(grazie|ti ringrazio|thanks|thank you|graziee+)\b")),
     ("bye", re.compile(r"\b(a dopo|a presto|ci vediamo|arrivederci|buonanotte|notte|addio|ciao ciao|bye)\b")),
@@ -23,7 +25,7 @@ _REPLIES = {
     "bye": ["A dopo.", "A presto.", "Ci sono, quando ti servo.", "Buona giornata."],
     "greeting": None,  # dipende dall'ora
     "howareyou": ["Tutto in ordine, sistemi operativi al cento per cento. Tu?", "Alla grande. Dimmi cosa serve.", "Bene, pronto a lavorare."],
-    "whoareyou": ["Sono Jake, il tuo assistente. Vivo su questo computer e faccio le cose al posto tuo: apro programmi, cerco, scrivo, ricordo, e imparo comandi nuovi.", "Jake. Assistente personale, versione 3. Dimmi cosa fare."],
+    "whoareyou": ["Sono Jake, il tuo assistente. Vivo su questo computer e faccio le cose al posto tuo: apro programmi, cerco, scrivo, ricordo, e imparo comandi nuovi.", f"Jake. Assistente personale, versione {VERSION}. Dimmi cosa fare."],
     "presence": ["Ci sono.", "Ti ascolto.", "Sempre.", "Eccomi."],
     "praise": ["Grazie, faccio del mio meglio.", "Lo so.", "Troppo gentile.", "Fa parte del lavoro."],
     "love": ["Anch'io, a modo mio.", "Sei il mio utente preferito. L'unico, in effetti."],

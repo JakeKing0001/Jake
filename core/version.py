@@ -1,12 +1,20 @@
-"""Fonte unica della versione di Jake (F0: "avere una sola versione"). Prima di questo modulo
-main.py mostrava ancora "Jake 3.0" nel banner d'aiuto mentre i commit dichiaravano fasi fino
-alla 5.9 (lo stesso problema per cui il README riportava "Jake 3.1", gia' corretto li' ma non
-qui) - due punti diversi del codice raccontavano una storia diversa perche' nessuno dei due
-leggeva da una fonte comune.
+"""Versioni di prodotto e protocollo lette dal manifest condiviso Python/CMake."""
+import json
+from pathlib import Path
 
-VERSION riflette la fase piu' alta gia' raggiunta nella cronologia Git secondo la ricostruzione
-in ROADMAP.md ("i commit dichiarano fasi fino alla 5.9"), non un numero scelto a piacere: va
-aggiornata insieme alla tabella delle fasi in ROADMAP.md quando una fase successiva si conclude
-davvero, non ad ogni commit."""
 
-VERSION = "5.9"
+RELEASE_MANIFEST_PATH = Path(__file__).resolve().parent.parent / "config" / "release.json"
+
+
+def _load_release_manifest() -> tuple[str, int]:
+    manifest = json.loads(RELEASE_MANIFEST_PATH.read_text(encoding="utf-8"))
+    version = manifest.get("version")
+    protocol_version = manifest.get("protocol_version")
+    if not isinstance(version, str) or not version.strip():
+        raise ValueError("config/release.json: version deve essere una stringa non vuota")
+    if not isinstance(protocol_version, int) or protocol_version < 1:
+        raise ValueError("config/release.json: protocol_version deve essere un intero positivo")
+    return version, protocol_version
+
+
+VERSION, PROTOCOL_VERSION = _load_release_manifest()
