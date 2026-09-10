@@ -8,6 +8,8 @@ import unittest
 from pathlib import Path
 
 from core.plugin_loader import load_plugin_file, load_plugins
+from core.policy_engine import PolicyEngine
+from core.skill_registry import SkillRegistry
 
 
 class FakeRegistry:
@@ -162,6 +164,41 @@ class LoadPluginsTests(PluginLoaderTestCase):
 
         self.assertEqual(loaded, [])
         self.assertTrue(missing_dir.is_dir())
+
+
+class UnclassifiedPluginIntentIsStillGatedTests(PluginLoaderTestCase):
+    """F1, criterio di uscita 'nessuna skill non classificata': tests/test_risk.py verifica gia'
+    che ogni skill BUILT-IN/di JakeCore abbia un livello di rischio esplicito, ma non c'era un
+    equivalente end-to-end per un plugin scritto a mano e caricato da load_plugins() - qui si
+    verifica la catena reale (load_plugins() -> SkillRegistry.register_skill() vero ->
+    PolicyEngine.sync_with_registry() vero, lo stesso ordine di JakeCore.__init__), non solo i
+    pezzi isolati: un intent MAI visto da core/risk.py deve comunque finire dietro conferma E
+    autenticazione, esattamente come garantito per un intent forgiato a runtime dalla Skill
+    Forge (vedi OnSkillInstalledGateWiringTests in tests/test_jake_core_permissions.py)."""
+
+    def test_a_hand_written_plugin_with_an_unclassified_intent_still_requires_confirmation_and_auth(self):
+        self._write_plugin("plugin_sconosciuto.py", (
+            "class Skill:\n"
+            "    metadata = {'intent': 'UN_INTENT_MAI_VISTO_PRIMA', 'description': '', 'parameters': {}}\n"
+            "    def execute(self, parameters=None):\n"
+            "        return None\n"
+            "\n"
+            "def register(registry):\n"
+            "    registry.register_skill('UN_INTENT_MAI_VISTO_PRIMA', Skill())\n"
+        ))
+        registry = SkillRegistry.__new__(SkillRegistry)
+        registry.skills = {}
+        registry.logger = None
+
+        loaded = load_plugins(registry, plugins_dir=self.tmp_dir)
+        self.assertEqual(loaded, ["plugin_sconosciuto"])
+        self.assertIn("UN_INTENT_MAI_VISTO_PRIMA", registry.skills)
+
+        policy_engine = PolicyEngine()
+        policy_engine.sync_with_registry(registry)
+
+        self.assertIn("UN_INTENT_MAI_VISTO_PRIMA", policy_engine.always_confirm_intents)
+        self.assertIn("UN_INTENT_MAI_VISTO_PRIMA", policy_engine.require_auth_intents)
 
 
 if __name__ == "__main__":
