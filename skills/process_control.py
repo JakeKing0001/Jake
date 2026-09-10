@@ -24,14 +24,27 @@ def _process_needle(name: str) -> str:
     return PROCESS_ALIASES.get(lowered, lowered)
 
 
+# Sotto questa lunghezza il confronto per sottostringa (vedi _matching_processes) smette di
+# essere un filtro sensato: "a" da solo corrisponde a ~150 processi su una macchina reale
+# (quasi ogni nome eseguibile contiene la lettera "a"), incluse app con finestre visibili -
+# riprodotto per davvero su questa macchina, con Opera/Impostazioni/Nahimic/l'overlay NVIDIA
+# tra i risultati. Per CloseAppSkill questo non e' solo rumore: il ramo "chiusura gentile"
+# (WM_CLOSE) sotto NON chiede mai conferma, quindi un filtro troppo corto avrebbe chiuso
+# finestre reali dell'utente senza alcun avviso. Il piu' corto valore vero in PROCESS_ALIASES
+# e' lungo 3 (es. "cmd", "vlc"), quindi questa soglia non esclude nessun alias curato.
+MIN_MATCH_LENGTH = 3
+
+
 def _matching_processes(needle: str, original: str):
     import psutil
 
-    needles = {needle, original.lower().replace(" ", "")}
+    needles = {n for n in (needle, original.lower().replace(" ", "")) if len(n) >= MIN_MATCH_LENGTH}
+    if not needles:
+        return []
     matching = []
     for process in psutil.process_iter(["pid", "name"]):
         process_name = (process.info.get("name") or "").lower()
-        if any(n and n in process_name for n in needles):
+        if any(n in process_name for n in needles):
             matching.append(process)
     return matching
 
