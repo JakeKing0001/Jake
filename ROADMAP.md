@@ -1094,6 +1094,8 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   winreg", ...)`, non `sys.modules`, che non avrebbe alcun effetto su un nome gia' legato nel
   modulo (i primi tentativi di questi test lo confermavano leggendo per davvero il registro vero
   di questa macchina). Nessun bug trovato nel codice della skill.
+- ✅ Copertura per `skills/security_utils.py` (10 test: forza password, hash SHA-256 di un file
+  vero su disco temporaneo) - nessuna suite esisteva finora. Nessun bug trovato.
 
 ## F2 — Voice Natural 3.0
 
