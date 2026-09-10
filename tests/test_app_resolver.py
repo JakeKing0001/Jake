@@ -1,9 +1,10 @@
 """Test unitari per core/app_resolver.py: nessuna suite esisteva finora. resolve() e' isolato
 dal filesystem/PowerShell reali costruendo AppResolver con search_paths=[]/
-include_start_apps=False (niente scansione vera del menu Start o Get-StartApps) e iniettando
+include_start_apps=False/include_path=False (niente scansione vera del menu Start, Get-StartApps
+o PATH) e iniettando
 direttamente _applications/_display_names/_sources per i test sul fuzzy matching - le uniche
 parti che davvero toccano il sistema (_add_start_menu_entries/_add_start_apps/_add_path_entries)
-restano fuori scopo qui, sono I/O non deterministico.
+sono verificate separatamente con fault I/O deterministici.
 
 F1 (indiretto): buco reale trovato e corretto in questa sessione. resolve() gestiva gia'
 l'articolo elidibile senza apostrofo ("il pannello di controllo" -> "pannello di controllo"),
@@ -12,13 +13,15 @@ che il controllo sull'articolo veda il testo, quindi "l'esplora file" diventava 
 (l'apostrofo sparisce senza lasciare uno spazio) e il controllo storico
 "normalized_name.startswith('l ')" non scattava mai per questo caso - "apri l'esplora file", una
 frase italiana perfettamente naturale, non risolveva affatto l'alias."""
+from pathlib import Path
 import unittest
+from unittest import mock
 
 from core.app_resolver import AppMatch, AppResolver
 
 
 def _resolver(**kwargs) -> AppResolver:
-    return AppResolver(search_paths=[], include_start_apps=False, **kwargs)
+    return AppResolver(search_paths=[], include_start_apps=False, include_path=False, **kwargs)
 
 
 class NormalizeNameTests(unittest.TestCase):
@@ -135,6 +138,94 @@ class FuzzyMatchingAgainstDiscoveredAppsTests(unittest.TestCase):
     def test_returns_an_appmatch_instance(self):
         resolver = self._resolver_with_apps({"spotify": "spotify.exe"})
         self.assertIsInstance(resolver.resolve("spotify"), AppMatch)
+
+
+class PathDiscoveryFaultTests(unittest.TestCase):
+    @staticmethod
+    def _failing_entries(exception):
+        def entries():
+            raise exception
+            yield  # pragma: no cover - rende questa funzione un generatore
+
+        return entries
+
+    def test_empty_search_paths_are_preserved_instead_of_using_defaults(self):
+        with mock.patch.object(AppResolver, "_default_start_menu_paths") as defaults:
+            resolver = AppResolver(search_paths=[], include_start_apps=False, include_path=False)
+
+        self.assertEqual(resolver.search_paths, [])
+        defaults.assert_not_called()
+
+    def test_none_search_paths_use_the_default_start_menu_paths(self):
+        expected = [Path("C:/Start Menu")]
+        with mock.patch.object(AppResolver, "_default_start_menu_paths", return_value=expected) as defaults:
+            resolver = AppResolver(search_paths=None, include_start_apps=False, include_path=False)
+
+        self.assertEqual(resolver.search_paths, expected)
+        defaults.assert_called_once_with()
+
+    def test_permission_error_raised_while_iterating_a_path_directory_is_ignored(self):
+        """F0.1.1: Path.iterdir() e' un generatore; l'I/O puo' fallire al primo next()."""
+
+        resolver = AppResolver(search_paths=[], include_start_apps=False)
+        with (
+            mock.patch.dict("os.environ", {"PATH": "C:/inaccessibile"}, clear=False),
+            mock.patch("core.app_resolver.Path.is_dir", return_value=True),
+            mock.patch(
+                "core.app_resolver.Path.iterdir",
+                side_effect=self._failing_entries(PermissionError("directory PATH non accessibile")),
+            ),
+        ):
+            self.assertEqual(resolver.discover(), {})
+
+    def test_directory_removed_while_iterating_path_is_ignored(self):
+        resolver = AppResolver(search_paths=[], include_start_apps=False)
+        with (
+            mock.patch.dict("os.environ", {"PATH": "C:/rimossa"}, clear=False),
+            mock.patch("core.app_resolver.Path.is_dir", return_value=True),
+            mock.patch(
+                "core.app_resolver.Path.iterdir",
+                side_effect=self._failing_entries(FileNotFoundError("directory rimossa")),
+            ),
+        ):
+            self.assertEqual(resolver.discover(), {})
+
+    def test_invalid_junction_that_fails_directory_check_is_ignored(self):
+        resolver = AppResolver(search_paths=[], include_start_apps=False)
+        with (
+            mock.patch.dict("os.environ", {"PATH": "C:/junction-non-valida"}, clear=False),
+            mock.patch("core.app_resolver.Path.is_dir", side_effect=OSError("junction non valida")),
+        ):
+            self.assertEqual(resolver.discover(), {})
+
+    def test_unreadable_file_in_path_is_ignored(self):
+        unreadable = mock.Mock()
+        unreadable.suffix = ".exe"
+        unreadable.is_file.side_effect = PermissionError("file non leggibile")
+        resolver = AppResolver(search_paths=[], include_start_apps=False)
+        with (
+            mock.patch.dict("os.environ", {"PATH": "C:/con-file-non-leggibile"}, clear=False),
+            mock.patch("core.app_resolver.Path.is_dir", return_value=True),
+            mock.patch("core.app_resolver.Path.iterdir", return_value=iter([unreadable])),
+        ):
+            self.assertEqual(resolver.discover(), {})
+
+    def test_empty_path_does_not_scan_the_current_directory(self):
+        resolver = AppResolver(search_paths=[], include_start_apps=False)
+        with (
+            mock.patch.dict("os.environ", {"PATH": ""}, clear=False),
+            mock.patch("core.app_resolver.Path.is_dir") as is_dir,
+        ):
+            self.assertEqual(resolver.discover(), {})
+
+        is_dir.assert_not_called()
+
+    def test_path_scanning_can_be_disabled(self):
+        resolver = AppResolver(search_paths=[], include_start_apps=False, include_path=False)
+        with mock.patch.object(resolver, "_add_path_entries") as add_path_entries:
+            self.assertEqual(resolver.discover(), {})
+
+        add_path_entries.assert_not_called()
 
 
 if __name__ == "__main__":

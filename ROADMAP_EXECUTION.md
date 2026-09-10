@@ -95,6 +95,23 @@ Inoltre `search_paths=[]` viene sostituito dai percorsi predefiniti perché il c
 `search_paths or defaults`. Il test che dovrebbe essere isolato finisce così per leggere il
 vero `PATH` e fallisce su `WindowsApps` con `PermissionError`.
 
+### Verifica della correzione F0.1 — 11/09/2026
+
+- Stato: `VERIFY`; implementazione e gate locali conclusi, manca la matrice CI Python 3.11/3.12.
+- Causa riprodotta prima del fix: `Path.iterdir()` restituiva un generatore e il
+  `PermissionError` emergeva al primo `next()`, fuori dal `try`; il test mirato falliva con la
+  stessa eccezione osservata su `WindowsApps`.
+- Fix: `search_paths=[]` viene preservato e solo `None` abilita i default; la scansione del
+  `PATH` è disattivabile con `include_path=False`; verifica della directory e materializzazione
+  di `iterdir()` sono protette da `OSError`; un singolo file non leggibile viene ignorato.
+- Fault test deterministici: directory inaccessibile durante l'iterazione, directory rimossa,
+  junction non valida, file non leggibile, `PATH` vuoto, scansione `PATH` disabilitata e
+  semantica distinta di `search_paths=None`/`[]`.
+- Prova locale Python 3.12.6: `tests.test_app_resolver` 29/29; suite completa 1.262/1.262;
+  20/20 suite complete consecutive verdi; ruff, mypy selettivo, compileall e smoke test verdi.
+- Condizione residua: non segnare `DONE` e non chiudere G0 finché i job CI Windows su Python
+  3.11 e 3.12 non sono entrambi verdi sul commit della correzione.
+
 ## 4. Architettura di destinazione e collegamenti
 
 ```mermaid
@@ -1533,6 +1550,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-La prossima attività è `F0.1.1`: aggiungere il test di regressione per una directory `PATH`
-inaccessibile e farlo fallire in modo deterministico. Seguono `F0.1.2` e `F0.1.3`; nessuna
-nuova feature deve precedere il ritorno a una suite completamente verde.
+La prossima attività è chiudere la verifica remota di `F0.1`: creare il commit atomico con test,
+fix e audit, pubblicarlo e osservare entrambi i job CI Windows Python 3.11/3.12. Solo dopo il
+verde remoto `F0.1` passa da `VERIFY` a `DONE` e si procede con `F0.2`; nessuna nuova feature
+deve precedere questo gate.
