@@ -276,6 +276,17 @@ pulita; smoke test installazione/avvio/arresto; dashboard locale con errori e la
   `tests/test_app_resolver.py` (21 test nuovi): alias diretti, elisione con/senza apostrofo,
   normalizzazione, e il fuzzy matching (typo, abbreviazioni, soglia piu' alta per le voci dal
   PATH) iniettando applicazioni finte invece di scansionare il menu Start/PowerShell veri.
+- ✅ Copertura di test per `core/network.py` (5 test, `socket.create_connection` mockato) e per
+  l'assemblaggio del catalogo di skill built-in (`core/skill_catalog.py`, `tests/
+  test_skill_catalog.py`, 5 test): quest'ultimo non testa le singole skill (hanno gia' le proprie
+  suite), verifica solo che le 16 funzioni `build_*_skills()` non registrino mai lo stesso intent
+  in due domini diversi (si sovrascriverebbero a vicenda in silenzio quando `SkillRegistry` unisce
+  i dizionari) e che la chiave di ogni dizionario coincida col `metadata["intent"]` dichiarato
+  dalla skill stessa. Nessun bug trovato in nessuno dei due moduli: il valore e' la copertura,
+  non una correzione - chiude l'ultimo dei moduli senza alcun test individuati a inizio sessione
+  (insieme a `intent_provider`/`vision_provider`/`win_dpi`/`learning_manager`/`reminder_manager`/
+  `trigger_manager`/`workflow_manager`/`app_resolver`/`device_registry` sopra, tutti trattati in
+  questa stessa sessione).
 
 ## F1 — Trustworthy Agent Core 3.0
 
