@@ -84,5 +84,8 @@ class ResearchSkill:
             with request.urlopen(http_request, timeout=self.timeout) as response:
                 result = json.loads(response.read().decode("utf-8"))
             return result["message"]["content"].strip() or None
-        except (error.URLError, TimeoutError, json.JSONDecodeError, KeyError):
+        except (error.URLError, TimeoutError, json.JSONDecodeError, KeyError, TypeError):
+            # F1: stesso buco corretto in core/vision_provider.py/skills/ask_question.py in
+            # questa sessione - un corpo JSON valido ma non nella forma attesa fa sollevare un
+            # TypeError da questo indicizzamento, non un KeyError.
             return None

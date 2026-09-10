@@ -76,5 +76,10 @@ class AskQuestionSkill:
             with request.urlopen(http_request, timeout=self.timeout) as response:
                 result = json.loads(response.read().decode("utf-8"))
             return result["message"]["content"].strip() or None
-        except (error.URLError, TimeoutError, json.JSONDecodeError, KeyError):
+        except (error.URLError, TimeoutError, json.JSONDecodeError, KeyError, TypeError):
+            # F1: buco reale (corretto insieme a core/vision_provider.py in questa sessione) -
+            # un corpo JSON valido ma non nella forma attesa ("null", "[]", un numero,
+            # {"message": null}) fa sollevare un TypeError da questo indicizzamento, non un
+            # KeyError: senza TypeError qui, quella risposta faceva uscire un'eccezione invece
+            # di degradare a None come promesso.
             return None
