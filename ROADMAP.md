@@ -280,6 +280,19 @@ pulita; smoke test installazione/avvio/arresto; dashboard locale con errori e la
   `tests/test_app_resolver.py` (21 test nuovi): alias diretti, elisione con/senza apostrofo,
   normalizzazione, e il fuzzy matching (typo, abbreviazioni, soglia piu' alta per le voci dal
   PATH) iniettando applicazioni finte invece di scansionare il menu Start/PowerShell veri.
+- ✅ **F0.1 AppResolver, fault I/O del `PATH`, corretto e verificato localmente** (11/09/2026;
+  stato operativo `VERIFY` fino alla CI Python 3.11/3.12). La regressione e' stata prima
+  riprodotta in modo deterministico: `Path.iterdir()` crea un generatore senza fare I/O e il
+  `PermissionError` emerge al primo `next()`, che prima avveniva fuori dal `try`. Inoltre il
+  costruttore usava `search_paths or defaults`, quindi `search_paths=[]` non isolava affatto i
+  test e riattivava menu Start e `PATH` reali. Il fix distingue `None` da `[]`, rende la scansione
+  `PATH` esplicitamente disattivabile con `include_path=False`, materializza `iterdir()` dentro
+  la protezione `OSError`, protegge anche `is_dir()`/`is_file()` e non tratta un `PATH` vuoto
+  come la directory corrente. `tests/test_app_resolver.py` passa da 21 a 29 test, aggiungendo
+  fault per iterazione inaccessibile, directory rimossa, junction non valida, file non leggibile,
+  `PATH` vuoto e configurazione delle fonti. Prova locale su Python 3.12.6: test mirati 29/29,
+  suite completa 1.262/1.262 e 20/20 esecuzioni complete consecutive verdi; ruff, mypy
+  selettivo, compileall e smoke test verdi. F0.1 non e' marcata `DONE` prima dei due job CI.
 - ✅ Copertura di test per `core/network.py` (5 test, `socket.create_connection` mockato) e per
   l'assemblaggio del catalogo di skill built-in (`core/skill_catalog.py`, `tests/
   test_skill_catalog.py`, 5 test): quest'ultimo non testa le singole skill (hanno gia' le proprie

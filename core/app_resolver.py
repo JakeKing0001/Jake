@@ -54,10 +54,17 @@ class AppResolver:
     PATH_MIN_SCORE = 0.92
     START_APPS_TIMEOUT = 12
 
-    def __init__(self, search_paths: list[Path] = None, threshold: float = 0.72, include_start_apps: bool = True):
-        self.search_paths = search_paths or self._default_start_menu_paths()
+    def __init__(
+        self,
+        search_paths: list[Path] | None = None,
+        threshold: float = 0.72,
+        include_start_apps: bool = True,
+        include_path: bool = True,
+    ):
+        self.search_paths = self._default_start_menu_paths() if search_paths is None else search_paths
         self.threshold = threshold
         self.include_start_apps = include_start_apps
+        self.include_path = include_path
         self._applications = None
         self._display_names = {}
         self._sources = {}
@@ -75,7 +82,8 @@ class AppResolver:
             self._add_start_menu_entries(applications, display_names, sources, Path(search_path))
         if self.include_start_apps:
             self._add_start_apps(applications, display_names, sources)
-        self._add_path_entries(applications, display_names, sources)
+        if self.include_path:
+            self._add_path_entries(applications, display_names, sources)
         with self._lock:
             self._applications = applications
             self._display_names = display_names
@@ -265,17 +273,26 @@ class AppResolver:
 
     def _add_path_entries(self, applications, display_names, sources):
         for directory in os.environ.get("PATH", "").split(os.pathsep):
-            path = Path(directory)
-            if not path.is_dir():
+            if not directory:
                 continue
+            path = Path(directory)
             try:
-                entries = path.iterdir()
+                if not path.is_dir():
+                    continue
+                # Path.iterdir() e' lazy: PermissionError/FileNotFoundError possono emergere
+                # durante il consumo, non alla creazione dell'iteratore. Materializzare qui
+                # mantiene tutta l'operazione I/O dentro la protezione.
+                entries = list(path.iterdir())
             except OSError:
                 continue
             for entry in entries:
                 # Niente shutil.which per ogni voce: con centinaia di eseguibili nel PATH costava
                 # decine di secondi (ogni which rifa' la ricerca su tutte le cartelle del PATH).
-                if entry.suffix.lower() in self.LAUNCHER_SUFFIXES and entry.is_file():
+                try:
+                    is_launcher_file = entry.suffix.lower() in self.LAUNCHER_SUFFIXES and entry.is_file()
+                except OSError:
+                    continue
+                if is_launcher_file:
                     self._add_application(applications, display_names, sources, entry.stem, str(entry), "path")
 
     def _add_application(self, applications, display_names, sources, name: str, launcher: str, source: str):
