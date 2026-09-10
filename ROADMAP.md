@@ -1314,6 +1314,15 @@ della lista sopra, non l'intera fase.
   controllo diretto che l'orario salvato coincida esattamente con cio' che lo scheduler vero
   confrontera' (`datetime(...).strftime("%H:%M")`), non solo con un valore atteso scritto a
   mano.
+- ✅ **Buco reale trovato e corretto in `START_POMODORO`** (`skills/reminders_extra.py`,
+  nessuna suite esisteva per l'intero file, ne' per `skills/reminder.py`). `int(minutes)` non
+  catturava un valore non numerico: **verificato per davvero**, `execute({"minutes": "trenta"})`
+  sollevava un `ValueError` mai gestito, con l'utente che vedeva solo il generico errore
+  imprevisto di `JakeCore.answer()`. Corretto con un parsing tollerante (`_parse_minutes`, stesso
+  principio di `ttl_days`/`ListNotesSkill.limit` corretti in questa stessa sessione): un valore
+  mancante, non numerico o non positivo ricade sul default (25) invece di rompersi. Aggiunti
+  `tests/test_reminders_extra_skills.py` (17 test) e `tests/test_reminder_skills.py` (8 test,
+  nessun bug trovato li'), entrambi con un `ReminderManager` vero su file temporaneo.
 - ⬜ Tutto il resto: event engine multi-connettore, daily brief, commitment tracking, goal
   manager, routine apprese, focus assistant, meeting copilot, resto del digital housekeeping
   (duplicati, aggiornamenti, sicurezza), quiet policy appresa/cooldown/digest, finestra di
