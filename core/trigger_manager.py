@@ -42,8 +42,17 @@ class TriggerManager:
             return None
         return json.loads(results[0]["value"])
 
+    # Non un limite di prodotto (l'utente non creerebbe mai centinaia di automazioni a mano):
+    # solo un tetto di sicurezza contro una query sql senza fine. TriggerScheduler._fire() (core/
+    # trigger_scheduler.py) itera list_all() a OGNI ciclo di controllo per decidere cosa far
+    # scattare: un limite basso troncherebbe silenziosamente i trigger piu' vecchi/meno di
+    # recente aggiornati (recall() ordina per importance/updated_at), che smetterebbero di
+    # scattare mai piu' superata quella soglia - un limite di 50 era raggiungibile per davvero
+    # con un uso normale nel tempo (ogni SET_TRIGGER e' un record permanente).
+    MAX_TRIGGERS = 1000
+
     def list_all(self) -> list[dict]:
-        results = self.memory_manager.recall(category=self.CATEGORY, limit=50)
+        results = self.memory_manager.recall(category=self.CATEGORY, limit=self.MAX_TRIGGERS)
         triggers = []
         for entry in results:
             record = json.loads(entry["value"])

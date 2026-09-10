@@ -29,6 +29,12 @@ class WorkflowManager:
         steps = [PlanStep(**step) for step in steps_data]
         return Plan(steps=steps)
 
+    # Stesso ragionamento di TriggerManager.MAX_TRIGGERS (core/trigger_manager.py): non un
+    # limite di prodotto, solo un tetto di sicurezza - un limite basso troncherebbe
+    # silenziosamente i workflow salvati piu' vecchi/meno di recente aggiornati da
+    # "elenca i miei workflow" superata quella soglia.
+    MAX_WORKFLOWS = 1000
+
     def list_names(self) -> list[str]:
-        results = self.memory_manager.recall(category=self.CATEGORY, limit=50)
+        results = self.memory_manager.recall(category=self.CATEGORY, limit=self.MAX_WORKFLOWS)
         return [result["key"] for result in results]
