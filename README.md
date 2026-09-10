@@ -1,8 +1,8 @@
 # Jake
 
-> Il progetto include oggi avanzamenti delle fasi 3.x–5.x. Lo stato reale, ciò che era già
-> deciso e il piano completo verso un vero Jarvis sono mantenuti nella
-> **[roadmap del progetto](ROADMAP.md)**.
+> Il progetto include oggi avanzamenti delle fasi 3.x–5.x. Il percorso collegato e ordinato
+> verso un vero Jarvis è nella **[roadmap esecutiva](ROADMAP_EXECUTION.md)**; prove, incidenti e
+> cronologia tecnica restano nell'[audit storico](ROADMAP.md).
 
 Assistente personale vocale, locale, per Windows. Ascolta, capisce l'italiano parlato, **fa le cose al posto tuo** (apre programmi e siti, cerca, scrive, clicca, gestisce file, finestre, timer, promemoria, musica...), risponde a domande, **impara comandi nuovi** e, quando non sa fare qualcosa, **si scrive da solo una nuova capacità**. Per i compiti composti ("trova il file X e leggimelo") **ragiona a passi**: esegue un'azione, guarda il risultato vero, decide la successiva, e chiede a te solo se manca davvero un'informazione che solo tu conosci. Quando lo attivi compare un HUD a schermo intero in vetro liquido blu, stile Jarvis, sopra qualunque cosa: i suoi pannelli sono cliccabili, il resto dello schermo resta trasparente e utilizzabile.
 
@@ -39,7 +39,7 @@ Requisiti: Windows 10/11, Python 3.11+, [Ollama](https://ollama.com) con `qwen2.
 | RAM | 8 GB (soglia generica di Ollama per modelli 7B, non specifica di Jake) | 16 GB o più, per tenere insieme Ollama, Whisper, l'HUD e il resto di Windows senza swap |
 | VRAM occupata da Ollama a runtime | - | ~5 GB con `qwen2.5:7b` (classificatore/agente) e `nomic-embed-text` (recupero semantico) entrambi caricati insieme su GPU (misurato con `ollama ps`); `qwen2.5-coder:7b`/`qwen2.5vl:7b` si aggiungono solo quando usati, Ollama scarica i modelli inattivi da soli dopo un periodo di inattività |
 
-Le dimensioni dei modelli sopra sono misurate direttamente (`ollama list`/`ollama ps`, cache di `faster-whisper`), non stimate. Non ancora misurato: l'impronta RAM del processo Python di Jake stesso (HUD, agente, memoria) insieme a Ollama, ne' un profilo di latenza end-to-end dell'intera pipeline voce+NLU+agente in un'unica sessione - vedi `benchmarks/` per le latenze misurate dei singoli componenti (NLU, agente, percezione schermo), e la fase F0 nella [roadmap](ROADMAP.md) per cosa manca ancora.
+Le dimensioni dei modelli sopra sono misurate direttamente (`ollama list`/`ollama ps`, cache di `faster-whisper`), non stimate. Non ancora misurato: l'impronta RAM del processo Python di Jake stesso (HUD, agente, memoria) insieme a Ollama, ne' un profilo di latenza end-to-end dell'intera pipeline voce+NLU+agente in un'unica sessione - vedi `benchmarks/` per le latenze misurate dei singoli componenti (NLU, agente, percezione schermo), e la fase F0 nella [roadmap esecutiva](ROADMAP_EXECUTION.md) per cosa manca ancora.
 
 ## Cosa puoi dirgli
 

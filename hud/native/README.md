@@ -1,6 +1,6 @@
 # Jake HUD nativo (fase 4.9, HUD Engine 2.0)
 
-Prototipo QML per la fase 4.9.2 della [roadmap](../../ROADMAP.md): separare l'interfaccia grafica dal core Python,
+Prototipo QML per la fase 4.9.2 della [roadmap esecutiva](../../ROADMAP_EXECUTION.md): separare l'interfaccia grafica dal core Python,
 riscrivendola in C++/Qt6/QML per un vero blur/compositing/trasparenza nativi che PySide6 non può
 offrire (vedi la nota nella roadmap salvata). Parla con Jake **solo** tramite il server companion
 HTTP+SSE (`core/companion_server.py`, fase 4.9.1/5.8/5.9): non importa `core/jake_core.py`, non sa
