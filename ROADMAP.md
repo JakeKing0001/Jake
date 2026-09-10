@@ -1100,6 +1100,22 @@ della lista sopra, non l'intera fase.
   con soglie abbassate via mock invece di scrivere file da 5+ GB veri su disco). Resta 🟡, non
   ✅: solo Download e solo due segnali (spazio/eta'); duplicati, cartelle diverse da Download,
   aggiornamenti e sicurezza del sistema restano non affrontati.
+- ✅ **Buco reale trovato e corretto nei promemoria ricorrenti**
+  (`core/reminder_manager.py::due_reminders()`, nessuna suite esisteva finora nonostante sia
+  interrogato ogni 20 secondi da un thread separato, `core/scheduler.py`). Un promemoria
+  ricorrente (`SET_DAILY_REMINDER`) rimasto scaduto per piu' di un giorno (es. Jake spento per
+  qualche giorno) veniva riprogrammato di +1 giorno alla volta: se il nuovo `due_at` restava
+  comunque nel passato, la chiamata SUCCESSIVA di `due_reminders()` (20 secondi dopo) lo faceva
+  scattare di nuovo, e ancora, finche' la data non raggiungeva oggi. **Verificato per davvero,
+  non ipotizzato**: un promemoria giornaliero rimasto scaduto per 3 giorni suonava per DAVVERO 4
+  volte di fila nel giro di un minuto dall'avvio di Jake (una per ogni giorno mancato piu' oggi),
+  non una sola come ci si aspetterebbe da un "recupero" - riprodotto simulando 5 tick consecutivi
+  dello scheduler su un database sqlite vero, non un'ipotesi sul codice. Corretto avanzando la
+  data finche' non e' strettamente nel futuro invece di un solo `+timedelta(days=1)`, cosi' il
+  recupero avviene in un colpo solo. Aggiunto `tests/test_reminder_manager.py` (19 test nuovi,
+  il modulo non ne aveva nessuno): copre anche il caso normale (mancato di un solo giorno,
+  comportamento invariato), i timer/pomodoro (stessa tabella, colonna `kind`), e la resilienza
+  della migrazione dello schema (`ALTER TABLE` ripetuto senza fallire alla riapertura).
 - ⬜ Tutto il resto: event engine multi-connettore, daily brief, commitment tracking, goal
   manager, routine apprese, focus assistant, meeting copilot, resto del digital housekeeping
   (duplicati, aggiornamenti, sicurezza), quiet policy appresa/cooldown/digest, finestra di
