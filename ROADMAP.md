@@ -1063,6 +1063,11 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   CLOSE_APP.
 - ✅ Copertura per `skills/keyboard_control.py` (11 test) e `skills/mouse_control.py` (9 test) -
   nessuno dei due aveva una suite. `keyboard`/`pyautogui` sempre mockati. Nessun bug trovato.
+- ✅ Copertura per `skills/network_utils.py` (17 test), `skills/print_utils.py` (4 test) e
+  `skills/browser_search.py` (27 test, incluso `_first_youtube_video` - logica pura di
+  estrazione video id/titolo dall'HTML grezzo di YouTube, nessuna richiesta di rete vera).
+  Nessuno dei tre aveva una suite. `subprocess.run`/`urllib.request.urlopen`/`webbrowser.open`/
+  `os.startfile` sempre mockati. Nessun bug trovato.
 
 ## F2 — Voice Natural 3.0
 
