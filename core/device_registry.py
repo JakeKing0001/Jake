@@ -11,7 +11,17 @@ class DeviceRegistry:
         self._known_devices: dict[str, dict] = {}
 
     def register(self, device_id: str, name: str = "") -> None:
-        self._known_devices.setdefault(device_id, {"name": name})
+        # claim() chiama register() a ogni richiesta (core/companion_server.py::_handle_claim),
+        # col nome che il client manda in quel momento: prima di questa correzione setdefault()
+        # fissava il nome alla PRIMA registrazione per sempre, ignorando silenziosamente un nome
+        # diverso su un claim successivo (es. l'utente rinomina il dispositivo nell'app
+        # companion) - riprodotto per davvero: due claim dello stesso device_id con nomi diversi
+        # lasciavano list_devices() a mostrare per sempre il primo nome. Un nome vuoto su un
+        # claim successivo non cancella pero' un nome gia' noto: significa solo che quella
+        # richiesta non ne ha mandato uno, non che l'utente lo abbia tolto.
+        existing = self._known_devices.setdefault(device_id, {"name": name})
+        if name and existing.get("name") != name:
+            existing["name"] = name
 
     def claim(self, device_id: str, name: str = "") -> str | None:
         """device_id diventa il dispositivo attivo. Restituisce l'id del dispositivo
