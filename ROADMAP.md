@@ -1086,6 +1086,14 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   propria suite), `os.startfile`/`subprocess.Popen`/`webbrowser.open` sempre mockati. Nessun bug
   trovato in nessuno dei due (la catena di fallback separata da `|` in `OpenAppSkill._launch` e'
   scritta in modo poco leggibile ma si comporta correttamente).
+- ✅ Copertura per `skills/system_maintenance.py` (26 test: pulizia file temporanei con file veri
+  su disco, riavvio Esplora risorse, flush DNS, elenco app all'avvio/installate, piano di
+  alimentazione, tema scuro, stato Wi-Fi) - nessuna suite esisteva finora. Nota tecnica: questo
+  file fa `import winreg` a livello di MODULO (non dentro le funzioni, a differenza di win32gui/
+  pyautogui/keyboard usati altrove) - mockarlo richiede `mock.patch("skills.system_maintenance.
+  winreg", ...)`, non `sys.modules`, che non avrebbe alcun effetto su un nome gia' legato nel
+  modulo (i primi tentativi di questi test lo confermavano leggendo per davvero il registro vero
+  di questa macchina). Nessun bug trovato nel codice della skill.
 
 ## F2 — Voice Natural 3.0
 
