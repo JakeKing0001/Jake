@@ -872,6 +872,21 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   proprio caso (`test_malformed_embeddings_shape_returns_none_not_a_crash`), qui mancava.
   Corretto validando la forma di `result`/`result["message"]` prima di leggerne i campi. Aggiunto
   `tests/test_vision_provider.py` (12 test nuovi).
+- ✅ **Buco reale trovato e corretto in `core/win_dpi.py::ensure_dpi_aware()`** (nessuna suite
+  esisteva finora). Le API Win32 di fallback (`SetProcessDpiAwareness`, `SetProcessDPIAware`)
+  segnalano il fallimento nel loro VALORE DI RITORNO (un HRESULT diverso da S_OK, o un BOOL
+  falso), non sollevando un'eccezione - ma il codice le chiamava e ritornava incondizionatamente
+  `True` senza mai controllare cosa avessero effettivamente restituito. **Verificato per
+  davvero, non ipotizzato**: chiamando `ctypes.windll.shcore.SetProcessDpiAwareness(2)` due
+  volte di fila nello stesso processo, la seconda chiamata ritorna per davvero `E_ACCESSDENIED`
+  (`0x80070005`) - nessuna eccezione, solo un valore di ritorno ignorato dal codice. La
+  conseguenza pratica oggi e' contenuta (l'unico chiamante, `main.py`, scarta il valore di
+  ritorno), ma la funzione promette esplicitamente `-> bool` come "la DPI awareness e' stata
+  impostata davvero", ed era falsa in caso di fallimento silenzioso - esattamente il tipo di
+  disallineamento schermo/mouse che questo modulo esiste per prevenire, se in futuro qualcosa
+  iniziasse a fidarsi di quel valore. Corretto controllando il valore di ritorno di entrambe le
+  API di fallback. Aggiunto `tests/test_win_dpi.py` (9 test nuovi, mockando le vere funzioni
+  `ctypes.windll.<dll>.<api>` invece di reimplementarle).
 
 ## F2 — Voice Natural 3.0
 
