@@ -1046,10 +1046,31 @@ qui come non affrontati, non abbozzati per finta.
   vita breve ("oggi piove") decide li' la sua scadenza, non un limite di retention imposto dopo
   (quello resta `purge_history_older_than`, invariato). `recall()`/`semantic_recall()` escludono
   di default i ricordi scaduti (`include_expired=False`); `purge_expired()` li rimuove per
-  davvero dal disco (nessun chiamante automatico ancora - una pulizia periodica via
-  `core/system_advisor.py` resta da collegare). Coperto da `ProvenanceAndExpiryTests` in
+  davvero dal disco. Coperto da `ProvenanceAndExpiryTests` in
   `tests/test_memory_manager.py` (9 test nuovi, dedup/query temporali esistenti invariati:
   28/28 verdi in `tests/test_memory_manager.py`).
+- ✅ **Collegato il primo chiamante reale per `ttl_days`, e la pulizia periodica che a fine
+  sessione precedente restava dichiarata come mancante** (vedi il bullet sopra: "nessun
+  chiamante automatico ancora"). Prima di questo collegamento l'intera funzionalita' di scadenza
+  era completamente INERTE in produzione: nessuna skill esponeva mai `ttl_days` all'utente,
+  quindi nessun ricordo aveva mai un `expires_at` impostato, e `purge_expired()` non aveva mai
+  nulla da rimuovere - implementata e testata in isolamento, ma zero effetto reale. Corretto in
+  due parti: (1) `skills/remember.py` espone ora un parametro opzionale `ttl_days` ("se il
+  ricordo vale solo per un periodo limitato... ometti per un ricordo permanente: non inventare
+  una scadenza se l'utente non ne ha detta una" - la stessa cautela gia' usata per non
+  allucinare parametri altrove in questo documento), con un ttl invalido (0, negativo, non
+  numerico) degradato silenziosamente a "nessuna scadenza" invece di far fallire l'intero
+  REMEMBER, coerente con `importance` nello stesso file; (2) `core/system_advisor.py` (lo stesso
+  "futuro hook di manutenzione" gia' previsto nel docstring di `purge_expired()`) chiama ora
+  `purge_expired()` a ogni ciclo - SILENZIOSO, non un avviso come batteria/disco/Download: un
+  ricordo scaduto e' esattamente cio' che l'utente ha chiesto impostando quella scadenza, non
+  "disordine" da segnalare, ma resta loggato per audit. **Verificato end-to-end su un `JakeCore`
+  reale** (non solo con test isolati): salvato un ricordo con un ttl brevissimo, chiamato
+  `system_advisor.memory_manager.purge_expired()`, confermato che il ricordo e' davvero sparito
+  dal disco (`recall(..., include_expired=True)` vuoto) e che `system_advisor.memory_manager` e'
+  lo STESSO oggetto di `JakeCore.memory_manager`, non una copia. Aggiunti
+  `tests/test_remember_skill.py` (10 test, il modulo non ne aveva nessuno prima) e 4 test nuovi
+  in `tests/test_system_advisor.py`.
 - ✅ Parsing temporale naturale per espressioni relative (`core/temporal_parser.py`, nuovo):
   "oggi/ieri/l'altro ieri/domani/dopodomani", "ultimi N giorni/ore", "questa/la settimana
   scorsa", "questo/il mese scorso", "quest'anno/l'anno scorso" -> intervallo `(since, until)`
