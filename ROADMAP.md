@@ -1245,6 +1245,21 @@ della lista sopra, non l'intera fase.
   prodotto: l'utente non crea mai centinaia di automazioni a mano). Aggiunti
   `tests/test_trigger_manager.py` (13 test) e `tests/test_workflow_manager.py` (6 test), nessuno
   dei due moduli ne aveva prima, con un `MemoryManager` vero su file temporaneo.
+- ✅ **Buco reale trovato e corretto in `SET_TRIGGER`** (`skills/trigger.py`, nessuna suite
+  esisteva finora per l'intero file). `TriggerScheduler._time_is_due()` (`core/
+  trigger_scheduler.py`) confronta l'orario salvato con `now.strftime("%H:%M")` - una stringa
+  con lo zero iniziale SEMPRE presente ("09:05", mai "9:5") - ma `SetTriggerSkill` salvava
+  `at_time` cosi' come arrivava, senza normalizzarlo. **Verificato per davvero**: un trigger
+  creato con "9:5" (la forma piu' naturale per dire un orario mattutino a voce, es. "alle 9 e
+  5") veniva salvato con `success=True` ma non sarebbe MAI scattato - nessun errore, nessun
+  avviso, l'utente crede che l'automazione sia impostata correttamente. Corretto normalizzando
+  l'orario alla forma canonica con zero iniziale prima di salvarlo (`INVALID_TIME` se non e' un
+  orario valido, stesso codice di errore gia' usato da `SET_REMINDER`/`SET_DAILY_REMINDER`, che
+  invece non hanno questo problema perche' costruiscono un vero oggetto `datetime` invece di
+  confrontare stringhe). Aggiunto `tests/test_trigger_skills.py` (18 test), incluso un
+  controllo diretto che l'orario salvato coincida esattamente con cio' che lo scheduler vero
+  confrontera' (`datetime(...).strftime("%H:%M")`), non solo con un valore atteso scritto a
+  mano.
 - ⬜ Tutto il resto: event engine multi-connettore, daily brief, commitment tracking, goal
   manager, routine apprese, focus assistant, meeting copilot, resto del digital housekeeping
   (duplicati, aggiornamenti, sicurezza), quiet policy appresa/cooldown/digest, finestra di
