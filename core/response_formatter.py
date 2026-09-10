@@ -203,6 +203,14 @@ def _format_error(intent: str, result: SkillResult) -> str:
         return data.get("message") or "Non sono riuscito a creare la nuova capacità."
     if error == "BLOCKED":
         return data.get("message") or "Non eseguo questa azione: è nella lista di quelle bloccate per sicurezza."
+    if error == "NONZERO_EXIT":
+        # F1: stesso messaggio di prima (vedi il caso gemello in _format_success per
+        # RUN_COMMAND/RUN_PYTHON_SCRIPT) - il codice di uscita diverso da zero ora si riflette
+        # correttamente in result.success, ma l'utente deve continuare a vedere l'output del
+        # comando/script, non un generico "si e' verificato un errore" che lo nasconderebbe.
+        output = data.get("output") or "(nessun output)"
+        label = "Comando eseguito" if intent == "RUN_COMMAND" else "Script eseguito"
+        return f"{label} (codice {data['return_code']}):\n{output}"
     return "Si è verificato un errore durante l'esecuzione"
 
 
