@@ -55,12 +55,34 @@ class SetTriggerSkill:
         if trigger_type == "app_focus" and not app_contains:
             return SkillResult(success=False, data={}, error="MISSING_PARAMETERS")
 
+        if trigger_type == "time":
+            # TriggerScheduler._time_is_due() confronta lo spec con now.strftime("%H:%M"), che
+            # e' SEMPRE con zero iniziale (es. "09:05", mai "9:5"): riprodotto per davvero che
+            # salvare un trigger con "9:5" o "9:05" (senza zero sull'ora) veniva accettato con
+            # successo ma non sarebbe MAI scattato, in silenzio - la forma piu' naturale per dire
+            # un orario mattutino ("alle 9 e 5", "alle 9:05") non e' quella canonica salvata qui.
+            at_time = self._normalize_time(at_time)
+            if at_time is None:
+                return SkillResult(success=False, data={"at_time": (parameters.get("at_time") or "").strip()}, error="INVALID_TIME")
+
         if not self.trigger_manager.workflow_exists(workflow_name):
             return SkillResult(success=False, data={"name": workflow_name}, error="NOT_FOUND")
 
         spec = {"at": at_time} if trigger_type == "time" else {"app_contains": app_contains}
         self.trigger_manager.save(name, workflow_name, trigger_type, spec)
         return SkillResult(success=True, data={"name": name, "workflow_name": workflow_name})
+
+    @staticmethod
+    def _normalize_time(at_time: str) -> str | None:
+        """'9:5' -> '09:05': la forma canonica con zero iniziale che TriggerScheduler confronta
+        letteralmente con now.strftime('%H:%M'). None se non e' un orario valido."""
+        try:
+            hour, minute = (int(part) for part in at_time.split(":"))
+        except ValueError:
+            return None
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            return None
+        return f"{hour:02d}:{minute:02d}"
 
 
 class ListTriggersSkill:
