@@ -608,10 +608,20 @@ pulita; smoke test installazione/avvio/arresto; dashboard locale con errori e la
   puo' letteralmente produrne un altro se lo strutturato viene rispettato), E `TaskAgent.run()`
   controlla di nuovo `intent not in valid` prima di eseguire (`valid` viene dagli stessi
   `tools`) - una difesa indipendente dal fatto che il modello abbia davvero rispettato lo schema.
-  Resta 🟡, non ✅: e' reale ma non e' un oggetto nominato/testato come "capability token" - vive
-  sparso tra una costante a livello di modulo e una lista per istanza, senza un test dedicato che
-  lo blocchi esplicitamente (rischio di regressione silenziosa se qualcuno lo modifica senza
-  sapere cosa protegge).
+  Resta 🟡, non ✅: e' reale ma non e' un oggetto nominato come "capability token" - vive sparso
+  tra una costante a livello di modulo e una lista per istanza, non un oggetto unico. Il rischio
+  di regressione silenziosa segnalato qui e' pero' chiuso: aggiunta
+  `CapabilityTokenEnforcementTests` (`tests/test_agent.py`, 4 test nuovi) che verifica per
+  davvero ENTRAMBI gli strati, non solo la loro esistenza - (1) un intent di `NEVER_FOR_AGENT`
+  (`RUN_COMMAND`, registrato per davvero nel registro finto e suggerito esplicitamente dal
+  recupero semantico, non solo assente dal catalogo) resta escluso da `_tools()` sia nel percorso
+  generico sia con `fixed_tools` esplicito; (2) anche simulando un modello che IGNORA lo schema
+  e restituisce comunque `RUN_COMMAND` nella risposta JSON grezza, l'executor non viene mai
+  chiamato - il controllo `intent not in valid` a runtime funziona davvero in modo indipendente
+  dal rispetto dello schema, non e' un doppione ridondante mai esercitato nei test; (3) le
+  costanti vere `CODING_TOOLS`/`RESEARCH_TOOLS` (`core/orchestrator.py`) non contengono nessun
+  intent di `NEVER_FOR_AGENT`, letto dal modulo reale, non da una copia nel test. Ora una
+  modifica futura che restringesse questa protezione farebbe fallire la suite.
 - ✅ **Capability/identity token per dispositivo**: buco reale trovato e corretto in
   `core/companion_server.py` - NESSUN endpoint (`/command`, `/status`, `/events`,
   `/devices/<id>/claim`, `/devices/<id>/release`) richiedeva alcuna autenticazione. Qualunque
