@@ -309,6 +309,11 @@ pulita; smoke test installazione/avvio/arresto; dashboard locale con errori e la
   (verificato che non sia rimasta traccia nel file reale dei comandi imparati). Aggiunto
   `tests/test_learn_skills.py` (15 test, copre anche `ListLearnedSkill`/`ForgetLearnedSkill`/
   `CorrectLastSkill`, nello stesso file e senza alcuna suite prima).
+- ✅ Copertura di test per altre due aree senza alcuna suite: `skills/skill_forge_skills.py`
+  (12 test, il livello di wiring tra CREATE_SKILL/LIST_CREATED_SKILLS/DELETE_CREATED_SKILL e
+  `core/skill_forge.py` - gia' ampiamente testato per conto suo - con un `SkillForge` finto) e
+  `skills/git_control.py` (11 test, con repository git VERI su cartelle temporanee: `git init`/
+  commit/modifiche reali, non un subprocess mockato). Nessun bug trovato in nessuno dei due.
 
 ## F1 — Trustworthy Agent Core 3.0
 
