@@ -2,6 +2,7 @@
 
 Queste skill hanno bisogno del core (router, planner, learning manager): vengono registrate
 in JakeCore, non in SkillRegistry."""
+from core import intent_patterns
 from core.command import Command
 from core.skill_result import SkillResult
 
@@ -30,7 +31,14 @@ class LearnCommandSkill:
 
         command = None
         kind = "command"
-        if self.core.MULTI_STEP_PATTERN.search(request):
+        # Buco reale trovato e corretto (F1): questa riga leggeva self.core.MULTI_STEP_PATTERN,
+        # un attributo che JakeCore non ha mai avuto (il pattern vive in core/intent_patterns.py,
+        # usato altrove da JakeCore come intent_patterns.is_multi_step_request(), mai riesposto
+        # come attributo di istanza) - LEARN_COMMAND sollevava un AttributeError a OGNI singola
+        # chiamata, verificato per davvero eseguendo la skill. L'utente vedeva solo un generico
+        # "si e' verificato un errore imprevisto" (JakeCore.answer() cattura tutto), mai il vero
+        # motivo: l'intera funzionalita' "impara che quando dico X fai Y" era completamente rotta.
+        if intent_patterns.is_multi_step_request(request):
             plan = self.core.planner_provider.build_plan(request)
             if plan is not None and len(plan.steps) >= 2:
                 self.core.skill_registry.workflow_manager.save(phrase, plan)
