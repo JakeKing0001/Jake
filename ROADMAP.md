@@ -314,6 +314,19 @@ pulita; smoke test installazione/avvio/arresto; dashboard locale con errori e la
   `core/skill_forge.py` - gia' ampiamente testato per conto suo - con un `SkillForge` finto) e
   `skills/git_control.py` (11 test, con repository git VERI su cartelle temporanee: `git init`/
   commit/modifiche reali, non un subprocess mockato). Nessun bug trovato in nessuno dei due.
+- ✅ Copertura per `skills/open_path.py` (9 test, nessun bug trovato) e **buco reale trovato e
+  corretto in `LIST_NOTES`** (`skills/notes.py`, nessuna suite esisteva per l'intero file).
+  `limit=0` restituiva TUTTI gli appunti invece di zero (`lines[-0:]` in Python e' l'intera
+  lista, la stessa insidia di "-0 == 0" gia' vista altrove nel linguaggio), e un `limit` non
+  numerico (es. il modello scrive "tutti" invece di un numero) sollevava un `ValueError` mai
+  catturato. **Verificato per davvero**: entrambi i casi riprodotti su un file di appunti reale
+  prima della correzione. Corretto con un parsing tollerante (`_parse_limit`): un valore mancante,
+  non numerico o non positivo ricade sul default (10) invece di rompersi o restituire tutto,
+  coerente con come altri parametri facoltativi malformati degradano altrove in questo progetto
+  (es. `ttl_days` in `skills/remember.py`, corretto in questa stessa sessione). Aggiunto
+  `tests/test_notes_skills.py` (19 test): ogni test patcha `skills.notes.NOTES_PATH` su un file
+  temporaneo (e' una costante di modulo puntata alla vera `data/notes.md`, senza iniezione via
+  costruttore - verificato che il file reale dell'utente non venga mai toccato).
 
 ## F1 — Trustworthy Agent Core 3.0
 
