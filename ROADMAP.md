@@ -1,4 +1,8 @@
-# Jake — roadmap verso un vero Jarvis
+# Jake — audit storico della roadmap
+
+> Il piano operativo aggiornato, con dipendenze, gate e passaggi numerati, è
+> **[ROADMAP_EXECUTION.md](ROADMAP_EXECUTION.md)**. Questo documento conserva la ricostruzione
+> storica, gli incidenti trovati e le prove dettagliate delle sessioni precedenti.
 
 Aggiornata l'8 settembre 2026. Questo documento separa ciò che è già stato deciso o
 implementato da ciò che viene proposto ora. La cronologia Git e il codice sono la fonte di
