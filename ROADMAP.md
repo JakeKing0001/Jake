@@ -314,6 +314,15 @@ pulita; smoke test installazione/avvio/arresto; dashboard locale con errori e la
   23 test mirati e 1.269 test complessivi verdi; ruff, mypy selettivo, compileall e build C++
   dentro l'ambiente MSVC verdi. Il changelog adotta Added/Changed/Fixed/Security e rimanda a
   questo audit per la storia precedente alla baseline 5.9.
+- ✅ **Errore runtime HUD "Qt6*.dll non trovata" riprodotto e corretto** (11/09/2026).
+  `JakeHud.exe` era l'unico file runtime nella cartella di build: funzionava soltanto nelle
+  shell che avevano `C:\Qt\...\bin` nel `PATH`, mentre un avvio normale non trovava le DLL.
+  CMake ora ricava `windeployqt` da `Qt6::qmake` e lo esegue `POST_BUILD` con `--qmldir`,
+  distribuendo DLL, platform plugin e moduli QML della stessa versione Qt usata dal linker.
+  Verifica reale: clean build completa, presenza di `Qt6Core/Gui/Qml/Quick.dll` e
+  `platforms/qwindows.dll`, poi avvio nascosto con tutti i percorsi `C:\Qt` rimossi dal `PATH`;
+  il processo e' rimasto attivo oltre tre secondi. La cartella build e' ora autocontenuta per
+  il runtime Qt, pur non essendo ancora un installer completo.
 - ✅ Copertura di test per `core/network.py` (5 test, `socket.create_connection` mockato) e per
   l'assemblaggio del catalogo di skill built-in (`core/skill_catalog.py`, `tests/
   test_skill_catalog.py`, 5 test): quest'ultimo non testa le singole skill (hanno gia' le proprie

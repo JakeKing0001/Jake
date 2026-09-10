@@ -34,6 +34,9 @@ alla cieca:
   bug reale trovato in questo modo: `JakeClient.h` non era nel percorso di inclusione per il file
   auto-generato di registrazione dei tipi QML — vedi `target_include_directories` in
   `CMakeLists.txt`). L'eseguibile si avvia e resta in esecuzione senza warning QML su stderr.
+- **Distribuisce il runtime Qt.** Il passo `POST_BUILD` esegue il `windeployqt` appartenente alla
+  stessa installazione Qt usata da CMake e copia DLL, plugin e moduli QML accanto a
+  `JakeHud.exe`; la cartella `build/` risultante non richiede Qt nel `PATH`.
 - **Si collega davvero al server companion vero.** Avviato `CompanionServer` reale (lo stesso
   `core/companion_server.py`, non un doppio finto) su una porta reale: `event_bus.
   subscriber_count()` è passato da 0 a 1 nel momento in cui l'eseguibile compilato ha aperto la
@@ -61,9 +64,9 @@ cmake -S hud/native -B hud/native/build -G Ninja -DCMAKE_PREFIX_PATH=C:/Qt/6.7.3
 cmake --build hud/native/build
 ```
 
-Poi, con `Qt/6.7.3/msvc2019_64/bin` in PATH (per le DLL Qt) ed **il server companion di Jake già
-avviato** (`companion_server_enabled: true` in `config/settings.json`, o il probe minimale
-descritto sopra):
+Poi, senza modificare il `PATH`, con **il server companion di Jake già avviato**
+(`companion_server_enabled: true` in `config/settings.json`, o il probe minimale descritto
+sopra):
 
 ```
 hud/native/build/JakeHud.exe

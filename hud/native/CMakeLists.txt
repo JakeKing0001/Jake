@@ -101,6 +101,31 @@ target_link_libraries(JakeHud PRIVATE
     Qt6::Network
 )
 
+if(WIN32)
+    # Un exe collegato dinamicamente a Qt non e' distribuibile da solo: senza le DLL e i plugin
+    # accanto al binario Windows mostra "Qt6*.dll non trovata". Ricavare windeployqt dalla
+    # stessa installazione che ha fornito Qt6::qmake evita di usare per errore un'altra versione.
+    get_target_property(JAKE_QMAKE_EXECUTABLE Qt6::qmake IMPORTED_LOCATION)
+    get_filename_component(JAKE_QT_BIN_DIR "${JAKE_QMAKE_EXECUTABLE}" DIRECTORY)
+    find_program(
+        JAKE_WINDEPLOYQT_EXECUTABLE
+        NAMES windeployqt
+        HINTS "${JAKE_QT_BIN_DIR}"
+        REQUIRED
+        NO_DEFAULT_PATH
+    )
+    add_custom_command(
+        TARGET JakeHud POST_BUILD
+        COMMAND "${JAKE_WINDEPLOYQT_EXECUTABLE}"
+            --release
+            --no-translations
+            --qmldir "${CMAKE_CURRENT_SOURCE_DIR}/qml"
+            "$<TARGET_FILE:JakeHud>"
+        COMMENT "Deploying the Qt runtime next to JakeHud.exe"
+        VERBATIM
+    )
+endif()
+
 set_target_properties(JakeHud PROPERTIES
     WIN32_EXECUTABLE ON
 )

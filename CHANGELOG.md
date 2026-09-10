@@ -20,6 +20,7 @@ restano nell'audit storico `ROADMAP.md`.
 
 - La scoperta delle applicazioni ignora directory e file del `PATH` che diventano inaccessibili.
 - `search_paths=[]` disabilita davvero la scansione dei percorsi del menu Start.
+- La build nativa distribuisce DLL, plugin e moduli QML richiesti da `JakeHud.exe`.
 
 ### Security
 

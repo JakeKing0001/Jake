@@ -314,6 +314,13 @@ Criterio di uscita: ogni fase F2–F7 ha una baseline misurata prima di iniziare
 
 Dipende da: F0.2 e F0.3.
 
+- Stato: `DOING` sulle fondamenta HUD; resto `BLOCKED` dalle dipendenze e dalla scelta
+  dell'installer.
+- Verifica 11/09/2026: CMake individua il `windeployqt` della stessa installazione usata per
+  compilare ed esegue il deployment `POST_BUILD` di DLL, plugin e moduli QML. Una clean build
+  ha prodotto il runtime completo e `JakeHud.exe` e' rimasto attivo oltre tre secondi con ogni
+  percorso `C:\Qt` rimosso dal `PATH`, riproducendo e chiudendo l'errore "Qt6*.dll non trovata".
+
 1. `F0.6.1` Definire installer per core Python, HUD, modelli e componenti opzionali.
 2. `F0.6.2` Aggiungere preflight hardware/software e spazio disco.
 3. `F0.6.3` Rendere installazione, upgrade, repair e uninstall idempotenti.
