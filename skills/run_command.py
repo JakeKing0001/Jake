@@ -65,7 +65,15 @@ class RunCommandSkill:
         if len(output) > MAX_OUTPUT_CHARS:
             output = output[:MAX_OUTPUT_CHARS] + "... (troncato)"
 
+        # Riprodotto per davvero: prima di questa correzione un comando con un codice di uscita
+        # diverso da zero (fallito per davvero: sintassi sbagliata, file non trovato, comando
+        # inesistente...) veniva comunque riportato come success=True. L'utente se ne accorgeva
+        # comunque leggendo "codice N" nella risposta (vedi core/response_formatter.py, il
+        # messaggio resta identico), ma chi si fida del campo strutturato - il ledger di audit,
+        # la dashboard (successi/fallimenti per skill), un futuro passo di PlanExecutor che
+        # decidesse se proseguire in base a result.success - veniva ingannato.
         return SkillResult(
-            success=True,
+            success=result.returncode == 0,
             data={"command": command, "output": output, "return_code": result.returncode},
+            error=None if result.returncode == 0 else "NONZERO_EXIT",
         )

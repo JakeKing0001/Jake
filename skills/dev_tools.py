@@ -52,7 +52,14 @@ class RunPythonScriptSkill:
             return SkillResult(success=False, data={"path": raw_path}, error="OPERATION_FAILED")
 
         output = (result.stdout or result.stderr or "").strip()[:1500]
-        return SkillResult(success=True, data={"path": raw_path, "output": output, "return_code": result.returncode})
+        # Stesso buco reale corretto in skills/run_command.py: un codice di uscita diverso da
+        # zero (l'eccezione dello script non catturata, un errore di sintassi...) veniva
+        # comunque riportato come success=True.
+        return SkillResult(
+            success=result.returncode == 0,
+            data={"path": raw_path, "output": output, "return_code": result.returncode},
+            error=None if result.returncode == 0 else "NONZERO_EXIT",
+        )
 
 
 class FormatJsonSkill:
