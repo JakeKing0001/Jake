@@ -132,5 +132,11 @@ class TranslateClipboardSkill:
             with request.urlopen(http_request, timeout=self.timeout) as response:
                 result = json.loads(response.read().decode("utf-8"))
             return result["message"]["content"].strip() or None
-        except (error.URLError, TimeoutError, json.JSONDecodeError, KeyError):
+        except (error.URLError, TimeoutError, json.JSONDecodeError, KeyError, TypeError):
+            # F1: buco reale trovato e corretto in questa sessione (insieme allo stesso in
+            # core/vision_provider.py e in altre 5 skill con lo stesso pattern copiaincollato) -
+            # un corpo JSON valido ma non nella forma attesa ("null", "[]", un numero,
+            # {"message": null}) fa sollevare un TypeError da questo indicizzamento, non un
+            # KeyError: verificato per davvero, _translate() sollevava un'eccezione invece di
+            # degradare a None come promesso da TRANSLATE_CLIPBOARD (error="OLLAMA_UNAVAILABLE").
             return None
