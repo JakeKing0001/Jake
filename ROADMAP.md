@@ -1068,6 +1068,13 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   estrazione video id/titolo dall'HTML grezzo di YouTube, nessuna richiesta di rete vera).
   Nessuno dei tre aveva una suite. `subprocess.run`/`urllib.request.urlopen`/`webbrowser.open`/
   `os.startfile` sempre mockati. Nessun bug trovato.
+- ✅ Copertura per `skills/contacts.py` (28 test, nessuna suite esisteva finora): `ContactBook`
+  con un `MemoryManager` vero su file temporaneo, `os.startfile`/`webbrowser.open` mockati.
+  Include un test esplicito della garanzia gia' verificata a lettura del codice in una sessione
+  precedente (F1, indagine sul taint tracking): `SEND_WHATSAPP`/`SEND_EMAIL` non inviano MAI in
+  autonomia, aprono solo un messaggio precompilato (`whatsapp://send`/`mailto:`) che l'utente
+  deve ancora confermare a mano - ora verificato con un'asserzione, non solo con una lettura.
+  Nessun bug trovato.
 
 ## F2 — Voice Natural 3.0
 
