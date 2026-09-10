@@ -67,7 +67,7 @@ Questa è la ricostruzione fedele dei commit e delle note già presenti nel repo
 | 4.9.9 | ⬜ | — | Transizioni fluide e interrupt-safe |
 | 4.9.10 | ⬜ | — | Multi-monitor, DPI, accessibilità e layout persistenti |
 | 5.0–5.2 Multi-Agent | 🟡 | Orchestratore con agente generale, coding e research | Routing semantico, budget, isolamento, collaborazione e valutazione per dominio |
-| 5.3 Self-Improvement | 🟡 | Fucina con AST checks, allowlist, subprocess e conferma | Sandbox OS, permessi per capability, firma, test generati e rollback versione |
+| 5.3 Self-Improvement | 🟡 | Fucina con AST checks, allowlist, subprocess e conferma; sandbox a integrità Low (MIC) per il solo passo di validazione | Job Object/AppContainer per l'esecuzione permanente delle skill installate, permessi per capability, firma, test generati e rollback versione |
 | 5.4–5.5 Security & Identity | 🟡 | Policy rischio e passphrase opzionale per azioni admin | Vault, Windows Hello/passkey, pairing, ruoli, audit e protezione da prompt injection |
 | 5.6 Privacy Engine | 🟡 | Modalità privata e purge esplicito della cronologia | Cifratura a riposo, classificazione dati, retention per categoria e privacy dashboard |
 | 5.7 Home/IoT | 🟡 | Home Assistant: elenco e on/off/toggle per nome | Aree, scene, sensori, automazioni, energia, voce satellitare e conferme fisiche |
@@ -673,16 +673,53 @@ pulita; smoke test installazione/avvio/arresto; dashboard locale con errori e la
   tecniche non ancora previste, e `_sandbox_import()` non isola i privilegi - solo i crash. Un
   vero sandbox OS (Job Object/AppContainer/token ristretto) resta il modo corretto di chiudere
   questo per davvero, non un'altra correzione puntuale alla lista nera.
+- 🟡 **Sandbox OS vera (non solo isolamento dai crash) per la validazione della Skill Forge**
+  (`core/process_sandbox.py`, nuovo; `core/forge_probe.py`, nuovo; `core/skill_forge.py::
+  _sandbox_import()`, riscritto). Prima di questa correzione `_sandbox_import()` isolava solo i
+  CRASH: il processo di prova girava con GLI STESSI PRIVILEGI dell'utente che esegue Jake, quindi
+  qualunque tecnica di scrittura file/registro non ancora prevista da `FORBIDDEN_PATTERNS`/
+  `_check_ast_escapes` sarebbe riuscita per davvero durante la sola validazione, prima che
+  l'utente vedesse o approvasse il codice (esattamente la classe di buco appena chiusa sopra per
+  `subprocess`/`os.popen`/`multiprocessing` - ma quella e' una correzione puntuale alla lista
+  nera, aggirabile dalla prossima tecnica non prevista). Ora il processo di prova gira, quando
+  possibile, con un token duplicato impostato a integrita' **Low** (Windows Mandatory Integrity
+  Control - lo stesso meccanismo usato da Chrome per i processi renderer): un processo Low non
+  puo' scrivere su NESSUN oggetto a integrita' Medium o superiore (praticamente tutto cio' che
+  l'utente possiede), IMPOSTO DAL SISTEMA OPERATIVO, non da un controllo di Jake aggirabile con
+  indirezione. La sonda comunica il proprio esito (JSON: ok/error/registered) scrivendo su un
+  singolo file a cui viene assegnata esplicitamente un'etichetta di integrita' Low
+  (`SetNamedSecurityInfo` + mandatory label ACE), l'unico canale di scrittura concesso.
+  **Verificato per davvero, non solo implementato**: `tests/test_process_sandbox.py` lancia un
+  probe che TENTA di scrivere un file canarino fuori dal canale di output assegnato e verifica
+  che il file non esista dopo l'esecuzione (bloccato con `PermissionError` dal sistema
+  operativo); `tests/test_skill_forge.py::
+  OsLevelSandboxCatchesWhatTheStaticBlocklistMissesTests` dimostra il caso che conta davvero per
+  la Forge: `mode = chr(119); open(path, mode)` **passa indenne** sia `FORBIDDEN_PATTERNS`
+  (richiede `['"][wa]` letterale subito dopo `open(`) sia `_check_ast_escapes` (`open` non e' tra
+  i nomi pericolosi controllati), eppure la scrittura fallisce comunque a runtime grazie al
+  secondo strato indipendente, e `_validate()` la riporta come `ForgeError` invece di lasciarla
+  passare. Fallback esplicito e loggato (`self.logger.warning`, non un fallimento silenzioso) se
+  le API Win32 di integrita' non sono disponibili in un dato ambiente: si ripiega
+  sull'esecuzione normale (solo isolamento dai crash, comportamento pre-correzione), mai un
+  crash di Jake per l'assenza del meccanismo. **Resta 🟡, non ✅, e va dichiarato con onestà cosa
+  NON copre**: (1) protegge solo il PASSO DI VALIDAZIONE della Forge (l'import/execute di prova
+  prima dell'approvazione), non l'esecuzione permanente in produzione di una skill gia'
+  installata, che gira ancora con i privilegi normali dopo l'installazione - non e' nello scope
+  di questa correzione, resta un problema architetturale piu' ampio; (2) Windows MIC non e' un
+  confine di sicurezza assoluto (non protegge da exploit del kernel, e alcuni attacchi via
+  oggetti di sistema con nomi noti sono documentati contro processi Low) - e' un livello reale in
+  più, non un sandbox completo; (3) non introduce quote di CPU/memoria/rete ne' un vero Job
+  Object/AppContainer, che restano il modo piu' completo di chiudere questo del tutto. Suite
+  completa: 627/627 verdi dopo l'integrazione.
 - ⬜ Passkey/WebAuthn vero (Windows Hello per operazioni ADMIN e' fatto, vedi sopra - un passkey
   per un secondo dispositivo/servizio no, richiederebbe un vero secondo dispositivo/browser/
   relying party da testare, non disponibile in questo ambiente), un vero taint tracking/
   allowlist STRUTTURALE (non solo un avviso nel prompt) per le difese da prompt injection - i
   canali chiusi finora (bypass di `PlanExecutor`, contesto desktop, risultati degli strumenti)
   restano mitigazioni puntuali, non una difesa sistemica che segua i dati non fidati ovunque
-  vadano nella pipeline, un vero sandbox OS con primitive di isolamento a livello di sistema
-  operativo (Job Object/AppContainer/token ristretto su Windows - vedi il buco chiuso appena
-  sopra/sotto per la parte di validazione statica, non ancora per l'isolamento vero e proprio),
-  backup transazionale + undo center nell'HUD (l'undo center nell'HUD
+  vadano nella pipeline, un vero Job Object/AppContainer per l'esecuzione permanente (non solo di
+  validazione, vedi sopra) delle skill installate, backup transazionale + undo center nell'HUD
+  (l'undo center nell'HUD
   richiede una GUI che non posso verificare qui; un "annulla l'ultima azione" senza interfaccia
   e' stato deliberatamente scartato in questa sessione per la stessa ragione dell'idempotency
   enforcement: l'ambiguita' su cosa conti come "ultima azione" e come si concatenano piu' undo
