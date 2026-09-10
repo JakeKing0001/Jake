@@ -1061,6 +1061,8 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   minimizza/massimizza/ridimensiona una finestra sbagliata e' un fastidio banalmente reversibile,
   non un'azione distruttiva senza conferma) - non giustifica la stessa soglia minima imposta per
   CLOSE_APP.
+- ✅ Copertura per `skills/keyboard_control.py` (11 test) e `skills/mouse_control.py` (9 test) -
+  nessuno dei due aveva una suite. `keyboard`/`pyautogui` sempre mockati. Nessun bug trovato.
 
 ## F2 — Voice Natural 3.0
 
