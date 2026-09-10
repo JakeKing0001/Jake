@@ -1075,6 +1075,11 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   autonomia, aprono solo un messaggio precompilato (`whatsapp://send`/`mailto:`) che l'utente
   deve ancora confermare a mano - ora verificato con un'asserzione, non solo con una lettura.
   Nessun bug trovato.
+- ✅ Copertura per `skills/file_utils.py` (25 test: comprimi/estrai/informazioni file/conta
+  parole/leggi testo/duplica/dimensione cartella) e `skills/file_utils2.py` (11 test: trova file
+  grandi/trova duplicati per hash del contenuto) - nessuno dei due aveva una suite. File/cartelle
+  VERI su disco temporaneo (compressione, estrazione, hashing reali), non simulati. Nessun bug
+  trovato.
 
 ## F2 — Voice Natural 3.0
 
