@@ -859,6 +859,19 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   modalita' degradata, non solo un dettaglio teorico. Aggiunto `tests/test_intent_provider.py`
   (20 test nuovi, il modulo non aveva ancora nessuna suite): blocca esplicitamente sia i casi di
   falso positivo corretti sia i percorsi legittimi che devono continuare a funzionare.
+- ✅ **Buco reale trovato e corretto in `core/vision_provider.py::VisionProvider.describe()`**
+  (nessuna suite esisteva finora). La classe dichiara esplicitamente nel proprio docstring
+  "nessuna eccezione esce da describe()", e chi la chiama (`skills/describe_screen.py`) si fida
+  di quella promessa - non ha un `try`/`except` attorno alla chiamata. **Verificato per
+  davvero**: un corpo di risposta JSON valido ma non nella forma attesa (`"null"`, `"[]"`, un
+  numero, o `{"message": null}`) faceva uscire un `AttributeError` da `result.get(...)` invece di
+  restituire `None` come promesso, potendo propagare un errore non gestito fino a `JakeCore`
+  invece del normale esito `VISION_UNAVAILABLE`. Non un'ipotesi remota: e' esattamente la forma
+  di risposta che ci si aspetterebbe da Ollama giu' dietro un proxy, o da un cambio futuro
+  dell'API - lo stesso genere di guardia gia' presente in `core/embedding_provider.py` per il
+  proprio caso (`test_malformed_embeddings_shape_returns_none_not_a_crash`), qui mancava.
+  Corretto validando la forma di `result`/`result["message"]` prima di leggerne i campi. Aggiunto
+  `tests/test_vision_provider.py` (12 test nuovi).
 
 ## F2 — Voice Natural 3.0
 
