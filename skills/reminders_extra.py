@@ -105,12 +105,26 @@ class StartPomodoroSkill:
     def __init__(self, reminder_manager):
         self.reminder_manager = reminder_manager
 
+    DEFAULT_MINUTES = 25
+
     def execute(self, parameters: dict = None):
         parameters = parameters or {}
-        minutes = parameters.get("minutes") or 25
-        due_utc = datetime.now(timezone.utc) + timedelta(minutes=int(minutes))
+        minutes = self._parse_minutes(parameters.get("minutes"))
+        due_utc = datetime.now(timezone.utc) + timedelta(minutes=minutes)
         self.reminder_manager.add("fine sessione pomodoro, fai una pausa", due_utc)
         return SkillResult(success=True, data={"minutes": minutes})
+
+    @classmethod
+    def _parse_minutes(cls, raw) -> int:
+        """Riprodotto per davvero, corretto: un valore non numerico (es. il modello scrive
+        'trenta' invece di 30) sollevava un ValueError mai catturato da int(minutes). Un valore
+        mancante, non numerico o non positivo ricade sul default, stesso principio gia' applicato
+        altrove in questo progetto per un parametro facoltativo malformato."""
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return cls.DEFAULT_MINUTES
+        return value if value > 0 else cls.DEFAULT_MINUTES
 
 
 class StopPomodoroSkill:
