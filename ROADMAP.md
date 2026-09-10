@@ -873,6 +873,23 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   questa fase. Resta 🟡 il quadro piu' ampio: il rollback esiste solo per il filesystem, non per
   azioni esterne (email, WhatsApp, domotica) o per l'esecuzione di comandi/script, dove un
   "annulla" non ha un inverso naturale.
+- ✅ **Buco reale trovato e corretto in `RUN_COMMAND`/`RUN_PYTHON_SCRIPT`** (`skills/
+  run_command.py`, `skills/dev_tools.py::RunPythonScriptSkill` - nessuna delle due aveva una
+  suite, nonostante `RUN_COMMAND` sia dichiarata nel proprio docstring "la skill piu' potente e
+  piu' rischiosa di Jake"). Un comando/script che falliva per davvero (codice di uscita diverso
+  da zero: sintassi sbagliata, comando inesistente, un'eccezione Python non catturata) veniva
+  comunque riportato come `success=True`. **Verificato per davvero**: `RunCommandSkill().
+  execute({"command": "exit 1", "confirmed": True})` ritornava `success=True`. L'utente se ne
+  accorgeva comunque leggendo "codice N" nel testo della risposta (il messaggio non e'
+  cambiato), ma il campo strutturato `result.success` - di cui si fidano il ledger di audit, le
+  metriche di successi/fallimenti della dashboard (F0) e un futuro `PlanExecutor` che decidesse
+  se proseguire un'automazione in base a quel campo - mentiva. Corretto riflettendo il vero
+  codice di uscita in `success` (nuovo errore `NONZERO_EXIT` quando diverso da zero) e aggiunto
+  il caso gemello in `core/response_formatter.py::_format_error` cosi' il messaggio mostrato
+  all'utente resta IDENTICO a prima (comando/script + codice + output), solo instradato
+  correttamente come errore invece che come successo. Aggiunti `tests/test_run_command_skill.py`
+  (10 test) e `tests/test_run_python_script_skill.py` (7 test), nessuno dei due file aveva una
+  suite prima.
 - ✅ **Copertura di test per l'apprendimento continuo** (`core/learning_manager.py`): nessuna
   suite dedicata esisteva, nonostante governi cosa Jake impara da solo dai comandi eseguiti con
   successo - un'associazione frase->intent imparata a torto sopravvive ai riavvii e prende la
