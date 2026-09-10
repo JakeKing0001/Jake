@@ -1177,6 +1177,25 @@ della lista sopra, non l'intera fase.
 **Criterio di uscita:** pairing/revoca verificati; handoff senza perdita di contesto; operazioni
 fisiche sensibili impossibili da un dispositivo non autorizzato.
 
+### Cosa e' stato fatto in questa sessione
+
+Onestà preliminare: questa fase resta quasi interamente ⬜ (pairing, cifratura, Home Assistant
+profondo, tutto il resto della lista sopra non affrontati). Quanto segue e' un buco reale
+corretto in un pezzo gia' esistente (`core/device_registry.py`, l'handoff tra dispositivi), non
+un progresso sulla fase nel suo complesso.
+
+- ✅ **Buco reale trovato e corretto in `DeviceRegistry.register()`** (nessuna suite esisteva
+  finora). `claim()` chiama `register()` a OGNI richiesta di rivendicazione (`core/
+  companion_server.py::_handle_claim`), col nome che il client manda in quel momento - ma
+  `register()` usava `dict.setdefault()`, che fissa il nome alla PRIMA registrazione per
+  sempre. **Verificato per davvero**: due `claim()` dello stesso `device_id` con nomi diversi
+  (es. l'utente rinomina il dispositivo nell'app companion) lasciavano `list_devices()` a
+  mostrare per sempre il primo nome, ignorando silenziosamente l'aggiornamento. Corretto
+  aggiornando il nome quando un claim successivo ne manda uno diverso e non vuoto (un claim
+  senza nome non cancella pero' un nome gia' noto - quella richiesta semplicemente non ne ha
+  mandato uno, non significa che l'utente lo abbia tolto). Aggiunto
+  `tests/test_device_registry.py` (16 test nuovi, il modulo non ne aveva nessuno).
+
 ## F8 — Self-Improvement & Ecosystem
 
 **Priorità: P2/P3. Obiettivo: Jake cresce senza trasformare il PC in un laboratorio insicuro.**
