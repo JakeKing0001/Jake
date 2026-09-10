@@ -67,7 +67,17 @@ class ReminderManager:
         ).fetchall()
         for row in rows:
             if row["recur_time"]:
+                # +1 giorno alla volta non basta se Jake e' rimasto spento piu' a lungo di un
+                # giorno: il nuovo due_at sarebbe ANCORA scaduto, e la prossima chiamata (ogni
+                # 20s, vedi core/scheduler.py) lo farebbe scattare di nuovo, e ancora, finche'
+                # la data non raggiunge oggi - un promemoria giornaliero perso per 3 giorni
+                # suonerebbe 4 volte di fila nel giro di un minuto invece di una sola.
+                # Riprodotto per davvero prima della correzione. Si avanza finche' non e' nel
+                # futuro, cosi' si recupera in un colpo solo restando comunque notificato una
+                # volta sola per questa chiamata.
                 next_due = datetime.fromisoformat(row["due_at"]) + timedelta(days=1)
+                while next_due <= now_utc:
+                    next_due += timedelta(days=1)
                 self._connection.execute(
                     "UPDATE reminders SET due_at = ? WHERE id = ?", (next_due.isoformat(), row["id"])
                 )
