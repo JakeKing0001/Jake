@@ -57,6 +57,12 @@ void JakeClient::fetchStatus() {
         if (reply->error() == QNetworkReply::NoError) {
             const auto doc = QJsonDocument::fromJson(reply->readAll());
             const auto object = doc.object();
+            if (object.value("protocol_version").toInt(-1) != JAKE_PROTOCOL_VERSION) {
+                setConnected(false);
+                emit errorOccurred(QStringLiteral("Versione protocollo Jake non compatibile"));
+                reply->deleteLater();
+                return;
+            }
             setConnected(true);
             if (object.value("active_device").isString())
                 setActiveDevice(object.value("active_device").toString());
@@ -100,6 +106,10 @@ void JakeClient::handleEventLine(const QString &jsonLine) {
     const auto doc = QJsonDocument::fromJson(jsonLine.toUtf8());
     if (!doc.isObject()) return;
     const auto object = doc.object();
+    if (object.value("schema_version").toInt(-1) != JAKE_PROTOCOL_VERSION) {
+        emit errorOccurred(QStringLiteral("Evento Jake con versione protocollo non compatibile"));
+        return;
+    }
     const QString type = object.value("type").toString();
     const auto payload = object.value("payload").toObject();
 

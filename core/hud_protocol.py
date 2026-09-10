@@ -15,6 +15,8 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 
+from core.version import PROTOCOL_VERSION
+
 
 class EventType(str, Enum):
     HUD_SHOW = "HUD_SHOW"
@@ -63,11 +65,24 @@ class HudEvent:
     at: float = field(default_factory=time.time)
 
     def to_json(self) -> str:
-        return json.dumps({"type": self.type.value, "payload": self.payload, "at": self.at}, ensure_ascii=False)
+        return json.dumps(
+            {
+                "schema_version": PROTOCOL_VERSION,
+                "type": self.type.value,
+                "payload": self.payload,
+                "at": self.at,
+            },
+            ensure_ascii=False,
+        )
 
     @classmethod
     def from_json(cls, raw: str) -> "HudEvent":
         data = json.loads(raw)
+        schema_version = data.get("schema_version", PROTOCOL_VERSION)
+        if schema_version != PROTOCOL_VERSION:
+            raise ValueError(
+                f"versione protocollo non supportata: {schema_version}; attesa {PROTOCOL_VERSION}"
+            )
         return cls(type=EventType(data["type"]), payload=data.get("payload") or {}, at=data.get("at", time.time()))
 
     @classmethod

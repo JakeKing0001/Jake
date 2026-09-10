@@ -33,7 +33,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from core.device_registry import DeviceRegistry
 from core.event_bus import EventBus
 from core.hud_protocol import EventType, HudEvent
-from core.version import VERSION
+from core.version import PROTOCOL_VERSION, VERSION
 
 DEFAULT_HOST = "127.0.0.1"
 SSE_KEEPALIVE_SECONDS = 15
@@ -136,6 +136,7 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json_response(200, {
                 "ok": True,
                 "version": VERSION,
+                "protocol_version": PROTOCOL_VERSION,
                 "active_device": self.companion.devices.active_device_id,
                 "devices": self.companion.devices.list_devices(),
             })

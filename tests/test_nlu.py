@@ -82,6 +82,13 @@ class ChitchatTests(unittest.TestCase):
         self.assertTrue(chitchat.reply("grazie"))
         self.assertIsNone(chitchat.reply("metti un timer"))
 
+    def test_identity_replies_do_not_report_a_stale_version(self):
+        from core.version import VERSION
+
+        versioned_replies = [reply for reply in chitchat._REPLIES["whoareyou"] if "versione" in reply.lower()]
+        self.assertTrue(versioned_replies)
+        self.assertTrue(all(VERSION in reply for reply in versioned_replies))
+
 
 class ExampleStoreTests(unittest.TestCase):
     def setUp(self):

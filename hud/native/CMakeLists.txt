@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.21)
-project(JakeHud LANGUAGES CXX)
+
+# Un solo manifest guida Python, endpoint /status, eventi e build nativa.
+set(JAKE_RELEASE_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/../../config/release.json")
+file(READ "${JAKE_RELEASE_MANIFEST}" JAKE_RELEASE_JSON)
+string(JSON JAKE_PRODUCT_VERSION GET "${JAKE_RELEASE_JSON}" version)
+string(JSON JAKE_PROTOCOL_VERSION GET "${JAKE_RELEASE_JSON}" protocol_version)
+
+project(JakeHud VERSION ${JAKE_PRODUCT_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -79,6 +86,11 @@ qt_add_qml_module(JakeHud
 )
 
 target_include_directories(JakeHud PRIVATE src)
+
+target_compile_definitions(JakeHud PRIVATE
+    JAKE_PRODUCT_VERSION="${JAKE_PRODUCT_VERSION}"
+    JAKE_PROTOCOL_VERSION=${JAKE_PROTOCOL_VERSION}
+)
 
 target_link_libraries(JakeHud PRIVATE
     Qt6::Core
