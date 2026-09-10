@@ -234,6 +234,17 @@ Criterio di uscita: 20/20 suite verdi su Python 3.12 locale e job 3.11/3.12 verd
 
 Dipende da: F0.1.
 
+- Stato: `BLOCKED` sul remoto; `F0.2.1`–`F0.2.3` locali conclusi, `F0.2.7` in `VERIFY`.
+- Verifica locale 11/09/2026: il commit F0.1 e' atomico e la storia condivisa non e' stata
+  riscritta; `git ls-files` non contiene log, database, token, registrazioni, modelli, binari o
+  build artifact; il lock con hash si installa; ruff, mypy, compileall, 1.262 test, smoke CLI,
+  configure/build HUD e smoke del binario HUD sono verdi su Python 3.12.6.
+- Diagnostica CI: il job Python conserva `unittest.log` e `summary.txt` con commit, versione
+  Python, durata ed exit code tramite `actions/upload-artifact@v4` e `if: always()`; verificati
+  localmente sia il log della suite sia la propagazione di un exit code di fallimento.
+- Blocco esplicito: `F0.2.4` e `F0.2.6` modificano GitHub; su richiesta dell'utente non viene
+  eseguito alcun push né cambiata la protezione di `master`. `F0.2.5` attende quindi una CI reale.
+
 1. `F0.2.1` Raggruppare i commit locali in una sequenza comprensibile senza riscrivere storia
    già condivisa.
 2. `F0.2.2` Verificare che nessun log, database, token, registrazione, modello o build artifact
@@ -1550,7 +1561,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-La prossima attività è chiudere la verifica remota di `F0.1`: creare il commit atomico con test,
-fix e audit, pubblicarlo e osservare entrambi i job CI Windows Python 3.11/3.12. Solo dopo il
-verde remoto `F0.1` passa da `VERIFY` a `DONE` e si procede con `F0.2`; nessuna nuova feature
-deve precedere questo gate.
+Il gate remoto resta la prima azione necessaria per chiudere `F0.1`/`F0.2`, ma il push e le
+impostazioni GitHub sono esplicitamente esclusi dall'utente. La prossima attività locale e'
+`F0.3.1`: consolidare la fonte unica di verita' e poi collegare versione, protocol version,
+release notes e `--version`, senza dichiarare G0 superato e senza iniziare nuove feature.

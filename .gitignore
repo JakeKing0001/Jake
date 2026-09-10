@@ -23,3 +23,7 @@ hud/native/build2/
 # F0: risultati dei benchmark (benchmarks/*.py) - numeri specifici di QUESTA macchina in un
 # momento preciso, non fanno parte del codice versionato.
 benchmarks/results/
+
+# Diagnostica prodotta localmente dallo stesso step usato in CI; il runner la pubblica come
+# artifact, ma non deve mai entrare nel repository.
+.ci-artifacts/
