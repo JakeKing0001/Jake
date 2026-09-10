@@ -1116,6 +1116,22 @@ della lista sopra, non l'intera fase.
   il modulo non ne aveva nessuno): copre anche il caso normale (mancato di un solo giorno,
   comportamento invariato), i timer/pomodoro (stessa tabella, colonna `kind`), e la resilienza
   della migrazione dello schema (`ALTER TABLE` ripetuto senza fallire alla riapertura).
+- ✅ **Buco reale trovato e corretto in `TriggerManager.list_all()`/`WorkflowManager.
+  list_names()`** (`core/trigger_manager.py`, `core/workflow_manager.py`, nessuna delle due
+  suite esisteva finora). Entrambi i metodi avevano un limite fisso di 50 risultati nella query
+  di recupero (`memory_manager.recall(..., limit=50)`), ordinata per importanza/data di
+  aggiornamento: `TriggerScheduler._fire()` (`core/trigger_scheduler.py`) itera `list_all()` a
+  OGNI ciclo di controllo per decidere cosa far scattare, quindi un utente con piu' di 50
+  trigger avrebbe visto i trigger piu' vecchi/meno di recente aggiornati smettere di scattare
+  mai piu' superata quella soglia, in silenzio - lo stesso ordinamento fa si' che i trigger che
+  scattano PIU' spesso (aggiornando il proprio `updated_at` a ogni `mark_fired()`) monopolizzino
+  i primi 50, facendo uscire dalla lista proprio quelli usati piu' di rado. Non ancora
+  osservabile con un uso normale (richiede superare 50 trigger salvati nel tempo), ma un limite
+  raggiungibile per davvero, non teorico - ogni `SET_TRIGGER` e' un record permanente. Corretto
+  alzando il tetto a 1000 (un limite di sicurezza contro una query senza fine, non un limite di
+  prodotto: l'utente non crea mai centinaia di automazioni a mano). Aggiunti
+  `tests/test_trigger_manager.py` (13 test) e `tests/test_workflow_manager.py` (6 test), nessuno
+  dei due moduli ne aveva prima, con un `MemoryManager` vero su file temporaneo.
 - ⬜ Tutto il resto: event engine multi-connettore, daily brief, commitment tracking, goal
   manager, routine apprese, focus assistant, meeting copilot, resto del digital housekeeping
   (duplicati, aggiornamenti, sicurezza), quiet policy appresa/cooldown/digest, finestra di
