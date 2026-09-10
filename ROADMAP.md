@@ -262,6 +262,20 @@ pulita; smoke test installazione/avvio/arresto; dashboard locale con errori e la
   dell'effetto, ultimi fallimenti. Verificato con dati veri (una sessione reale di `JakeCore` con
   un successo, un fallimento e un'azione privata) prima di essere ripulito. Coperto da
   `tests/test_dashboard.py`, incluso l'escaping HTML di skill/trace_id non fidati.
+- ✅ **Buco reale trovato e corretto in `core/app_resolver.py::AppResolver.resolve()`**
+  (nessuna suite esisteva finora, per il modulo dietro OPEN_APP). L'articolo elidibile SENZA
+  apostrofo era gia' gestito ("il pannello di controllo" -> alias "pannello di controllo"), ma
+  MAI quello CON apostrofo: `normalize_name()` toglie la punteggiatura prima che il controllo
+  sull'articolo veda il testo, quindi `"l'esplora file"` diventava `"lesplora file"`
+  (l'apostrofo sparisce senza lasciare uno spazio) e il controllo storico
+  `normalized_name.startswith("l ")` non scattava mai per questo caso. **Verificato per
+  davvero**: `resolve("l'esplora file")` tornava `None` nonostante `"esplora file"` sia in
+  `KNOWN_APP_ALIASES` - "apri l'esplora file", una frase italiana perfettamente naturale, non
+  apriva Esplora File. Corretto riconoscendo l'elisione (apostrofo dritto o tipografico) sul
+  testo grezzo, prima della normalizzazione che la cancellerebbe. Aggiunto
+  `tests/test_app_resolver.py` (21 test nuovi): alias diretti, elisione con/senza apostrofo,
+  normalizzazione, e il fuzzy matching (typo, abbreviazioni, soglia piu' alta per le voci dal
+  PATH) iniettando applicazioni finte invece di scansionare il menu Start/PowerShell veri.
 
 ## F1 — Trustworthy Agent Core 3.0
 
