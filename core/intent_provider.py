@@ -33,7 +33,14 @@ class RuleBasedProvider(IntentProvider):
 		self.volume_down_triggers = ["abbassa il volume", "diminuisci il volume"]
 		self.volume_mute_triggers = ["silenzia", "muta l'audio", "togli l'audio"]
 		self.list_processes_triggers = ["mostra i processi", "elenca i processi", "che processi sono aperti"]
-		self.close_app_triggers = ["chiudi", "termina"]
+		# "termina" NON e' incluso (a differenza di prima): e' anche la forma indicativa del
+		# verbo terminare ("il contratto termina...", "quando termina la partita"), quindi un
+		# confine di parola da solo non basta a distinguerlo dall'imperativo "termina Spotify" -
+		# riprodotto per davvero: "quando termina la partita" restava misclassificato CLOSE_APP
+		# anche dopo il controllo \b. Tolto invece di provare un'euristica fragile (es. "solo se
+		# e' la prima parola") che avrebbe solo spostato il problema su un altro caso non
+		# previsto. "chiudi" resta, non e' ambiguo allo stesso modo.
+		self.close_app_triggers = ["chiudi"]
 		self.reminder_triggers = ["ricordami di", "ricordami che", "promemoria"]
 		self.list_reminders_triggers = ["che promemoria ho", "quali promemoria ho", "i miei promemoria"]
 		self.screenshot_triggers = ["fai uno screenshot", "cattura lo schermo", "scatta uno screenshot"]
@@ -68,12 +75,32 @@ class RuleBasedProvider(IntentProvider):
 			"riassumi gli appunti", "riassumi quello che ho copiato", "riassumi il contenuto degli appunti",
 		]
 
+	# Un trigger va cercato ai confini di parola (\b), non come sottostringa qualunque: senza
+	# questo, un trigger corto che e' anche una radice verbale italiana (es. "cancella", "elimina",
+	# "apri") scatta pure dentro "cancellare"/"eliminato"/"aprile" - non un'ipotesi, riprodotto per
+	# davvero prima della correzione: "vorrei cancellare tutto" veniva misclassificato DELETE_PATH
+	# (un intent DESTRUCTIVE) con un percorso spazzatura, "il 3 aprile e' il mio compleanno, dimmi
+	# il risultato" veniva misclassificato OPEN_SEARCH_RESULT. Vale per ogni trigger, anche
+	# multi-parola: i confini contano solo agli estremi della frase, non tra le parole al suo
+	# interno. Non basta pero' per un trigger che e' anche una forma verbale INDICATIVA legittima
+	# (non solo imperativa): "termina" era in questa lista finche' "quando termina la partita"
+	# restava misclassificato CLOSE_APP anche con \b, perche' li' "termina" e' davvero una parola
+	# intera, non una sottostringa - va tolto il trigger ambiguo (vedi close_app_triggers), un
+	# confine di parola da solo non lo risolve.
+	@staticmethod
+	def _trigger_match(text: str, trigger: str):
+		return re.search(r"\b" + re.escape(trigger) + r"\b", text)
+
+	@classmethod
+	def _has_trigger(cls, text: str, triggers: list) -> bool:
+		return any(cls._trigger_match(text, trigger) for trigger in triggers)
+
 	def extract_parameter_after_trigger(self, text: str, triggers: list) -> str:
 		"""Estrae il parametro dopo un trigger, ripulendo gli spazi."""
 		for trigger in triggers:
-			if trigger in text:
-				idx = text.find(trigger)
-				return text[idx + len(trigger):].strip()
+			match = self._trigger_match(text, trigger)
+			if match:
+				return text[match.end():].strip()
 		return ""
 
 	@staticmethod
@@ -125,132 +152,132 @@ class RuleBasedProvider(IntentProvider):
 		return cls._MATH_WORDS_PATTERN.sub(lambda m: cls._MATH_WORDS[m.group().rstrip("'")], text)
 
 	def detect_intent(self, text: str) -> Command:
-		if "apri" in text and "risultato" in text:
+		if self._has_trigger(text, ["apri"]) and self._has_trigger(text, ["risultato"]):
 			index = self._extract_result_index(text)
 			if index is not None:
 				return Command("OPEN_SEARCH_RESULT", {"index": index})
 
-		if any(trigger in text for trigger in self.open_url_triggers):
+		if self._has_trigger(text, self.open_url_triggers):
 			url = self.extract_parameter_after_trigger(text, self.open_url_triggers)
 			return Command("OPEN_URL", {"url": url})
 
 		# Controllato prima di open_triggers: "apri in vscode" contiene anche "apri" e finirebbe
 		# per essere interpretato come OPEN_APP se controllato dopo.
-		if any(trigger in text for trigger in self.open_in_editor_triggers):
+		if self._has_trigger(text, self.open_in_editor_triggers):
 			path = self.extract_parameter_after_trigger(text, self.open_in_editor_triggers)
 			return Command("OPEN_IN_EDITOR", {"path": path})
 
-		if any(trigger in text for trigger in self.open_triggers):
+		if self._has_trigger(text, self.open_triggers):
 			app_name = self.extract_parameter_after_trigger(text, self.open_triggers)
 			return Command("OPEN_APP", {"app": app_name})
 
-		if any(trigger in text for trigger in self.remember_triggers):
+		if self._has_trigger(text, self.remember_triggers):
 			content = self.extract_parameter_after_trigger(text, self.remember_triggers)
 			key, value = self._split_key_value(content)
 			return Command("REMEMBER", {"key": key, "value": value})
 
-		if any(trigger in text for trigger in self.forget_triggers):
+		if self._has_trigger(text, self.forget_triggers):
 			key = self.extract_parameter_after_trigger(text, self.forget_triggers)
 			return Command("FORGET", {"key": key})
 
-		if any(trigger in text for trigger in self.recall_triggers):
+		if self._has_trigger(text, self.recall_triggers):
 			query = self.extract_parameter_after_trigger(text, self.recall_triggers)
 			return Command("RECALL", {"query": query})
 
-		if any(trigger in text for trigger in self.create_folder_triggers):
+		if self._has_trigger(text, self.create_folder_triggers):
 			path = self.extract_parameter_after_trigger(text, self.create_folder_triggers)
 			return Command("CREATE_PATH", {"path": path, "type": "folder"})
 
-		if any(trigger in text for trigger in self.create_file_triggers):
+		if self._has_trigger(text, self.create_file_triggers):
 			path = self.extract_parameter_after_trigger(text, self.create_file_triggers)
 			return Command("CREATE_PATH", {"path": path, "type": "file"})
 
-		if any(trigger in text for trigger in self.delete_triggers):
+		if self._has_trigger(text, self.delete_triggers):
 			path = self.extract_parameter_after_trigger(text, self.delete_triggers)
 			return Command("DELETE_PATH", {"path": path})
 
-		if any(trigger in text for trigger in self.search_files_triggers):
+		if self._has_trigger(text, self.search_files_triggers):
 			query = self.extract_parameter_after_trigger(text, self.search_files_triggers)
 			return Command("SEARCH_FILES", {"query": query})
 
-		if any(trigger in text for trigger in self.find_file_triggers):
+		if self._has_trigger(text, self.find_file_triggers):
 			name = self.extract_parameter_after_trigger(text, self.find_file_triggers)
 			return Command("FIND_FILE", {"name": name})
 
-		if any(trigger in text for trigger in self.semantic_search_triggers):
+		if self._has_trigger(text, self.semantic_search_triggers):
 			query = self.extract_parameter_after_trigger(text, self.semantic_search_triggers)
 			return Command("SEMANTIC_SEARCH_FILES", {"query": query})
 
-		if any(trigger in text for trigger in self.build_semantic_index_triggers):
+		if self._has_trigger(text, self.build_semantic_index_triggers):
 			return Command("BUILD_SEMANTIC_INDEX", {})
 
-		if any(trigger in text for trigger in self.research_triggers):
+		if self._has_trigger(text, self.research_triggers):
 			topic = self.extract_parameter_after_trigger(text, self.research_triggers)
 			return Command("RESEARCH", {"topic": topic})
 
-		if any(trigger in text for trigger in self.list_todos_triggers):
+		if self._has_trigger(text, self.list_todos_triggers):
 			return Command("LIST_TODOS", {})
 
-		if any(trigger in text for trigger in self.complete_todo_triggers):
+		if self._has_trigger(text, self.complete_todo_triggers):
 			content = self.extract_parameter_after_trigger(text, self.complete_todo_triggers)
 			return Command("COMPLETE_TODO", {"text": content})
 
-		if any(trigger in text for trigger in self.add_todo_triggers):
+		if self._has_trigger(text, self.add_todo_triggers):
 			content = self.extract_parameter_after_trigger(text, self.add_todo_triggers)
 			return Command("ADD_TODO", {"text": content})
 
-		if any(trigger in text for trigger in self.shutdown_triggers):
+		if self._has_trigger(text, self.shutdown_triggers):
 			return Command("SYSTEM_POWER", {"action": "shutdown"})
-		if any(trigger in text for trigger in self.restart_triggers):
+		if self._has_trigger(text, self.restart_triggers):
 			return Command("SYSTEM_POWER", {"action": "restart"})
-		if any(trigger in text for trigger in self.sleep_triggers):
+		if self._has_trigger(text, self.sleep_triggers):
 			return Command("SYSTEM_POWER", {"action": "sleep"})
-		if any(trigger in text for trigger in self.lock_triggers):
+		if self._has_trigger(text, self.lock_triggers):
 			return Command("SYSTEM_POWER", {"action": "lock"})
 
-		if any(trigger in text for trigger in self.brightness_triggers):
+		if self._has_trigger(text, self.brightness_triggers):
 			match = re.search(r"\d+", text)
 			if match:
 				return Command("SET_BRIGHTNESS", {"level": int(match.group())})
 
-		if any(trigger in text for trigger in self.empty_recycle_bin_triggers):
+		if self._has_trigger(text, self.empty_recycle_bin_triggers):
 			return Command("EMPTY_RECYCLE_BIN", {})
 
-		if any(trigger in text for trigger in self.list_wifi_triggers):
+		if self._has_trigger(text, self.list_wifi_triggers):
 			return Command("LIST_WIFI_NETWORKS", {})
 
-		if any(trigger in text for trigger in self.git_status_triggers):
+		if self._has_trigger(text, self.git_status_triggers):
 			path = self.extract_parameter_after_trigger(text, self.git_status_triggers)
 			return Command("GIT_STATUS", {"path": path} if path else {})
 
-		if any(trigger in text for trigger in self.git_pull_triggers):
+		if self._has_trigger(text, self.git_pull_triggers):
 			path = self.extract_parameter_after_trigger(text, self.git_pull_triggers)
 			return Command("GIT_PULL", {"path": path} if path else {})
 
-		if any(trigger in text for trigger in self.run_command_triggers):
+		if self._has_trigger(text, self.run_command_triggers):
 			command = self.extract_parameter_after_trigger(text, self.run_command_triggers)
 			return Command("RUN_COMMAND", {"command": command})
 
-		if any(trigger in text for trigger in self.media_next_triggers):
+		if self._has_trigger(text, self.media_next_triggers):
 			return Command("MEDIA_CONTROL", {"action": "next"})
-		if any(trigger in text for trigger in self.media_previous_triggers):
+		if self._has_trigger(text, self.media_previous_triggers):
 			return Command("MEDIA_CONTROL", {"action": "previous"})
-		if any(trigger in text for trigger in self.media_play_pause_triggers):
+		if self._has_trigger(text, self.media_play_pause_triggers):
 			return Command("MEDIA_CONTROL", {"action": "play_pause"})
 
-		if any(trigger in text for trigger in self.tell_joke_triggers):
+		if self._has_trigger(text, self.tell_joke_triggers):
 			return Command("TELL_JOKE", {})
 
-		if any(trigger in text for trigger in self.flip_coin_triggers):
+		if self._has_trigger(text, self.flip_coin_triggers):
 			return Command("FLIP_COIN", {})
 
-		if any(trigger in text for trigger in self.roll_dice_triggers):
+		if self._has_trigger(text, self.roll_dice_triggers):
 			return Command("ROLL_DICE", {})
 
-		if any(trigger in text for trigger in self.summarize_clipboard_triggers):
+		if self._has_trigger(text, self.summarize_clipboard_triggers):
 			return Command("SUMMARIZE_CLIPBOARD", {})
 
-		convert_match = self._CONVERT_PATTERN.search(text) if any(t in text for t in self.convert_units_triggers) else None
+		convert_match = self._CONVERT_PATTERN.search(text) if self._has_trigger(text, self.convert_units_triggers) else None
 		if convert_match:
 			return Command("CONVERT_UNITS", {
 				"value": float(convert_match.group(1).replace(",", ".")),
@@ -258,55 +285,55 @@ class RuleBasedProvider(IntentProvider):
 				"to_unit": convert_match.group(3),
 			})
 
-		if any(trigger in text for trigger in self.calculate_triggers):
+		if self._has_trigger(text, self.calculate_triggers):
 			content = self.extract_parameter_after_trigger(text, self.calculate_triggers)
 			return Command("CALCULATE", {"expression": self._normalize_math_expression(content)})
 
-		if any(trigger in text for trigger in self.weather_triggers):
+		if self._has_trigger(text, self.weather_triggers):
 			city = self.extract_parameter_after_trigger(text, self.weather_triggers)
 			return Command("GET_WEATHER", {"city": city})
 
-		if any(trigger in text for trigger in self.news_triggers):
+		if self._has_trigger(text, self.news_triggers):
 			topic = self.extract_parameter_after_trigger(text, self.news_triggers)
 			return Command("GET_NEWS", {"topic": topic})
 
-		if any(trigger in text for trigger in self.web_search_triggers):
+		if self._has_trigger(text, self.web_search_triggers):
 			query = self.extract_parameter_after_trigger(text, self.web_search_triggers)
 			return Command("WEB_SEARCH", {"query": query})
 
-		if any(trigger in text for trigger in self.clipboard_read_triggers):
+		if self._has_trigger(text, self.clipboard_read_triggers):
 			return Command("CLIPBOARD_READ", {})
 
-		if any(trigger in text for trigger in self.volume_up_triggers):
+		if self._has_trigger(text, self.volume_up_triggers):
 			return Command("SET_VOLUME", {"action": "up"})
-		if any(trigger in text for trigger in self.volume_down_triggers):
+		if self._has_trigger(text, self.volume_down_triggers):
 			return Command("SET_VOLUME", {"action": "down"})
-		if any(trigger in text for trigger in self.volume_mute_triggers):
+		if self._has_trigger(text, self.volume_mute_triggers):
 			return Command("SET_VOLUME", {"action": "mute"})
 
-		if any(trigger in text for trigger in self.list_processes_triggers):
+		if self._has_trigger(text, self.list_processes_triggers):
 			return Command("LIST_PROCESSES", {})
 
-		if any(trigger in text for trigger in self.close_app_triggers):
+		if self._has_trigger(text, self.close_app_triggers):
 			name = self.extract_parameter_after_trigger(text, self.close_app_triggers)
 			return Command("CLOSE_APP", {"name": name})
 
-		if any(trigger in text for trigger in self.list_reminders_triggers):
+		if self._has_trigger(text, self.list_reminders_triggers):
 			return Command("LIST_REMINDERS", {})
 
-		if any(trigger in text for trigger in self.reminder_triggers):
+		if self._has_trigger(text, self.reminder_triggers):
 			content = self.extract_parameter_after_trigger(text, self.reminder_triggers)
 			parsed = self._parse_reminder(content)
 			if parsed is not None:
 				return Command("SET_REMINDER", parsed)
 
-		if any(trigger in text for trigger in self.screenshot_triggers):
+		if self._has_trigger(text, self.screenshot_triggers):
 			return Command("TAKE_SCREENSHOT", {})
 
-		if any(trigger in text for trigger in self.read_screen_triggers):
+		if self._has_trigger(text, self.read_screen_triggers):
 			return Command("READ_SCREEN", {})
 
-		if any(trigger in text for trigger in self.active_window_triggers):
+		if self._has_trigger(text, self.active_window_triggers):
 			return Command("GET_ACTIVE_WINDOW", {})
 
 		if re.search(r"\b(ora|ore)\b", text):
