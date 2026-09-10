@@ -825,12 +825,32 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   intent gia' esistente o ambiguo senza che nulla lo segnali), e "classificato" qui significa
   solo "ha un livello di rischio", non "il livello e' quello corretto per l'azione reale" - quel
   giudizio resta umano.
-- 🟡 Test d'attacco su plugin: `tests/test_skill_registry.py` copre ora il caso concreto di un
-  plugin che dichiara un intent gia' esistente (vedi sopra) - non un vero "attack test" con un
-  file plugin malevolo eseguito per davvero in un ambiente isolato, solo la collisione di intent
-  piu' semplice da sfruttare. Test d'attacco su prompt injection: non affrontati in questa
-  sessione (le difese da prompt injection, sopra, oggi non esistono affatto, non solo non sono
-  testate).
+- 🟡 **Test d'attacco su plugin e prompt injection** (aggiornato piu' avanti in questa sessione
+  rispetto a quando questo bullet e' stato scritto la prima volta - vedi le voci successive in
+  questo stesso documento per i dettagli completi, qui solo il collegamento):
+  - Plugin: oltre alla collisione di intent (`tests/test_skill_registry.py`, vedi sopra), un vero
+    "attack test" e' stato aggiunto per il percorso che conta davvero (la Skill Forge, l'unico che
+    genera ed esegue codice non scritto da un umano) - `tests/test_skill_forge.py::
+    OsLevelSandboxCatchesWhatTheStaticBlocklistMissesTests`: una skill che scrive un file con
+    `mode = chr(119); open(path, mode)` (evade sia `FORBIDDEN_PATTERNS` sia `_check_ast_escapes`
+    per costruzione) viene comunque bloccata a runtime dalla sandbox a integrita' Low. Un plugin
+    scritto a mano da un umano e messo in `plugins/` resta invece un confine di fiducia deliberato
+    (chi puo' scrivere file li' ha gia' accesso completo alla macchina) - un "attack test" sul
+    codice arbitrario di un plugin manuale non misurerebbe altro che questo, non e' stato quindi
+    perseguito.
+  - Prompt injection: le mitigazioni ESISTONO dalla fine di questa sessione (framing "e' un dato,
+    non un'istruzione" nei tre consumatori LLM, vedi F1 piu' sotto) - la frase precedente di
+    questo bullet ("non esistono affatto") era gia' superata dal resto del documento e non
+    aggiornata qui, corretto ora. Aggiunto anche il vero test d'attacco mancante,
+    `tests/test_prompt_injection_attack.py`: simula lo scenario PEGGIORE (un'osservazione di
+    `READ_SCREEN` contiene un'iniezione, e il modello finto - non un modello vero, non
+    verificabile in un test deterministico - "ci casca" e richiede `FORGET` su un ricordo reale
+    come passo successivo) e dimostra che il backstop strutturale (`PolicyEngine.
+    decide_interactive`, basato sul RISCHIO dell'azione, non sul contenuto che l'ha causata) la
+    blocca comunque - verificato anche in negativo, rimuovendo il gate dal test il ricordo viene
+    davvero cancellato, quindi il test non e' tautologico. Non e' una difesa strutturale contro
+    l'iniezione in se' (quella resta la mitigazione nel prompt, senza garanzie), e' la prova che
+    anche se l'iniezione riuscisse in pieno non ne conseguirebbe un'azione reale senza conferma.
 - ✅ Restore verificato per il filesystem (`core/execution_safety.py`, `ROLLBACK_HANDLERS`):
   prima di questa sessione solo il rollback di `CREATE_PATH` aveva un test end-to-end vero
   (`tests/test_agent.py::RollbackAfterFatalErrorTests`, passando dall'agente intero), mentre
