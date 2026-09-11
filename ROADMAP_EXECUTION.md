@@ -584,10 +584,23 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   `tests/test_agent.py`, `tests/test_plan_executor.py` verificano sia il rifiuto (intent
   compensatorio bloccato) sia che un blocco su un intent diverso non impedisca comunque il
   rollback. Prova: 1.959/1.959 test, ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.2.8` — 11/09/2026: audit dei test di bypass gia' esistenti per ognuno dei 7 percorsi di
+  [docs/action-execution-paths.md](docs/action-execution-paths.md), integrato dove mancava un
+  caso reale invece di riscrivere da zero. Percorso 1/2 (comando diretto/agente):
+  `tests/test_jake_core_permissions.py::BlockedIntentsGateTests` (`blocked_intents`
+  vince anche con `confirmed` gia' impostato). Percorso 3 (piano automatico):
+  `tests/test_plan_executor.py::PolicyTests`. Percorso 4 (companion): nuovo test
+  `test_extra_fields_cannot_smuggle_authorization_signals_to_the_handler` in
+  `tests/test_companion_server.py` - il body arriva a `command_handler` come stringa nuda,
+  quindi campi extra come `confirmed`/`intent`/`parameters` nel JSON non hanno alcun modo di
+  raggiungere `_resolve_and_execute`. Percorso 5: N/A (solo registrazione). Percorso 6
+  (rollback): gia' coperto da `F1.2.5` sopra. Percorso 7 (`SkillRegistry.execute()`): nessun test
+  di bypass possibile da scrivere finche' `F1.2.1` non gli aggiunge un controllo proprio - il gap
+  resta documentato, non "testato" nel senso di verificarne la chiusura.
 - Non ancora affrontato: `F1.2.1` (PolicyEngine come unico gate: `core/skill_registry.py::
   execute()` resta un dispatcher senza controllo di policy proprio, i percorsi normali lo
   proteggono chiamandolo solo dopo una decisione, ma nulla lo impedisce strutturalmente);
-  `F1.2.2`-`F1.2.4`, `F1.2.6`-`F1.2.8`; il resto di `F1.2.5` (retry e sotto-azioni di workflow
+  `F1.2.2`-`F1.2.4`, `F1.2.6`-`F1.2.7`; il resto di `F1.2.5` (retry e sotto-azioni di workflow
   non ancora passati in rassegna allo stesso modo).
 
 ### F1.3 — Verifica degli effetti e undo
