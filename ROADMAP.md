@@ -1407,6 +1407,20 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   `mypy` ora pulito su tutti e 13 i file della lista.
 
   Suite completa: 1943 test, tutti verdi; `ruff check` e `mypy` puliti sull'intero repository.
+- ✅ **Esteso ancora il type-check selettivo** a `core/auth_gate.py`, `core/action_ledger.py`,
+  `core/kill_switch.py`, `core/conversation_state.py`, `core/command.py`, `core/skill_result.py`
+  (19 file in totale). Rendere esplicito che `Command.parameters` puo' essere `None` (era gia'
+  cosi' a runtime, solo mai dichiarato) si e' propagato a catena in `core/jake_core.py` e
+  `core/action_ledger.py`: `_log_action_outcome`/`_safe_confirm_envelope`/`authorization_of`/
+  `idempotency_key_of` dichiaravano tutte `parameters: dict` senza `Optional`, pur gestendo gia'
+  correttamente `None` a runtime (`parameters or {}` in ognuna) - allargate tutte e quattro le
+  firme per farle corrispondere al comportamento reale, nessuna modifica di comportamento.
+  `ConversationStateManager` aveva inoltre tre attributi privati senza un'annotazione esplicita
+  (`_pending_action`/`_short_term_history`/`_last_search_results`/`_entities`), inferiti da mypy
+  col tipo del valore iniziale invece che con quello vero via via assegnato. `mypy` ora pulito su
+  tutti e 19 i file della lista.
+
+  Suite completa: 1943 test, tutti verdi; `ruff check` e `mypy` puliti sull'intero repository.
 
 ## F2 — Voice Natural 3.0
 
