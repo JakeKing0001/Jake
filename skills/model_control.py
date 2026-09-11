@@ -23,7 +23,18 @@ class ListModelsSkill:
         except (error.URLError, TimeoutError, json.JSONDecodeError):
             return SkillResult(success=False, data={}, error="OLLAMA_UNAVAILABLE")
 
-        models = [model["name"] for model in payload.get("models", [])]
+        # F1: stesso buco sistemico corretto in questa sessione per i consumatori diretti di
+        # Ollama (skills/clipboard.py e altri 6 file) - un corpo JSON valido ma non nella forma
+        # attesa ("null", "[]", un numero) faceva sollevare un AttributeError da payload.get(...)
+        # mai catturato, invece di degradare a OLLAMA_UNAVAILABLE come promesso.
+        if not isinstance(payload, dict):
+            return SkillResult(success=False, data={}, error="OLLAMA_UNAVAILABLE")
+
+        raw_models = payload.get("models")
+        if not isinstance(raw_models, list):
+            return SkillResult(success=False, data={}, error="OLLAMA_UNAVAILABLE")
+
+        models = [entry["name"] for entry in raw_models if isinstance(entry, dict) and "name" in entry]
         if not models:
             return SkillResult(success=False, data={}, error="NOT_FOUND")
         return SkillResult(success=True, data={"models": models})
