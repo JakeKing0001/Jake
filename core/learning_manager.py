@@ -35,7 +35,7 @@ class LearningManager:
     # ---- osservazione ------------------------------------------------------------------
 
     @staticmethod
-    def _parameters_grounded(text: str, parameters: dict) -> bool:
+    def _parameters_grounded(text: str, parameters: dict | None) -> bool:
         lowered = (text or "").lower()
         for value in (parameters or {}).values():
             if isinstance(value, bool):

@@ -16,7 +16,7 @@ class MemoryManager:
     # correlati (es. "mi piace il caffe'" e "mi piace il te'").
     DEDUP_SIMILARITY_THRESHOLD = 0.93
 
-    def __init__(self, db_path: Path = None):
+    def __init__(self, db_path: Path | None = None):
         self.db_path = Path(db_path) if db_path else self.DEFAULT_DB_PATH
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         # check_same_thread=False: dalla v3.0 TriggerScheduler legge/scrive workflow_manager e
@@ -93,10 +93,10 @@ class MemoryManager:
         value: str,
         category: str = "fact",
         importance: int = 1,
-        embedding: list = None,
-        project: str = None,
+        embedding: list | None = None,
+        project: str | None = None,
         source: str = "user",
-        ttl_days: float = None,
+        ttl_days: float | None = None,
     ) -> None:
         """Salva o aggiorna un ricordo (upsert su key+category). Se e' fornito un embedding e
         un ricordo esistente nella stessa categoria/progetto e' semanticamente quasi identico
@@ -143,7 +143,7 @@ class MemoryManager:
         )
         self._connection.commit()
 
-    def _find_duplicate_key(self, embedding: list, category: str, project: str, exclude_key: str) -> str | None:
+    def _find_duplicate_key(self, embedding: list, category: str, project: str | None, exclude_key: str) -> str | None:
         """Chiave del ricordo esistente piu' simile semanticamente a embedding, nella stessa
         categoria/progetto, se supera DEDUP_SIMILARITY_THRESHOLD. None se non c'e' nulla di
         abbastanza simile (compreso il caso, normale, in cui exclude_key e' gia' quello giusto:
@@ -173,8 +173,9 @@ class MemoryManager:
     _RETURNED_COLUMNS = "key, value, category, importance, updated_at, project, source, expires_at"
 
     def recall(
-        self, key: str = None, category: str = None, query: str = None, project: str = None, limit: int = 5,
-        since: str = None, until: str = None, include_expired: bool = False,
+        self, key: str | None = None, category: str | None = None, query: str | None = None,
+        project: str | None = None, limit: int = 5,
+        since: str | None = None, until: str | None = None, include_expired: bool = False,
     ) -> list[dict]:
         """Recupera ricordi per chiave esatta e/o ricerca libera su chiave/valore.
 
@@ -220,7 +221,7 @@ class MemoryManager:
         return [dict(row) for row in rows]
 
     def semantic_recall(
-        self, query_embedding: list, category: str = None, project: str = None, limit: int = 5,
+        self, query_embedding: list, category: str | None = None, project: str | None = None, limit: int = 5,
         include_expired: bool = False,
     ) -> list[dict]:
         """Recupera i ricordi piu' simili semanticamente a un embedding di query.
@@ -271,7 +272,7 @@ class MemoryManager:
         self._connection.commit()
         return cursor.rowcount
 
-    def forget(self, key: str, category: str = None) -> bool:
+    def forget(self, key: str, category: str | None = None) -> bool:
         """Elimina i ricordi con la chiave indicata. Restituisce True se qualcosa e' stato rimosso."""
         if category:
             cursor = self._connection.execute(
@@ -325,7 +326,7 @@ class MemoryManager:
         self._connection.commit()
         return cursor.rowcount > 0
 
-    def related(self, key: str, category: str = "fact", predicate: str = None) -> list[dict]:
+    def related(self, key: str, category: str = "fact", predicate: str | None = None) -> list[dict]:
         """Ricordi collegati a (key, category) come soggetto, con il predicato e il valore
         attuale del ricordo collegato. value e' None se l'oggetto non esiste (piu') come
         ricordo: forget() ripulisce sempre gli archi del nodo che cancella, quindi in pratica
