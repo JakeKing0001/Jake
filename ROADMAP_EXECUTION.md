@@ -322,7 +322,9 @@ Dipende da: F0.1.
   `.ci-artifacts/`, saltando di conseguenza lo smoke CLI. La correzione locale imposta
   `include-hidden-files: true`, sposta l'upload dopo lo smoke affinche' un errore del servizio
   artifact non lo salti, ed e' protetta da `tests/test_ci_workflow.py`; baseline successiva:
-  1.945/1.945 test, ruff, mypy su 75 file e compileall verdi.
+  1.946/1.946 test, ruff, mypy su 75 file e compileall verdi. Lo smoke CLI completa
+  avvio-risposta-chiusura in 12,9 secondi con exit code 0; lo smoke HUD resta attivo oltre tre
+  secondi con ogni percorso Qt rimosso dal `PATH`.
 - Blocco esplicito: `F0.2.4` e `F0.2.6` modificano GitHub; su richiesta dell'utente non viene
   eseguito alcun push né cambiata la protezione di `master`. La correzione attende quindi una
   pubblicazione e una nuova CI reale. Inoltre l'API di branch protection restituisce HTTP 403:
