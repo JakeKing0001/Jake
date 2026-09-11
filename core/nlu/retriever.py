@@ -121,7 +121,7 @@ class CapabilityRetriever:
         candidate_set = set(candidates)
         examples: list[Example] = []
         per_intent: dict[str, int] = {}
-        for key, score in example_hits:
+        for key, _score in example_hits:
             example = self._examples_by_key.get(key)
             if example is None or example.intent not in candidate_set:
                 continue

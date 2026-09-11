@@ -251,7 +251,7 @@ class SkillForge:
         try:
             tree = ast.parse(code)
         except SyntaxError as exc:
-            raise ForgeError(f"errore di sintassi alla riga {exc.lineno}")
+            raise ForgeError(f"errore di sintassi alla riga {exc.lineno}") from exc
 
         for pattern, why in FORBIDDEN_PATTERNS:
             if pattern.search(code):
@@ -294,8 +294,8 @@ class SkillForge:
                     if isinstance(item, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "metadata" for t in item.targets):
                         try:
                             metadata = ast.literal_eval(item.value)
-                        except (ValueError, SyntaxError):
-                            raise ForgeError("metadata non e' un dizionario letterale")
+                        except (ValueError, SyntaxError) as exc:
+                            raise ForgeError("metadata non e' un dizionario letterale") from exc
                         if not isinstance(metadata, dict):
                             raise ForgeError("metadata deve essere un dizionario")
                         intent = metadata.get("intent")

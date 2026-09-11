@@ -117,7 +117,7 @@ class EdgeTtsProvider(TtsProvider):
 
             sentences = _split_sentences(text)
             future = self._executor.submit(self._synthesize, sentences[0])
-            for index, sentence in enumerate(sentences):
+            for index, _sentence in enumerate(sentences):
                 mp3 = future.result()
                 if index + 1 < len(sentences):
                     future = self._executor.submit(self._synthesize, sentences[index + 1])
