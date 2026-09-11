@@ -53,11 +53,11 @@ def _get_file_logger(path: Path) -> logging.Logger:
 
 
 class SessionRecorder:
-    def __init__(self, enabled: bool = False, verbatim: bool = False, path: Path = None):
+    def __init__(self, enabled: bool = False, verbatim: bool = False, path: Path | None = None):
         self.enabled = enabled
         self.verbatim = verbatim and enabled
         self._path = Path(path) if path else DEFAULT_PATH
-        self._logger = None
+        self._logger: logging.Logger | None = None
 
     def record_failure(
         self, trace_id: str, *, intent: str, parameters: dict, error: str, risk_decision: str, private: bool = False,
