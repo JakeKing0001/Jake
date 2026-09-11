@@ -11,7 +11,7 @@ class ReminderScheduler:
         self.reminder_manager = reminder_manager
         self.on_due = on_due
         self.interval_seconds = interval_seconds
-        self._thread = None
+        self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._logger = get_logger()
 

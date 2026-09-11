@@ -26,7 +26,7 @@ class TriggerScheduler:
         on_trigger=None,
         policy_engine=None,
         interval_seconds: float = 30,
-        autonomy_budget: AutonomyBudget = None,
+        autonomy_budget: AutonomyBudget | None = None,
     ):
         self.trigger_manager = trigger_manager
         self.workflow_manager = workflow_manager
@@ -45,12 +45,12 @@ class TriggerScheduler:
         # un'istanza locale con i default - mai disattivato del tutto, a differenza di
         # blocked_intents/always_confirm_intents che possono restare None.
         self.autonomy_budget = autonomy_budget or AutonomyBudget()
-        self._thread = None
+        self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._logger = get_logger()
         # Stato del fronte di salita per i trigger "app_focus": memorizza se, all'ultimo
         # controllo, la finestra attiva corrispondeva gia' o no (per non risparare a ogni poll).
-        self._app_focus_matched = {}
+        self._app_focus_matched: dict[str, bool] = {}
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -104,7 +104,7 @@ class TriggerScheduler:
         needle = (spec.get("app_contains") or "").lower()
         if not needle:
             return False
-        name = trigger.get("name")
+        name = trigger.get("name") or ""
         current = (self.desktop_context.get_current_window() or "").lower()
         matches_now = needle in current
         matched_before = self._app_focus_matched.get(name, False)

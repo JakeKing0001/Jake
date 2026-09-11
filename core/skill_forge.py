@@ -152,8 +152,8 @@ class ForgeError(Exception):
 
 
 class SkillForge:
-    def __init__(self, registry, client: OllamaClient = None, model_provider=None, plugins_dir: Path = None,
-                 logger=None, on_skill_installed=None, coder_model: str = None):
+    def __init__(self, registry, client: OllamaClient | None = None, model_provider=None, plugins_dir: Path | None = None,
+                 logger=None, on_skill_installed=None, coder_model: str | None = None):
         self.registry = registry
         self.client = client or OllamaClient(timeout=180)
         # callable -> nome del modello generico configurato (per il fallback se manca il coder)
@@ -189,7 +189,7 @@ class SkillForge:
         code = match.group(1) if match else text
         return code.strip() + "\n"
 
-    def propose(self, request: str, feedback: str = None, attempts: int = 2) -> ForgeDraft:
+    def propose(self, request: str, feedback: str | None = None, attempts: int = 2) -> ForgeDraft:
         """Genera e valida un plugin per la richiesta. Solleva ForgeError con un messaggio
         comprensibile se dopo 'attempts' tentativi il codice non passa i controlli."""
         request = (request or "").strip()

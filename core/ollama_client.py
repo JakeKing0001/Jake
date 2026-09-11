@@ -42,7 +42,7 @@ class OllamaClient:
     # classificatore a 8192 e il resto al default (2048) ogni alternanza costava un reload.
     DEFAULT_NUM_CTX = 8192
 
-    def __init__(self, base_url: str = None, timeout: float = 30, keep_alive: str = "30m", num_ctx: int = None):
+    def __init__(self, base_url: str | None = None, timeout: float = 30, keep_alive: str = "30m", num_ctx: int | None = None):
         self.base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
         self.timeout = timeout
         self.keep_alive = keep_alive
@@ -50,7 +50,7 @@ class OllamaClient:
 
     # ---- basso livello -------------------------------------------------------------
 
-    def _post(self, path: str, payload: dict, timeout: float = None) -> dict:
+    def _post(self, path: str, payload: dict, timeout: float | None = None) -> dict:
         body = json.dumps(payload).encode("utf-8")
         http_request = request.Request(
             f"{self.base_url}{path}", data=body,
@@ -78,7 +78,7 @@ class OllamaClient:
             raise OllamaResponseError("risposta non nella forma attesa (non un dizionario)")
         return parsed
 
-    def _get(self, path: str, timeout: float = None) -> dict:
+    def _get(self, path: str, timeout: float | None = None) -> dict:
         try:
             with request.urlopen(f"{self.base_url}{path}", timeout=timeout or self.timeout) as response:
                 parsed = json.loads(response.read().decode("utf-8"))
@@ -94,8 +94,8 @@ class OllamaClient:
 
     # ---- API comode ------------------------------------------------------------------
 
-    def chat(self, model: str, messages: list, format=None, options: dict = None,
-             timeout: float = None, images: list = None) -> dict:
+    def chat(self, model: str, messages: list, format=None, options: dict | None = None,
+             timeout: float | None = None, images: list | None = None) -> dict:
         payload = {
             "model": model,
             "stream": False,
@@ -107,7 +107,7 @@ class OllamaClient:
         payload["options"] = {"num_ctx": self.num_ctx, **(options or {})}
         return self._post("/api/chat", payload, timeout=timeout)
 
-    def chat_text(self, model: str, messages: list, options: dict = None, timeout: float = None) -> str | None:
+    def chat_text(self, model: str, messages: list, options: dict | None = None, timeout: float | None = None) -> str | None:
         """Come chat(), ma restituisce direttamente il testo (None se vuoto/errore)."""
         try:
             result = self.chat(model, messages, options=options, timeout=timeout)
@@ -117,7 +117,7 @@ class OllamaClient:
         content = message.get("content") if isinstance(message, dict) else None
         return content.strip() if isinstance(content, str) and content.strip() else None
 
-    def embed(self, model: str, inputs: list[str], timeout: float = None) -> list[list[float]] | None:
+    def embed(self, model: str, inputs: list[str], timeout: float | None = None) -> list[list[float]] | None:
         """Embedding di piu' testi in una chiamata. None se Ollama/modello non disponibili."""
         if not inputs:
             return []
