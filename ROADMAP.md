@@ -1374,6 +1374,24 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
 
   Con questo, ogni metodo pubblico e privato non banale di `core/jake_core.py` ha una copertura
   dedicata. Suite completa: 1942 test, tutti verdi; `ruff check` pulito sull'intero repository.
+- ✅ **`core/jake_core.py` aggiunto al type-check selettivo di mypy** (F0, `[tool.mypy].files`
+  in `pyproject.toml`): dato che i test appena scritti avevano gia' trovato un buco severo di
+  arity in questo file, valeva la pena controllare se un type-checker ne avrebbe trovati altri.
+  Aggiungerlo alla lista COSI' COM'ERA avrebbe pero' fatto fallire subito la CI con 414 errori in
+  133 file mai passati in rassegna: mypy, senza `follow_imports`, segnala anche gli errori di
+  ogni modulo importato transitivamente, non solo di quelli elencati esplicitamente. Corretto
+  aggiungendo `follow_imports = "silent"` alla configurazione condivisa (mypy continua a seguire
+  gli import per inferire i tipi, ma segnala errori solo nei file della lista) - cosi' la lista
+  puo' davvero crescere un modulo alla volta, come dice gia' il suo stesso commento. Con questo,
+  `core/jake_core.py` da solo segnalava 3 problemi reali (nessuno un bug a runtime, ma comunque
+  corretti): una variabile locale in `_default_on_advisory` riusata con un tipo diverso da quello
+  del parametro originale, un `Optional` implicito su `_run_agent(remember_text)`, e la firma di
+  `response_formatter.format_skill_result` che non dichiarava `result` come `Optional` nonostante
+  la funzione lo gestisca gia' correttamente a runtime. `mypy` ora pulito su tutti e 6 i file
+  della lista. Aggiunto anche un test mancante (`_default_on_advisory` quando `notify()` mette la
+  notifica in coda, stesso schema gia' testato per `_default_on_reminder_due`).
+
+  Suite completa: 1943 test, tutti verdi; `ruff check` e `mypy` puliti sull'intero repository.
 
 ## F2 — Voice Natural 3.0
 
