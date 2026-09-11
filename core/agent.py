@@ -86,7 +86,7 @@ class TaskAgent:
     def __init__(self, registry, retriever, client: OllamaClient, model_provider, format_result,
                  logger=None, context_provider=None, executor=None, fixed_tools: list[str] | None = None,
                  persona_line: str | None = None, session_recorder=None, action_ledger=None, agent_name: str = "general",
-                 kill_switch=None):
+                 kill_switch=None, policy_engine=None):
         self.registry = registry
         self.retriever = retriever
         self.client = client
@@ -109,6 +109,10 @@ class TaskAgent:
         # solo, azionabile da voce/hotkey/tray - vedi core/kill_switch.py), altrimenti
         # un'istanza locale mai attivata (self.kill_switch.is_active() e' sempre False).
         self.kill_switch = kill_switch or KillSwitch()
+        # F1.2.5: opzionale (None = comportamento precedente, nessun controllo) - passato da
+        # JakeCore cosi' il rollback rispetta blocked_intents invece di eseguire sempre la
+        # compensazione (vedi core/execution_safety.py::rollback_effect).
+        self.policy_engine = policy_engine
         # executor(intent, parameters) -> SkillResult: di default il registry (con risoluzione
         # dei percorsi); il core puo' passare una versione con policy/ripieghi.
         self.executor = executor or (lambda intent, parameters: registry.execute(intent, parameters))
@@ -465,7 +469,7 @@ class TaskAgent:
         for step in reversed(steps):
             if step.result is None or not step.result.success:
                 continue
-            if rollback_effect(self.registry, step.intent, step.result.data or {}):
+            if rollback_effect(self.registry, step.intent, step.result.data or {}, policy_engine=self.policy_engine):
                 rolled_back.append(step)
         return rolled_back
 

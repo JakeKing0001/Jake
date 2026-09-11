@@ -11,6 +11,7 @@ from pathlib import Path
 
 from core.agent import TaskAgent
 from core.ollama_client import OllamaError
+from core.policy_engine import PolicyEngine
 from core.skill_result import SkillResult
 
 CAPABILITIES = {
@@ -225,6 +226,28 @@ class RollbackAfterFatalErrorTests(unittest.TestCase):
         self.assertTrue(target.exists())
         self.assertEqual(outcome.rolled_back, [])
         self.assertIsNone(outcome.error)
+
+    def test_rollback_is_refused_when_the_compensating_intent_is_blocked(self):
+        """F1.2.5 (vedi core/execution_safety.py::rollback_effect): un rollback non deve
+        eseguire un intent che l'utente ha esplicitamente bloccato in config.json, nemmeno per
+        annullare un passo gia' approvato."""
+        tmp_dir = Path(tempfile.mkdtemp(prefix="jake_agent_rollback_blocked_"))
+        self.addCleanup(shutil.rmtree, tmp_dir, ignore_errors=True)
+        target = tmp_dir / "nuovo_file.txt"
+
+        registry = FakeRegistry()
+        client = ScriptedOllamaClient([
+            {"thought": "Creo il file", "action": {"intent": "CREATE_PATH", "parameters": {"path": str(target)}},
+             "final_answer": "", "ask_user": ""},
+            OllamaError("il modello non risponde"),
+        ])
+        agent = _agent(registry, client)
+        agent.policy_engine = PolicyEngine(blocked_intents={"DELETE_PATH"})
+
+        outcome = agent.run("crea un file e poi fai qualcos'altro di rischioso")
+
+        self.assertEqual(outcome.rolled_back, [])
+        self.assertTrue(target.exists(), "DELETE_PATH e' bloccato: il rollback non doveva cancellare il file")
 
 
 class AuthRequiredPropagationTests(unittest.TestCase):

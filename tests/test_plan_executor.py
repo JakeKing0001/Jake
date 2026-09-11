@@ -272,6 +272,29 @@ class KillSwitchStopsThePlanTests(unittest.TestCase):
         self.assertEqual(registry.calls, [])
 
 
+class RollbackRespectsBlockedIntentsTests(unittest.TestCase):
+    """F1.2.5 (vedi core/execution_safety.py::rollback_effect, stesso principio di
+    tests/test_agent.py::RollbackAfterFatalErrorTests per l'altro esecutore): un rollback non
+    deve eseguire un intent che l'utente ha bloccato in config.json, nemmeno per annullare un
+    passo gia' approvato."""
+
+    def test_rollback_is_refused_when_the_compensating_intent_is_blocked(self):
+        target = str(Path(tempfile.gettempdir()) / "jake_test_plan_rollback_blocked_9231.txt")
+        self.addCleanup(lambda: Path(target).unlink(missing_ok=True))
+        registry = FakeRegistry(add_note_results=[SkillResult(success=False, data={}, error="MISSING_PARAMETERS")])
+        plan = Plan(steps=[
+            PlanStep(intent="CREATE_PATH", parameters={"path": target}),
+            PlanStep(intent="ADD_NOTE", parameters={"text": "fallisce"}),
+        ])
+        executor = PlanExecutor(registry)
+        policy_engine = PolicyEngine(blocked_intents={"DELETE_PATH"})
+
+        outcome = executor.execute(plan, policy_engine=policy_engine)
+
+        self.assertEqual(outcome.rolled_back, [])
+        self.assertTrue(Path(target).exists(), "DELETE_PATH e' bloccato: il rollback non doveva cancellare il file")
+
+
 class AuthorizationSignalStrippingTests(unittest.TestCase):
     """F1: un piano eseguito qui (il ripiego di JakeCore._try_plan, un'automazione salvata con
     RUN_WORKFLOW, o un trigger che parte da solo) non ha MAI nessuno pronto a confermare in
