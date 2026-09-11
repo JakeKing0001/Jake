@@ -76,6 +76,7 @@ jobs:
         with:
           name: python-${{ matrix.python-version }}-test-diagnostics
           path: .ci-artifacts/
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
 
