@@ -320,8 +320,9 @@ Dipende da: F0.1.
   Python sono verdi sia su 3.11 sia su 3.12; build e smoke HUD sono verdi. I due job Python sono
   risultati rossi soltanto perche' `upload-artifact@v4` esclude per default la directory nascosta
   `.ci-artifacts/`, saltando di conseguenza lo smoke CLI. La correzione locale imposta
-  `include-hidden-files: true` ed e' protetta da `tests/test_ci_workflow.py`; baseline successiva:
-  1.944/1.944 test, ruff, mypy su 75 file e compileall verdi.
+  `include-hidden-files: true`, sposta l'upload dopo lo smoke affinche' un errore del servizio
+  artifact non lo salti, ed e' protetta da `tests/test_ci_workflow.py`; baseline successiva:
+  1.945/1.945 test, ruff, mypy su 75 file e compileall verdi.
 - Blocco esplicito: `F0.2.4` e `F0.2.6` modificano GitHub; su richiesta dell'utente non viene
   eseguito alcun push né cambiata la protezione di `master`. La correzione attende quindi una
   pubblicazione e una nuova CI reale.
@@ -1673,8 +1674,8 @@ Aggiornato 11/09/2026: il commit remoto `2308009` ha superato build/smoke HUD e,
 3.12, installazione, ruff, mypy, compileall e tutti i test. Il run `34614112195` e' pero' rosso:
 entrambi i job Python falliscono nel successivo upload perche' `actions/upload-artifact@v4`
 ignora per default `.ci-artifacts/`; lo smoke CLI viene quindi saltato. La correzione locale
-aggiunge `include-hidden-files: true` e un test di regressione dedicato. Baseline locale:
-1.944/1.944 test, ruff, mypy su 75 file e compileall verdi.
+aggiunge `include-hidden-files: true`, colloca l'upload dopo lo smoke e include due test di
+regressione dedicati. Baseline locale: 1.945/1.945 test, ruff, mypy su 75 file e compileall verdi.
 
 La prossima azione esatta e' pubblicare questa correzione e osservare una nuova CI reale, poi
 aggiornare `F0.1`, `F0.2` e G0 in base all'esito. Push e impostazioni GitHub restano esclusi su

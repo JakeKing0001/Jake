@@ -23,6 +23,13 @@ class CiWorkflowTests(unittest.TestCase):
         self.assertIn("include-hidden-files: true", block)
         self.assertIn("if-no-files-found: error", block)
 
+    def test_diagnostics_upload_cannot_prevent_the_cli_smoke_test(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+
+        smoke_position = workflow.index("- name: Smoke test")
+        upload_position = workflow.index("- name: Pubblica diagnostica test")
+        self.assertLess(smoke_position, upload_position)
+
 
 if __name__ == "__main__":
     unittest.main()
