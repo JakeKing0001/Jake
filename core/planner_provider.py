@@ -14,16 +14,16 @@ class PlannerProvider:
     def __init__(
         self,
         registry,
-        base_url: str = None,
+        base_url: str | None = None,
         timeout: float = 40,
-        model: str = None,
+        model: str | None = None,
         context_provider=None,
     ):
         self.registry = registry
         self.base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
         self.timeout = timeout
         self.model = model or "qwen2.5:7b"
-        self.last_error = None
+        self.last_error: str | None = None
         self.context_provider = context_provider
 
     def build_plan(self, text: str) -> Plan | None:

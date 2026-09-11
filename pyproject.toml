@@ -52,6 +52,14 @@ files = [
     "core/workflow_manager.py",
     "core/trigger_manager.py",
     "core/planner.py",
+    "core/desktop_context.py",
+    "core/computer_agent.py",
+    "core/companion_server.py",
+    "core/path_resolver.py",
+    "core/embedding_provider.py",
+    "core/vision_provider.py",
+    "core/planner_provider.py",
+    "core/response_formatter.py",
 ]
 ignore_missing_imports = true
 no_implicit_optional = true

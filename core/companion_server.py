@@ -28,7 +28,9 @@ chi ha gia' un uso locale/fidato del server non vede alcun cambiamento."""
 import hmac
 import json
 import queue
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import cast
 
 from core.device_registry import DeviceRegistry
 from core.event_bus import EventBus
@@ -48,8 +50,8 @@ class CompanionServer:
     <token>", altrimenti riceve 401 - vedi il docstring del modulo."""
 
     def __init__(
-        self, event_bus: EventBus = None, command_handler=None, host: str = DEFAULT_HOST, port: int = 0,
-        token: str = None,
+        self, event_bus: EventBus | None = None, command_handler=None, host: str = DEFAULT_HOST, port: int = 0,
+        token: str | None = None,
     ):
         self.event_bus = event_bus or EventBus()
         self.command_handler = command_handler or (lambda text: "")
@@ -90,12 +92,10 @@ class _Server(ThreadingHTTPServer):
 
     def __init__(self, address, handler_cls, companion: CompanionServer):
         self.companion = companion
-        self._thread = None
+        self._thread: threading.Thread | None = None
         super().__init__(address, handler_cls)
 
     def start_serving(self) -> None:
-        import threading
-
         self._thread = threading.Thread(target=self.serve_forever, daemon=True)
         self._thread.start()
 
@@ -111,7 +111,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     @property
     def companion(self) -> CompanionServer:
-        return self.server.companion
+        return cast(_Server, self.server).companion
 
     # ---- autenticazione (F1, opt-in - vedi il docstring del modulo) ----------------------
 

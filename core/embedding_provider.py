@@ -10,7 +10,7 @@ class EmbeddingProvider:
     il modello non sono disponibili, embed() restituisce None: i chiamanti devono degradare
     con grazia alla ricerca testuale semplice, senza far fallire l'intera funzione."""
 
-    def __init__(self, model: str = "nomic-embed-text", base_url: str = None, timeout: float = 15):
+    def __init__(self, model: str = "nomic-embed-text", base_url: str | None = None, timeout: float = 15):
         self.model = model
         self.base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
         self.timeout = timeout
