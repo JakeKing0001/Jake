@@ -65,19 +65,19 @@ class AppResolver:
         self.threshold = threshold
         self.include_start_apps = include_start_apps
         self.include_path = include_path
-        self._applications = None
-        self._display_names = {}
-        self._sources = {}
+        self._applications: dict[str, str] | None = None
+        self._display_names: dict[str, str] = {}
+        self._sources: dict[str, str] = {}
         self._lock = threading.RLock()
-        self._discovery_thread = None
+        self._discovery_thread: threading.Thread | None = None
 
     # ---- scoperta ----------------------------------------------------------------------
 
     def discover(self) -> dict[str, str]:
         """Restituisce una mappa nome normalizzato -> launcher."""
-        applications = {}
-        display_names = {}
-        sources = {}
+        applications: dict[str, str] = {}
+        display_names: dict[str, str] = {}
+        sources: dict[str, str] = {}
         for search_path in self.search_paths:
             self._add_start_menu_entries(applications, display_names, sources, Path(search_path))
         if self.include_start_apps:
@@ -114,7 +114,11 @@ class AppResolver:
         with self._lock:
             if self._applications is None:
                 self.discover()
-            return self._applications
+            # discover() imposta sempre self._applications prima di tornare (mai un return
+            # anticipato che lo salti): questo "or {}" e' solo un ripiego difensivo, mai
+            # atteso a scattare davvero, per non restituire None se quell'invariante si
+            # rompesse in futuro.
+            return self._applications or {}
 
     def display_names(self, wait: bool = False) -> list[str]:
         """Nomi leggibili delle app trovate (v3.0: vocabolario per correggere le trascrizioni).

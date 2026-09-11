@@ -28,7 +28,7 @@ class HomeAssistantUnavailable(HomeAssistantError):
 
 
 class HomeAssistantClient:
-    def __init__(self, base_url: str = None, token: str = None, timeout: float = DEFAULT_TIMEOUT):
+    def __init__(self, base_url: str | None = None, token: str | None = None, timeout: float = DEFAULT_TIMEOUT):
         self.base_url = (base_url or "").rstrip("/")
         self.token = (token or "").strip() or None
         self.timeout = timeout
@@ -42,7 +42,7 @@ class HomeAssistantClient:
     def _headers(self) -> dict:
         return {"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"}
 
-    def _request(self, path: str, method: str, payload: dict = None):
+    def _request(self, path: str, method: str, payload: dict | None = None):
         body = json.dumps(payload).encode("utf-8") if payload is not None else None
         http_request = request.Request(f"{self.base_url}{path}", data=body, headers=self._headers(), method=method)
         try:
@@ -61,7 +61,7 @@ class HomeAssistantClient:
         except json.JSONDecodeError as exc:
             raise HomeAssistantError("risposta non JSON") from exc
 
-    def list_states(self, domain: str = None) -> list[dict]:
+    def list_states(self, domain: str | None = None) -> list[dict]:
         """Stato di tutte le entita' note (luci, prese, sensori...), opzionalmente filtrate per
         dominio (es. 'light', 'switch': il prefisso di entity_id prima del punto)."""
         states = self._request("/api/states", "GET")
@@ -72,7 +72,7 @@ class HomeAssistantClient:
     def get_state(self, entity_id: str) -> dict:
         return self._request(f"/api/states/{entity_id}", "GET")
 
-    def call_service(self, domain: str, service: str, entity_id: str = None, **extra_data) -> list:
+    def call_service(self, domain: str, service: str, entity_id: str | None = None, **extra_data) -> list:
         """Chiama un servizio Home Assistant, es. call_service('light', 'turn_on', 'light.
         soggiorno', brightness=200): il modo standard con cui l'API REST fa AGIRE un dispositivo
         (a differenza di list_states/get_state, che leggono soltanto)."""
