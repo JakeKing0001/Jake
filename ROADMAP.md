@@ -1336,6 +1336,33 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   questo venv perche' richiedono l'interprete isolato `.venv-rvc`, e i benchmark veri e propri,
   esclusi per design dal progetto stesso). Suite finale: 1885 test, tutti verdi; `ruff check`
   pulito sull'intero repository.
+- 🔴 **Buco severo trovato e corretto nella pipeline centrale di `core/jake_core.py`**, dopo che
+  lo sweep di copertura si e' spostato dalla fase 3.2 della roadmap (test) al resto della stessa
+  fase (architettura/reliability del core vero e proprio). `tests/test_jake_core_permissions.py`
+  copriva gia' a fondo il gate di conferma/autenticazione (`_resolve_and_execute`/
+  `_handle_confirmation`), ma nessuna suite testava il resto della pipeline
+  (`answer`/`_process`/`_execute_command`/`_run_agent`/`_handle_unknown`/`_try_plan`, kill
+  switch, shutdown). Scrivendo quella copertura, un test ha fatto emergere un `TypeError` reale:
+  `JakeCore._execute_command` (riga 710) chiamava `self._safe_confirm_envelope(resolved, result,
+  reason)` con 3 argomenti posizionali, mentre la firma del metodo richiede 4
+  (`intent, parameters, result, reason`) - introdotto nel commit `df33e9c` ("busta di conferma
+  validata", F1), mai notato perche' nessun test chiamava `_execute_command` con un intent che
+  produce `CONFIRMATION_REQUIRED`/`AUTH_REQUIRED`. L'eccezione veniva catturata solo dal
+  try/except generico di `answer()`, quindi l'effetto reale era: **qualunque comando diretto
+  (non passato dall'agente a passi) che richiedeva conferma o autenticazione - "dimentica tutto",
+  "cancella il file X", qualunque azione DESTRUCTIVE/ADMIN invocata come comando singolo -
+  falliva con "si e' verificato un errore imprevisto" invece di chiedere "Confermi?"**, dalla
+  data di quel commit. Il percorso via agente (`_run_agent`) e quello di finalizzazione
+  (`_finalize_pending_action`) non erano toccati (chiamano `_safe_confirm_envelope` con gli
+  argomenti giusti), quindi non tutti i percorsi di conferma erano rotti - ma il piu' diretto e
+  comune si'. Corretto passando `resolved.intent, resolved.parameters` invece di `resolved`.
+  Verificato riproducendo per davvero il `TypeError` con un test dedicato prima della correzione.
+  Aggiunto `tests/test_jake_core_pipeline.py` (38 test: priorita' di instradamento in
+  `_process`, percorso a comando singolo, l'agente a passi con tutte le sue uscite, il fallback
+  al vecchio planner, kill switch, shutdown).
+
+  Suite completa dopo questo incremento: 1923 test, tutti verdi; `ruff check` pulito sull'intero
+  repository.
 
 ## F2 — Voice Natural 3.0
 
