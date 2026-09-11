@@ -1392,6 +1392,21 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   notifica in coda, stesso schema gia' testato per `_default_on_reminder_due`).
 
   Suite completa: 1943 test, tutti verdi; `ruff check` e `mypy` puliti sull'intero repository.
+- ✅ **Esteso il type-check selettivo a 5 file in piu' del nucleo di orchestrazione**:
+  `core/policy_engine.py`, `core/plan_executor.py`, `core/agent.py`, `core/orchestrator.py`,
+  `core/fallbacks.py` (gia' tutti con una propria copertura di test consolidata da sessioni
+  precedenti). 15 diagnosi corrette, tutte annotazioni (nessun bug a runtime): la maggior parte
+  `Optional` impliciti sui parametri di funzione/dataclass (incluso `PlanOutcome.stopped_step:
+  StepOutcome = None`, dove l'assenza dell'`Optional` era particolarmente fuorviante dato che
+  `PlanOutcome.success` verifica proprio `stopped_step is None`), piu' due casi piu' interessanti:
+  `TaskAgent.run()` restringeva un `dict | None` chiamando due volte `action.get("parameters")`
+  invece di legare il risultato a una variabile - mypy non riusciva a restringere il tipo
+  attraverso la chiamata ripetuta (comportamento identico, ma piu' fragile da leggere/estendere);
+  e `PlanExecutor._log_step` dichiarava `model: str` mentre il chiamante gli passa sempre
+  `model: str | None` (il modello e' un metadato opzionale di log, mai stato un requisito vero).
+  `mypy` ora pulito su tutti e 13 i file della lista.
+
+  Suite completa: 1943 test, tutti verdi; `ruff check` e `mypy` puliti sull'intero repository.
 
 ## F2 — Voice Natural 3.0
 
