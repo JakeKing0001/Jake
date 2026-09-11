@@ -1154,6 +1154,40 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   catturato, invece di degradare a `OLLAMA_UNAVAILABLE` come promesso. Corretto validando la
   forma di `payload`/`payload["models"]` prima di leggerli, e ignorando singole voci malformate
   invece di rifiutare l'intera risposta. Aggiunto `tests/test_model_control_skills.py` (10 test).
+- ✅ **Lo stesso buco sistemico esteso oltre Ollama: trovato e corretto in altri 6 file** che
+  parlano direttamente con API HTTP di terze parti (`grep -rln "json.loads(response.read()"
+  skills/ core/` dopo aver gia' corretto le 8 occorrenze lato Ollama, per verificare che non
+  restassero altri consumatori con lo stesso schema). Nessuno dei sei aveva una suite di test.
+  In ognuno, un corpo JSON sintatticamente valido ma nella forma sbagliata (`"null"`, `"[]"`, un
+  numero semplice, o un campo interno del tipo sbagliato) faceva sollevare `AttributeError` o
+  `TypeError` non catturati, invece di degradare all'errore documentato della skill - riprodotto
+  per davvero prima e dopo la correzione in ciascun caso:
+  - `skills/astronomy.py::GetSunriseSunsetSkill` - due difetti distinti: (1) `_geocode` chiamava
+    `payload.get("results")` senza validare che `payload` fosse un dizionario; (2) le righe che
+    leggono `forecast["daily"]["sunrise"][0]`/`sunset` erano scritte FUORI dal blocco
+    `try/except`, quindi un `forecast` malformato (es. `None`) sollevava un `TypeError` mai
+    gestito nemmeno in linea di principio. Spostate dentro il `try` e allargato l'except a
+    `KeyError, IndexError, TypeError, AttributeError`. Aggiunto `tests/test_astronomy_skills.py`
+    (9 test).
+  - `skills/currency.py::ConvertCurrencySkill` - `payload.get("rates").get(to_currency)` senza
+    validare ne' `payload` ne' `rates`. Aggiunto `tests/test_currency_skill.py` (6 test).
+  - `skills/get_news.py::GetNewsSkill` - `payload.get("articles")` iterato senza validare che
+    fosse una lista di dizionari. Aggiunto `tests/test_get_news_skill.py` (7 test).
+  - `skills/get_weather.py::GetWeatherSkill` - accesso a `payload["weather"][0]["description"]`/
+    `payload["main"]["temp"]` senza validare i tipi intermedi. Aggiunto
+    `tests/test_get_weather_skill.py` (9 test).
+  - `skills/system_info.py::GetPublicIpSkill` - `payload.get("ip")` senza validare `payload`.
+    Aggiunto `tests/test_system_info_skills.py` (9 test, copre anche le altre skill del file che
+    non avevano alcuna suite: batteria, IP locale, info sistema, disco).
+  - `skills/web_search.py::WebSearchSkill` - `payload.get("AbstractText")` senza validare
+    `payload` (la lista `RelatedTopics` era gia' protetta voce per voce con `isinstance`, ma non
+    lo era l'accesso al payload stesso). Aggiunto `tests/test_web_search_skill.py` (8 test).
+
+  In tutti e sei i casi la correzione segue lo stesso principio gia' applicato alle 8 skill
+  Ollama: validare la forma con `isinstance` prima di ogni accesso, degradare all'errore
+  documentato della skill invece di lasciar propagare l'eccezione, e non alterare in alcun modo
+  il comportamento sul percorso di successo. Suite completa verificata dopo la correzione: 1333
+  test, tutti verdi; `ruff check` pulito su tutti i file toccati.
 
 ## F2 — Voice Natural 3.0
 
