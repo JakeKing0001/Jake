@@ -1,0 +1,587 @@
+"""Test unitari per la pipeline centrale di JakeCore (core/jake_core.py): answer(), _process(),
+_execute_command(), _run_agent(), _handle_unknown(), _try_plan(), kill switch e shutdown().
+
+tests/test_jake_core_permissions.py copre gia' a fondo il gate di conferma/autenticazione
+centralizzato (_resolve_and_execute/_handle_confirmation); questo file copre invece il resto
+della pipeline che risponde davvero a un testo: priorita' di instradamento (comando in sospeso >
+uscita > meta-comando > comando insegnato > cortesia breve > richiesta composta > instradamento
+normale), il percorso a comando singolo, l'agente a passi con le sue uscite (conferma in sospeso/
+domanda/risposta finale/fallback al planner), il fallback al vecchio planner, e i due percorsi di
+spegnimento/kill switch. Nessuna suite esisteva per questi metodi prima di questa sessione.
+
+Stesso approccio della suite di permessi: un JakeCore "spoglio" via JakeCore.__new__, con
+collaboratori finti minimali invece dell'intero registro/Ollama/NEST veri. ConversationStateManager
+ed EventBus sono usati REALI (leggeri, solo in memoria, nessun I/O): la logica che si vuole
+verificare qui e' come JakeCore li usa, non se loro stessi funzionano (gia' testati altrove).
+ActionLedger usa sempre un percorso temporaneo (mai il registro vero data/jake_ledger.jsonl)."""
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+from core.action_ledger import ActionLedger
+from core.agent import AgentOutcome
+from core.auth_gate import AuthGate
+from core.command import Command
+from core.conversation_state import ConversationStateManager
+from core.event_bus import EventBus
+from core.jake_core import JakeCore
+from core.planner import Plan, PlanStep
+from core.plan_executor import PlanOutcome, StepOutcome
+from core.policy_engine import PolicyEngine
+from core.session_recorder import SessionRecorder
+from core.skill_result import SkillResult
+
+
+class FakeSkill:
+    metadata = {"intent": "FAKE", "description": "Una skill finta.", "parameters": {}}
+
+    def __init__(self, result=None):
+        self.result = result if result is not None else SkillResult(success=True, data={})
+        self.calls = []
+
+    def execute(self, parameters=None):
+        self.calls.append(parameters)
+        return self.result
+
+
+class FakeRegistry:
+    def __init__(self, skills: dict = None):
+        self._skills = skills or {}
+
+    def get_skill(self, intent):
+        return self._skills.get(intent)
+
+    def has_skill(self, intent):
+        return intent in self._skills
+
+    def execute(self, intent, parameters=None):
+        skill = self.get_skill(intent)
+        return None if skill is None else skill.execute(parameters)
+
+
+class FakeNormalizer:
+    def normalize(self, text):
+        return (text or "").strip()
+
+
+class FakeExampleStore:
+    def __init__(self, exact=None):
+        self._exact = exact
+
+    def find_exact(self, text):
+        return self._exact
+
+    def all(self):
+        return []
+
+    def learned(self):
+        return []
+
+
+class FakeExample:
+    def __init__(self, intent, parameters=None, source="taught"):
+        self.intent = intent
+        self.parameters = parameters or {}
+        self.source = source
+
+
+class FakeLearning:
+    def __init__(self):
+        self.observed = []
+        self.commit_pending_calls = 0
+
+    def observe(self, text, command, result, route):
+        self.observed.append((text, command, result, route))
+
+    def commit_pending(self):
+        self.commit_pending_calls += 1
+
+    def teach(self, *args, **kwargs):
+        pass
+
+    def correct(self, *args, **kwargs):
+        pass
+
+
+class FakeRouter:
+    def __init__(self, command=None, route="llm"):
+        self.command = command if command is not None else Command("UNKNOWN", {})
+        self.last_route = route
+
+    def detect_intent(self, text):
+        return self.command
+
+
+class FakeOrchestrator:
+    def __init__(self, outcome=None, raises=None):
+        self.outcome = outcome
+        self.raises = raises
+        self.calls = []
+
+    def run(self, request, history=None, trace_id=None, private=False):
+        self.calls.append(request)
+        if self.raises is not None:
+            raise self.raises
+        return self.outcome
+
+
+class FakeMemoryManager:
+    def __init__(self):
+        self.logged = []
+
+    def log_turn(self, role, text):
+        self.logged.append((role, text))
+
+    def summarize_old_history(self, summarizer):
+        pass
+
+    def get_recent_history(self, limit=20):
+        return []
+
+    def count_memories(self):
+        return 0
+
+
+class FakePlannerProvider:
+    def __init__(self, plan=None):
+        self.plan = plan
+
+    def build_plan(self, text):
+        return self.plan
+
+
+class FakeSkillForge:
+    def __init__(self, available=False):
+        self._available = available
+
+    def is_available(self):
+        return self._available
+
+
+class FakeScheduler:
+    def __init__(self):
+        self.started = 0
+        self.stopped = 0
+
+    def start(self):
+        self.started += 1
+
+    def stop(self):
+        self.stopped += 1
+
+
+class FakeAutonomyBudget:
+    def __init__(self):
+        self.reset_calls = 0
+
+    def reset(self):
+        self.reset_calls += 1
+
+
+class FakeKillSwitch:
+    def __init__(self):
+        self.activated = False
+        self.reset_calls = 0
+
+    def activate(self):
+        self.activated = True
+
+    def reset(self):
+        self.reset_calls += 1
+        self.activated = False
+
+
+class FakeLogger:
+    def info(self, *a, **k):
+        pass
+
+    def warning(self, *a, **k):
+        pass
+
+    def exception(self, *a, **k):
+        pass
+
+
+def _bare_core(**overrides) -> JakeCore:
+    """JakeCore 'spoglio': solo gli attributi che i metodi testati in questo file usano
+    davvero, con collaboratori finti minimali al posto dell'intero registro/Ollama/NEST veri."""
+    core = JakeCore.__new__(JakeCore)
+    core.logger = FakeLogger()
+    core.skill_registry = overrides.get("skill_registry", FakeRegistry())
+    core.normalizer = overrides.get("normalizer", FakeNormalizer())
+    core.conversation_state = overrides.get("conversation_state", ConversationStateManager())
+    core.example_store = overrides.get("example_store", FakeExampleStore())
+    core.learning = overrides.get("learning", FakeLearning())
+    core.router = overrides.get("router", FakeRouter())
+    core.orchestrator = overrides.get("orchestrator", FakeOrchestrator())
+    core.planner_provider = overrides.get("planner_provider", FakePlannerProvider())
+    core.plan_executor = overrides.get("plan_executor", mock.MagicMock())
+    core.skill_forge = overrides.get("skill_forge", FakeSkillForge())
+    core.event_bus = overrides.get("event_bus", EventBus())
+    core.memory_manager = overrides.get("memory_manager", FakeMemoryManager())
+    core.context_summarizer = overrides.get("context_summarizer", mock.MagicMock())
+    core.desktop_context = overrides.get("desktop_context", mock.MagicMock())
+    core.auth_gate = overrides.get("auth_gate", AuthGate())
+    core.policy_engine = overrides.get("policy_engine", PolicyEngine(
+        auth_gate=core.auth_gate, blocked_intents=overrides.get("blocked_intents", []),
+        always_confirm_intents=overrides.get("always_confirm_intents", set()),
+    ))
+    core.action_ledger = overrides.get("action_ledger", ActionLedger(path=overrides["ledger_path"]))
+    core.session_recorder = overrides.get("session_recorder", SessionRecorder())
+    core.model = "test-model"
+    core.private_mode = overrides.get("private_mode", False)
+    core.last_exchange = None
+    core.last_response = None
+    core.last_route = None
+    core.scheduler = overrides.get("scheduler", FakeScheduler())
+    core.trigger_scheduler = overrides.get("trigger_scheduler", FakeScheduler())
+    core.autonomy_budget = overrides.get("autonomy_budget", FakeAutonomyBudget())
+    core.kill_switch = overrides.get("kill_switch", FakeKillSwitch())
+    core.system_advisor = overrides.get("system_advisor", mock.MagicMock())
+    core.companion_server = overrides.get("companion_server", mock.MagicMock())
+    core.retriever = overrides.get("retriever", mock.MagicMock())
+    return core
+
+
+class _JakeCoreTestCase(unittest.TestCase):
+    """Fornisce un percorso di ledger temporaneo (mai il registro vero data/jake_ledger.jsonl)
+    a ogni test che ne ha bisogno, tramite _core(**overrides)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._ledger_path = Path(self._tmp.name) / "ledger.jsonl"
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _core(self, **overrides) -> JakeCore:
+        overrides.setdefault("ledger_path", self._ledger_path)
+        return _bare_core(**overrides)
+
+
+class AnswerTests(_JakeCoreTestCase):
+    def test_empty_text_is_reported_without_touching_the_pipeline(self):
+        core = self._core()
+        response = core.answer("   ")
+        self.assertEqual(response, "Non ho sentito nulla.")
+
+    def test_a_normal_exchange_is_logged_to_memory_and_conversation_state(self):
+        registry = FakeRegistry({"GET_TIME": FakeSkill(SkillResult(success=True, data={"time": "10:00"}))})
+        memory = FakeMemoryManager()
+        core = self._core(
+            registry=registry, skill_registry=registry, memory_manager=memory,
+            router=FakeRouter(Command("GET_TIME", {})),
+        )
+        response = core.answer("che ore sono")
+        self.assertIn("10:00", response)
+        self.assertEqual(len(memory.logged), 2)
+        self.assertEqual(memory.logged[0], ("user", "che ore sono"))
+        history = core.conversation_state.get_short_term_history()
+        self.assertEqual(len(history), 2)
+
+    def test_private_mode_suppresses_memory_logging(self):
+        registry = FakeRegistry({"GET_TIME": FakeSkill(SkillResult(success=True, data={"time": "10:00"}))})
+        memory = FakeMemoryManager()
+        core = self._core(
+            skill_registry=registry, memory_manager=memory, private_mode=True,
+            router=FakeRouter(Command("GET_TIME", {})),
+        )
+        core.answer("che ore sono")
+        self.assertEqual(memory.logged, [])
+
+    def test_an_unexpected_exception_is_reported_gracefully_not_raised(self):
+        broken_router = mock.MagicMock()
+        broken_router.detect_intent.side_effect = RuntimeError("boom")
+        core = self._core(router=broken_router)
+        response = core.answer("qualcosa")
+        self.assertIn("errore imprevisto", response)
+
+    def test_the_exit_sentinel_is_not_logged_as_a_jake_turn(self):
+        core = self._core()
+        with mock.patch("core.jake_core.intent_patterns.is_exit", return_value=True):
+            response = core.answer("esci")
+        self.assertEqual(response, JakeCore.EXIT_SENTINEL)
+        history = core.conversation_state.get_short_term_history()
+        # Solo il turno dell'utente, mai un turno "jake" con il sentinel di uscita.
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["role"], "user")
+
+
+class ProcessRoutingPriorityTests(_JakeCoreTestCase):
+    """L'ordine di priorita' dentro _process() e' la logica piu' delicata di JakeCore: un
+    comando insegnato deve vincere sempre su tutto tranne un'azione in sospeso/l'uscita/un
+    meta-comando, anche quando assomiglia a un saluto o a una richiesta composta."""
+
+    def test_a_pending_action_intercepts_everything_else(self):
+        registry = FakeRegistry({"DELETE_PATH": FakeSkill(SkillResult(success=True, data={}))})
+        core = self._core(skill_registry=registry)
+        core.conversation_state.set_pending_action({
+            "intent": "DELETE_PATH", "parameters": {"confirmed": True}, "reason": "confirmation_required", "text": "cancella",
+        })
+        with mock.patch("core.jake_core.intent_patterns.is_positive_answer", return_value=True):
+            core._process("si")
+        self.assertFalse(core.conversation_state.has_pending_action())
+
+    def test_a_taught_command_wins_over_a_short_courtesy_phrase(self):
+        example = FakeExample("OPEN_APP", {"app": "chrome"}, source="taught")
+        registry = FakeRegistry({"OPEN_APP": FakeSkill(SkillResult(success=True, data={}))})
+        core = self._core(skill_registry=registry, example_store=FakeExampleStore(exact=example))
+        core._process("ciao")
+        self.assertEqual(registry.get_skill("OPEN_APP").calls, [{"app": "chrome"}])
+
+    def test_a_taught_command_wins_over_a_multi_step_request(self):
+        example = FakeExample("OPEN_APP", {"app": "chrome"}, source="corrected")
+        registry = FakeRegistry({"OPEN_APP": FakeSkill(SkillResult(success=True, data={}))})
+        orchestrator = FakeOrchestrator()
+        core = self._core(skill_registry=registry, example_store=FakeExampleStore(exact=example), orchestrator=orchestrator)
+        with mock.patch("core.jake_core.intent_patterns.is_multi_step_request", return_value=True):
+            core._process("prima apri chrome poi cerca il meteo")
+        self.assertEqual(orchestrator.calls, [])
+        self.assertEqual(registry.get_skill("OPEN_APP").calls, [{"app": "chrome"}])
+
+    def test_a_builtin_example_is_not_treated_as_a_taught_command(self):
+        # Solo source in (taught, corrected) deve bypassare il resto: un esempio "builtin"
+        # (dataset di addestramento) non e' un comando insegnato dall'utente.
+        example = FakeExample("OPEN_APP", {"app": "chrome"}, source="builtin")
+        registry = FakeRegistry({"UNKNOWN_HANDLER": FakeSkill()})
+        router = FakeRouter(Command("UNKNOWN", {}))
+        core = self._core(skill_registry=registry, example_store=FakeExampleStore(exact=example), router=router)
+        core._process("apri chrome")
+        self.assertEqual(registry.get_skill("OPEN_APP"), None)
+
+    def test_a_short_courtesy_phrase_gets_an_immediate_reply_without_the_model(self):
+        core = self._core()
+        response = core._process("grazie mille")
+        self.assertIn(response, ["Prego.", "Di nulla.", "Figurati.", "Quando vuoi.", "Sempre a disposizione."])
+        self.assertEqual(core.learning.commit_pending_calls, 1)
+
+    def test_a_multi_step_request_is_routed_to_the_agent(self):
+        outcome = AgentOutcome(final_answer="Fatto.")
+        orchestrator = FakeOrchestrator(outcome)
+        core = self._core(orchestrator=orchestrator)
+        with mock.patch("core.jake_core.intent_patterns.is_multi_step_request", return_value=True):
+            response = core._process("apri chrome e cerca il meteo")
+        self.assertEqual(response, "Fatto.")
+        self.assertEqual(len(orchestrator.calls), 1)
+
+    def test_an_unrecognized_command_is_handled_as_unknown(self):
+        core = self._core(router=FakeRouter(Command("UNKNOWN", {})), skill_forge=FakeSkillForge(available=False))
+        with mock.patch("core.jake_core.intent_patterns.is_question", return_value=False):
+            response = core._process("qualcosa di incomprensibile")
+        self.assertEqual(response, JakeCore.NO_PLAN)
+
+    def test_a_recognized_command_is_executed_directly(self):
+        registry = FakeRegistry({"GET_TIME": FakeSkill(SkillResult(success=True, data={"time": "10:00"}))})
+        core = self._core(skill_registry=registry, router=FakeRouter(Command("GET_TIME", {})))
+        response = core._process("che ore sono")
+        self.assertEqual(len(registry.get_skill("GET_TIME").calls), 1)
+        self.assertIn("10:00", response)
+
+
+class ExecuteCommandTests(_JakeCoreTestCase):
+    def test_a_policy_blocked_intent_is_never_executed(self):
+        skill = FakeSkill()
+        registry = FakeRegistry({"DELETE_PATH": skill})
+        core = self._core(skill_registry=registry, blocked_intents=["DELETE_PATH"])
+        response = core._execute_command("cancella tutto", Command("DELETE_PATH", {}))
+        self.assertEqual(skill.calls, [])
+        self.assertIn("disabilitata", response)
+
+    def test_a_missing_skill_reports_not_found(self):
+        core = self._core(skill_registry=FakeRegistry({}))
+        response = core._execute_command("qualcosa", Command("GHOST_INTENT", {}))
+        self.assertIn("GHOST_INTENT", response)
+
+    def test_a_confirmation_required_result_sets_a_pending_action(self):
+        registry = FakeRegistry({"FORGET": FakeSkill()})
+        core = self._core(skill_registry=registry, always_confirm_intents={"FORGET"})
+        response = core._execute_command("dimentica tutto", Command("FORGET", {"topic": "tutto"}))
+        self.assertTrue(core.conversation_state.has_pending_action())
+        self.assertIn("Confermi", response)
+
+    def test_a_successful_execution_is_observed_by_learning(self):
+        registry = FakeRegistry({"GET_TIME": FakeSkill(SkillResult(success=True, data={"time": "10:00"}))})
+        learning = FakeLearning()
+        core = self._core(skill_registry=registry, learning=learning, router=FakeRouter(route="llm"))
+        core._execute_command("che ore sono", Command("GET_TIME", {}))
+        self.assertEqual(len(learning.observed), 1)
+        self.assertEqual(learning.observed[0][3], "llm")
+
+    def test_learn_false_skips_the_learning_observation(self):
+        registry = FakeRegistry({"GET_TIME": FakeSkill(SkillResult(success=True, data={"time": "10:00"}))})
+        learning = FakeLearning()
+        core = self._core(skill_registry=registry, learning=learning)
+        core._execute_command("che ore sono", Command("GET_TIME", {}), learn=False)
+        self.assertEqual(learning.observed, [])
+
+    def test_a_successful_execution_remembers_entities(self):
+        registry = FakeRegistry({"OPEN_APP": FakeSkill(SkillResult(success=True, data={"app": "chrome"}))})
+        core = self._core(skill_registry=registry, router=FakeRouter(Command("OPEN_APP", {"app": "chrome"})))
+        core._execute_command("apri chrome", Command("OPEN_APP", {"app": "chrome"}))
+        self.assertEqual(core.conversation_state.get_entities().get("app"), "chrome")
+
+
+class RunAgentTests(_JakeCoreTestCase):
+    def test_a_final_answer_is_remembered_and_returned(self):
+        outcome = AgentOutcome(final_answer="Ho aperto Chrome.")
+        core = self._core(orchestrator=FakeOrchestrator(outcome))
+        response = core._run_agent("apri chrome")
+        self.assertEqual(response, "Ho aperto Chrome.")
+        self.assertEqual(core.last_exchange["response"], "Ho aperto Chrome.")
+
+    def test_a_none_outcome_falls_back_to_the_planner(self):
+        core = self._core(orchestrator=FakeOrchestrator(None), planner_provider=FakePlannerProvider(None))
+        response = core._run_agent("fai qualcosa di complicato")
+        self.assertEqual(response, JakeCore.NO_PLAN)
+
+    def test_an_orchestrator_exception_falls_back_to_the_planner(self):
+        core = self._core(orchestrator=FakeOrchestrator(raises=RuntimeError("boom")), planner_provider=FakePlannerProvider(None))
+        response = core._run_agent("fai qualcosa")
+        self.assertEqual(response, JakeCore.NO_PLAN)
+
+    def test_an_error_outcome_that_did_nothing_falls_back_to_the_planner(self):
+        outcome = AgentOutcome(error="qualcosa e' andato storto")
+        core = self._core(orchestrator=FakeOrchestrator(outcome), planner_provider=FakePlannerProvider(None))
+        response = core._run_agent("fai qualcosa")
+        self.assertEqual(response, JakeCore.NO_PLAN)
+
+    def test_a_pending_confirmation_sets_a_pending_action_with_the_right_reason(self):
+        outcome = AgentOutcome(pending_confirmation={
+            "intent": "DELETE_PATH", "parameters": {"confirmed": True}, "message": "Confermi?",
+        })
+        core = self._core(orchestrator=FakeOrchestrator(outcome))
+        response = core._run_agent("cancella tutto")
+        self.assertEqual(response, "Confermi?")
+        action = core.conversation_state.get_pending_action()
+        self.assertEqual(action["reason"], "confirmation_required")
+        self.assertEqual(action["intent"], "DELETE_PATH")
+
+    def test_an_auth_required_pending_confirmation_uses_the_auth_reason(self):
+        outcome = AgentOutcome(pending_confirmation={
+            "intent": "SET_POWER_PLAN", "parameters": {}, "message": "Serve la passphrase.", "kind": "AUTH_REQUIRED",
+        })
+        core = self._core(orchestrator=FakeOrchestrator(outcome))
+        core._run_agent("cambia il piano energetico")
+        action = core.conversation_state.get_pending_action()
+        self.assertEqual(action["reason"], "auth_required")
+
+    def test_a_clarifying_question_sets_an_agent_continue_pending_action(self):
+        outcome = AgentOutcome(question="Quale file, di preciso?")
+        core = self._core(orchestrator=FakeOrchestrator(outcome))
+        response = core._run_agent("cancella il file")
+        self.assertEqual(response, "Quale file, di preciso?")
+        action = core.conversation_state.get_pending_action()
+        self.assertEqual(action["intent"], "AGENT_CONTINUE")
+        self.assertEqual(action["reason"], "agent_question")
+
+    def test_continuing_after_a_question_combines_the_original_request_and_the_answer(self):
+        orchestrator = FakeOrchestrator(AgentOutcome(final_answer="Fatto."))
+        core = self._core(orchestrator=orchestrator)
+        action = {"intent": "AGENT_CONTINUE", "parameters": {"request": "cancella il file", "question": "quale file?"}}
+        response = core._continue_agent(action, "quello vecchio")
+        self.assertEqual(response, "Fatto.")
+        self.assertIn("cancella il file", orchestrator.calls[0])
+        self.assertIn("quello vecchio", orchestrator.calls[0])
+
+
+class HandleUnknownTests(_JakeCoreTestCase):
+    def test_a_question_falls_back_to_ask_question_when_the_agent_finds_nothing(self):
+        registry = FakeRegistry({"ASK_QUESTION": FakeSkill(SkillResult(success=True, data={}))})
+        core = self._core(
+            skill_registry=registry, orchestrator=FakeOrchestrator(None), planner_provider=FakePlannerProvider(None),
+        )
+        with mock.patch("core.jake_core.intent_patterns.is_question", return_value=True):
+            core._handle_unknown("chi era napoleone")
+        self.assertEqual(len(registry.get_skill("ASK_QUESTION").calls), 1)
+
+    def test_offers_to_learn_a_new_skill_when_the_forge_is_available(self):
+        core = self._core(
+            orchestrator=FakeOrchestrator(None), planner_provider=FakePlannerProvider(None),
+            skill_forge=FakeSkillForge(available=True),
+        )
+        with mock.patch("core.jake_core.intent_patterns.is_question", return_value=False):
+            response = core._handle_unknown("fai una cosa strana")
+        self.assertIn("impararla", response)
+        action = core.conversation_state.get_pending_action()
+        self.assertEqual(action["intent"], "CREATE_SKILL")
+
+    def test_gives_up_when_the_forge_is_not_available(self):
+        core = self._core(
+            orchestrator=FakeOrchestrator(None), planner_provider=FakePlannerProvider(None),
+            skill_forge=FakeSkillForge(available=False),
+        )
+        with mock.patch("core.jake_core.intent_patterns.is_question", return_value=False):
+            response = core._handle_unknown("fai una cosa strana")
+        self.assertEqual(response, JakeCore.NO_PLAN)
+
+
+class TryPlanTests(_JakeCoreTestCase):
+    def test_no_plan_reports_no_plan(self):
+        core = self._core(planner_provider=FakePlannerProvider(None))
+        self.assertEqual(core._try_plan("qualcosa"), JakeCore.NO_PLAN)
+
+    def test_a_single_step_plan_is_not_worth_running(self):
+        plan = Plan(steps=[PlanStep(intent="GET_TIME", parameters={})])
+        core = self._core(planner_provider=FakePlannerProvider(plan))
+        self.assertEqual(core._try_plan("che ore sono"), JakeCore.NO_PLAN)
+
+    def test_a_multi_step_plan_is_executed_and_formatted(self):
+        step = PlanStep(intent="OPEN_APP", parameters={"app": "chrome"}, description="apri chrome")
+        plan = Plan(steps=[step, step])
+        outcome = PlanOutcome(completed=[
+            StepOutcome(step=step, result=SkillResult(success=True, data={}), attempts=1),
+            StepOutcome(step=step, result=SkillResult(success=True, data={}), attempts=1),
+        ])
+        plan_executor = mock.MagicMock()
+        plan_executor.execute.return_value = outcome
+        core = self._core(planner_provider=FakePlannerProvider(plan), plan_executor=plan_executor)
+        response = core._try_plan("apri chrome due volte")
+        self.assertIn("2 passi", response)
+        plan_executor.execute.assert_called_once()
+
+
+class KillSwitchTests(_JakeCoreTestCase):
+    def test_activate_stops_both_schedulers(self):
+        core = self._core()
+        core.activate_kill_switch()
+        self.assertTrue(core.kill_switch.activated)
+        self.assertEqual(core.scheduler.stopped, 1)
+        self.assertEqual(core.trigger_scheduler.stopped, 1)
+
+    def test_a_scheduler_failure_during_activation_does_not_stop_the_others(self):
+        core = self._core()
+        core.scheduler.stop = mock.MagicMock(side_effect=RuntimeError("boom"))
+        core.activate_kill_switch()  # non deve sollevare
+        self.assertEqual(core.trigger_scheduler.stopped, 1)
+
+    def test_reset_restarts_schedulers_and_the_autonomy_budget(self):
+        core = self._core()
+        core.activate_kill_switch()
+        core.reset_kill_switch()
+        self.assertFalse(core.kill_switch.activated)
+        self.assertEqual(core.autonomy_budget.reset_calls, 1)
+        self.assertEqual(core.scheduler.started, 1)
+        self.assertEqual(core.trigger_scheduler.started, 1)
+
+
+class ShutdownTests(_JakeCoreTestCase):
+    def test_stops_every_stoppable_component(self):
+        core = self._core()
+        core.retriever = mock.MagicMock()
+        core.shutdown()
+        self.assertEqual(core.scheduler.stopped, 1)
+        self.assertEqual(core.trigger_scheduler.stopped, 1)
+        core.retriever.example_index.save_cache.assert_called_once()
+        core.retriever.capability_index.save_cache.assert_called_once()
+
+    def test_a_failing_component_does_not_prevent_the_rest_from_stopping(self):
+        core = self._core()
+        core.scheduler.stop = mock.MagicMock(side_effect=RuntimeError("boom"))
+        core.retriever = mock.MagicMock()
+        core.shutdown()  # non deve sollevare
+        self.assertEqual(core.trigger_scheduler.stopped, 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

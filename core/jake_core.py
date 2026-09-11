@@ -707,7 +707,15 @@ class JakeCore:
         resolved, result, note = self._resolve_and_execute(command)
         if result is not None and result.error in ("CONFIRMATION_REQUIRED", "AUTH_REQUIRED"):
             reason = "auth_required" if result.error == "AUTH_REQUIRED" else "confirmation_required"
-            envelope = self._safe_confirm_envelope(resolved, result, reason)
+            # F1: buco reale trovato e corretto in questa sessione - chiamava _safe_confirm_envelope
+            # con 3 argomenti posizionali (resolved, result, reason) invece dei 4 richiesti dalla
+            # firma (intent, parameters, result, reason), sollevando un TypeError non catturato qui
+            # ma solo dal try/except generico di answer(): OGNI comando diretto (non passato
+            # dall'agente) che richiedeva conferma o autenticazione falliva con un errore generico
+            # invece di chiedere "Confermi?" - introdotto nel commit df33e9c ("busta di conferma
+            # validata"), mai notato perche' nessun test chiamava _execute_command con un intent
+            # che produce CONFIRMATION_REQUIRED/AUTH_REQUIRED.
+            envelope = self._safe_confirm_envelope(resolved.intent, resolved.parameters, result, reason)
             self.conversation_state.set_pending_action({
                 "intent": envelope.get("confirm_intent", resolved.intent),
                 "parameters": envelope.get("confirm_parameters", resolved.parameters),
