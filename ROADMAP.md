@@ -1284,6 +1284,41 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
 
   Suite completa dopo questo incremento: 1701 test, tutti verdi; `ruff check` pulito sull'intero
   repository.
+- ✅ **Completata la copertura di `core/gui/`** (HUD Qt/PySide6, tray, pannello di stato
+  Tkinter): l'ultimo cluster del progetto senza alcuna suite, chiudendo cosi' l'intera sessione
+  di sweep sulla reliability partita da `skills/`. Questa volta i moduli sono stati controllati
+  UNO PER UNO su `tests/` prima di scrivere qualunque file (lezione della quasi-perdita di
+  `test_wake_word_session.py` in `core/voice/`), nessun altro incidente. Nessun bug di
+  produzione trovato in nessuno degli otto file. Attenzioni particolari di sicurezza dei test
+  (mai un effetto visibile o attivo sul sistema reale durante la suite):
+  - `core/gui/tray_app.py`/`core/gui/hud/app.py::JarvisApp` - costruire questi oggetti per
+    davvero farebbe apparire un'icona vera nella system tray di Windows e registrerebbe un
+    hotkey globale vero sulla tastiera: `pystray`/`QSystemTrayIcon`/`keyboard` sono sempre
+    sostituiti con finti, mai un'icona o un hotkey reali durante i test.
+  - `core/gui/hud/overlay.py::HudOverlay` - e' una finestra reale, senza bordi, sempre in primo
+    piano, grande quanto lo schermo: costruirla (`__init__`) non la mostra mai di per se' (Qt
+    non mostra un widget finche' non si chiama `.show()`), ma `show_hud()` lo farebbe per
+    davvero e applicherebbe stili nativi Windows veri (incluso disattivare il click-through) su
+    un HWND vero. `self.show()`/`win_effects` sono sempre mockati in ogni test che tocca
+    show_hud/hide_hud/gli effetti nativi.
+  - `core/gui/status_panel.py::StatusPanel` - usa un vero root Tkinter (nessuna suite Tkinter
+    esisteva prima), sempre nascosto e distrutto in `tearDown`; `show()` reale (deiconify/lift/
+    focus_force, che ruberebbero il focus sullo schermo dell'utente) e' sempre mockato.
+  - `core/gui/hud/win_effects.py` - `ctypes.windll` e' sempre mockato: scrive stile di finestra
+    Windows nativo reale (blur, angoli DWM), niente da verificare in modo sicuro contro un vero
+    HWND senza rischiare effetti visibili.
+
+  Aggiunti: `tests/test_hud_theme.py` (9 test), `tests/test_tray_app.py` (3 test),
+  `tests/test_status_panel.py` (14 test), `tests/test_win_effects.py` (13 test),
+  `tests/test_hud_glass.py` (9 test), `tests/test_hud_widgets.py` (47 test: orb/forma d'onda/
+  etichetta a macchina da scrivere/layout a scorrimento/pannelli conversazione-contesto-azioni
+  rapide/barra comandi/top bar/palco centrale), `tests/test_hud_overlay.py` (40 test) e
+  `tests/test_hud_app.py` (40 test, con un `threading.Thread` sostituito da una versione
+  sincrona per rendere deterministico il test del comando testuale in background, senza vero
+  threading ne' un vero event loop Qt).
+
+  Suite completa dopo questo incremento, e con essa l'intero sweep di reliability iniziato con
+  `skills/`: 1876 test, tutti verdi; `ruff check` pulito sull'intero repository.
 
 ## F2 — Voice Natural 3.0
 
