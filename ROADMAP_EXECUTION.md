@@ -466,6 +466,29 @@ G0 è superato soltanto se:
 - versione e documentazione coerenti;
 - issue note per ogni limite noto ancora accettato.
 
+**Gate G0 superato — 11/09/2026.** Evidenza per ciascun criterio, raccolta sul commit `dedc2ce`
+(merge di F0.1/F0.2/F0.2.6 su `master`):
+
+- Suite completa 20 volte verde: 20/20 esecuzioni locali di `python -m unittest discover -s
+  tests -q` su Python 3.12.6, ciascuna 1.947/1.947 test verdi (~35 s a run), nessuna eccezione
+  I/O ambientale.
+- CI remota verde su 3.11/3.12 e HUD: run `34653572407` sul commit `dedc2ce` verde su tutti e tre
+  i job (`Python 3.11 (Windows)`, `Python 3.12 (Windows)`, `HUD nativo C++/Qt6/QML - build health
+  check`).
+- Smoke test e build riproducibile: smoke CLI e smoke HUD verdi in CI (vedi F0.2); build HUD
+  riproducibile via CMake/windeployqt (vedi F0.6).
+- Nessun segreto/artifact tracciato: verificato in F0.2.2 (`git ls-files` senza log, database,
+  token, registrazioni, modelli o build artifact).
+- Versione e documentazione coerenti: `config/release.json` come fonte unica (F0.3), verificato
+  da contract test (`tests/test_roadmap_structure.py`, `tests/test_architecture_decisions.py`,
+  `tests/test_ci_workflow.py`), tutti verdi.
+- Issue note per ogni limite noto ancora accettato: `docs/known-limitations.md` contiene un solo
+  limite registrato (`KL-001`) ed è risolto; nessun limite aperto residuo.
+- Nota: `F0.4` (matrice di test completa), `F0.5` (benchmark prestazionali) e `F0.6` (packaging,
+  oltre alle fondamenta HUD già verificate) restano `BACKLOG`/`DOING` come lavoro di qualità
+  continuativo su F0, ma nessuno dei sei criteri espliciti del gate li richiede: non bloccano G0.
+  Restano nel registro `### 5.1` con il loro stato reale e proseguono in parallelo a F1.
+
 ## 7. F1 — Trustworthy Agent Core
 
 - Stato: `DOING`
