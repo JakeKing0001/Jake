@@ -30,6 +30,12 @@ files = [
     "core/agent.py",
     "core/orchestrator.py",
     "core/fallbacks.py",
+    "core/auth_gate.py",
+    "core/action_ledger.py",
+    "core/kill_switch.py",
+    "core/conversation_state.py",
+    "core/command.py",
+    "core/skill_result.py",
 ]
 ignore_missing_imports = true
 no_implicit_optional = true

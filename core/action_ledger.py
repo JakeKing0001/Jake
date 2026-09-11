@@ -39,7 +39,7 @@ AUTHORIZATION_BLOCKED = "blocked"
 AUTHORIZATION_DENIED = "denied"
 
 
-def authorization_of(result: str, parameters: dict) -> str:
+def authorization_of(result: str, parameters: dict | None) -> str:
     """Deriva lo stato di autorizzazione dagli stessi segnali gia' usati altrove (core/risk.py,
     JakeCore._resolve_and_execute), invece di chiedere a chi registra la ricevuta di dichiararlo
     a mano - due fonti diverse per lo stesso fatto potrebbero disallinearsi in silenzio.
@@ -68,7 +68,7 @@ def authorization_of(result: str, parameters: dict) -> str:
     return AUTHORIZATION_NONE
 
 
-def idempotency_key_of(intent: str, parameters: dict) -> str:
+def idempotency_key_of(intent: str, parameters: dict | None) -> str:
     """Chiave stabile per la STESSA azione logica (stesso intent, stessi parametri): permette di
     accorgersi - in audit, o in futuro per un'enforcement vera - se un'azione e' stata eseguita
     piu' volte quando non doveva (un retry che non andava ripetuto, un trigger partito due volte
@@ -105,7 +105,7 @@ class ActionReceipt:
 
 
 class ActionLedger:
-    def __init__(self, path: Path = None):
+    def __init__(self, path: Path | None = None):
         self._path = Path(path) if path else DEFAULT_LEDGER_PATH
 
     def record(self, receipt: ActionReceipt, *, private: bool = False) -> None:
