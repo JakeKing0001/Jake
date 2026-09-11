@@ -1227,6 +1227,30 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
 
   Suite completa dopo tutti questi incrementi: 1538 test, tutti verdi; `ruff check` pulito
   sull'intero repository.
+- ✅ **Con `skills/` ormai interamente coperto, estesa la stessa verifica a `core/`**: dei due
+  soli file senza alcuna suite, `core/intent_provider_base.py` e' una pura interfaccia astratta
+  (nessuna logica propria da verificare, saltato deliberatamente), mentre
+  `core/forge_probe.py` - la sonda di sicurezza eseguita in un processo a integrita' ridotta che
+  valida un plugin candidato PRIMA che Skill Forge lo installi (vedi `core/skill_forge.py::
+  _sandbox_import()`) - non aveva alcuna copertura nonostante il suo ruolo nella pipeline di
+  auto-miglioramento controllato. Nessun bug trovato (il comportamento e' corretto anche nei casi
+  meno ovvi verificati esplicitamente: un `execute()` che fallisce non richiede `format_result`,
+  un errore di sintassi nel plugin viene catturato e mai propagato, un `output_path` non
+  scrivibile non solleva eccezioni). Aggiunto `tests/test_forge_probe.py` (10 test, con file VERI
+  su disco temporaneo, mai mockati, perche' il contratto a file e' l'intera interfaccia del
+  componente).
+- ✅ Aggiunta anche la copertura di `core/nlu/retriever.py::CapabilityRetriever` (nessuna suite
+  esisteva finora - esisteva solo un uso via mock/fake nei test di altri componenti come
+  `LearningManager`, mai un test diretto della sua logica). E' il componente che seleziona le
+  ~15-20 capacita' piu' plausibili passate al classificatore di intent (senza questa potatura il
+  prompt supererebbe i 10k token, vedi il docstring del modulo): selezione/deduplica dei
+  candidati, ripieghi sempre inclusi (`ASK_QUESTION`/`CHITCHAT`), tetto di 3 esempi per intent.
+  Nessun bug trovato. Aggiunto `tests/test_capability_retriever.py` (11 test, `embedder=None` per
+  usare il fallback lessicale deterministico gia' testato altrove, cosi' i test verificano solo
+  la logica del retriever e non l'indice sottostante).
+
+  Suite completa dopo questi due incrementi: 1559 test, tutti verdi; `ruff check` pulito
+  sull'intero repository.
 
 ## F2 — Voice Natural 3.0
 
