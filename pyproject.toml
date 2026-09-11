@@ -44,6 +44,14 @@ files = [
     "core/session_recorder.py",
     "core/session_hooks.py",
     "core/intent_patterns.py",
+    "core/memory_manager.py",
+    "core/learning_manager.py",
+    "core/nest_client.py",
+    "core/reminder_manager.py",
+    "core/todo_manager.py",
+    "core/workflow_manager.py",
+    "core/trigger_manager.py",
+    "core/planner.py",
 ]
 ignore_missing_imports = true
 no_implicit_optional = true

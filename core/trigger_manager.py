@@ -13,7 +13,7 @@ class TriggerManager:
 
     CATEGORY = "trigger"
 
-    def __init__(self, memory_manager, workflow_manager: WorkflowManager = None):
+    def __init__(self, memory_manager, workflow_manager: WorkflowManager | None = None):
         self.memory_manager = memory_manager
         self.workflow_manager = workflow_manager or WorkflowManager(memory_manager)
 

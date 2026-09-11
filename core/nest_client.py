@@ -20,7 +20,7 @@ class NestSearchResult:
 class NestClient:
     """Espone la CLI di NEST (motore di ricerca personale locale) come tool di Jake."""
 
-    def __init__(self, cli_path: Path = None, database_path: Path = None, timeout: float = 15):
+    def __init__(self, cli_path: Path | None = None, database_path: Path | None = None, timeout: float = 15):
         self.cli_path = cli_path or self._discover_cli_path()
         self.database_path = database_path
         self.timeout = timeout

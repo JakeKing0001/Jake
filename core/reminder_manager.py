@@ -10,7 +10,7 @@ class ReminderManager:
 
     DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "jake_memory.db"
 
-    def __init__(self, db_path: Path = None):
+    def __init__(self, db_path: Path | None = None):
         self.db_path = Path(db_path) if db_path else self.DEFAULT_DB_PATH
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._connection = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -48,7 +48,7 @@ class ReminderManager:
     def _now() -> datetime:
         return datetime.now(timezone.utc)
 
-    def add(self, text: str, due_at: datetime, recur_time: str = None, kind: str = "reminder") -> int:
+    def add(self, text: str, due_at: datetime, recur_time: str | None = None, kind: str = "reminder") -> int | None:
         cursor = self._connection.execute(
             "INSERT INTO reminders (text, due_at, created_at, fired, recur_time, kind) VALUES (?, ?, ?, 0, ?, ?)",
             (text, due_at.isoformat(), self._now().isoformat(), recur_time, kind),
@@ -87,7 +87,7 @@ class ReminderManager:
             self._connection.commit()
         return [dict(row) for row in rows]
 
-    def list_upcoming(self, limit: int = 10, kind: str = None) -> list[dict]:
+    def list_upcoming(self, limit: int = 10, kind: str | None = None) -> list[dict]:
         if kind:
             rows = self._connection.execute(
                 "SELECT id, text, due_at, recur_time, kind FROM reminders WHERE fired = 0 AND kind = ? ORDER BY due_at ASC LIMIT ?",

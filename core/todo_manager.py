@@ -9,7 +9,7 @@ class TodoManager:
 
     DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "jake_memory.db"
 
-    def __init__(self, db_path: Path = None):
+    def __init__(self, db_path: Path | None = None):
         self.db_path = Path(db_path) if db_path else self.DEFAULT_DB_PATH
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._connection = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -34,7 +34,7 @@ class TodoManager:
     def _now() -> str:
         return datetime.now(timezone.utc).isoformat()
 
-    def add(self, text: str) -> int:
+    def add(self, text: str) -> int | None:
         cursor = self._connection.execute(
             "INSERT INTO todos (text, created_at, done) VALUES (?, ?, 0)",
             (text, self._now()),
