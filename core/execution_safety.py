@@ -30,7 +30,7 @@ def execute_with_retry(execute_fn, intent: str, parameters: dict) -> tuple[Skill
     funzione non sa e non le importa cosa faccia davvero, ritenta solo in base al risultato.
     Restituisce (risultato, tentativi fatti)."""
     attempts = 0
-    result = None
+    result: SkillResult | None = None
     while attempts < MAX_ATTEMPTS:
         attempts += 1
         result = execute_fn(intent, parameters)
@@ -39,6 +39,12 @@ def execute_with_retry(execute_fn, intent: str, parameters: dict) -> tuple[Skill
             break
         if result.success or result.error not in RETRYABLE_ERRORS:
             break
+    # MAX_ATTEMPTS >= 1 garantisce che il ciclo giri almeno una volta, quindi result non e' mai
+    # None qui davvero - ma un ripiego esplicito (invece di fidarsi solo di quell'invariante)
+    # evita che un futuro MAX_ATTEMPTS = 0 restituisca None a un chiamante che si aspetta sempre
+    # un vero SkillResult.
+    if result is None:
+        result = SkillResult(success=False, data={}, error="UNKNOWN_INTENT")
     return result, attempts
 
 

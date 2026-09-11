@@ -22,7 +22,7 @@ class Config:
 
     DEFAULT_PATH = Path(__file__).resolve().parent.parent / "config" / "settings.json"
 
-    def __init__(self, path: Path = None):
+    def __init__(self, path: Path | None = None):
         self.path = Path(path) if path else self.DEFAULT_PATH
         self._values = self._load()
         self._migrate_secrets()

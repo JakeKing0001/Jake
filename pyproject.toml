@@ -36,6 +36,14 @@ files = [
     "core/conversation_state.py",
     "core/command.py",
     "core/skill_result.py",
+    "core/config.py",
+    "core/execution_safety.py",
+    "core/schema_validation.py",
+    "core/notification_center.py",
+    "core/autonomy_budget.py",
+    "core/session_recorder.py",
+    "core/session_hooks.py",
+    "core/intent_patterns.py",
 ]
 ignore_missing_imports = true
 no_implicit_optional = true
