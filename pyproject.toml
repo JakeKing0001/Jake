@@ -90,6 +90,8 @@ files = [
     "core/nlu/llm_classifier.py",
     "core/nlu/normalizer.py",
     "core/nlu/retriever.py",
+    "core/vision/screen.py",
+    "core/vision/screen_diff.py",
 ]
 ignore_missing_imports = true
 no_implicit_optional = true

@@ -23,7 +23,7 @@ def capture_screenshot_image():
     return ImageGrab.grab()
 
 
-def read_screen_text(image_path: Path = None) -> str | None:
+def read_screen_text(image_path: Path | None = None) -> str | None:
     """Estrae il testo visibile sullo schermo (o da un'immagine data) via OCR di Windows.
     None se nessun motore OCR e' disponibile per la lingua del profilo utente."""
     path = image_path or capture_screenshot()
@@ -31,7 +31,7 @@ def read_screen_text(image_path: Path = None) -> str | None:
     return result.text if result is not None else None
 
 
-def read_screen_words(image_path: Path = None) -> list[dict] | None:
+def read_screen_words(image_path: Path | None = None) -> list[dict] | None:
     """OCR con coordinate (v3.0): ogni parola con il suo rettangolo in pixel dello schermo,
     raggruppata per riga. Serve a "clicca su Accedi". None se l'OCR non e' disponibile."""
     path = image_path or capture_screenshot()
