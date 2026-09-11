@@ -22,6 +22,12 @@ files = [
     "core/hud_protocol.py",
     "core/risk.py",
     "core/logger.py",
+    "core/jake_core.py",
 ]
 ignore_missing_imports = true
 no_implicit_optional = true
+# Senza questo, controllare un file qui dentro trascina anche gli errori di TUTTI i moduli che
+# importa transitivamente (core/jake_core.py da solo ne porta 414, in 133 file mai passati in
+# rassegna): con "silent" mypy segue comunque gli import per inferire i tipi, ma segnala errori
+# solo nei file elencati sopra, cosi' la lista puo' crescere un modulo alla volta per davvero.
+follow_imports = "silent"

@@ -366,10 +366,10 @@ class JakeCore:
         return f"Promemoria: {reminder['text']}"
 
     def _default_on_advisory(self, message: str) -> None:
-        message = self.notify("advisory", message)
-        if message is None:
+        gated = self.notify("advisory", message)
+        if gated is None:
             return
-        print(f"\nJake > {message}\nTu > ", end="", flush=True)
+        print(f"\nJake > {gated}\nTu > ", end="", flush=True)
 
     def _default_on_trigger_fired(self, trigger: dict, outcome, total_steps: int) -> None:
         summary = format_plan_outcome(outcome, total_steps, self.skill_registry)
@@ -629,7 +629,7 @@ class JakeCore:
                     )
         return resolved, result, None
 
-    def _run_agent(self, request: str, remember_text: str = None) -> str:
+    def _run_agent(self, request: str, remember_text: str | None = None) -> str:
         """Richiesta composta o non riconosciuta: l'orchestratore (v5.0, core/orchestrator.py)
         sceglie l'agente generico o uno specializzato (coding/ricerca), che pensa un passo alla
         volta e guarda i risultati veri prima di decidere il successivo (core/agent.py), invece
