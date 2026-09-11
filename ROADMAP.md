@@ -1540,6 +1540,24 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   non per pigrizia.
 
   Suite completa: 1943 test, tutti verdi; `ruff check` e `mypy` puliti sull'intero repository.
+- ✅ **Ampliato anche `[tool.ruff.lint].select` con `B` (flake8-bugbear)**, seguendo la stessa
+  logica di espansione incrementale gia' descritta nel commento di quella sezione ("si allarga
+  in seguito, un gruppo alla volta, quando quel gruppo e' stato verificato pulito"): a differenza
+  di mypy, `ruff` non ha un sottoinsieme di file selettivo - `B` si applica gia' a TUTTO il
+  repository (skills/ comprese, ~200 file), non solo a `core/`. Solo 7 diagnosi in tutto il
+  progetto: tre `zip()` senza `strict=` (uno, `embedding_provider.py::cosine_similarity`, gia'
+  provatamente sicuro per un controllo di lunghezza esplicito subito sopra; gli altri due in
+  `core/nlu/index.py` **non lo erano**, corretti aggiungendo il controllo di lunghezza esplicito
+  PRIMA - mai un semplice `strict=True` che avrebbe trasformato un imbroglio silenzioso in un
+  `ValueError` incatturato fino a `JakeCore.__init__()`, dato che `_embed_missing()` non e'
+  protetto da alcun try/except a quel livello, a differenza di `search()` che lo e' in entrambi i
+  suoi due punti di chiamata reali), due variabili di ciclo mai usate (rinominate con `_` iniziale),
+  due `raise` dentro un `except` senza `from` (aggiunta la concatenazione, cosi' un traceback di
+  debug mostra anche l'eccezione originale invece di sembrare scollegata). Nessun bug di
+  produzione gia' sfruttabile, ma un salvagente reale in piu' per il futuro.
+
+  Suite completa: 1943 test, tutti verdi; `ruff check` (ora con `B`) e `mypy` puliti sull'intero
+  repository.
 
 ## F2 — Voice Natural 3.0
 
