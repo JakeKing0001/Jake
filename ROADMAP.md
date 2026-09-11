@@ -1143,6 +1143,17 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   di questa macchina). Nessun bug trovato nel codice della skill.
 - ✅ Copertura per `skills/security_utils.py` (10 test: forza password, hash SHA-256 di un file
   vero su disco temporaneo) - nessuna suite esisteva finora. Nessun bug trovato.
+- ✅ Copertura per `skills/editor_control.py` (4 test, nessun bug trovato) e **buco reale
+  sistemico corretto in `skills/model_control.py::ListModelsSkill`** (nessuna delle due suite
+  esisteva finora). `LIST_MODELS` e' l'ottavo file con lo stesso bug gia' corretto in questa
+  sessione per 7 consumatori diretti di Ollama (`core/vision_provider.py` e altri): qui la
+  variante e' `payload.get("models")` invece di un indicizzamento a catena, quindi l'eccezione
+  reale e' `AttributeError`, non `TypeError` - stesso principio, forma diversa. **Verificato per
+  davvero**: un corpo JSON valido ma non un dizionario (`"null"`, `"[]"`, un numero) faceva
+  sollevare `AttributeError: 'NoneType'/'list'/'int' object has no attribute 'get'`, mai
+  catturato, invece di degradare a `OLLAMA_UNAVAILABLE` come promesso. Corretto validando la
+  forma di `payload`/`payload["models"]` prima di leggerli, e ignorando singole voci malformate
+  invece di rifiutare l'intera risposta. Aggiunto `tests/test_model_control_skills.py` (10 test).
 
 ## F2 — Voice Natural 3.0
 
