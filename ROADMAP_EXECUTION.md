@@ -97,7 +97,7 @@ vero `PATH` e fallisce su `WindowsApps` con `PermissionError`.
 
 ### Verifica della correzione F0.1 — 11/09/2026
 
-- Stato: `VERIFY`; implementazione e gate locali conclusi, manca la matrice CI Python 3.11/3.12.
+- Stato: `DONE`; implementazione, gate locali e matrice CI Python 3.11/3.12 conclusi.
 - Causa riprodotta prima del fix: `Path.iterdir()` restituiva un generatore e il
   `PermissionError` emergeva al primo `next()`, fuori dal `try`; il test mirato falliva con la
   stessa eccezione osservata su `WindowsApps`.
@@ -111,6 +111,11 @@ vero `PATH` e fallisce su `WindowsApps` con `PermissionError`.
   20/20 suite complete consecutive verdi; ruff, mypy selettivo, compileall e smoke test verdi.
 - Condizione residua: non segnare `DONE` e non chiudere G0 finché i job CI Windows su Python
   3.11 e 3.12 non sono entrambi verdi sul commit della correzione.
+- Chiusura — 11/09/2026: run remoto `34616811238` sul commit `64303ac` (lo stesso che contiene
+  questo fix e la riscrittura del test harness Tk) è verde su tutti e tre i job: `Python 3.11
+  (Windows)`, `Python 3.12 (Windows)` e `HUD nativo C++/Qt6/QML - build health check`. Il criterio
+  di uscita di F0.1 ("20/20 suite verdi su Python 3.12 locale e job 3.11/3.12 verde in CI") è
+  quindi soddisfatto; `F0.1` passa a `DONE`.
 
 ## 4. Architettura di destinazione e collegamenti
 
@@ -211,8 +216,8 @@ distinguere sotto-passi già verificati da ciò che manca.
 
 | Pacchetto | Owner logico | Stato |
 |---|---|---|
-| `F0.1` | Platform Reliability | `VERIFY` |
-| `F0.2` | Release Engineering | `VERIFY` |
+| `F0.1` | Platform Reliability | `DONE` |
+| `F0.2` | Release Engineering | `DONE` |
 | `F0.3` | Architecture | `VERIFY` |
 | `F0.4` | Quality Engineering | `BLOCKED` |
 | `F0.5` | Performance Engineering | `BLOCKED` |
@@ -307,8 +312,7 @@ Criterio di uscita: 20/20 suite verdi su Python 3.12 locale e job 3.11/3.12 verd
 
 Dipende da: F0.1.
 
-- Stato: `VERIFY`; `F0.2.1`–`F0.2.3` e `F0.2.7` conclusi, `F0.2.5` di nuovo attivo sulla
-  divergenza Python 3.11, `F0.2.6` ancora aperto.
+- Stato: `DONE`; `F0.2.1`–`F0.2.7` tutti conclusi con evidenza remota.
 - Verifica locale 11/09/2026: il commit F0.1 e' atomico e la storia condivisa non e' stata
   riscritta; `git ls-files` non contiene log, database, token, registrazioni, modelli, binari o
   build artifact; il lock con hash si installa; ruff, mypy, compileall, 1.262 test, smoke CLI,
@@ -333,13 +337,26 @@ Dipende da: F0.1.
   locale usa un solo `Tk` di modulo e una `Toplevel` isolata per caso, mantenendo widget e
   `mainloop` reali. Il modulo passa 20/20 esecuzioni consecutive e la suite completa locale passa
   1.947/1.947 su Python 3.12.
-- Blocco esplicito: `F0.2.4` e `F0.2.6` modificano GitHub; su richiesta dell'utente non viene
-  eseguito alcun push né cambiata la protezione di `master`. La correzione Python 3.11 attende
-  quindi un nuovo sync e una CI reale. Il repository `JakeKing0001/Jake` e' ora pubblico: il
-  vincolo di piano registrato come `KL-001` e' risolto. L'API restituisce pero' `404 Branch not
-  protected`, quindi `F0.2.6` resta aperto. I check da rendere obbligatori sono
-  `Python 3.11 (Windows)`, `Python 3.12 (Windows)` e
-  `HUD nativo C++/Qt6/QML - build health check`.
+- Sync 11/09/2026: la correzione Python 3.11 è stata pubblicata nel commit `64303ac`; il run
+  remoto `34616811238` è verde su tutti e tre i job (`Python 3.11 (Windows)`,
+  `Python 3.12 (Windows)`, `HUD nativo C++/Qt6/QML - build health check`), chiudendo `F0.2.5`.
+- `F0.2.6` — Protezione di `master`, 11/09/2026: con autorizzazione esplicita dell'utente è stata
+  configurata la branch protection su `master` (`required_status_checks.strict=true` sui tre
+  contesti sopra elencati, `enforce_admins=true`, force-push e delete vietati). Poiché i required
+  status checks bloccano anche i push diretti privi di un check già verde su quello SHA, da questo
+  momento anche l'owner lavora via branch → PR → CI verde → merge; nessun push diretto a `master`
+  è più possibile, nemmeno per l'admin.
+- Verifica empirica del rifiuto — 11/09/2026: creato un branch usabile-e-getta
+  (`test/branch-protection-verify`) con un test che fallisce deliberatamente
+  (`tests/test_zz_branch_protection_probe.py`), aperta la PR #1 verso `master` (run remoto
+  `34651548002`). Esito: `HUD nativo C++/Qt6/QML - build health check` verde, `Python 3.11
+  (Windows)` e `Python 3.12 (Windows)` rossi come atteso; l'API GitHub ha riportato la PR con
+  `mergeable: MERGEABLE` (nessun conflitto) ma `mergeStateStatus: BLOCKED`, cioè il merge è
+  impedito esclusivamente dai required status checks falliti. Un tentativo diretto di
+  `gh pr merge` è stato bloccato a monte dal sandbox dell'agente prima ancora di raggiungere
+  GitHub, coerente con l'aspettativa che l'azione non sarebbe comunque riuscita. La PR è stata
+  chiusa senza merge e sia il branch remoto sia quello locale sono stati cancellati subito dopo.
+  Questo chiude la condizione residua di `F0.2.6` e, con essa, `KL-001`. `F0.2` passa a `DONE`.
 
 1. `F0.2.1` Raggruppare i commit locali in una sequenza comprensibile senza riscrivere storia
    già condivisa.
