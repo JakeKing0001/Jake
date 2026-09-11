@@ -122,10 +122,10 @@ class ActionLedgerTestCase(unittest.TestCase):
         self.ledger = ActionLedger(path=self.path)
 
     def _receipt(self, **overrides) -> ActionReceipt:
-        defaults = dict(
-            action_id="a1", trace_id="t1", ts=123.0, intent="OPEN_APP", requested_by="user",
-            risk_decision="local_reversible", authorization="none", result="success",
-        )
+        defaults = {
+            "action_id": "a1", "trace_id": "t1", "ts": 123.0, "intent": "OPEN_APP", "requested_by": "user",
+            "risk_decision": "local_reversible", "authorization": "none", "result": "success",
+        }
         defaults.update(overrides)
         return ActionReceipt(**defaults)
 

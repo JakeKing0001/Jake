@@ -34,7 +34,7 @@ def main(input_path: str, output_path: str, project_root: str | None = None) -> 
         register(_Registry())
         if not registered:
             raise AssertionError("register() non ha registrato nulla")
-        for _intent, skill in registered.items():
+        for skill in registered.values():
             outcome = skill.execute({})
             if not hasattr(outcome, "success"):
                 raise AssertionError("execute non ritorna SkillResult")

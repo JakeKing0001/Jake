@@ -82,7 +82,7 @@ class HistoryInMessagesTests(unittest.TestCase):
 
     def test_system_prompt_mentions_history_only_when_a_provider_is_set(self):
         client = RecordingClient({"intent": "GET_WEATHER", "parameters": {"city": "Roma"}})
-        with_history = _provider(client, history_provider=lambda: [])
+        with_history = _provider(client, history_provider=list)
         without_history = _provider(client)
 
         self.assertIn("turni precedenti", with_history.build_system_prompt(CAPABILITIES))

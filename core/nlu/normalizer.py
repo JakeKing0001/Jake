@@ -189,8 +189,7 @@ class TranscriptNormalizer:
         text = re.sub(r"\b(sei|uno|una)\b" + _NUMBER_CONTEXT_AFTER, lambda m: str(_UNITS[m.group(1)]), text)
         # "1 quarto" (da "un quarto" non gia' gestito), "un'ora" residui
         text = re.sub(r"\b(\d+)\s+mila\b", lambda m: str(int(m.group(1)) * 1000), text)
-        text = re.sub(r"\b(\d+)\s*per\s*cento\b", r"\1 per cento", text)
-        return text
+        return re.sub(r"\b(\d+)\s*per\s*cento\b", r"\1 per cento", text)
 
     def _app_names(self) -> list[str]:
         if self._app_names_cache is not None:

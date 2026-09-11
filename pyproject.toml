@@ -8,7 +8,7 @@ target-version = "py311"
 # Un select ampio (es. la "E" completa o "I") boccerebbe la CI su migliaia di preesistenze di
 # stile senza trovare un bug in piu': si allarga in seguito, un gruppo alla volta, quando quel
 # gruppo e' stato verificato pulito.
-select = ["E9", "F", "B"]
+select = ["E9", "F", "B", "ISC", "C4", "RET"]
 
 [tool.mypy]
 # F0: "type-check selettivo". mypy non e' ancora pulito su tutto il progetto (PySide6/win32/
