@@ -58,7 +58,7 @@ class OllamaClient:
         )
         try:
             with request.urlopen(http_request, timeout=timeout or self.timeout) as response:
-                return json.loads(response.read().decode("utf-8"))
+                parsed = json.loads(response.read().decode("utf-8"))
         except error.HTTPError as exc:
             detail = ""
             try:
@@ -70,17 +70,27 @@ class OllamaClient:
             raise OllamaUnavailable(str(exc)) from exc
         except json.JSONDecodeError as exc:
             raise OllamaResponseError("risposta non JSON") from exc
+        # F1: un corpo JSON valido ma non un dizionario (proxy/porta sbagliata che risponde con
+        # qualcosa di JSON ma non l'API di Ollama) faceva propagare un AttributeError da ogni
+        # chiamante (chat_text/embed/list_models fanno tutti payload.get(...) subito dopo),
+        # invece del solo OllamaError che i chiamanti gia' catturano.
+        if not isinstance(parsed, dict):
+            raise OllamaResponseError("risposta non nella forma attesa (non un dizionario)")
+        return parsed
 
     def _get(self, path: str, timeout: float = None) -> dict:
         try:
             with request.urlopen(f"{self.base_url}{path}", timeout=timeout or self.timeout) as response:
-                return json.loads(response.read().decode("utf-8"))
+                parsed = json.loads(response.read().decode("utf-8"))
         except error.HTTPError as exc:
             raise OllamaResponseError(f"HTTP {exc.code}") from exc
         except (error.URLError, TimeoutError, ConnectionError, OSError) as exc:
             raise OllamaUnavailable(str(exc)) from exc
         except json.JSONDecodeError as exc:
             raise OllamaResponseError("risposta non JSON") from exc
+        if not isinstance(parsed, dict):
+            raise OllamaResponseError("risposta non nella forma attesa (non un dizionario)")
+        return parsed
 
     # ---- API comode ------------------------------------------------------------------
 
@@ -103,7 +113,8 @@ class OllamaClient:
             result = self.chat(model, messages, options=options, timeout=timeout)
         except OllamaError:
             return None
-        content = result.get("message", {}).get("content")
+        message = result.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
         return content.strip() if isinstance(content, str) and content.strip() else None
 
     def embed(self, model: str, inputs: list[str], timeout: float = None) -> list[list[float]] | None:
@@ -127,7 +138,10 @@ class OllamaClient:
             payload = self._get("/api/tags", timeout=5)
         except OllamaError:
             return None
-        return [model.get("name", "") for model in payload.get("models", [])]
+        raw_models = payload.get("models")
+        if not isinstance(raw_models, list):
+            return None
+        return [model.get("name", "") for model in raw_models if isinstance(model, dict)]
 
     def is_available(self) -> bool:
         return self.list_models() is not None

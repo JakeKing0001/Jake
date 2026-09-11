@@ -39,7 +39,12 @@ class ReadSelectionSkill:
             return SkillResult(success=False, data={}, error="OPERATION_FAILED")
         time.sleep(0.35)
         text = _read_clipboard()
-        if not text or not text.strip() or (before is not None and text == before and not text.strip()):
+        # F1: buco reale corretto in questa sessione - la condizione originale aveva "and not
+        # text.strip()" anche sul confronto con "before", quindi non scattava mai (era gia'
+        # coperta dalla clausola precedente): se Ctrl+C non copiava nulla di nuovo (nessuna
+        # selezione attiva), il testo VECCHIO gia' presente negli appunti veniva letto ad alta
+        # voce come se fosse la selezione appena fatta, invece di restituire NO_SELECTION.
+        if not text or not text.strip() or (before is not None and text == before):
             return SkillResult(success=False, data={}, error="NO_SELECTION")
         text = text.strip()
         truncated = len(text) > MAX_CHARS
