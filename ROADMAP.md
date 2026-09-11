@@ -1421,6 +1421,20 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   tutti e 19 i file della lista.
 
   Suite completa: 1943 test, tutti verdi; `ruff check` e `mypy` puliti sull'intero repository.
+- ✅ **Esteso ancora il type-check selettivo** a `core/config.py`, `core/execution_safety.py`,
+  `core/schema_validation.py`, `core/notification_center.py`, `core/autonomy_budget.py`,
+  `core/session_recorder.py`, `core/session_hooks.py`, `core/intent_patterns.py` (27 file in
+  totale). Trovato un caso degno di nota, non un bug a runtime ma una fragilita' reale:
+  `execution_safety.py::execute_with_retry` e' annotato per restituire sempre un vero
+  `SkillResult`, ma `result` parte da `None` prima del ciclo di retry - il tipo dichiarato e'
+  vero solo grazie all'invariante implicito `MAX_ATTEMPTS >= 1` (il ciclo gira sempre almeno una
+  volta), mai verificato ne' protetto. Aggiunto un ripiego esplicito dopo il ciclo (mai un
+  `result` `None` restituito a un chiamante che si aspetta sempre un `SkillResult` vero, anche se
+  in futuro `MAX_ATTEMPTS` cambiasse) invece di limitarsi a zittire l'avviso di mypy. Il resto
+  erano `Optional` impliciti gia' visti nei batch precedenti. `mypy` ora pulito su tutti e 27 i
+  file della lista.
+
+  Suite completa: 1943 test, tutti verdi; `ruff check` e `mypy` puliti sull'intero repository.
 
 ## F2 — Voice Natural 3.0
 
