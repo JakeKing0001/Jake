@@ -47,10 +47,18 @@ class WebSearchSkill:
         except (error.URLError, TimeoutError, json.JSONDecodeError):
             return SkillResult(success=False, data={"query": query}, error="NETWORK_UNAVAILABLE")
 
+        # F1: stesso buco sistemico corretto in questa sessione per altri consumatori diretti di
+        # API esterne - un corpo JSON valido ma non un dizionario farebbe sollevare AttributeError
+        # da payload.get(...), mai catturato prima (RelatedTopics era gia' protetta riga per
+        # riga con isinstance(topic, dict), ma non lo era l'accesso a payload stesso).
+        if not isinstance(payload, dict):
+            return SkillResult(success=False, data={"query": query}, error="NOT_FOUND")
+
         summary = payload.get("AbstractText") or ""
         source_url = payload.get("AbstractURL") or ""
-        if not summary:
-            for topic in payload.get("RelatedTopics", []):
+        related_topics = payload.get("RelatedTopics")
+        if not summary and isinstance(related_topics, list):
+            for topic in related_topics:
                 if isinstance(topic, dict) and topic.get("Text"):
                     summary = topic["Text"]
                     source_url = topic.get("FirstURL", "")

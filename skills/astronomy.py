@@ -57,11 +57,16 @@ class GetSunriseSunsetSkill:
             url = f"https://api.open-meteo.com/v1/forecast?{params}"
             with request.urlopen(url, timeout=self.timeout) as response:
                 forecast = json.loads(response.read().decode("utf-8"))
-        except (error.URLError, TimeoutError, json.JSONDecodeError, KeyError, IndexError):
+            # F1: stesso buco sistemico corretto in questa sessione per altri consumatori diretti
+            # di API esterne - riprodotto per davvero: un corpo JSON valido ma non nella forma
+            # attesa faceva sollevare AttributeError (da payload.get in _geocode, mai catturato)
+            # o TypeError (da questo indicizzamento se forecast non e' un dizionario) FUORI dal
+            # blocco try, quindi nessuna delle due eccezioni veniva gestita. Spostato dentro il
+            # try e allargato l'except sotto invece di lasciarle propagare.
+            sunrise = forecast["daily"]["sunrise"][0].split("T")[1]
+            sunset = forecast["daily"]["sunset"][0].split("T")[1]
+        except (error.URLError, TimeoutError, json.JSONDecodeError, KeyError, IndexError, TypeError, AttributeError):
             return SkillResult(success=False, data={"city": city}, error="NETWORK_UNAVAILABLE")
-
-        sunrise = forecast["daily"]["sunrise"][0].split("T")[1]
-        sunset = forecast["daily"]["sunset"][0].split("T")[1]
         return SkillResult(success=True, data={"city": city, "sunrise": sunrise, "sunset": sunset})
 
 
