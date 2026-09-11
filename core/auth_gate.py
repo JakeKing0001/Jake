@@ -23,7 +23,7 @@ nulla."""
 
 
 class AuthGate:
-    def __init__(self, passphrase: str = None, windows_hello_enabled: bool = False, windows_hello_verify=None):
+    def __init__(self, passphrase: str | None = None, windows_hello_enabled: bool = False, windows_hello_verify=None):
         self.passphrase = passphrase.strip() if passphrase else None
         self.windows_hello_enabled = bool(windows_hello_enabled)
         # Iniettabile per i test (vedi core/windows_hello.py sul perche' verify() non deve MAI

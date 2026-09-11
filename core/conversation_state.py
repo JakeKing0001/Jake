@@ -10,10 +10,10 @@ class ConversationStateManager:
     ENTITY_KEYS = ("app", "path", "url", "title", "query", "name", "text", "contact")
 
     def __init__(self, short_term_limit: int = 10):
-        self._pending_action = None
-        self._short_term_history = deque(maxlen=short_term_limit)
-        self._last_search_results = []
-        self._entities = {}
+        self._pending_action: dict | None = None
+        self._short_term_history: deque[dict] = deque(maxlen=short_term_limit)
+        self._last_search_results: list[dict] = []
+        self._entities: dict = {}
 
     def add_turn(self, role: str, text: str) -> None:
         """Aggiunge un turno al buffer di conversazione a breve termine."""

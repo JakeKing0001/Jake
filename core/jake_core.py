@@ -743,7 +743,7 @@ class JakeCore:
     # e' un bug), ne' un successo: session_recorder.record_failure() li ignora entrambi.
     _NOT_A_FAILURE = {"success", "confirmation_required", "auth_required"}
 
-    def _safe_confirm_envelope(self, intent: str, parameters: dict, result: SkillResult, reason: str) -> dict:
+    def _safe_confirm_envelope(self, intent: str, parameters: dict | None, result: SkillResult, reason: str) -> dict:
         """Valida la busta CONFIRMATION_REQUIRED/AUTH_REQUIRED di una skill (F1, vedi
         core/schema_validation.py) prima di fidarsene: un campo mancante o del tipo sbagliato in
         una skill scritta male (o auto-generata dalla fucina, mai rivista da un umano prima di
@@ -766,7 +766,7 @@ class JakeCore:
             "message": f"Confermi: {self.describe_command(Command(intent, parameters))}?",
         }
 
-    def _log_action_outcome(self, trace_id: str, started: float, intent: str, parameters: dict, *, result: str) -> None:
+    def _log_action_outcome(self, trace_id: str, started: float, intent: str, parameters: dict | None, *, result: str) -> None:
         """Punto unico da cui _execute_command scrive in jake_actions.jsonl (F0: log strutturati
         con trace_id, durata, modello, skill, decisione di rischio, risultato). verified resta
         assente (vedi log_action): questo percorso a comando singolo non verifica ancora
