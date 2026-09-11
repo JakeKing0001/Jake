@@ -5,6 +5,7 @@ import unittest
 
 
 WORKFLOW = Path(__file__).resolve().parent.parent / ".github" / "workflows" / "ci.yml"
+KNOWN_LIMITATIONS = Path(__file__).resolve().parent.parent / "docs" / "known-limitations.md"
 
 
 class CiWorkflowTests(unittest.TestCase):
@@ -29,6 +30,15 @@ class CiWorkflowTests(unittest.TestCase):
         smoke_position = workflow.index("- name: Smoke test")
         upload_position = workflow.index("- name: Pubblica diagnostica test")
         self.assertLess(smoke_position, upload_position)
+
+    def test_unavailable_branch_protection_is_recorded_for_g0(self):
+        limitations = KNOWN_LIMITATIONS.read_text(encoding="utf-8")
+
+        self.assertIn("KL-001", limitations)
+        self.assertIn("F0.2.6", limitations)
+        self.assertIn("HTTP `403`", limitations)
+        self.assertIn("GitHub Pro", limitations)
+        self.assertIn("repository sia pubblico", limitations)
 
 
 if __name__ == "__main__":

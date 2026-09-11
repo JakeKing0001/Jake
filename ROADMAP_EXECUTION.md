@@ -325,7 +325,10 @@ Dipende da: F0.1.
   1.945/1.945 test, ruff, mypy su 75 file e compileall verdi.
 - Blocco esplicito: `F0.2.4` e `F0.2.6` modificano GitHub; su richiesta dell'utente non viene
   eseguito alcun push né cambiata la protezione di `master`. La correzione attende quindi una
-  pubblicazione e una nuova CI reale.
+  pubblicazione e una nuova CI reale. Inoltre l'API di branch protection restituisce HTTP 403:
+  il repository `JakeKing0001/Jake` e' privato e il piano corrente richiede GitHub Pro oppure
+  visibilita' pubblica per abilitare la funzione. Il limite e' registrato come `KL-001` in
+  `docs/known-limitations.md` e non e' accettato per G0.
 
 1. `F0.2.1` Raggruppare i commit locali in una sequenza comprensibile senza riscrivere storia
    già condivisa.
@@ -1675,9 +1678,13 @@ Aggiornato 11/09/2026: il commit remoto `2308009` ha superato build/smoke HUD e,
 entrambi i job Python falliscono nel successivo upload perche' `actions/upload-artifact@v4`
 ignora per default `.ci-artifacts/`; lo smoke CLI viene quindi saltato. La correzione locale
 aggiunge `include-hidden-files: true`, colloca l'upload dopo lo smoke e include due test di
-regressione dedicati. Baseline locale: 1.945/1.945 test, ruff, mypy su 75 file e compileall verdi.
+regressione dedicati. Baseline locale: 1.946/1.946 test, ruff, mypy su 75 file e compileall verdi.
+`KL-001` documenta inoltre che `F0.2.6` non e' configurabile sul repository privato con il piano
+GitHub corrente.
 
 La prossima azione esatta e' pubblicare questa correzione e osservare una nuova CI reale, poi
-aggiornare `F0.1`, `F0.2` e G0 in base all'esito. Push e impostazioni GitHub restano esclusi su
-richiesta dell'utente: finche' il nuovo workflow non viene eseguito sul remoto, non dichiarare G0
-superato e non iniziare nuove feature fuori da F0.
+scegliere esplicitamente tra GitHub Pro, repository pubblico o revisione del requisito
+`F0.2.6`; infine aggiornare `F0.1`, `F0.2` e G0 in base all'esito. Push, visibilita', piano e
+impostazioni GitHub restano esclusi su richiesta dell'utente: finche' il nuovo workflow non viene
+eseguito sul remoto e `KL-001` non viene risolto o accettato modificando il gate, non dichiarare
+G0 superato e non iniziare nuove feature fuori da F0.
