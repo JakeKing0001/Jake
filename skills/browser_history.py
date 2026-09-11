@@ -16,13 +16,23 @@ class GetBrowserHistorySkill:
         },
     }
 
+    DEFAULT_LIMIT = 10
+
+    @classmethod
+    def _parse_limit(cls, raw) -> int:
+        try:
+            limit = int(raw)
+        except (TypeError, ValueError):
+            return cls.DEFAULT_LIMIT
+        return limit if limit > 0 else cls.DEFAULT_LIMIT
+
     def execute(self, parameters: dict = None):
         from core.browser_history import read_recent_history
 
         parameters = parameters or {}
-        limit = parameters.get("limit") or 10
+        limit = self._parse_limit(parameters.get("limit"))
 
-        entries = read_recent_history(limit=int(limit))
+        entries = read_recent_history(limit=limit)
         if entries is None:
             return SkillResult(success=False, data={}, error="BROWSER_HISTORY_UNAVAILABLE")
         if not entries:
