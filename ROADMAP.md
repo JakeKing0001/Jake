@@ -1363,6 +1363,17 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
 
   Suite completa dopo questo incremento: 1923 test, tutti verdi; `ruff check` pulito sull'intero
   repository.
+- ✅ Coperto anche il resto di `core/jake_core.py` rimasto senza test dopo l'incremento
+  precedente: `describe_command` (caso speciale `RUN_WORKFLOW`, descrizione della skill
+  abbassata/troncata, valori dei parametri filtrati), `apply_correction` (correzione su un
+  intent riconosciuto vs `UNKNOWN`, e quando una correzione viene insegnata a `LearningManager`
+  in base alla similarita' lessicale con lo scambio precedente), `resolve_command`,
+  `format_due_reminder`, i tre callback di notifica di default (`_default_on_reminder_due`/
+  `_default_on_advisory`/`_default_on_trigger_fired`) e `_agent_context`. Nessun bug trovato in
+  nessuno di questi. Aggiunto `tests/test_jake_core_misc.py` (19 test).
+
+  Con questo, ogni metodo pubblico e privato non banale di `core/jake_core.py` ha una copertura
+  dedicata. Suite completa: 1942 test, tutti verdi; `ruff check` pulito sull'intero repository.
 
 ## F2 — Voice Natural 3.0
 
