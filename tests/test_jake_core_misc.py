@@ -207,6 +207,13 @@ class DefaultNotificationCallbacksTests(unittest.TestCase):
                 core._default_on_advisory("batteria scarica")
         notify.assert_called_once_with("advisory", "batteria scarica")
 
+    def test_advisory_prints_nothing_when_notify_queues_it(self):
+        core = _bare_core()
+        with mock.patch.object(core, "notify", return_value=None):
+            with mock.patch("builtins.print") as printed:
+                core._default_on_advisory("batteria scarica")
+        printed.assert_not_called()
+
     def test_trigger_fired_notifies_with_a_summary(self):
         core = _bare_core()
         outcome = mock.MagicMock(completed=[], success=True, stopped_step=None)

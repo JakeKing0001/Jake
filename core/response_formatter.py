@@ -687,7 +687,7 @@ def _format_success(intent: str, result: SkillResult, registry=None) -> str | No
     return None
 
 
-def format_skill_result(intent: str, result: SkillResult, registry=None) -> str:
+def format_skill_result(intent: str, result: SkillResult | None, registry=None) -> str:
     if result is None:
         return "Si è verificato un errore durante l'esecuzione"
     if not result.success:
