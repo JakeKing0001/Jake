@@ -1530,6 +1530,16 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   incompleti/assenti). `mypy` ora pulito su tutti e 73 i file della lista.
 
   Suite completa: 1943 test, tutti verdi; `ruff check` e `mypy` puliti sull'intero repository.
+- ✅ **Anche `core/vision/` (screen.py, screen_diff.py) aggiunto al type-check selettivo**: solo
+  due `Optional` impliciti, nessun bug. Con questo, **il type-check selettivo copre tutto
+  `core/` tranne le tre sottocartelle che dipendono davvero da librerie con stub incompleti/
+  assenti** (`core/vision/` era in realta' gia' priva di quella dipendenza, verificato prima di
+  aggiungerla): `core/voice/` (motore vocale: sounddevice/webrtcvad/edge-tts/av/winsdk/
+  faster-whisper/ctranslate2) e `core/gui/` (HUD: PySide6/pystray). 75 file su 102 in `core/`
+  ora tipizzati; i 27 esclusi sono tutti in quelle due sottocartelle per un motivo verificato,
+  non per pigrizia.
+
+  Suite completa: 1943 test, tutti verdi; `ruff check` e `mypy` puliti sull'intero repository.
 
 ## F2 — Voice Natural 3.0
 
