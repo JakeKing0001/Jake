@@ -516,8 +516,16 @@ Dipende da: G0.
 
 Criterio di uscita: il 100% dei percorsi produce lo stesso `ActionReceipt` validato.
 
-- Stato: `DOING`; `F1.1.3` (parzialmente) e `F1.1.8` conclusi con evidenza; `F1.1.1`, `F1.1.2`,
+- Stato: `DOING`; `F1.1.1`, `F1.1.3` (parzialmente) e `F1.1.8` conclusi con evidenza; `F1.1.2`,
   `F1.1.4`, `F1.1.5`, `F1.1.6`, `F1.1.7` restano aperti.
+- `F1.1.1` — 11/09/2026: inventario dei 7 percorsi di esecuzione in
+  [docs/action-execution-paths.md](docs/action-execution-paths.md) (comando diretto, agente a
+  passi, piano automatico/RUN_WORKFLOW/trigger, companion server, registrazione skill, rollback,
+  dispatch grezzo di `SkillRegistry.execute()`), con per ciascuno il punto d'ingresso esatto e se
+  passa da `PolicyEngine`. `tests/test_action_paths_inventory.py` verifica che i simboli citati
+  esistano ancora (incluso il buco noto e documentato di `SkillRegistry.execute()`, F1.2.1), cosi'
+  un rinominamento futuro fa fallire il test invece di lasciare il documento silenziosamente
+  disallineato dal codice.
 - Ricognizione 11/09/2026: `ActionProposal`, `ActionContext`, `VerificationEvidence`,
   `UndoDescriptor` ed `ActionError` non esistono ancora come classi (solo prosa nella roadmap);
   esiste solo `ActionReceipt` (`core/action_ledger.py`) e `PolicyEngine`
