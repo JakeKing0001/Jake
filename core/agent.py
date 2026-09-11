@@ -84,8 +84,8 @@ class TaskAgent:
     RUN_TIMEOUT_SECONDS = 90
 
     def __init__(self, registry, retriever, client: OllamaClient, model_provider, format_result,
-                 logger=None, context_provider=None, executor=None, fixed_tools: list[str] = None,
-                 persona_line: str = None, session_recorder=None, action_ledger=None, agent_name: str = "general",
+                 logger=None, context_provider=None, executor=None, fixed_tools: list[str] | None = None,
+                 persona_line: str | None = None, session_recorder=None, action_ledger=None, agent_name: str = "general",
                  kill_switch=None):
         self.registry = registry
         self.retriever = retriever
@@ -152,7 +152,7 @@ class TaskAgent:
         return lines
 
     def _schema(self, tools: list[dict]) -> dict:
-        parameter_properties = {}
+        parameter_properties: dict[str, dict] = {}
         for capability in tools:
             for name, meta in (capability.get("parameters") or {}).items():
                 parameter_properties.setdefault(name, {"type": meta.get("type", "string")} if meta.get("type") != "array" else {"type": "array", "items": {"type": "string"}})
@@ -287,7 +287,7 @@ class TaskAgent:
             text = text[: self.OBSERVATION_MAX_CHARS] + "…"
         return text
 
-    def run(self, request: str, history: list[dict] = None, trace_id: str = None, private: bool = False) -> AgentOutcome:
+    def run(self, request: str, history: list[dict] | None = None, trace_id: str | None = None, private: bool = False) -> AgentOutcome:
         # trace_id/private (F0, log strutturati): chi chiama (JakeCore._run_agent, tramite
         # JakeOrchestrator.run) passa lo stesso trace_id gia' generato per l'intera richiesta,
         # cosi' tutti i passi di UN compito composto si correlano nel log strutturato invece di
@@ -341,7 +341,8 @@ class TaskAgent:
             thought = str(payload.get("thought") or "").strip()
             action = payload.get("action") or {}
             intent = str(action.get("intent") or NONE_ACTION)
-            parameters = action.get("parameters") if isinstance(action.get("parameters"), dict) else {}
+            raw_parameters = action.get("parameters")
+            parameters = raw_parameters if isinstance(raw_parameters, dict) else {}
             final_answer = str(payload.get("final_answer") or "").strip()
             ask_user = str(payload.get("ask_user") or "").strip()
 

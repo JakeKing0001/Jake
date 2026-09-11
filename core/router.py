@@ -19,10 +19,10 @@ class Router:
 
     def __init__(
         self,
-        primary_provider: IntentProvider = None,
-        fallback_provider: IntentProvider = None,
-        intent_provider: IntentProvider = None,
-        skill_registry: SkillRegistry = None,
+        primary_provider: IntentProvider | None = None,
+        fallback_provider: IntentProvider | None = None,
+        intent_provider: IntentProvider | None = None,
+        skill_registry: SkillRegistry | None = None,
         example_store=None,
         retriever=None,
         client=None,
@@ -39,7 +39,7 @@ class Router:
         self.intent_provider = self.primary_provider
         self.example_store = example_store
         self.retriever = retriever
-        self.last_route = None  # "exact" | "llm" | "rules" | "retrieval" | None
+        self.last_route: str | None = None  # "exact" | "llm" | "rules" | "retrieval" | None
 
     def detect_intent(self, text: str) -> Command:
         self.last_route = None

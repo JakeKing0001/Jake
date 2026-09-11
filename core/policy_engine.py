@@ -66,8 +66,8 @@ class PolicyEngine:
     passati a mano in punti diversi (vedi il docstring del modulo)."""
 
     def __init__(
-        self, auth_gate=None, blocked_intents: set = None, always_confirm_intents: set = None,
-        require_auth_intents: set = None,
+        self, auth_gate=None, blocked_intents: set | None = None, always_confirm_intents: set | None = None,
+        require_auth_intents: set | None = None,
     ):
         self.auth_gate = auth_gate
         self.blocked_intents = set(blocked_intents or set())
