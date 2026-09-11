@@ -1,13 +1,33 @@
-"""Test unitari per core/gui/status_panel.py: nessuna suite esisteva finora, nessun bug trovato.
-Usa un vero root Tkinter (nascosto per tutta la durata dei test, mai mostrato per davvero: show()
-e' sempre mockato dove servirebbe deiconify/lift/focus_force reali, per non rubare il focus sullo
-schermo dell'utente durante la suite) - distrutto in tearDown per non accumulare finestre."""
+"""Test unitari per core/gui/status_panel.py con un solo interprete Tcl condiviso.
+
+Il root Tkinter resta nascosto e viene distrutto a fine modulo; ogni test riceve una Toplevel
+isolata e la distrugge in tearDown. show() e' mockato dove deiconify/lift/focus_force reali
+ruberebbero il focus durante la suite.
+"""
 import tempfile
+import tkinter as tk
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from core.gui.status_panel import StatusPanel
+
+
+_TK_ROOT: tk.Tk | None = None
+
+
+def setUpModule():
+    """Un solo interprete Tcl per modulo; ogni test usa una finestra figlia isolata."""
+    global _TK_ROOT
+    _TK_ROOT = tk.Tk()
+    _TK_ROOT.withdraw()
+
+
+def tearDownModule():
+    global _TK_ROOT
+    if _TK_ROOT is not None:
+        _TK_ROOT.destroy()
+        _TK_ROOT = None
 
 
 def _jake_core(history=None):
@@ -20,20 +40,26 @@ def _jake_core(history=None):
 
 class StatusPanelTestCase(unittest.TestCase):
     def setUp(self):
+        self.assertIsNotNone(_TK_ROOT)
         self.jake_core = _jake_core()
-        self.panel = StatusPanel(self.jake_core)
+        self.panel = StatusPanel(self.jake_core, root=tk.Toplevel(_TK_ROOT))
 
     def tearDown(self):
         self.panel.root.destroy()
 
 
 class InitTests(StatusPanelTestCase):
+    def test_uses_the_injected_window_from_the_shared_tcl_interpreter(self):
+        self.assertIsInstance(self.panel.root, tk.Toplevel)
+        self.assertIs(self.panel.root.master, _TK_ROOT)
+
     def test_starts_hidden(self):
         self.assertEqual(self.panel.root.state(), "withdrawn")
 
     def test_loads_recent_history_into_the_output(self):
         jake_core = _jake_core(history=[{"role": "user", "text": "ciao"}, {"role": "assistant", "text": "ciao a te"}])
-        panel = StatusPanel(jake_core)
+        self.assertIsNotNone(_TK_ROOT)
+        panel = StatusPanel(jake_core, root=tk.Toplevel(_TK_ROOT))
         try:
             content = panel.output.get("1.0", "end")
             self.assertIn("Tu > ciao", content)

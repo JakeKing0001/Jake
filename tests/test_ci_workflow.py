@@ -31,7 +31,7 @@ class CiWorkflowTests(unittest.TestCase):
         upload_position = workflow.index("- name: Pubblica diagnostica test")
         self.assertLess(smoke_position, upload_position)
 
-    def test_unavailable_branch_protection_is_recorded_for_g0(self):
+    def test_branch_protection_transition_is_recorded_for_g0(self):
         limitations = KNOWN_LIMITATIONS.read_text(encoding="utf-8")
 
         self.assertIn("KL-001", limitations)
@@ -39,6 +39,12 @@ class CiWorkflowTests(unittest.TestCase):
         self.assertIn("HTTP `403`", limitations)
         self.assertIn("GitHub Pro", limitations)
         self.assertIn("repository sia pubblico", limitations)
+        self.assertIn("Stato: risolto", limitations)
+        self.assertIn("`PUBLIC`", limitations)
+        self.assertRegex(limitations, r"404 Branch not\s+protected")
+        self.assertIn("Python 3.11 (Windows)", limitations)
+        self.assertIn("Python 3.12 (Windows)", limitations)
+        self.assertIn("HUD nativo C++/Qt6/QML - build health check", limitations)
 
 
 if __name__ == "__main__":

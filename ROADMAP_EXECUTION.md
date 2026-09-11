@@ -212,7 +212,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | Pacchetto | Owner logico | Stato |
 |---|---|---|
 | `F0.1` | Platform Reliability | `VERIFY` |
-| `F0.2` | Release Engineering | `BLOCKED` |
+| `F0.2` | Release Engineering | `VERIFY` |
 | `F0.3` | Architecture | `VERIFY` |
 | `F0.4` | Quality Engineering | `BLOCKED` |
 | `F0.5` | Performance Engineering | `BLOCKED` |
@@ -307,8 +307,8 @@ Criterio di uscita: 20/20 suite verdi su Python 3.12 locale e job 3.11/3.12 verd
 
 Dipende da: F0.1.
 
-- Stato: `BLOCKED` sul remoto; `F0.2.1`–`F0.2.3` locali conclusi, `F0.2.7` corretto
-  localmente e in `VERIFY` su una nuova esecuzione remota.
+- Stato: `VERIFY`; `F0.2.1`–`F0.2.3` e `F0.2.7` conclusi, `F0.2.5` di nuovo attivo sulla
+  divergenza Python 3.11, `F0.2.6` ancora aperto.
 - Verifica locale 11/09/2026: il commit F0.1 e' atomico e la storia condivisa non e' stata
   riscritta; `git ls-files` non contiene log, database, token, registrazioni, modelli, binari o
   build artifact; il lock con hash si installa; ruff, mypy, compileall, 1.262 test, smoke CLI,
@@ -325,12 +325,21 @@ Dipende da: F0.1.
   1.946/1.946 test, ruff, mypy su 75 file e compileall verdi. Lo smoke CLI completa
   avvio-risposta-chiusura in 12,9 secondi con exit code 0; lo smoke HUD resta attivo oltre tre
   secondi con ogni percorso Qt rimosso dal `PATH`.
+- Verifica remota 11/09/2026, run `34615971747` su `31409cf`: Python 3.12 e HUD sono interamente
+  verdi; l'upload della diagnostica passa su entrambi i job Python, chiudendo `F0.2.7`. Python
+  3.11 termina invece con exit code nativo `0x80000003` durante
+  `tests.test_status_panel.RunForeverTests`, con `Tcl_AsyncDelete: async handler deleted by the
+  wrong thread`. Il test harness creava un nuovo interprete `Tk` per ogni test; la correzione
+  locale usa un solo `Tk` di modulo e una `Toplevel` isolata per caso, mantenendo widget e
+  `mainloop` reali. Il modulo passa 20/20 esecuzioni consecutive e la suite completa locale passa
+  1.947/1.947 su Python 3.12.
 - Blocco esplicito: `F0.2.4` e `F0.2.6` modificano GitHub; su richiesta dell'utente non viene
-  eseguito alcun push né cambiata la protezione di `master`. La correzione attende quindi una
-  pubblicazione e una nuova CI reale. Inoltre l'API di branch protection restituisce HTTP 403:
-  il repository `JakeKing0001/Jake` e' privato e il piano corrente richiede GitHub Pro oppure
-  visibilita' pubblica per abilitare la funzione. Il limite e' registrato come `KL-001` in
-  `docs/known-limitations.md` e non e' accettato per G0.
+  eseguito alcun push né cambiata la protezione di `master`. La correzione Python 3.11 attende
+  quindi un nuovo sync e una CI reale. Il repository `JakeKing0001/Jake` e' ora pubblico: il
+  vincolo di piano registrato come `KL-001` e' risolto. L'API restituisce pero' `404 Branch not
+  protected`, quindi `F0.2.6` resta aperto. I check da rendere obbligatori sono
+  `Python 3.11 (Windows)`, `Python 3.12 (Windows)` e
+  `HUD nativo C++/Qt6/QML - build health check`.
 
 1. `F0.2.1` Raggruppare i commit locali in una sequenza comprensibile senza riscrivere storia
    già condivisa.
@@ -1675,18 +1684,16 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 11/09/2026: il commit remoto `2308009` ha superato build/smoke HUD e, su Python 3.11 e
-3.12, installazione, ruff, mypy, compileall e tutti i test. Il run `34614112195` e' pero' rosso:
-entrambi i job Python falliscono nel successivo upload perche' `actions/upload-artifact@v4`
-ignora per default `.ci-artifacts/`; lo smoke CLI viene quindi saltato. La correzione locale
-aggiunge `include-hidden-files: true`, colloca l'upload dopo lo smoke e include due test di
-regressione dedicati. Baseline locale: 1.946/1.946 test, ruff, mypy su 75 file e compileall verdi.
-`KL-001` documenta inoltre che `F0.2.6` non e' configurabile sul repository privato con il piano
-GitHub corrente.
+Aggiornato 11/09/2026: il sync di `31409cf` ha prodotto il run `34615971747`. Python 3.12 e HUD
+sono completamente verdi; entrambi gli artifact diagnostici vengono pubblicati, quindi il fix
+CI e `F0.2.7` sono verificati. Python 3.11 si arresta nel test GUI con il crash nativo
+`Tcl_AsyncDelete` causato dai molteplici interpreti `Tk` del test harness. La correzione locale
+mantiene un solo interprete Tcl e finestre `Toplevel` isolate; il modulo passa 20/20 e la baseline
+locale e' 1.947/1.947, con ruff, mypy su 75 file e compileall verdi. Il repository e' pubblico e
+`KL-001` e' risolto; `master` resta non protetto.
 
-La prossima azione esatta e' pubblicare questa correzione e osservare una nuova CI reale, poi
-scegliere esplicitamente tra GitHub Pro, repository pubblico o revisione del requisito
-`F0.2.6`; infine aggiornare `F0.1`, `F0.2` e G0 in base all'esito. Push, visibilita', piano e
-impostazioni GitHub restano esclusi su richiesta dell'utente: finche' il nuovo workflow non viene
-eseguito sul remoto e `KL-001` non viene risolto o accettato modificando il gate, non dichiarare
-G0 superato e non iniziare nuove feature fuori da F0.
+La prossima azione esatta e' sincronizzare la correzione Tcl e osservare una nuova CI reale, poi
+configurare i tre check osservati come obbligatori su `master`; infine aggiornare `F0.1`, `F0.2`
+e G0 in base all'esito. Codex non esegue push né modifica impostazioni GitHub: finche' il nuovo
+workflow non e' verde su 3.11/3.12/HUD e `F0.2.6` non e' verificato, non dichiarare G0 superato e
+non iniziare nuove feature fuori da F0.
