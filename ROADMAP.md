@@ -1451,6 +1451,24 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   della lista.
 
   Suite completa: 1943 test, tutti verdi; `ruff check` e `mypy` puliti sull'intero repository.
+- ✅ **Esteso ancora il type-check selettivo** a `core/desktop_context.py`,
+  `core/computer_agent.py`, `core/companion_server.py`, `core/path_resolver.py`,
+  `core/embedding_provider.py`, `core/vision_provider.py`, `core/planner_provider.py`,
+  `core/response_formatter.py` (43 file in totale). Trovato un vero falso positivo interessante:
+  `path_resolver.py::known_folder` era annotato `-> Path | None`, ma NESSUNO dei suoi percorsi di
+  ritorno restituisce mai `None` davvero (sempre un `Path` vero, anche nel caso di ripiego finale)
+  - l'annotazione, non il codice, era sbagliata, e generava 6 falsi allarmi "puo' essere None" nei
+    sei punti che chiamano `known_folder(...).joinpath(...)`/`.iterdir()` in `resolve_user_path`.
+  Corretta l'annotazione del tipo di ritorno invece di aggiungere controlli `is None` inutili nei
+  chiamanti (verificato anche che nessun altro punto del repository chiami `known_folder`
+  aspettandosi `None`). Anche `_Handler.companion` (`core/companion_server.py`) aveva lo stesso
+  problema strutturale del pattern standard di `http.server`: `self.server` e' tipizzato
+  genericamente `BaseServer` dagli stub anche se a runtime e' sempre una `_Server` vera - risolto
+  con un `cast()` esplicito, il fix idiomatico per questo caso specifico, non un errore di logica.
+  Il resto erano `Optional` impliciti come nei batch precedenti. `mypy` ora pulito su tutti e 43 i
+  file della lista.
+
+  Suite completa: 1943 test, tutti verdi; `ruff check` e `mypy` puliti sull'intero repository.
 
 ## F2 — Voice Natural 3.0
 
