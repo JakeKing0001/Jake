@@ -1469,6 +1469,22 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   file della lista.
 
   Suite completa: 1943 test, tutti verdi; `ruff check` e `mypy` puliti sull'intero repository.
+- ✅ **Esteso ancora il type-check selettivo** a `core/scheduler.py`, `core/trigger_scheduler.py`,
+  `core/system_advisor.py`, `core/skill_forge.py`, `core/skill_catalog.py`, `core/version.py`,
+  `core/intent_provider.py`, `core/ollama_client.py` (51 file in totale - la meta' esatta dei 102
+  file di `core/`, sottocartelle incluse). Lo stesso pattern `self._thread = None` visto in
+  `core/desktop_context.py`/`core/companion_server.py` si e' ripetuto identico in altri tre file
+  (`scheduler.py`, `system_advisor.py`, `trigger_scheduler.py`: ognuno gestisce il proprio thread
+  in background con lo stesso schema, mai fattorizzato in una classe base condivisa - non
+  necessariamente un problema da risolvere ora, solo un'osservazione per quando la fase di
+  refactoring dell'architettura affrontera' JakeCore/SkillRegistry). Un caso in piu' della
+  famiglia `Command.parameters`: `TriggerScheduler._app_focus_is_due` leggeva `trigger.get
+  ("name")` (potenzialmente `None`) e lo usava subito come chiave di un `dict[str, bool]` -
+  corretto con lo stesso ripiego `or ""` gia' usato altrove nel file per campi opzionali di un
+  dizionario grezzo. Il resto erano `Optional` impliciti. `mypy` ora pulito su tutti e 51 i file
+  della lista.
+
+  Suite completa: 1943 test, tutti verdi; `ruff check` e `mypy` puliti sull'intero repository.
 
 ## F2 — Voice Natural 3.0
 
