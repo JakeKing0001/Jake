@@ -1485,6 +1485,29 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   della lista.
 
   Suite completa: 1943 test, tutti verdi; `ruff check` e `mypy` puliti sull'intero repository.
+- ✅ **Il type-check selettivo ora copre TUTTI i 67 file Python al primo livello di `core/`**
+  (restano fuori solo le sottocartelle `core/nlu/`, `core/vision/`, `core/voice/`, `core/gui/`,
+  dove PySide6/win32/faster-whisper hanno stub incompleti o assenti - vedi il commento originale
+  in `[tool.mypy]`). Ultimo batch di 16 file: `core/app_resolver.py`, `core/browser_history.py`,
+  `core/command_safety.py`, `core/context_summarizer.py`, `core/filesystem_policy.py`,
+  `core/forge_probe.py`, `core/home_assistant_client.py`, `core/intent_provider_base.py`,
+  `core/nest_search.py`, `core/network.py`, `core/plugin_loader.py`, `core/process_sandbox.py`,
+  `core/secrets_vault.py`, `core/temporal_parser.py`, `core/win_dpi.py`, `core/windows_hello.py`.
+  Tre casi degni di nota, nessuno un bug a runtime gia' sfruttabile:
+  - `AppResolver._ensure_discovered` poteva restituire `None` secondo la sua stessa annotazione
+    (`-> dict[str, str]`) se l'invariante "`discover()` imposta sempre `self._applications`
+    prima di ogni return" si fosse mai rotto - stesso schema di `execute_with_retry` nel batch
+    precedente: aggiunto un `or {}` difensivo invece di limitarsi a zittire mypy.
+  - `plugin_loader.py::load_plugin_file` lasciava che un `spec`/`spec.loader` di
+    `importlib.util` eventualmente `None` (documentato mai come impossibile) sollevasse un
+    `AttributeError` generico, comunque catturato dal `except Exception` piu' sotto - reso
+    esplicito con un controllo e un `ImportError` dal messaggio chiaro, stesso esito pratico.
+  - `temporal_parser.py::_day_bounds` era annotato per accettare solo `datetime.timezone`, ma
+    `datetime(..., tzinfo=tz)` accetta qualunque `tzinfo` (incluso `zoneinfo.ZoneInfo` o
+    qualunque implementazione di terze parti) - l'annotazione era piu' stretta del contratto
+    reale, corretta a `tzinfo`.
+
+  Suite completa: 1943 test, tutti verdi; `ruff check` e `mypy` puliti sull'intero repository.
 
 ## F2 — Voice Natural 3.0
 
