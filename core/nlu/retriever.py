@@ -30,7 +30,7 @@ class Retrieval:
 
 class CapabilityRetriever:
     def __init__(self, registry, example_store: ExampleStore, embedder=None,
-                 cache_dir: Path = None, model_name: str = "nomic-embed-text"):
+                 cache_dir: Path | None = None, model_name: str = "nomic-embed-text"):
         self.registry = registry
         self.example_store = example_store
         cache_dir = Path(cache_dir) if cache_dir else CACHE_DIR

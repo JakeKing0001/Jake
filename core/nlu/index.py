@@ -30,7 +30,7 @@ class SemanticIndex:
 
     EMBED_BATCH = 64
 
-    def __init__(self, embedder, cache_path: Path = None, model_name: str = "nomic-embed-text"):
+    def __init__(self, embedder, cache_path: Path | None = None, model_name: str = "nomic-embed-text"):
         # embedder: callable(list[str]) -> list[list[float]] | None
         self.embedder = embedder
         self.model_name = model_name
