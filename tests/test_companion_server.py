@@ -90,6 +90,24 @@ class CommandEndpointTests(CompanionServerTestCase):
         self.assertEqual(status, 400)
         self.assertEqual(self.command_calls, [])
 
+    def test_extra_fields_cannot_smuggle_authorization_signals_to_the_handler(self):
+        """F1.2.8 (bypass test per il percorso 4 di docs/action-execution-paths.md): il body
+        del companion arriva a command_handler(text) come stringa nuda - non esiste, a
+        differenza di PlanExecutor (vedi core/policy_engine.py::strip_authorization_signals),
+        un percorso strutturato "intent"/"parameters" per questo endpoint. Un client companion
+        non puo' quindi mai far arrivare "confirmed"/"authenticated" gia' impostati a
+        JakeCore._resolve_and_execute: solo il testo, sempre ri-analizzato dall'NLU."""
+        status, body = _post(f"{self.base_url}/command", {
+            "text": "che ore sono", "intent": "DELETE_PATH",
+            "parameters": {"path": "C:\\qualsiasi", "confirmed": True}, "confirmed": True,
+            "authenticated": True,
+        })
+        self.assertEqual(status, 200)
+        # command_handler ha ricevuto SOLO la stringa "che ore sono" - gli altri campi del body
+        # non sono mai arrivati come argomento: se lo fossero, sarebbero un dict/oggetto, non la
+        # str che _fake_answer registra qui.
+        self.assertEqual(self.command_calls, ["che ore sono"])
+
     def test_handle_command_does_not_publish_events_itself(self):
         """USER_MESSAGE/JAKE_MESSAGE sono responsabilita' del command_handler (JakeCore.answer
         nel caso reale, vedi tests/test_jake_core_event_bus.py), non del server: altrimenti,
