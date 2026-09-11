@@ -516,6 +516,34 @@ Dipende da: G0.
 
 Criterio di uscita: il 100% dei percorsi produce lo stesso `ActionReceipt` validato.
 
+- Stato: `DOING`; `F1.1.3` (parzialmente) e `F1.1.8` conclusi con evidenza; `F1.1.1`, `F1.1.2`,
+  `F1.1.4`, `F1.1.5`, `F1.1.6`, `F1.1.7` restano aperti.
+- Ricognizione 11/09/2026: `ActionProposal`, `ActionContext`, `VerificationEvidence`,
+  `UndoDescriptor` ed `ActionError` non esistono ancora come classi (solo prosa nella roadmap);
+  esiste solo `ActionReceipt` (`core/action_ledger.py`) e `PolicyEngine`
+  (`core/policy_engine.py`). Le skill restituiscono `SkillResult` (piu' sottile del contratto
+  target); la ricevuta viene sintetizzata solo in 4 punti di orchestrazione
+  (`JakeCore._log_action_outcome`/`_log_denied_action`, `TaskAgent._log_step`,
+  `PlanExecutor._log_step`), non dalle singole skill. `core/skill_registry.py::execute()` e'
+  un dispatcher senza alcun controllo di policy; i due percorsi normali passano comunque da
+  `PolicyEngine` prima di chiamarlo, ma `core/execution_safety.py` invoca `registry.execute()`
+  direttamente nel rollback, bypassando la policy (buco noto, non ancora richiuso).
+- `F1.1.3`/`F1.1.8` — 11/09/2026: `idempotency_key` era `Optional[str] = None` pur essendo
+  sempre calcolata nei 4 punti reali - resa `str` obbligatoria (non piu' opzionale) in
+  `ActionReceipt`; aggiunto `schema_version` (default `ACTION_RECEIPT_SCHEMA_VERSION = 1`, F1.1.5
+  resta comunque aperto: nessuna migrazione multi-versione esiste ancora, solo la versione
+  corrente e' accettata). Aggiunta `validate_action_receipt()` che rifiuta campi obbligatori
+  vuoti, timestamp non positivo o `schema_version` non supportata. Nuovo
+  `tests/test_action_contract.py` esercita direttamente tutti e 4 i punti che oggi costruiscono
+  una ricevuta e verifica che ognuno produca un `ActionReceipt` conforme; `tests/
+  test_action_ledger.py` aggiornato per la nuova obbligatorietà. Prova: 1.955/1.955 test (36/36
+  su `test_action_ledger`+`test_action_contract`), ruff e mypy puliti su
+  `core/action_ledger.py`, compileall verde.
+- Non ancora affrontato: `effect_class`/"parametri validati"/"actor" distinto da "source" come
+  campi propri (`requested_by` li conflette in una sola stringa); tassonomia errori (`F1.1.4`);
+  migrazione reale delle skill sul contratto (`F1.1.6`/`F1.1.7`); chiusura del bypass di policy
+  nel rollback (`core/execution_safety.py`).
+
 ### F1.2 — Policy kernel e capability
 
 Dipende da: F1.1.

@@ -84,6 +84,13 @@ def idempotency_key_of(intent: str, parameters: dict | None) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
+# F1.1.5: unica versione supportata finche' non esiste una vera migrazione. read_all()/by_*
+# restano permissivi sui record vecchi gia' su disco (letti come dict, non ri-costruiti come
+# ActionReceipt), quindi non serve retrocompatibilita' qui: questo campo riguarda solo le
+# ricevute create da adesso in poi, non quelle gia' scritte prima che esistesse.
+ACTION_RECEIPT_SCHEMA_VERSION = 1
+
+
 @dataclass
 class ActionReceipt:
     action_id: str
@@ -94,14 +101,44 @@ class ActionReceipt:
     risk_decision: str
     authorization: str
     result: str
-    idempotency_key: Optional[str] = None
+    # F1.1.3: obbligatoria, non Optional - i 4 punti che costruiscono una ricevuta (JakeCore.
+    # _log_action_outcome/_log_denied_action, TaskAgent._log_step, PlanExecutor._log_step) la
+    # calcolano gia' sempre con idempotency_key_of(); renderla facoltativa qui nasconderebbe in
+    # silenzio un futuro punto che se ne dimenticasse (vedi validate_action_receipt).
+    idempotency_key: str
     verified: Optional[bool] = None
     duration_ms: Optional[float] = None
     model: Optional[str] = None
+    schema_version: int = ACTION_RECEIPT_SCHEMA_VERSION
 
     def to_json(self) -> str:
         record = {key: value for key, value in asdict(self).items() if value is not None}
         return json.dumps(record, ensure_ascii=False)
+
+
+_MANDATORY_STRING_FIELDS = (
+    "action_id", "trace_id", "intent", "requested_by", "risk_decision", "authorization",
+    "result", "idempotency_key",
+)
+
+
+def validate_action_receipt(receipt: ActionReceipt) -> None:
+    """F1.1.8: contratto minimo che ogni ricevuta deve rispettare, in un unico punto invece che
+    ripetuto in ogni test. Solleva ValueError con il campo incriminato invece di lasciare che una
+    ricevuta incompleta finisca silenziosamente nel ledger (append-only: un errore scritto li'
+    non si corregge piu', vedi il modulo docstring). Non valuta ancora chi ha CHIAMATO questo
+    percorso (F1.1.1/F1.1.6/F1.1.7, migrazione skill-per-skill, restano lavoro successivo): qui
+    si controlla solo che l'oggetto ActionReceipt che si sta per scrivere sia ben formato."""
+    for field in _MANDATORY_STRING_FIELDS:
+        if not getattr(receipt, field):
+            raise ValueError(f"ActionReceipt.{field} e' obbligatorio e non puo' essere vuoto")
+    if receipt.ts <= 0:
+        raise ValueError("ActionReceipt.ts deve essere un timestamp positivo")
+    if receipt.schema_version != ACTION_RECEIPT_SCHEMA_VERSION:
+        raise ValueError(
+            f"ActionReceipt.schema_version={receipt.schema_version!r} non supportata "
+            f"(attesa {ACTION_RECEIPT_SCHEMA_VERSION}; nessuna migrazione ancora implementata)"
+        )
 
 
 class ActionLedger:
