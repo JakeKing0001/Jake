@@ -1188,6 +1188,45 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   documentato della skill invece di lasciar propagare l'eccezione, e non alterare in alcun modo
   il comportamento sul percorso di successo. Suite completa verificata dopo la correzione: 1333
   test, tutti verdi; `ruff check` pulito su tutti i file toccati.
+- ✅ **Il buco sistemico "forma della risposta JSON non validata" trovato anche nel client
+  Ollama condiviso** (`core/ollama_client.py`), un livello piu' in profondita' e piu' grave delle
+  singole skill gia' corrette: `_post`/`_get` restituivano `json.loads(...)` senza validare che
+  fosse un dizionario, quindi `chat_text`/`embed`/`list_models` (che chiamano tutti
+  `payload.get(...)` subito dopo) sollevavano `AttributeError` non catturato invece del solo
+  `OllamaError` che ogni chiamante gia' cattura - riprodotto per davvero prima della correzione.
+  Rilevante perche' questo client e' usato da `core/nlu/llm_classifier.py` (il classificatore di
+  intent, sul percorso di OGNI comando vocale), `core/jake_core.py`, `core/skill_forge.py`,
+  `core/skill_registry.py` e `skills/chitchat.py`. Corretto validando la forma direttamente
+  dentro `_post`/`_get` (protezione unica per ogni chiamante attuale e futuro), piu' due varianti
+  a valle trovate e corrette allo stesso modo: `chat_text` quando `"message"` non e' un
+  dizionario, e `list_models` quando `"models"` non e' una lista o contiene voci non-dizionario.
+  Nessuna suite esisteva per questo file nonostante la sua centralita': aggiunto
+  `tests/test_ollama_client.py` (21 test).
+- ✅ **Completata la copertura di tutti i restanti file `skills/*.py` privi di qualsiasi suite**
+  (l'elenco tenuto aggiornato sessione per sessione e' ora vuoto). Nessun bug trovato nella
+  maggior parte dei file (`calculate.py`, `convert_units.py`, `date.py`, `time.py`,
+  `holidays.py`, `math_utils2.py`, `datetime_utils.py`, `timer.py`, `active_window.py`,
+  `app_utils.py`, `brightness_control.py`, `chitchat.py`, `fun.py`, `fun2.py`,
+  `personal_utils.py`, `media_control.py`, `volume_control.py`, `volume_level.py`,
+  `wifi_control.py`, `screenshot.py`, `read_screen.py`, `describe_screen.py`,
+  `open_search_result.py`, `system_info2.py`, `build_semantic_index.py`), ma **due bug reali
+  trovati e corretti**:
+  - `skills/read_selection.py::ReadSelectionSkill` - la condizione che doveva rilevare "Ctrl+C
+    non ha copiato nulla di nuovo" (confronto con il contenuto degli appunti prima della
+    pressione) aveva un `and not text.strip()` di troppo che la rendeva sempre falsa (gia'
+    coperta dalla clausola precedente): quando l'utente chiedeva di leggere una selezione
+    inesistente, Jake leggeva ad alta voce il contenuto VECCHIO gia' presente negli appunti
+    invece di dire che non c'era nulla di selezionato - riprodotto per davvero prima e dopo la
+    correzione. Aggiunto `tests/test_read_selection_skill.py` (6 test).
+  - `skills/browser_history.py::GetBrowserHistorySkill` - stesso pattern gia' corretto in
+    `skills/notes.py` e `skills/reminders_extra.py`: `limit` passato direttamente a `int(limit)`
+    senza gestire un valore non numerico, sollevava un `ValueError` mai catturato invece di usare
+    il default. Corretto con lo stesso schema `_parse_limit` gia' usato altrove. Aggiunto
+    `tests/test_browser_history_skill.py` (6 test) - esisteva gia' `tests/test_browser_history.py`,
+    ma copriva solo `core/browser_history.py::read_recent_history`, non questa skill.
+
+  Suite completa dopo tutti questi incrementi: 1538 test, tutti verdi; `ruff check` pulito
+  sull'intero repository.
 
 ## F2 — Voice Natural 3.0
 
