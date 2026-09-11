@@ -85,14 +85,39 @@ ROLLBACK_HANDLERS = {
     "MOVE_PATH": _rollback_move_path,
 }
 
+# F1.2.5: quale intent esegue DAVVERO ogni handler (i tre sopra chiamano registry.execute() con
+# "confirmed": True gia' impostato, per compensare un effetto gia' approvato senza bloccarsi in
+# attesa di una conferma che qui nessuno puo' dare - vedi rollback_effect). Serve un elenco
+# separato dagli handler stessi per poter controllare blocked_intents PRIMA di chiamarli, non
+# dopo: un intent che l'utente ha esplicitamente disabilitato in config.json non deve eseguire
+# nemmeno come compensazione di un passo gia' fatto.
+ROLLBACK_COMPENSATING_INTENT = {
+    "CREATE_PATH": "DELETE_PATH",
+    "RENAME_PATH": "RENAME_PATH",
+    "MOVE_PATH": "MOVE_PATH",
+}
 
-def rollback_effect(registry, intent: str, data: dict) -> bool:
+
+def rollback_effect(registry, intent: str, data: dict, policy_engine=None) -> bool:
     """Annulla l'effetto di un passo gia' eseguito con successo, se esiste un inverso noto per
     il suo intent (vedi ROLLBACK_HANDLERS). Vero se e' stato davvero annullato; gli errori nel
     rollback stesso vengono inghiottiti (un rollback fallito non deve mai far crashare il
-    chiamante, ne' mascherare l'errore originale che ha scatenato il rollback)."""
+    chiamante, ne' mascherare l'errore originale che ha scatenato il rollback).
+
+    F1.2.5: policy_engine (core/policy_engine.py::PolicyEngine) e' opzionale per compatibilita'
+    con i chiamanti che non ne hanno ancora uno da passare, ma quando c'e' un blocked_intents
+    che include l'intent compensatorio (vedi ROLLBACK_COMPENSATING_INTENT), il rollback NON
+    parte: prima di questa correzione i tre handler chiamavano registry.execute() direttamente,
+    con "confirmed": True auto-iniettato, bypassando PolicyEngine del tutto - un DELETE_PATH
+    disabilitato dall'utente restava comunque eseguibile come "annullamento" di un CREATE_PATH.
+    Non si passa invece da decide_automated(): quello richiederebbe CONFIRM per un intent
+    DESTRUCTIVE/ADMIN, ma qui nessun utente e' pronto a confermare in tempo reale - bloccare
+    resta l'unico controllo che ha senso applicare a un'azione gia' approvata in origine."""
     handler = ROLLBACK_HANDLERS.get(intent)
     if handler is None:
+        return False
+    compensating_intent = ROLLBACK_COMPENSATING_INTENT[intent]
+    if policy_engine is not None and compensating_intent in policy_engine.blocked_intents:
         return False
     try:
         handler(registry, data)

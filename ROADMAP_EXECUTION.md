@@ -541,8 +541,8 @@ Criterio di uscita: il 100% dei percorsi produce lo stesso `ActionReceipt` valid
   `core/action_ledger.py`, compileall verde.
 - Non ancora affrontato: `effect_class`/"parametri validati"/"actor" distinto da "source" come
   campi propri (`requested_by` li conflette in una sola stringa); tassonomia errori (`F1.1.4`);
-  migrazione reale delle skill sul contratto (`F1.1.6`/`F1.1.7`); chiusura del bypass di policy
-  nel rollback (`core/execution_safety.py`).
+  migrazione reale delle skill sul contratto (`F1.1.6`/`F1.1.7`). Il bypass di policy nel
+  rollback e' stato parzialmente chiuso, vedi `F1.2.5`.
 
 ### F1.2 — Policy kernel e capability
 
@@ -559,6 +559,28 @@ Dipende da: F1.1.
 8. `F1.2.8` Costruire test di bypass per ogni percorso inventariato in F1.1.1.
 
 Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa dal PolicyEngine.
+
+- Stato: `DOING`; `F1.2.5` chiuso solo per il rollback filesystem, resto aperto.
+- `F1.2.5` (parziale) — 11/09/2026: `core/execution_safety.py::rollback_effect` eseguiva sempre
+  l'intent compensatorio (`DELETE_PATH`/`RENAME_PATH`/`MOVE_PATH`, con `confirmed: True`
+  auto-iniettato) chiamando `registry.execute()` direttamente, bypassando `PolicyEngine` del
+  tutto - un `DELETE_PATH` disabilitato dall'utente in `config.json` restava comunque eseguibile
+  come "annullamento" di un `CREATE_PATH`. `rollback_effect()` accetta ora un `policy_engine`
+  opzionale e rifiuta il rollback se l'intent compensatorio e' in `blocked_intents` (non passa da
+  `decide_automated()`: quello richiederebbe `CONFIRM` per un intent DESTRUCTIVE/ADMIN, ma nel
+  rollback nessun utente e' pronto a confermare in tempo reale - `BLOCK` resta l'unico controllo
+  sensato su un'azione compensatoria). `TaskAgent` e `PlanExecutor` (i due soli punti che
+  chiamano `rollback_effect`) ora ricevono/inoltrano il `policy_engine` condiviso; `JakeCore`
+  collega `self.agent/coding_agent/research_agent.policy_engine` subito dopo aver creato
+  `self.policy_engine`. Nuovi test in `tests/test_execution_safety.py`,
+  `tests/test_agent.py`, `tests/test_plan_executor.py` verificano sia il rifiuto (intent
+  compensatorio bloccato) sia che un blocco su un intent diverso non impedisca comunque il
+  rollback. Prova: 1.959/1.959 test, ruff/mypy/compileall verdi su tutti i file toccati.
+- Non ancora affrontato: `F1.2.1` (PolicyEngine come unico gate: `core/skill_registry.py::
+  execute()` resta un dispatcher senza controllo di policy proprio, i percorsi normali lo
+  proteggono chiamandolo solo dopo una decisione, ma nulla lo impedisce strutturalmente);
+  `F1.2.2`-`F1.2.4`, `F1.2.6`-`F1.2.8`; il resto di `F1.2.5` (retry e sotto-azioni di workflow
+  non ancora passati in rassegna allo stesso modo).
 
 ### F1.3 — Verifica degli effetti e undo
 

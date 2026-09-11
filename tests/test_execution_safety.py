@@ -15,6 +15,7 @@ import unittest
 from pathlib import Path
 
 from core.execution_safety import rollback_effect, verify_effect
+from core.policy_engine import PolicyEngine
 from skills.create_path import CreatePathSkill
 from skills.delete_path import DeletePathSkill
 from skills.move_path import MovePathSkill
@@ -114,6 +115,40 @@ class RollbackRenamePathTests(unittest.TestCase):
         self.assertTrue(original.exists(), "il rollback doveva ripristinare il nome originale")
         self.assertEqual(original.read_text(), "contenuto")
         self.assertFalse(renamed.exists())
+
+
+class RollbackRespectsBlockedIntentsTests(unittest.TestCase):
+    """F1.2.5: un rollback e' la compensazione di un effetto gia' approvato, ma l'intent che
+    esegue davvero (vedi ROLLBACK_COMPENSATING_INTENT in core/execution_safety.py) resta
+    soggetto a blocked_intents - un DELETE_PATH disabilitato in config.json non deve eseguire
+    nemmeno come "annullamento" di un CREATE_PATH."""
+
+    def setUp(self):
+        self.tmp_dir = Path(tempfile.mkdtemp(prefix="jake_execution_safety_"))
+        self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
+        self.registry = RealSkillRegistry()
+
+    def test_rollback_is_refused_when_the_compensating_intent_is_blocked(self):
+        target = self.tmp_dir / "nuovo.txt"
+        create_result = self.registry.execute("CREATE_PATH", {"path": str(target)})
+        self.assertTrue(create_result.success)
+        policy_engine = PolicyEngine(blocked_intents={"DELETE_PATH"})
+
+        rolled_back = rollback_effect(self.registry, "CREATE_PATH", create_result.data, policy_engine=policy_engine)
+
+        self.assertFalse(rolled_back)
+        self.assertTrue(target.exists(), "il file non doveva essere cancellato: DELETE_PATH e' bloccato")
+
+    def test_rollback_still_happens_when_a_different_intent_is_blocked(self):
+        target = self.tmp_dir / "nuovo.txt"
+        create_result = self.registry.execute("CREATE_PATH", {"path": str(target)})
+        self.assertTrue(create_result.success)
+        policy_engine = PolicyEngine(blocked_intents={"OPEN_PATH"})
+
+        rolled_back = rollback_effect(self.registry, "CREATE_PATH", create_result.data, policy_engine=policy_engine)
+
+        self.assertTrue(rolled_back)
+        self.assertFalse(target.exists())
 
 
 class RollbackEdgeCaseTests(unittest.TestCase):

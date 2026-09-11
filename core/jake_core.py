@@ -216,6 +216,16 @@ class JakeCore:
             blocked_intents=config.get("blocked_intents", []) or [],
             always_confirm_intents=config.get("always_confirm_intents", []) or [],
         )
+        # F1.2.5: collegato DOPO la creazione (self.agent/coding_agent/research_agent esistono
+        # gia', self.policy_engine no, quando i tre TaskAgent vengono costruiti sopra) - senza
+        # questo, il rollback di ciascun agente (core/agent.py::TaskAgent._rollback) non saprebbe
+        # mai quali intent l'utente ha bloccato in config.json (vedi core/execution_safety.py::
+        # rollback_effect). Stesso principio del commento qui sopra su RunWorkflowSkill: un
+        # riferimento condiviso, assegnato esplicitamente a ognuno invece di sperare che il
+        # costruttore lo ricevesse gia'.
+        self.agent.policy_engine = self.policy_engine
+        self.coding_agent.policy_engine = self.policy_engine
+        self.research_agent.policy_engine = self.policy_engine
 
         # Jake proattivo (v1.2): di default stampa i promemoria scaduti; chi lancia Jake
         # (CLI, voce, tray, HUD) puo' sostituire questo callback per parlarli o mostrarli.
