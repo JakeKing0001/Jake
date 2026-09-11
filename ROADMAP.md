@@ -1319,6 +1319,23 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
 
   Suite completa dopo questo incremento, e con essa l'intero sweep di reliability iniziato con
   `skills/`: 1876 test, tutti verdi; `ruff check` pulito sull'intero repository.
+- ✅ **Controllo finale su tutto il resto del repository** (`main.py`, `tools/`, `benchmarks/`,
+  `plugins/`): `main.py` e `tools/` avevano gia' copertura da sessioni precedenti. `benchmarks/`
+  e' deliberatamente escluso dalla suite (il proprio docstring lo dice esplicitamente: richiede
+  Ollama/hardware reale in esecuzione, va lanciato a mano) - rispettato, tranne per
+  `benchmarks/_report.py`, le cui tre funzioni di utilita' (`percentile`/`latency_stats`/
+  `save_report`) sono pure e senza alcuna dipendenza da hardware/Ollama, quindi testabili come
+  qualunque altra utility. Aggiunta anche `plugins/example_coin_flip.py` (il plugin di esempio
+  di Skill Forge: nonostante il proprio docstring inviti a cancellarlo, viene caricato per
+  davvero all'avvio come qualunque altro file in `plugins/`, quindi merita la stessa copertura
+  minima di una skill vera). Nessun bug trovato in nessuno dei due. Aggiunti
+  `tests/test_benchmarks_report.py` (6 test) e `tests/test_example_coin_flip_plugin.py` (3 test).
+
+  Con questo, l'intero repository ha una suite di test dedicata per ogni file di logica
+  applicativa (esclusi solo `core/voice/rvc_compat.py` e `rvc_server.py`, fuori portata in
+  questo venv perche' richiedono l'interprete isolato `.venv-rvc`, e i benchmark veri e propri,
+  esclusi per design dal progetto stesso). Suite finale: 1885 test, tutti verdi; `ruff check`
+  pulito sull'intero repository.
 
 ## F2 — Voice Natural 3.0
 
