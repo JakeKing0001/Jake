@@ -39,8 +39,7 @@ class FakeMemoryStore:
         self.memories = {"password wifi": "abc123", "compleanno mamma": "5 marzo"}
 
     def forget(self, key: str) -> bool:
-        removed = self.memories.pop(key, None) is not None
-        return removed
+        return self.memories.pop(key, None) is not None
 
 
 class FakeRegistry:

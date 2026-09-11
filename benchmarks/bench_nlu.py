@@ -85,14 +85,13 @@ def run(sample_size: int = 80, seed: int = 42) -> dict:
         })
 
     n = len(rows)
-    report = {
+    return {
         "sample_size": len(sample), "evaluated": n, "errors": errors,
         "accuracy": round(correct / n, 3) if n else None,
         "latency": latency_stats(latencies_ms),
         "routes": dict(route_counts),
         "misclassified": [row for row in rows if not row["correct"]],
     }
-    return report
 
 
 def main():

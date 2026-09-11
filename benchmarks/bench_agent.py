@@ -55,11 +55,10 @@ def run(tasks: list[str] = None) -> dict:
                 "error": outcome.error, "asked_question": outcome.question,
                 "final_answer": outcome.final_answer, "latency_ms": round(latency_ms, 1),
             })
-        report = {
+        return {
             "tasks": len(rows), "completed": sum(1 for row in rows if row["completed"]),
             "latency": latency_stats(latencies_ms), "runs": rows,
         }
-        return report
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 

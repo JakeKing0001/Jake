@@ -47,11 +47,10 @@ class FakeJakeCore:
 
 
 def _session(text: str) -> WakeWordSession:
-    session = WakeWordSession(
+    return WakeWordSession(
         FakeJakeCore(), FakeSttProvider(text), FakeTtsProvider(),
         vad_listener=SimpleNamespace(on_level=None, muted=False, SAMPLE_RATE=16000),
     )
-    return session
 
 
 class MatchWakeWordTests(unittest.TestCase):

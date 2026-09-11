@@ -120,8 +120,8 @@ class OllamaProvider(IntentProvider):
         capabilities = capabilities if capabilities is not None else self.registry.list_capabilities()
         lines = [
             "Sei il parser degli intent di Jake, un assistente vocale italiano che controlla un PC Windows.",
-            "Il testo arriva dal riconoscimento vocale: puo' contenere piccoli errori di trascrizione, "
-            "interpreta il senso piu' probabile.",
+            ("Il testo arriva dal riconoscimento vocale: puo' contenere piccoli errori di trascrizione, "
+            "interpreta il senso piu' probabile."),
             "Rispondi esclusivamente con JSON valido secondo lo schema fornito: {\"intent\": ..., \"parameters\": {...}}.",
         ]
         context = self.context_provider() if self.context_provider else None
@@ -169,18 +169,18 @@ class OllamaProvider(IntentProvider):
                 )
         lines.extend([
             "Regole:",
-            "- Usa UNKNOWN se nessuna capacita' e' appropriata o se manca un valore obbligatorio che "
-            "l'utente non ha detto: non inventare MAI valori (percorsi, nomi, citta', testo).",
-            "- Copia i valori letterali cosi' come li dice l'utente (percorsi anche 'parlati' come "
-            "'desktop\\\\note.txt' o 'download'), senza correggerli o tradurli.",
-            "- Tempi: 'tra 10 minuti' -> in_minutes=10, 'tra 2 ore' -> in_minutes=120, 'alle 9' -> at_time=\"09:00\", "
-            "'alle 18:30' -> at_time=\"18:30\".",
-            "- Se la richiesta descrive piu' azioni distinte in sequenza (es. 'e poi', 'quindi') e "
+            ("- Usa UNKNOWN se nessuna capacita' e' appropriata o se manca un valore obbligatorio che "
+            "l'utente non ha detto: non inventare MAI valori (percorsi, nomi, citta', testo)."),
+            ("- Copia i valori letterali cosi' come li dice l'utente (percorsi anche 'parlati' come "
+            "'desktop\\\\note.txt' o 'download'), senza correggerli o tradurli."),
+            ("- Tempi: 'tra 10 minuti' -> in_minutes=10, 'tra 2 ore' -> in_minutes=120, 'alle 9' -> at_time=\"09:00\", "
+            "'alle 18:30' -> at_time=\"18:30\"."),
+            ("- Se la richiesta descrive piu' azioni distinte in sequenza (es. 'e poi', 'quindi') e "
             "nessuna capacita' la copre tutta, usa UNKNOWN: non eseguirne solo una parte. Eccezione: "
             "le capacita' con un parametro pensato per una descrizione libera (es. SAVE_WORKFLOW, "
-            "LEARN_COMMAND), dove l'intera richiesta va in quel parametro.",
-            "- Saluti, ringraziamenti, commenti senza una richiesta: CHITCHAT. Domande di conoscenza "
-            "generale o richieste di aiuto testuale: ASK_QUESTION.",
+            "LEARN_COMMAND), dove l'intera richiesta va in quel parametro."),
+            ("- Saluti, ringraziamenti, commenti senza una richiesta: CHITCHAT. Domande di conoscenza "
+            "generale o richieste di aiuto testuale: ASK_QUESTION."),
             "- Non inventare intent o parametri e non aggiungere spiegazioni o Markdown.",
         ])
         prompt = "\n".join(lines)

@@ -143,6 +143,7 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/events":
             return self._stream_events()
         self._json_response(404, {"error": "not_found"})
+        return None
 
     def do_POST(self):
         if not self._is_authorized():
@@ -161,6 +162,7 @@ class _Handler(BaseHTTPRequestHandler):
             device_id = self.path.split("/")[2]
             return self._handle_release(device_id)
         self._json_response(404, {"error": "not_found"})
+        return None
 
     # ---- endpoint -----------------------------------------------------------------------
 
@@ -176,6 +178,7 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json_response(400, {"error": "missing_text"})
         response = self.companion.command_handler(text)
         self._json_response(200, {"response": response})
+        return None
 
     def _handle_claim(self, device_id: str):
         body = self._read_json_body()

@@ -159,15 +159,15 @@ class JakeCore:
         # elenco di strumenti fisso e un prompt diverso per i domini coding/ricerca, invece del
         # recupero semantico generico su tutte le ~200 capacita'. JakeOrchestrator sceglie quale
         # dei tre usare in base alla richiesta (vedi core/orchestrator.py).
-        agent_kwargs = dict(
-            model_provider=lambda: self.model,
-            format_result=lambda intent, result: format_skill_result(intent, result, self.skill_registry),
-            logger=self.logger,
-            context_provider=lambda: self._agent_context(),
-            executor=lambda intent, parameters: self._resolve_and_execute(Command(intent, parameters))[1],
-            session_recorder=self.session_recorder, action_ledger=self.action_ledger,
-            kill_switch=self.kill_switch,
-        )
+        agent_kwargs = {
+            "model_provider": lambda: self.model,
+            "format_result": lambda intent, result: format_skill_result(intent, result, self.skill_registry),
+            "logger": self.logger,
+            "context_provider": lambda: self._agent_context(),
+            "executor": lambda intent, parameters: self._resolve_and_execute(Command(intent, parameters))[1],
+            "session_recorder": self.session_recorder, "action_ledger": self.action_ledger,
+            "kill_switch": self.kill_switch,
+        }
         self.coding_agent = TaskAgent(
             self.skill_registry, self.retriever, self.ollama,
             fixed_tools=list(orchestrator.CODING_TOOLS), persona_line=orchestrator.CODING_PERSONA,

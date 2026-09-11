@@ -126,7 +126,7 @@ class ExampleStore:
         # i piu' vecchi (quelli insegnati o corretti esplicitamente restano sempre).
         auto = [e for e in self._learned if e.source == "auto"]
         if len(auto) > self.MAX_AUTO_EXAMPLES:
-            to_drop = set(id(e) for e in auto[: len(auto) - self.MAX_AUTO_EXAMPLES])
+            to_drop = {id(e) for e in auto[: len(auto) - self.MAX_AUTO_EXAMPLES]}
             self._learned = [e for e in self._learned if id(e) not in to_drop]
         self._rebuild_index()
         self._save_learned()

@@ -86,7 +86,7 @@ class FuzzyMatchingAgainstDiscoveredAppsTests(unittest.TestCase):
     def _resolver_with_apps(self, applications: dict, sources: dict = None, display_names: dict = None) -> AppResolver:
         resolver = _resolver()
         resolver._applications = dict(applications)
-        resolver._sources = dict(sources or {name: "start_menu" for name in applications})
+        resolver._sources = dict(sources or dict.fromkeys(applications, "start_menu"))
         resolver._display_names = dict(display_names or {name: name for name in applications})
         return resolver
 
