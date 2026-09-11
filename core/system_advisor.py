@@ -29,7 +29,7 @@ DOWNLOADS_MAX_SCANNED = 2000
 class SystemAdvisor:
     def __init__(
         self, on_advisory=None, interval_seconds: float = 300, enabled: bool = True, todo_manager=None,
-        downloads_dir: Path = None, memory_manager=None,
+        downloads_dir: Path | None = None, memory_manager=None,
     ):
         self.on_advisory = on_advisory
         self.interval_seconds = interval_seconds
@@ -43,7 +43,7 @@ class SystemAdvisor:
         # remember.py) smetteva di COMPARIRE in recall() alla scadenza ma restava per sempre sul
         # disco, mai davvero rimosso.
         self.memory_manager = memory_manager
-        self._thread = None
+        self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._logger = get_logger()
         self._battery_warned = False

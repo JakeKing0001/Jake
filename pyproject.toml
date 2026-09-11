@@ -60,6 +60,14 @@ files = [
     "core/vision_provider.py",
     "core/planner_provider.py",
     "core/response_formatter.py",
+    "core/scheduler.py",
+    "core/trigger_scheduler.py",
+    "core/system_advisor.py",
+    "core/skill_forge.py",
+    "core/skill_catalog.py",
+    "core/version.py",
+    "core/intent_provider.py",
+    "core/ollama_client.py",
 ]
 ignore_missing_imports = true
 no_implicit_optional = true
