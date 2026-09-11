@@ -1435,6 +1435,22 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
   file della lista.
 
   Suite completa: 1943 test, tutti verdi; `ruff check` e `mypy` puliti sull'intero repository.
+- ✅ **Esteso ancora il type-check selettivo** a `core/memory_manager.py`,
+  `core/learning_manager.py`, `core/nest_client.py`, `core/reminder_manager.py`,
+  `core/todo_manager.py`, `core/workflow_manager.py`, `core/trigger_manager.py`,
+  `core/planner.py` (35 file in totale). Trovato un altro caso della stessa famiglia di
+  `execute_with_retry`: `TodoManager.add`/`ReminderManager.add` erano annotati per restituire
+  sempre un `int` vero, ma usano `cursor.lastrowid` di sqlite3, che e' realmente `int | None` per
+  contratto DB-API - qui pero', a differenza di `execute_with_retry`, l'id restituito non viene
+  mai letto da nessuno dei quattro punti che chiamano questi due metodi (verificato con un grep
+  mirato), quindi la correzione onesta e' stata allargare il tipo dichiarato a `int | None`
+  invece di inventare un ripiego per un valore che oggi nessuno consuma. Il resto erano `Optional`
+  impliciti come nei batch precedenti (incluso `Command.parameters` che continua a propagarsi:
+  `LearningManager._parameters_grounded` e `MemoryManager._find_duplicate_key` gestivano gia'
+  correttamente `None` a runtime ma non lo dichiaravano). `mypy` ora pulito su tutti e 35 i file
+  della lista.
+
+  Suite completa: 1943 test, tutti verdi; `ruff check` e `mypy` puliti sull'intero repository.
 
 ## F2 — Voice Natural 3.0
 
