@@ -105,6 +105,7 @@ class ActionReceiptTests(unittest.TestCase):
         receipt = ActionReceipt(
             action_id="a1", trace_id="t1", ts=123.0, intent="OPEN_APP", requested_by="user",
             risk_decision="local_reversible", authorization="none", result="success",
+            idempotency_key="k1",
         )
         import json
         record = json.loads(receipt.to_json())
@@ -125,6 +126,7 @@ class ActionLedgerTestCase(unittest.TestCase):
         defaults = {
             "action_id": "a1", "trace_id": "t1", "ts": 123.0, "intent": "OPEN_APP", "requested_by": "user",
             "risk_decision": "local_reversible", "authorization": "none", "result": "success",
+            "idempotency_key": "k1",
         }
         defaults.update(overrides)
         return ActionReceipt(**defaults)
