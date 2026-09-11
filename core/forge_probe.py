@@ -13,14 +13,14 @@ import json
 import sys
 
 
-def main(input_path: str, output_path: str, project_root: str = None) -> None:
+def main(input_path: str, output_path: str, project_root: str | None = None) -> None:
     if project_root:
         sys.path.insert(0, project_root)
-    result = {"ok": False, "error": None, "registered": []}
+    result: dict[str, object] = {"ok": False, "error": None, "registered": []}
     try:
         with open(input_path, "r", encoding="utf-8") as handle:
             code = handle.read()
-        spec_module = {}
+        spec_module: dict = {}
         exec(compile(code, "forge_probe_plugin.py", "exec"), spec_module)
         registered = {}
 

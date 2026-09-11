@@ -63,9 +63,9 @@ class ProbeOutcome:
     ok/error restano ai valori di default)."""
 
     ok: bool = False
-    error: str = None
+    error: str | None = None
     timed_out: bool = False
-    launch_error: str = None
+    launch_error: str | None = None
     integrity_restricted: bool = False
 
 
@@ -103,7 +103,7 @@ def _make_file_low_writable(path: str) -> None:
 
 
 def run_probe_with_reduced_privileges(
-    probe_path: Path, input_text: str, cwd: str, timeout: float = 20, extra_args: list = None,
+    probe_path: Path, input_text: str, cwd: str, timeout: float = 20, extra_args: list | None = None,
 ) -> ProbeOutcome:
     """Esegue `python probe_path <input_file> <output_file> [extra_args...]` (probe_path deve
     leggere il primo argomento e scrivere un JSON {"ok": bool, "error": str|None, ...} nel

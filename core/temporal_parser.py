@@ -14,7 +14,7 @@ iniettabile, pensata per un singolo giorno puntuale, es. GET_DAY_OF_WEEK), qui s
 INTERVALLO con un 'adesso' iniettabile per i test - due bisogni diversi, non la stessa funzione
 con un parametro in piu'."""
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone, tzinfo
 
 _SINGLE_DAY_OFFSETS = {
     "oggi": 0, "stamattina": 0, "stasera": 0, "stanotte": 0, "questa mattina": 0,
@@ -26,7 +26,7 @@ _RELATIVE_DAYS_RE = re.compile(r"^(?:negli |gli )?ultim[ei] (\d+) giorni$")
 _RELATIVE_HOURS_RE = re.compile(r"^(?:nell[e'] |le )?ultim[ei] (\d+) or[ae]$")
 
 
-def _day_bounds(day: date, tz: timezone) -> tuple[str, str]:
+def _day_bounds(day: date, tz: tzinfo) -> tuple[str, str]:
     """(inizio, fine) del giorno indicato, come intervallo mezzo-aperto [00:00, 00:00 del
     giorno dopo) - coerente con recall(since=..., until=...) che confronta stringhe ISO."""
     start = datetime(day.year, day.month, day.day, tzinfo=tz)
@@ -49,7 +49,7 @@ def _add_months(day: date, delta: int) -> date:
     return date(year, month, 1)
 
 
-def parse_relative_range(text: str, now: datetime = None) -> tuple[str, str] | None:
+def parse_relative_range(text: str, now: datetime | None = None) -> tuple[str, str] | None:
     """Restituisce (since, until) ISO 8601 per un'espressione temporale relativa in italiano, o
     None se il testo non corrisponde a nessuna espressione riconosciuta - MAI un'eccezione: chi
     chiama tratta None come 'nessun vincolo temporale riconosciuto', non come un errore.

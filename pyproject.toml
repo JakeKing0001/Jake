@@ -68,6 +68,22 @@ files = [
     "core/version.py",
     "core/intent_provider.py",
     "core/ollama_client.py",
+    "core/app_resolver.py",
+    "core/browser_history.py",
+    "core/command_safety.py",
+    "core/context_summarizer.py",
+    "core/filesystem_policy.py",
+    "core/forge_probe.py",
+    "core/home_assistant_client.py",
+    "core/intent_provider_base.py",
+    "core/nest_search.py",
+    "core/network.py",
+    "core/plugin_loader.py",
+    "core/process_sandbox.py",
+    "core/secrets_vault.py",
+    "core/temporal_parser.py",
+    "core/win_dpi.py",
+    "core/windows_hello.py",
 ]
 ignore_missing_imports = true
 no_implicit_optional = true
