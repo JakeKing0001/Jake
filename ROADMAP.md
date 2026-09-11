@@ -1558,6 +1558,26 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
 
   Suite completa: 1943 test, tutti verdi; `ruff check` (ora con `B`) e `mypy` puliti sull'intero
   repository.
+- ✅ **Ampliato ancora `ruff` con `ISC` (implicit string concat), `C4` (comprehension) e `RET`
+  (return statement)**. `ISC004` ha trovato 12 casi (tutti in `core/agent.py`/
+  `core/nlu/llm_classifier.py`, i due prompt di sistema costruiti come liste di istruzioni):
+  nessuno era davvero una virgola dimenticata (ogni voce della lista termina gia' correttamente
+  con la sua virgola), solo stringhe lunghe spezzate su piu' righe dentro un singolo elemento
+  della lista senza parentesi - corrette con `--unsafe-fixes` (verificato con `git diff` che il
+  testo dei prompt non fosse cambiato di una virgola, solo le parentesi aggiunte). `RET503` ha
+  trovato tre funzioni in `core/companion_server.py::_Handler` (`do_GET`/`do_POST`/
+  `_handle_command`) che mescolavano `return self._json_response(...)` con un'ultima chiamata
+  senza `return`: `_json_response` non ha mai restituito nulla (scrive sul socket), quindi e' solo
+  un'incoerenza di stile mai un bug (il framework `http.server` non guarda comunque il valore di
+  ritorno di questi handler) - reso esplicito per coerenza. Il resto (`RET504`, `C408`, `C401`,
+  `C420`) erano assegnazioni/costruttori superflui, tutti behavior-preserving (verificato con
+  `git diff` riga per riga). **Deliberatamente NON adottati** `A` (`format` come nome di
+  parametro rispecchia il campo JSON reale dell'API di Ollama - rinominarlo ridurrebbe la
+  chiarezza senza alcun beneficio di sicurezza) e `PERF` (le 4 diagnosi rimaste sono preferenze
+  di stile loop-vs-comprehension senza valore di correttezza).
+
+  Suite completa: 1943 test, tutti verdi; `ruff check` (ora con `B`/`ISC`/`C4`/`RET`) e `mypy`
+  puliti sull'intero repository.
 
 ## F2 — Voice Natural 3.0
 
