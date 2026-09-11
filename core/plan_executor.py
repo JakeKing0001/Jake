@@ -23,7 +23,7 @@ class StepOutcome:
 @dataclass
 class PlanOutcome:
     completed: list[StepOutcome] = field(default_factory=list)
-    stopped_step: StepOutcome = None
+    stopped_step: StepOutcome | None = None
     rolled_back: list[StepOutcome] = field(default_factory=list)
 
     @property
@@ -54,7 +54,7 @@ class PlanExecutor:
 
     def execute(
         self, plan, policy_engine=None,
-        trace_id: str = None, private: bool = False, model: str = None, requested_by: str = "user",
+        trace_id: str | None = None, private: bool = False, model: str | None = None, requested_by: str = "user",
         dry_run: bool = False,
     ) -> PlanOutcome:
         """policy_engine (core/policy_engine.py::PolicyEngine) e' opzionale (default None =
@@ -181,7 +181,7 @@ class PlanExecutor:
     _NOT_A_FAILURE = {"confirmation_required", "auth_required"}
 
     def _log_step(
-        self, trace_id: str, private: bool, model: str, requested_by: str, started: float, intent: str,
+        self, trace_id: str, private: bool, model: str | None, requested_by: str, started: float, intent: str,
         parameters: dict, *, result: str, verified: bool | None,
     ) -> None:
         """Stesso formato e stesso trace_id condiviso di TaskAgent._log_step (core/agent.py):
@@ -212,7 +212,7 @@ class PlanExecutor:
                 risk_decision=risk, private=private,
             )
 
-    def _execute_step(self, step, parameters: dict = None) -> StepOutcome:
+    def _execute_step(self, step, parameters: dict | None = None) -> StepOutcome:
         """parameters e' quello che va davvero eseguito (sanificato da execute(), vedi sopra);
         step.parameters resta quello originale del piano solo per riferimento/descrizione -
         StepOutcome.step lo conserva per format_plan_outcome, non per essere rieseguito."""

@@ -30,12 +30,12 @@ class SkillRegistry:
 
     def __init__(
         self,
-        memory_manager: MemoryManager = None,
-        conversation_state: ConversationStateManager = None,
-        nest_client: NestClient = None,
-        config: Config = None,
-        embedding_provider: EmbeddingProvider = None,
-        reminder_manager: ReminderManager = None,
+        memory_manager: MemoryManager | None = None,
+        conversation_state: ConversationStateManager | None = None,
+        nest_client: NestClient | None = None,
+        config: Config | None = None,
+        embedding_provider: EmbeddingProvider | None = None,
+        reminder_manager: ReminderManager | None = None,
         logger=None,
     ):
         self.logger = logger or get_logger()
@@ -160,7 +160,7 @@ class SkillRegistry:
         except Exception:
             return []
 
-    def execute(self, intent: str, parameters: dict = None):
+    def execute(self, intent: str, parameters: dict | None = None):
         skill = self.get_skill(intent)
         if skill is None:
             return None

@@ -23,6 +23,13 @@ files = [
     "core/risk.py",
     "core/logger.py",
     "core/jake_core.py",
+    "core/skill_registry.py",
+    "core/router.py",
+    "core/policy_engine.py",
+    "core/plan_executor.py",
+    "core/agent.py",
+    "core/orchestrator.py",
+    "core/fallbacks.py",
 ]
 ignore_missing_imports = true
 no_implicit_optional = true
