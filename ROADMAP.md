@@ -1508,6 +1508,28 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
     reale, corretta a `tzinfo`.
 
   Suite completa: 1943 test, tutti verdi; `ruff check` e `mypy` puliti sull'intero repository.
+- ✅ **Esteso il type-check selettivo a `core/nlu/`** (73 file in totale): a differenza di
+  `core/gui/`/`core/voice/`, questa sottocartella non tocca PySide6/win32/faster-whisper (solo
+  numpy, che ha stub buoni), quindi era un candidato pulito nonostante il commento originale di
+  `[tool.mypy]` parlasse di "core/" in generale. Copre `core/nlu/chitchat.py`,
+  `core/nlu/examples.py`, `core/nlu/index.py`, `core/nlu/llm_classifier.py` (il classificatore
+  di intent sul percorso di OGNI comando vocale), `core/nlu/normalizer.py`,
+  `core/nlu/retriever.py`. Tre falsi positivi genuini (nessun bug a runtime, verificato leggendo
+  il flusso con attenzione) risolti con un `assert` esplicito invece di un cast silenzioso o un
+  ripiego che avrebbe nascosto una futura violazione:
+  - `chitchat.py::reply` - `_REPLIES["greeting"]` e' l'unica voce a `None`, ma quel ramo e' gia'
+    escluso da un controllo precedente prima di indicizzare il dizionario.
+  - `normalizer.py::_fix_app_names` - `best_name`/`best_span` sono sempre assegnati insieme
+    nella stessa riga dentro il ciclo (mai l'uno senza l'altro), ma sono variabili separate: mypy
+    non puo' tracciare la correlazione tra le due.
+  - `WHISPER_FIXES` non era annotato e conteneva un mix di sostituzioni a stringa fissa e a
+    funzione (`re.sub` accetta entrambe): annotato con l'unione corretta invece di restringerlo
+    a un solo caso.
+  Il resto erano `Optional` impliciti/mancanza di annotazione su liste/dizionari, come nei batch
+  precedenti. Restano fuori solo `core/vision/`, `core/voice/`, `core/gui/` (dipendenze con stub
+  incompleti/assenti). `mypy` ora pulito su tutti e 73 i file della lista.
+
+  Suite completa: 1943 test, tutti verdi; `ruff check` e `mypy` puliti sull'intero repository.
 
 ## F2 — Voice Natural 3.0
 
