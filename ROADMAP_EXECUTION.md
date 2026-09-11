@@ -203,6 +203,79 @@ Schema e versionati. Nessuna fase deve introdurre una variante privata dello ste
 | Onda 6 — Evoluzione controllata | Skill e agenti aggiornabili senza perdere sicurezza | F8 | Ecosystem gate |
 | Onda 7 — Moonshot | AR, robotica, digital twin e modello personale | M | Gate dedicati |
 
+### 5.1 — Registro owner e stato dei pacchetti
+
+Gli owner sono ruoli logici, non persone. Questo registro copre ogni pacchetto e viene aggiornato
+ai gate; le note dentro i singoli pacchetti conservano l'evidenza più recente e possono
+distinguere sotto-passi già verificati da ciò che manca.
+
+| Pacchetto | Owner logico | Stato |
+|---|---|---|
+| `F0.1` | Platform Reliability | `VERIFY` |
+| `F0.2` | Release Engineering | `BLOCKED` |
+| `F0.3` | Architecture | `VERIFY` |
+| `F0.4` | Quality Engineering | `BLOCKED` |
+| `F0.5` | Performance Engineering | `BLOCKED` |
+| `F0.6` | Release Engineering | `DOING` |
+| `F1.1` | Trust Core | `DOING` |
+| `F1.2` | Security Architecture | `DOING` |
+| `F1.3` | Execution Reliability | `DOING` |
+| `F1.4` | Identity and Secrets | `DOING` |
+| `F1.5` | Application Security | `DOING` |
+| `F1.6` | Sandbox Runtime | `DOING` |
+| `F1.7` | Observability | `DOING` |
+| `F1.8` | Runtime Reliability | `DOING` |
+| `F2.1` | Voice Quality | `BLOCKED` |
+| `F2.2` | Speech Runtime | `BLOCKED` |
+| `F2.3` | Voice Quality | `BLOCKED` |
+| `F2.4` | Audio Systems | `BLOCKED` |
+| `F2.5` | Speech Runtime | `BLOCKED` |
+| `F2.6` | Conversation Runtime | `BLOCKED` |
+| `F2.7` | Identity and Voice | `BLOCKED` |
+| `F3.1` | Computer Use Quality | `BLOCKED` |
+| `F3.2` | Windows Automation | `BLOCKED` |
+| `F3.3` | Windows Automation | `BLOCKED` |
+| `F3.4` | Execution Runtime | `BLOCKED` |
+| `F3.5` | Computer Use Reliability | `BLOCKED` |
+| `F3.6` | Browser Automation | `BLOCKED` |
+| `F3.7` | Application Adapters | `BLOCKED` |
+| `F3.8` | Demonstration Learning | `BLOCKED` |
+| `F4.1` | Protocol Architecture | `VERIFY` |
+| `F4.2` | Native HUD | `VERIFY` |
+| `F4.3` | Native HUD | `BLOCKED` |
+| `F4.4` | Interaction Design | `BLOCKED` |
+| `F4.5` | Interaction Design | `BLOCKED` |
+| `F4.6` | Trust UX | `BLOCKED` |
+| `F4.7` | Accessibility | `BLOCKED` |
+| `F4.8` | Release Engineering | `BLOCKED` |
+| `F5.1` | Memory Platform | `DOING` |
+| `F5.2` | Memory Platform | `DOING` |
+| `F5.3` | Knowledge Model | `DOING` |
+| `F5.4` | Memory Reliability | `DOING` |
+| `F5.5` | Retrieval Quality | `DOING` |
+| `F5.6` | Context Runtime | `DOING` |
+| `F5.7` | Privacy Engineering | `BACKLOG` |
+| `F6.1` | Proactivity Platform | `DOING` |
+| `F6.2` | Proactivity Quality | `DOING` |
+| `F6.3` | Notification UX | `BACKLOG` |
+| `F6.4` | Goal Runtime | `DOING` |
+| `F6.5` | Automation Runtime | `DOING` |
+| `F6.6` | Meeting Experience | `BACKLOG` |
+| `F6.7` | Runtime Reliability | `DOING` |
+| `F7.1` | Companion Security | `DOING` |
+| `F7.2` | Mobile Companion | `BACKLOG` |
+| `F7.3` | Voice Devices | `BACKLOG` |
+| `F7.4` | Presence Runtime | `DOING` |
+| `F7.5` | Home Integration | `DOING` |
+| `F7.6` | Sync and Crypto | `BACKLOG` |
+| `F7.7` | Edge Devices | `BACKLOG` |
+| `F8.1` | Skill Platform | `DOING` |
+| `F8.2` | Supply-chain Security | `BACKLOG` |
+| `F8.3` | Skill Forge | `DOING` |
+| `F8.4` | Model Runtime | `BACKLOG` |
+| `F8.5` | Agent Runtime | `DOING` |
+| `F8.6` | Release Safety | `BACKLOG` |
+
 ## 6. F0 — Baseline verde e release riproducibile
 
 - Stato: `DOING`
@@ -261,14 +334,25 @@ Criterio di uscita: HEAD locale coincide con un commit remoto i cui job Python e
 
 Dipende da: F0.1.
 
-- Stato: `DOING`; `F0.3.1`, `F0.3.3` e `F0.3.4` conclusi localmente; `F0.3.2` attende il gate,
-  `F0.3.5`–`F0.3.6` sono i prossimi passi.
+- Stato: `DOING`; `F0.3.1`, `F0.3.3`, `F0.3.4`, `F0.3.5` e `F0.3.6` conclusi localmente; `F0.3.2`
+  resta una regola di processo permanente (non un passo da chiudere una volta sola) e attende
+  comunque il gate G0 prima di essere dichiarata rispettata su una release vera.
 - Fonte canonica: `config/release.json` contiene versione prodotto e protocollo. Python, CLI,
   risposta identitaria, endpoint `/status`, eventi HUD e CMake/HUD nativo la consumano; il
   changelog e' verificato da contract test contro la stessa versione.
 - Prova 11/09/2026: 23 contract test mirati e 1.269 test completi verdi; ruff, mypy selettivo e
   compileall verdi; CMake ha configurato dal manifest e la build C++ e' passata dentro
   l'ambiente MSVC. `CHANGELOG.md` usa Added/Changed/Fixed/Security.
+- Prova F0.3.5/F0.3.6 — 11/09/2026: 5 ADR creati in `docs/adr/` (UIA, sandbox plugin, trasporto
+  companion, cifratura, storage memoria) con indice `docs/adr/README.md`; ognuno dichiara stato,
+  data, contesto, decisione, alternative, conseguenze, piano di migrazione e criterio di
+  revisione. Il registro owner/stato per ogni pacchetto vive in `### 5.1` di questo stesso file.
+  Verificato con due nuove suite dedicate, non solo a occhio: `tests/test_architecture_decisions.py`
+  (ogni ADR atteso esiste, e' indicizzato e contiene tutte le sezioni richieste) e
+  `tests/test_roadmap_structure.py` (ogni intestazione `### F*.*` del piano ha esattamente una
+  riga nel registro, con owner non vuoto e stato tra quelli ammessi) - un pacchetto aggiunto in
+  futuro senza owner/stato o un ADR incompleto fa fallire la suite invece di passare inosservato.
+  Suite completa rieseguita dopo l'aggiunta: 1.272/1.272 verdi; ruff pulito.
 
 1. `F0.3.1` Rendere questo file il piano attivo e `ROADMAP.md` lo storico/audit.
 2. `F0.3.2` Aggiornare la tabella “stato corrente” a ogni gate, non a ogni micro-commit.
@@ -1577,8 +1661,14 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Il gate remoto resta la prima azione necessaria per chiudere `F0.1`/`F0.2`, ma il push e le
-impostazioni GitHub sono esplicitamente esclusi dall'utente. La prossima attività locale e'
-`F0.3.5`: creare gli ADR iniziali per UIA, sandbox, trasporto, cifratura e memoria, quindi
-`F0.3.6` con owner logico e stato di ogni pacchetto. Non dichiarare G0 superato e non iniziare
-nuove feature.
+Aggiornato 11/09/2026: `F0.3.5` (ADR per UIA, sandbox, trasporto, cifratura, memoria) e `F0.3.6`
+(registro owner/stato per pacchetto, sezione `5.1`) sono conclusi e verificati da due suite
+dedicate (`tests/test_architecture_decisions.py`, `tests/test_roadmap_structure.py`); suite
+completa 1.272/1.272, ruff pulito.
+
+Con questo, ogni passo di F0 eseguibile SENZA toccare il remoto e' esaurito: `F0.2` (allineare
+CI) e la parte restante di `F0.6` (canale/installer) dipendono da osservare job reali su GitHub,
+e `F0.4`/`F0.5` dipendono da `F0.1` pienamente `DONE`, che a sua volta attende lo stesso gate CI.
+Il gate remoto resta quindi l'unica azione che sbloccherebbe il resto di F0, ma il push e le
+impostazioni GitHub restano esplicitamente esclusi dall'utente finche' non lo richiede lui
+stesso. Non dichiarare G0 superato e non iniziare nuove feature fuori da F0 nel frattempo.

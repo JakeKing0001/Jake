@@ -10,6 +10,11 @@ restano nell'audit storico `ROADMAP.md`.
 
 - Diagnostica CI persistente per ogni versione Python.
 - Test di fault deterministici per la scansione delle directory nel `PATH`.
+- Cinque Architecture Decision Record iniziali (`docs/adr/`): adapter Windows UI Automation,
+  sandbox runtime dei plugin, trasporto HUD/companion, cifratura dei dati sensibili, storage
+  della memoria personale.
+- Registro owner logico e stato per ogni pacchetto della roadmap esecutiva (`ROADMAP_EXECUTION.md`,
+  sezione 5.1), verificato da `tests/test_roadmap_structure.py`.
 
 ### Changed
 
