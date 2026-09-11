@@ -83,9 +83,13 @@ class SemanticIndex:
         for start in range(0, len(missing), self.EMBED_BATCH):
             batch = missing[start:start + self.EMBED_BATCH]
             vectors = self.embedder(batch)
-            if vectors is None:
+            # F1: niente zip(strict=True) qui - una lunghezza diversa da un embedder che viola
+            # il contratto (OllamaClient.embed() la rispetta gia', ma e' un parametro iniettabile)
+            # deve degradare a "embeddings non disponibili" come il resto del modulo, non far
+            # esplodere build()/refresh() con un ValueError incatturato fino a JakeCore.__init__.
+            if vectors is None or len(vectors) != len(batch):
                 return False
-            for text, vector in zip(batch, vectors):
+            for text, vector in zip(batch, vectors, strict=True):
                 self._vectors[self._digest(text)] = vector
             self._dirty_cache = True
         return True
@@ -175,7 +179,7 @@ class SemanticIndex:
                     top = np.argsort(-scores)[:k]
                     return [(self._keys[i], float(scores[i])) for i in top]
             # fallback lessicale
-            scored = [(key, lexical_similarity(query, text)) for key, text in zip(self._keys, self._texts)]
+            scored = [(key, lexical_similarity(query, text)) for key, text in zip(self._keys, self._texts, strict=True)]
             scored.sort(key=lambda item: item[1], reverse=True)
             return scored[:k]
 
