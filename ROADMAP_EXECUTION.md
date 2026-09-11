@@ -307,7 +307,8 @@ Criterio di uscita: 20/20 suite verdi su Python 3.12 locale e job 3.11/3.12 verd
 
 Dipende da: F0.1.
 
-- Stato: `BLOCKED` sul remoto; `F0.2.1`–`F0.2.3` locali conclusi, `F0.2.7` in `VERIFY`.
+- Stato: `BLOCKED` sul remoto; `F0.2.1`–`F0.2.3` locali conclusi, `F0.2.7` corretto
+  localmente e in `VERIFY` su una nuova esecuzione remota.
 - Verifica locale 11/09/2026: il commit F0.1 e' atomico e la storia condivisa non e' stata
   riscritta; `git ls-files` non contiene log, database, token, registrazioni, modelli, binari o
   build artifact; il lock con hash si installa; ruff, mypy, compileall, 1.262 test, smoke CLI,
@@ -315,8 +316,15 @@ Dipende da: F0.1.
 - Diagnostica CI: il job Python conserva `unittest.log` e `summary.txt` con commit, versione
   Python, durata ed exit code tramite `actions/upload-artifact@v4` e `if: always()`; verificati
   localmente sia il log della suite sia la propagazione di un exit code di fallimento.
+- Verifica remota 11/09/2026, run `34614112195`: installazione, ruff, mypy, compileall e suite
+  Python sono verdi sia su 3.11 sia su 3.12; build e smoke HUD sono verdi. I due job Python sono
+  risultati rossi soltanto perche' `upload-artifact@v4` esclude per default la directory nascosta
+  `.ci-artifacts/`, saltando di conseguenza lo smoke CLI. La correzione locale imposta
+  `include-hidden-files: true` ed e' protetta da `tests/test_ci_workflow.py`; baseline successiva:
+  1.944/1.944 test, ruff, mypy su 75 file e compileall verdi.
 - Blocco esplicito: `F0.2.4` e `F0.2.6` modificano GitHub; su richiesta dell'utente non viene
-  eseguito alcun push né cambiata la protezione di `master`. `F0.2.5` attende quindi una CI reale.
+  eseguito alcun push né cambiata la protezione di `master`. La correzione attende quindi una
+  pubblicazione e una nuova CI reale.
 
 1. `F0.2.1` Raggruppare i commit locali in una sequenza comprensibile senza riscrivere storia
    già condivisa.
@@ -1661,14 +1669,14 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 11/09/2026: `F0.3.5` (ADR per UIA, sandbox, trasporto, cifratura, memoria) e `F0.3.6`
-(registro owner/stato per pacchetto, sezione `5.1`) sono conclusi e verificati da due suite
-dedicate (`tests/test_architecture_decisions.py`, `tests/test_roadmap_structure.py`); suite
-completa 1.272/1.272, ruff pulito.
+Aggiornato 11/09/2026: il commit remoto `2308009` ha superato build/smoke HUD e, su Python 3.11 e
+3.12, installazione, ruff, mypy, compileall e tutti i test. Il run `34614112195` e' pero' rosso:
+entrambi i job Python falliscono nel successivo upload perche' `actions/upload-artifact@v4`
+ignora per default `.ci-artifacts/`; lo smoke CLI viene quindi saltato. La correzione locale
+aggiunge `include-hidden-files: true` e un test di regressione dedicato. Baseline locale:
+1.944/1.944 test, ruff, mypy su 75 file e compileall verdi.
 
-Con questo, ogni passo di F0 eseguibile SENZA toccare il remoto e' esaurito: `F0.2` (allineare
-CI) e la parte restante di `F0.6` (canale/installer) dipendono da osservare job reali su GitHub,
-e `F0.4`/`F0.5` dipendono da `F0.1` pienamente `DONE`, che a sua volta attende lo stesso gate CI.
-Il gate remoto resta quindi l'unica azione che sbloccherebbe il resto di F0, ma il push e le
-impostazioni GitHub restano esplicitamente esclusi dall'utente finche' non lo richiede lui
-stesso. Non dichiarare G0 superato e non iniziare nuove feature fuori da F0 nel frattempo.
+La prossima azione esatta e' pubblicare questa correzione e osservare una nuova CI reale, poi
+aggiornare `F0.1`, `F0.2` e G0 in base all'esito. Push e impostazioni GitHub restano esclusi su
+richiesta dell'utente: finche' il nuovo workflow non viene eseguito sul remoto, non dichiarare G0
+superato e non iniziare nuove feature fuori da F0.
