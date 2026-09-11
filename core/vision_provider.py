@@ -16,12 +16,12 @@ class VisionProvider:
     describe(), un fallimento (Ollama giu', modello di visione non scaricato) restituisce
     semplicemente None e la skill chiamante degrada con un messaggio comprensibile."""
 
-    def __init__(self, model: str = "qwen2.5vl:7b", base_url: str = None, timeout: float = 60):
+    def __init__(self, model: str = "qwen2.5vl:7b", base_url: str | None = None, timeout: float = 60):
         self.model = model
         self.base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
         self.timeout = timeout
 
-    def describe(self, image_path: Path, question: str = None) -> str | None:
+    def describe(self, image_path: Path, question: str | None = None) -> str | None:
         try:
             image_bytes = Path(image_path).read_bytes()
         except OSError:

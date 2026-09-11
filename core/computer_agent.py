@@ -22,12 +22,12 @@ POST_ACTION_SETTLE_SECONDS = 0.4
 @dataclass
 class ComputerActionResult:
     success: bool
-    x: int = None
-    y: int = None
-    matched: str = None
+    x: int | None = None
+    y: int | None = None
+    matched: str | None = None
     verified: bool = False
     change_ratio: float = 0.0
-    error: str = None
+    error: str | None = None
 
 
 class ComputerAgent:
@@ -37,7 +37,7 @@ class ComputerAgent:
 
         return read_screen_words()
 
-    def locate_text(self, text: str, words: list[dict] = None) -> dict | None:
+    def locate_text(self, text: str, words: list[dict] | None = None) -> dict | None:
         """Trova 'text' tra le parole osservate (le rilegge da sola se non gia' fornite)."""
         from skills.screen_click import find_text_on_screen
 
@@ -53,7 +53,7 @@ class ComputerAgent:
             return ComputerActionResult(success=False, error="NOT_FOUND")
         return self.click_point(hit["x"], hit["y"], button, matched=hit["matched"])
 
-    def click_point(self, x: int, y: int, button: str = "left", matched: str = None) -> ComputerActionResult:
+    def click_point(self, x: int, y: int, button: str = "left", matched: str | None = None) -> ComputerActionResult:
         from core.vision.screen import capture_screenshot_image
         from core.vision.screen_diff import pixel_change_ratio, screen_visibly_changed
 

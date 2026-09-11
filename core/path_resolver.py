@@ -26,7 +26,7 @@ _SPECIAL = {
 }
 
 
-def known_folder(name: str) -> Path | None:
+def known_folder(name: str) -> Path:
     """Percorso reale di una cartella utente nota ('Desktop'...), anche se spostata in OneDrive."""
     home = Path.home()
     if name == "":

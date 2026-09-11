@@ -16,12 +16,12 @@ class DesktopContextTracker:
 
     def __init__(self, poll_seconds: float = 3.0, history_size: int = 10):
         self.poll_seconds = poll_seconds
-        self._history = deque(maxlen=history_size)
-        self._current_title = None
+        self._history: deque[dict] = deque(maxlen=history_size)
+        self._current_title: str | None = None
         self._open_windows: list[str] = []
         self._clipboard_preview: str | None = None
         self._lock = threading.Lock()
-        self._thread = None
+        self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
     def start(self) -> None:
