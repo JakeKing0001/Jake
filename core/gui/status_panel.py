@@ -9,9 +9,9 @@ class StatusPanel:
 
     Resta nascosta finche' non viene richiesta dal menu della tray icon (vedi tray_app.py)."""
 
-    def __init__(self, jake_core):
+    def __init__(self, jake_core, root: tk.Tk | tk.Toplevel | None = None):
         self.jake_core = jake_core
-        self.root = tk.Tk()
+        self.root = root if root is not None else tk.Tk()
         self.root.title("Jake - Pannello di stato")
         self.root.geometry("560x480")
         self.root.protocol("WM_DELETE_WINDOW", self.hide)
