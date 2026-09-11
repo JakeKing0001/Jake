@@ -41,7 +41,14 @@ class ConvertCurrencySkill:
         except (error.URLError, TimeoutError, json.JSONDecodeError):
             return SkillResult(success=False, data={}, error="NETWORK_UNAVAILABLE")
 
-        rate = (payload.get("rates") or {}).get(to_currency)
+        # F1: stesso buco sistemico corretto in questa sessione per altri consumatori diretti di
+        # API esterne - un corpo JSON valido ma non un dizionario farebbe sollevare AttributeError
+        # da payload.get(...), mai catturato prima.
+        if not isinstance(payload, dict):
+            return SkillResult(success=False, data={"from_currency": from_currency, "to_currency": to_currency}, error="CURRENCY_NOT_FOUND")
+
+        rates = payload.get("rates")
+        rate = rates.get(to_currency) if isinstance(rates, dict) else None
         if payload.get("result") != "success" or rate is None:
             return SkillResult(success=False, data={"from_currency": from_currency, "to_currency": to_currency}, error="CURRENCY_NOT_FOUND")
 

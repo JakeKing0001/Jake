@@ -51,9 +51,20 @@ class GetWeatherSkill:
         except (error.URLError, TimeoutError, json.JSONDecodeError):
             return SkillResult(success=False, data={"city": city}, error="NETWORK_UNAVAILABLE")
 
-        description = (payload.get("weather") or [{}])[0].get("description", "")
-        temperature = payload.get("main", {}).get("temp")
-        feels_like = payload.get("main", {}).get("feels_like")
+        # F1: stesso buco sistemico corretto in questa sessione per altri consumatori diretti di
+        # API esterne - un corpo JSON valido ma non nella forma attesa (payload/"weather"/"main"
+        # non del tipo giusto) faceva sollevare AttributeError o TypeError, mai catturato.
+        if not isinstance(payload, dict):
+            return SkillResult(success=False, data={"city": city}, error="NETWORK_UNAVAILABLE")
+
+        weather_entries = payload.get("weather")
+        first_weather_entry = weather_entries[0] if isinstance(weather_entries, list) and weather_entries else {}
+        description = first_weather_entry.get("description", "") if isinstance(first_weather_entry, dict) else ""
+
+        main = payload.get("main")
+        main = main if isinstance(main, dict) else {}
+        temperature = main.get("temp")
+        feels_like = main.get("feels_like")
 
         return SkillResult(success=True, data={
             "city": city,

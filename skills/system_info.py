@@ -154,4 +154,9 @@ class GetPublicIpSkill:
                 payload = json.loads(response.read().decode("utf-8"))
         except (error.URLError, TimeoutError, json.JSONDecodeError):
             return SkillResult(success=False, data={}, error="NETWORK_UNAVAILABLE")
+        # F1: stesso buco sistemico corretto in questa sessione per altri consumatori diretti di
+        # API esterne - un corpo JSON valido ma non un dizionario farebbe sollevare AttributeError
+        # da payload.get(...), mai catturato prima.
+        if not isinstance(payload, dict):
+            return SkillResult(success=False, data={}, error="NETWORK_UNAVAILABLE")
         return SkillResult(success=True, data={"ip": payload.get("ip", "")})

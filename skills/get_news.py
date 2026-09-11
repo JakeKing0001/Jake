@@ -51,12 +51,25 @@ class GetNewsSkill:
         except (error.URLError, TimeoutError, json.JSONDecodeError):
             return SkillResult(success=False, data={"topic": topic}, error="NETWORK_UNAVAILABLE")
 
-        articles = payload.get("articles", [])[:self.MAX_RESULTS]
+        # F1: stesso buco sistemico corretto in questa sessione per altri consumatori diretti di
+        # API esterne - un corpo JSON valido ma non nella forma attesa (non un dizionario, o
+        # "articles" non una lista di dizionari) faceva sollevare AttributeError, mai catturato.
+        if not isinstance(payload, dict):
+            return SkillResult(success=False, data={"topic": topic}, error="NOT_FOUND")
+        raw_articles = payload.get("articles")
+        if not isinstance(raw_articles, list):
+            return SkillResult(success=False, data={"topic": topic}, error="NOT_FOUND")
+
+        articles = [article for article in raw_articles if isinstance(article, dict)][:self.MAX_RESULTS]
         if not articles:
             return SkillResult(success=False, data={"topic": topic}, error="NOT_FOUND")
 
+        def _source_name(article: dict) -> str:
+            source = article.get("source")
+            return source.get("name", "") if isinstance(source, dict) else ""
+
         headlines = [
-            {"title": article.get("title", ""), "source": (article.get("source") or {}).get("name", "")}
+            {"title": article.get("title", ""), "source": _source_name(article)}
             for article in articles
         ]
         return SkillResult(success=True, data={"topic": topic, "headlines": headlines})
