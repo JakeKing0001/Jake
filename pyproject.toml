@@ -84,6 +84,12 @@ files = [
     "core/temporal_parser.py",
     "core/win_dpi.py",
     "core/windows_hello.py",
+    "core/nlu/chitchat.py",
+    "core/nlu/examples.py",
+    "core/nlu/index.py",
+    "core/nlu/llm_classifier.py",
+    "core/nlu/normalizer.py",
+    "core/nlu/retriever.py",
 ]
 ignore_missing_imports = true
 no_implicit_optional = true

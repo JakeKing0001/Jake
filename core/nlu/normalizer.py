@@ -7,6 +7,7 @@ tutto quello che e' correggibile con regole deterministiche, PRIMA di spendere u
 al modello: piu' il testo in ingresso e' pulito, meno il classificatore sbaglia."""
 import json
 import re
+from typing import Callable, Match
 from difflib import SequenceMatcher
 from pathlib import Path
 
@@ -69,7 +70,7 @@ class TranscriptNormalizer:
     LearningManager), che viene ricaricato quando cambia."""
 
     # Errori sistematici di Whisper sull'italiano parlato, osservati nel log di Jake.
-    WHISPER_FIXES = [
+    WHISPER_FIXES: list[tuple[re.Pattern[str], str | Callable[[Match[str]], str]]] = [
         (re.compile(r"\ba\s+nulla\b"), "annulla"),
         (re.compile(r"\bpost\s*on\s+(?:il\s+|un\s+)?timer\b"), "imposta un timer"),
         (re.compile(r"^(?:udi|giudi|hapri|apre|aprì|april|opri|apr|apri mi|aprime|aprimi)\s+"), "apri "),
@@ -108,13 +109,13 @@ class TranscriptNormalizer:
         r"passa a|vai su|torna su|porta in primo piano|mostrami|riduci a icona|ripristina)\b"
     )
 
-    def __init__(self, app_names_provider=None, learned_vocabulary_path: Path = None):
+    def __init__(self, app_names_provider=None, learned_vocabulary_path: Path | None = None):
         # callable che restituisce l'elenco dei nomi (leggibili) delle app installate: usato
         # per correggere per somiglianza i nomi storpiati dal riconoscimento vocale.
         self.app_names_provider = app_names_provider
         self.learned_vocabulary_path = Path(learned_vocabulary_path) if learned_vocabulary_path else LEARNED_VOCABULARY_PATH
         self._learned = self._load_learned()
-        self._app_names_cache = None
+        self._app_names_cache: list[str] | None = None
 
     # ---- vocabolario imparato ----------------------------------------------------------
 
@@ -239,6 +240,10 @@ class TranscriptNormalizer:
                 if score > best_score:
                     best_name, best_score, best_span = name, score, width
         if best_name is not None and best_score >= 0.82:
+            # best_span e' sempre assegnato nella STESSA riga di best_name (mai l'uno senza
+            # l'altro): l'assert documenta l'invariante invece di un "best_span or 0" che
+            # nasconderebbe silenziosamente una violazione futura producendo un taglio sbagliato.
+            assert best_span is not None
             fixed_remainder = best_name + (" " + " ".join(candidate_words[best_span:]) if best_span < len(candidate_words) else "")
             return text[:match.end()].rstrip() + " " + fixed_remainder
         return text

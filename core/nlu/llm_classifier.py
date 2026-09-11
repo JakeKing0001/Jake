@@ -25,20 +25,20 @@ class OllamaProvider(IntentProvider):
     def __init__(
         self,
         registry,
-        base_url: str = None,
+        base_url: str | None = None,
         timeout: float = 25,
-        model: str = None,
+        model: str | None = None,
         context_provider=None,
         history_provider=None,
         retriever=None,
-        client: OllamaClient = None,
+        client: OllamaClient | None = None,
     ):
         self.registry = registry
         self.client = client or OllamaClient(base_url=base_url, timeout=timeout)
         self.base_url = self.client.base_url
         self.timeout = timeout
         self.model = model or self.DEFAULT_MODEL
-        self.last_error = None
+        self.last_error: str | None = None
         # Contestualizzazione desktop (v2.0): callable opzionale che restituisce una riga di
         # contesto (es. finestre usate di recente), per risolvere richieste ambigue.
         self.context_provider = context_provider
@@ -85,16 +85,16 @@ class OllamaProvider(IntentProvider):
             self.last_error = "OLLAMA_ERROR"
         return Command(self.UNKNOWN_INTENT, {})
 
-    def get_valid_intents(self, capabilities: list = None) -> list[str]:
+    def get_valid_intents(self, capabilities: list | None = None) -> list[str]:
         capabilities = capabilities if capabilities is not None else self.registry.list_capabilities()
         intents = [capability["intent"] for capability in capabilities]
         if self.UNKNOWN_INTENT not in intents:
             intents.append(self.UNKNOWN_INTENT)
         return intents
 
-    def build_output_schema(self, capabilities: list = None) -> dict:
+    def build_output_schema(self, capabilities: list | None = None) -> dict:
         capabilities = capabilities if capabilities is not None else self.registry.list_capabilities()
-        parameter_properties = {}
+        parameter_properties: dict[str, dict] = {}
         for capability in capabilities:
             for name, metadata in capability.get("parameters", {}).items():
                 parameter_schema = deepcopy(metadata)
@@ -116,7 +116,7 @@ class OllamaProvider(IntentProvider):
             },
         }
 
-    def build_system_prompt(self, capabilities: list = None, examples: list = None) -> str:
+    def build_system_prompt(self, capabilities: list | None = None, examples: list | None = None) -> str:
         capabilities = capabilities if capabilities is not None else self.registry.list_capabilities()
         lines = [
             "Sei il parser degli intent di Jake, un assistente vocale italiano che controlla un PC Windows.",

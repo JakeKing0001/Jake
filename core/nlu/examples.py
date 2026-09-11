@@ -45,7 +45,7 @@ class Example:
 class ExampleStore:
     MAX_AUTO_EXAMPLES = 3000
 
-    def __init__(self, builtin_path: Path = None, learned_path: Path = None):
+    def __init__(self, builtin_path: Path | None = None, learned_path: Path | None = None):
         self.builtin_path = Path(builtin_path) if builtin_path else BUILTIN_PATH
         self.learned_path = Path(learned_path) if learned_path else LEARNED_PATH
         self._builtin: list[Example] = []
@@ -57,7 +57,7 @@ class ExampleStore:
 
     @staticmethod
     def _read_jsonl(path: Path, default_source: str) -> list[Example]:
-        examples = []
+        examples: list[Example] = []
         if not path.is_file():
             return examples
         for line in path.read_text(encoding="utf-8").splitlines():
@@ -116,7 +116,7 @@ class ExampleStore:
 
     # ---- scrittura ---------------------------------------------------------------------
 
-    def add_learned(self, text: str, intent: str, parameters: dict = None, source: str = "taught") -> Example:
+    def add_learned(self, text: str, intent: str, parameters: dict | None = None, source: str = "taught") -> Example:
         key = normalize_key(text)
         parameters = dict(parameters or {})
         self._learned = [example for example in self._learned if example.key != key]

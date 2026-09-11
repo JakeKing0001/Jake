@@ -60,4 +60,8 @@ def reply(text: str) -> str | None:
         return None
     if category == "greeting":
         return _greeting_reply()
-    return random.choice(_REPLIES[category])
+    # _REPLIES["greeting"] e' l'unica voce a None ed e' gia' esclusa dal ramo sopra: le altre
+    # sono sempre liste vere, ma l'assert lo rende esplicito invece di un cast silenzioso.
+    replies = _REPLIES[category]
+    assert replies is not None
+    return random.choice(replies)
