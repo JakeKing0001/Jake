@@ -1251,6 +1251,39 @@ ricevuta di policy; test d'attacco su prompt injection e plugin; restore verific
 
   Suite completa dopo questi due incrementi: 1559 test, tutti verdi; `ruff check` pulito
   sull'intero repository.
+- ✅ **Estesa la copertura di test a `core/voice/`** (motore vocale: TTS/STT/VAD/RVC), l'ultimo
+  grande cluster senza alcuna suite. Nessuno dei file aveva test. `rvc_compat.py` e
+  `rvc_server.py` restano fuori portata in questo ambiente: richiedono `torch`/`rvc_python`,
+  disponibili solo nell'interprete isolato `.venv-rvc` (non installato nel venv principale, per
+  design - vedi il loro stesso docstring). Per tutti gli altri, `sounddevice`/`webrtcvad`/
+  `edge_tts`/`av`/`winsdk`/`faster_whisper`/`ctranslate2` sono pacchetti VERI installati in
+  questo venv: si patchano le loro classi/funzioni direttamente con `mock.patch`, mai
+  `mock.patch.dict` su `sys.modules`. Nessun bug di produzione trovato, ma **una vera insidia di
+  test infrastruttura scoperta e documentata**: `mock.patch.dict("sys.modules", ...)` ripristina
+  un'istantanea COMPLETA di `sys.modules` alla fine del blocco `with` (non solo la chiave
+  patchata), quindi cancella silenziosamente qualunque modulo importato per la prima volta
+  DURANTE quel blocco - riprodotto per davvero con `numpy`, la cui estensione C rifiuta di
+  caricarsi una seconda volta nello stesso processo ("cannot load module more than once per
+  process") una volta rimossa da `sys.modules` e reimportata da zero. Sistemato passando a
+  `mock.patch` sugli attributi dei pacchetti reali (gia' installati) ovunque possibile.
+  Aggiunti: `tests/test_rvc_client.py` (5 test), `tests/test_microphone.py` (6 test),
+  `tests/test_rvc_server_manager.py` (12 test), `tests/test_push_to_talk.py` (9 test),
+  `tests/test_tts_provider.py` (11 test), `tests/test_character_tts_provider.py` (12 test),
+  `tests/test_vad_listener.py` (9 test), `tests/test_stt_provider.py` (15 test),
+  `tests/test_edge_tts_provider.py` (21 test), `tests/test_onecore_tts_provider.py` (13 test),
+  `tests/test_wake_word_session.py` (distanza di edit per tollerare le mistrascrizioni di
+  Whisper su "Jake", finestre di comando/follow-up/conferma, dettatura, pausa/risveglio) - **con
+  un incidente da correggere**: `tests/test_wake_word_session.py` esisteva gia' (test del
+  risveglio dalla pausa in posizione naturale, v4.1) e il primo tentativo di `Write` lo ha
+  sovrascritto per intero invece di estenderlo, perche' la scansione dei buchi di copertura per
+  questa sessione non aveva mai controllato `core/voice/` (solo `core/`, `core/nlu/`,
+  `core/vision/`). Accorto dal successivo `git status` prima del commit (mostrava il file come
+  modificato, non nuovo) e corretto recuperando il contenuto originale con `git show HEAD:...` e
+  fondendolo con quello nuovo, senza perdere alcun test. Nessun'altra suite di questa sessione
+  risultava gia' esistente (verificato per tutte con `git log --diff-filter=A`).
+
+  Suite completa dopo questo incremento: 1701 test, tutti verdi; `ruff check` pulito sull'intero
+  repository.
 
 ## F2 — Voice Natural 3.0
 
