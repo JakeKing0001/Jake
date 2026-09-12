@@ -1238,12 +1238,49 @@ Dipende da: F1.1.
 
 Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock o ledger incoerente.
 
-- Stato: `DOING`; `F1.8.2` chiuso per tutti i registri/store condivisi tra thread (ledger,
-  promemoria, todo, memoria a lungo termine); `F1.8.3` chiuso per RUN_COMMAND (il solo
-  subprocess bloccante abbastanza lungo da essere rilevante, vedi sotto); `F1.8.4` chiuso
-  parzialmente (visibilita' dei fallimenti di shutdown, non ancora drain/checkpoint veri);
-  `F1.8.6` chiuso (verificato, vedi sotto); resto della fase (coda per azioni concorrenti,
-  deadlock timeout, test di race su trigger/handoff/conferma/undo) non affrontato.
+- Stato: `DOING`; `F1.8.1` chiuso parzialmente (la forma piu' grave del buco - doppia esecuzione
+  della stessa azione in sospeso - chiusa, non l'intera ownership di sessione, vedi sotto);
+  `F1.8.2` chiuso per tutti i registri/store condivisi tra thread (ledger, promemoria, todo,
+  memoria a lungo termine); `F1.8.3` chiuso per RUN_COMMAND (il solo subprocess bloccante
+  abbastanza lungo da essere rilevante, vedi sotto); `F1.8.4` chiuso parzialmente (visibilita'
+  dei fallimenti di shutdown, non ancora drain/checkpoint veri); `F1.8.6` chiuso (verificato,
+  vedi sotto); resto della fase (deadlock timeout, test di race su trigger/handoff/undo) non
+  affrontato.
+- `F1.8.1` (parziale, doppia esecuzione via conferma concorrente) — 12/09/2026: "definire
+  ownership della sessione... e una coda per azioni concorrenti". Buco reale, riprodotto per
+  davvero prima del fix - `JakeCore.answer()` e' l'UNICO ingresso condiviso sia dal loop voce
+  (thread principale) sia da `core/companion_server.py` (un `ThreadingHTTPServer`: OGNI richiesta
+  HTTP gira sul PROPRIO thread), quindi due turni possono arrivare davvero in concorrenza sulla
+  STESSA istanza di `JakeCore` - non un caso ipotetico. Il controllo di un'azione in sospeso era
+  tre chiamate SEPARATE su `ConversationStateManager` (`has_pending_action()`,
+  `get_pending_action()`, `clear_pending_action()`) senza alcuna sincronizzazione tra loro: due
+  thread potevano osservare ENTRAMBI la stessa azione DESTRUCTIVE/ADMIN ancora in sospeso prima
+  che uno dei due la ripulisse, ed eseguirla DUE VOLTE (una per canale). Riprodotto con due thread
+  reali in corsa su una stessa azione pendente (finestra di gara forzata con un piccolo sleep tra
+  lettura e pulizia, esattamente cio' che un `_finalize_pending_action` piu' lento - una skill
+  lenta, un modello da interrogare per un passo aggiuntivo - allargherebbe naturalmente). Corretto
+  aggiungendo `ConversationStateManager.take_pending_action()`: legge E cancella l'azione in
+  UN'UNICA operazione atomica sotto lock, invece delle tre chiamate separate. `JakeCore._process()`
+  la usa per decidere se c'e' una conferma da gestire (invece di `has_pending_action()` seguito da
+  `_handle_confirmation()` che la rileggeva da sola), e passa l'azione GIA' presa direttamente a
+  `_handle_confirmation(text, action)` (nuovo secondo parametro opzionale, `None` di default per
+  compatibilita' con le chiamate dirette gia' esistenti nei test) - cosi' al massimo UN chiamante
+  concorrente puo' mai "vincere" una data azione in sospeso; gli altri la vedono gia' consumata
+  (`None`) e procedono come un comando nuovo, mai come una doppia conferma. Deliberatamente NON
+  una soluzione a `_process()`/`answer()` interamente serializzati con un lock unico: bloccare
+  l'intero turno impedirebbe al kill switch di restare raggiungibile da un canale diverso mentre
+  un altro turno (lento) e' in corso - esattamente l'opposto di quanto richiesto da F1 ("il kill
+  switch deve restare raggiungibile"). Il lock qui protegge SOLO il controllo/consumo istantaneo
+  dell'azione in sospeso, mai l'esecuzione (potenzialmente lenta) che segue. Non risolve l'intera
+  fase F1.8.1: due canali che hanno CIASCUNO bisogno di una propria conferma nello stesso istante
+  si sovrascrivono ancora a vicenda (l'ultimo `set_pending_action()` vince) - servirebbe
+  un'identita' di canale/sessione vera per una coda multi-sessione completa, non ancora
+  modellata; ne' una coda generale per azioni concorrenti non legate a una conferma. Aggiunto
+  nuovo `tests/test_conversation_state.py` (6 test, incluso uno che dimostra come il VECCHIO
+  pattern a tre chiamate resti racy anche bloccando ciascuna chiamata singolarmente - la prova che
+  serviva davvero un'operazione atomica, non solo tre metodi piu' sicuri presi separatamente) e un
+  test di integrazione in `tests/test_jake_core_pipeline.py::ConcurrentPendingActionConfirmationTests`.
+  Prova: 2.199/2.199 test, ruff/mypy/compileall verdi su tutti i file toccati.
 - `F1.8.4` (parziale, continuazione - stessa visibilita' dei fallimenti, secondo punto) —
   12/09/2026: stesso identico principio della voce precedente (fallimenti silenziosi durante uno
   shutdown/una notifica non devono sparire senza log), trovato in un secondo punto:
@@ -2517,17 +2554,19 @@ una sessione precedente), `F1.7.1` (ledger resistente a record parziali/arresto 
 config/settings.json), `F1.7.5` (replay sicuro), `F1.8.4` (parziale, visibilita' dei fallimenti
 di shutdown), `F1.2.2` (parziale, prima capability vera - radici filesystem consentite per le
 quattro mutazioni sul percorso interattivo), `F1.8.6` (verificato con una suite dedicata), `F1.4.3` (parziale, confronto a tempo costante della
-passphrase admin) e due voci aggiuntive di `F1.8.4` (notifica `on_step` dell'agente e chiusura
-del HUD loggate come lo shutdown di `JakeCore`) sono stati completati e verificati in questa
-sessione. La maggior parte erano buchi reali riprodotti empiricamente prima del fix (`F1.8.3` con
-due buchi ULTERIORI trovati durante la verifica del fix stesso, `F1.4.1` lo stesso identico buco
-di `F1.7.1` ma con un impatto piu' grave, `F1.7.5` un bypass completo dell'autorizzazione in
-`tools/replay_session.py --replay`, `F1.4.3` un canale laterale temporale sulla passphrase admin -
-`AuthGate.check()` usava `==` invece di `hmac.compare_digest`, gia' usato correttamente per lo
-stesso scopo altrove nel progetto); `F1.2.2` e' la prima funzionalita' NUOVA della sessione (non
-un fix), scelta come fetta verticale stretta del "kernel dei permessi"; `F1.8.6` e' una VERIFICA
-(il codice era gia' corretto per costruzione, mancava solo una prova a cronometro). `master` e'
-pulito, 2.192/2.192 test, ruff/mypy/compileall verdi. `G1` resta aperto.
+passphrase admin), due voci aggiuntive di `F1.8.4` (notifica `on_step` dell'agente e chiusura
+del HUD loggate come lo shutdown di `JakeCore`) e `F1.8.1` (parziale, doppia esecuzione di
+un'azione in sospeso confermata da due canali concorrenti) sono stati completati e verificati in
+questa sessione. La maggior parte erano buchi reali riprodotti empiricamente prima del fix
+(`F1.8.3` con due buchi ULTERIORI trovati durante la verifica del fix stesso, `F1.4.1` lo stesso
+identico buco di `F1.7.1` ma con un impatto piu' grave, `F1.7.5` un bypass completo
+dell'autorizzazione in `tools/replay_session.py --replay`, `F1.4.3` un canale laterale temporale
+sulla passphrase admin, `F1.8.1` una doppia esecuzione reale - `JakeCore.answer()` e' condiviso
+tra il loop voce e il `ThreadingHTTPServer` del companion server, e il controllo di un'azione in
+sospeso era tre chiamate separate senza sincronizzazione); `F1.2.2` e' la prima funzionalita'
+NUOVA della sessione (non un fix), scelta come fetta verticale stretta del "kernel dei permessi";
+`F1.8.6` e' una VERIFICA (il codice era gia' corretto per costruzione, mancava solo una prova a
+cronometro). `master` e' pulito, 2.199/2.199 test, ruff/mypy/compileall verdi. `G1` resta aperto.
 
 L'utente aveva chiesto di fermarsi dopo la sessione precedente, poi ha esplicitamente chiesto di
 controllare le cose non committate e continuare da li' - il lavoro prosegue. Restano fuori
@@ -2546,6 +2585,7 @@ sessione - oggi solo un allowlist utente, nessuna intersezione), il resto di `F1
 classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7` (`F1.7.2` trace id
 condiviso con undo/notifica, `F1.7.3` retention differenziata, `F1.7.4` redazione strutturata per
 tipo di dato, `F1.7.8` modalita' privata end-to-end su ogni nuovo record), il resto di `F1.8`
-(`F1.8.1` coda azioni concorrenti, il resto di `F1.8.4` - drain limitato di un'azione in corso,
-checkpoint vero, release device audio, `F1.8.5` deadlock timeout, `F1.8.7` test di race su
-trigger/handoff/conferma/undo).
+(il resto di `F1.8.1` - identita' di canale/sessione vera per due conferme concorrenti distinte,
+coda generale per azioni concorrenti non legate a una conferma; il resto di `F1.8.4` - drain
+limitato di un'azione in corso, checkpoint vero, release device audio; `F1.8.5` deadlock timeout;
+`F1.8.7` test di race su trigger/handoff/undo).
