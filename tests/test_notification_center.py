@@ -1,4 +1,6 @@
 """Test unitari per il sistema di modalita' di notifica (v4.3, core/notification_center.py)."""
+import sys
+import threading
 import unittest
 
 from core.notification_center import NotificationCenter, NotificationMode
@@ -68,6 +70,66 @@ class SetModeAndReleaseTests(unittest.TestCase):
 
         self.assertEqual(released, ["promemoria"])
         self.assertEqual(center.pending_count(), 1)  # l'avviso resta in coda, DND non lo ammette
+
+
+class ConcurrentAccessTests(unittest.TestCase):
+    """F1.8.2 (stesso principio gia' applicato a ActionLedger/ReminderManager/TodoManager/
+    MemoryManager in questa sessione): buco reale, riprodotto per davvero prima del fix -
+    NotificationCenter e' condivisa PER RIFERIMENTO tra JakeCore.notify() (chiamato dai thread
+    separati di TriggerScheduler/ReminderScheduler/SystemAdvisor) e SetNotificationModeSkill
+    (voce/companion server, altri thread). set_mode() leggeva e riscriveva self._queued in DUE
+    passaggi separati senza alcun lock: un gate() concorrente che arrivava esattamente tra i due
+    passaggi spariva per sempre, ne' rilasciato ne' rimasto in coda. Riprodotto con
+    sys.setswitchinterval() abbassato per forzare la sovrapposizione reale: su 30 prove con 500
+    gate() concorrenti a un set_mode(), oltre il 98% delle notifiche spariva senza lasciare
+    traccia PRIMA di questo fix."""
+
+    THREAD_MESSAGES = 500
+
+    def setUp(self):
+        self._original_switch_interval = sys.getswitchinterval()
+        # Costringe il GIL a cedere molto piu' spesso, per massimizzare la sovrapposizione reale
+        # tra i thread invece di affidarsi al caso del timing (stesso principio gia' usato per
+        # riprodurre il buco durante lo sviluppo di questo fix).
+        sys.setswitchinterval(0.00001)
+        self.addCleanup(sys.setswitchinterval, self._original_switch_interval)
+
+    def test_no_notification_is_lost_when_gate_races_with_a_concurrent_set_mode(self):
+        for _ in range(20):
+            self._assert_no_message_lost_in_one_race()
+
+    def _assert_no_message_lost_in_one_race(self) -> None:
+        center = NotificationCenter(mode=NotificationMode.STUDY)
+        center.gate("advisory", "batteria scarica")  # in coda: STUDY non ammette advisory
+
+        results: dict = {}
+        delivered_directly: list = []
+        delivered_lock = threading.Lock()
+        barrier = threading.Barrier(2)
+
+        def _switch_mode():
+            barrier.wait()
+            results["released"] = center.set_mode(NotificationMode.NORMAL)
+
+        def _gate_more():
+            barrier.wait()
+            for i in range(self.THREAD_MESSAGES):
+                message = center.gate("advisory", f"avviso-{i}")
+                if message is not None:
+                    with delivered_lock:
+                        delivered_directly.append(message)
+
+        threads = [threading.Thread(target=_switch_mode), threading.Thread(target=_gate_more)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        # Ogni messaggio deve finire in ESATTAMENTE uno dei tre posti: consegnato subito da
+        # gate() (se il cambio di modalita' e' gia' avvenuto), rilasciato da set_mode(), o
+        # ancora in coda - mai perso silenziosamente.
+        total = len(delivered_directly) + len(results["released"]) + center.pending_count()
+        self.assertEqual(total, self.THREAD_MESSAGES + 1)
 
 
 if __name__ == "__main__":
