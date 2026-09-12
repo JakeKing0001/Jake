@@ -3,6 +3,7 @@
 finti (semplici vettori 2D): cosine_similarity e' pura matematica, non richiede Ollama."""
 import shutil
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -279,6 +280,55 @@ class PurgeHistoryOlderThanTests(MemoryManagerTestCase):
 
     def test_nothing_to_remove_returns_zero(self):
         self.assertEqual(self.manager.purge_history_older_than(days=30), 0)
+
+
+class ConcurrentAccessTests(MemoryManagerTestCase):
+    """F1.8.2 ("serializzare azioni che toccano lo stesso resource key"): stesso principio gia'
+    applicato a core/reminder_manager.py/core/todo_manager.py - la connessione e'
+    check_same_thread=False perche' TriggerScheduler legge/scrive WorkflowManager/TriggerManager
+    (entrambi backed da questa connessione) da un thread separato, ma senza un lock proprio
+    l'accesso concorrente reale puo' sollevare sqlite3.InterfaceError o corrompere i dati (vedi
+    la stessa dimostrazione empirica gia' fatta per TodoManager)."""
+
+    def test_concurrent_remember_from_many_threads_loses_nothing(self):
+        thread_count, per_thread = 15, 15
+        barrier = threading.Barrier(thread_count)
+
+        def _remember_many(thread_index: int):
+            barrier.wait()
+            for i in range(per_thread):
+                self.manager.remember(f"chiave-{thread_index}-{i}", f"valore-{thread_index}-{i}")
+
+        threads = [threading.Thread(target=_remember_many, args=(i,)) for i in range(thread_count)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(self.manager.count_memories(), thread_count * per_thread)
+
+    def test_concurrent_log_turn_does_not_corrupt_history(self):
+        """log_turn() e' un INSERT seguito da una DELETE di pulizia (due istruzioni, non una
+        sola): il caso piu' simile a due_reminders() (core/reminder_manager.py), gia' dimostrato
+        vulnerabile senza un lock che copra l'intero metodo."""
+        thread_count, per_thread = 10, 10
+        barrier = threading.Barrier(thread_count)
+
+        def _log_many(thread_index: int):
+            barrier.wait()
+            for i in range(per_thread):
+                self.manager.log_turn("user", f"turno-{thread_index}-{i}")
+
+        threads = [threading.Thread(target=_log_many, args=(i,)) for i in range(thread_count)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        # MAX_HISTORY_ENTRIES tronca la cronologia: qui il totale (100) resta sotto la soglia
+        # (200), quindi nessuna riga deve mancare.
+        history = self.manager.get_recent_history(limit=thread_count * per_thread + 10)
+        self.assertEqual(len(history), thread_count * per_thread)
 
 
 if __name__ == "__main__":
