@@ -204,6 +204,19 @@ class PolicyLedgerTests(unittest.TestCase):
         self.execute()
         self.assertEqual(self.receipts(), [])
 
+    def test_private_mode_does_not_write_policy_receipts_for_the_agent_path(self):
+        """F1.7.8 ("testare modalita' privata end-to-end su tutti i nuovi record"): a differenza
+        del test sopra (percorso diretto, JakeCore._execute_command), TaskAgent._log_step scrive
+        sul ledger per conto proprio - un chokepoint diverso, con la propria gestione di
+        `private`. Il test esistente in tests/test_agent.py::ActionLedgerWiringTests verificava
+        solo che record() venisse CHIAMATO con private=True (un Mock), non che un ledger vero
+        restasse vuoto per un intent BLOCCATO (che avrebbe popolato policy_reason se non fosse
+        privato)."""
+        self.core.policy_engine.blocked_intents.add("ADD_NOTE")
+        self.agent().run("fixture", private=True)
+        self.assertEqual(self.skill.calls, [])
+        self.assertEqual(self.receipts(), [])
+
     def test_all_agent_specializations_preserve_the_actual_policy_reason(self):
         for name in ("general", "coding", "research"):
             self.agent(agent_name=name).run("fixture", trace_id=name)

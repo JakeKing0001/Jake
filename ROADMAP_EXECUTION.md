@@ -1134,8 +1134,8 @@ Criterio di uscita: una failure end-to-end è ricostruibile senza esporre conten
 - Stato: `DOING`; `F1.7.1` chiuso; `F1.7.2` chiuso parzialmente (solo la notifica di
   un'automazione, vedi sotto); `F1.7.4` chiuso parzialmente (percorsi/URL/email, vedi sotto);
   `F1.7.5` chiuso; `F1.7.6` chiuso parzialmente (failure taxonomy, non ancora rollback rate),
-  `F1.7.7` chiuso; `F1.7.8` chiuso parzialmente (percorso automatico verificato, vedi sotto);
-  resto aperto.
+  `F1.7.7` chiuso; `F1.7.8` chiuso (i tre chokepoint - diretto, agente, automatico - tutti
+  verificati end-to-end, vedi sotto); resto aperto.
 - `F1.7.2` (parziale, notifica di un'automazione) — 13/09/2026: "collegare command, sub-step,
   verifica, undo e notifica con lo stesso trace id". Buco reale, non ipotizzato -
   `PlanExecutor.execute()` correla gia' ogni singolo passo alla stessa ricevuta nel ledger
@@ -1282,25 +1282,30 @@ Criterio di uscita: una failure end-to-end è ricostruibile senza esporre conten
   per condividere il bundle (resta intenzionalmente cosi', vedi sopra), ne' un formato compresso
   per bundle molto grandi. Prova: 2.075/2.075 test, ruff/mypy/compileall verdi su tutti i file
   toccati.
-- `F1.7.8` (parziale, percorso automatico) — 13/09/2026: "testare modalita' privata end-to-end
-  su tutti i nuovi record". Verifica, non un fix - `ActionLedger.record()`/`SessionRecorder.
-  record_failure()` gia' ritornano subito quando `private=True`, indipendentemente da COSA
-  contenga la ricevuta (comportamento corretto per costruzione), ma nessun test lo dimostrava
-  con un `ActionLedger`/`SessionRecorder` VERI (file temporanei reali) per il percorso
-  automatico (`PlanExecutor`) DOPO le aggiunte di questa sessione (`policy_reason`, F1.2.6):
-  le suite esistenti in `tests/test_plan_executor.py` verificavano solo che `record()`/
-  `log_action` venissero CHIAMATI con `private=True` (un `Mock`), non che il file su disco
-  restasse vuoto per davvero. Il percorso interattivo (`JakeCore._handle_confirmation`) aveva
-  gia' questa prova end-to-end (`tests/test_jake_core_permissions.py::
-  test_private_mode_does_not_persist_revoked_action`, scritta durante il lavoro su F1.2.6) - non
-  toccato, gia' a posto. Aggiunti 2 nuovi test in
-  `tests/test_plan_executor.py::PrivateModeEndToEndTests`: un passo BLOCCATO (che popolerebbe
-  `policy_reason` se non fosse privato) non scrive nulla ne' nel ledger ne' nel session
-  recorder, con una prova di controllo che lo stesso scenario SENZA `private=True` scrive
-  davvero (dimostra che il primo test non passa solo perche' non c'era nulla da scrivere).
-  Prova: 2.219/2.219 test, ruff/compileall verdi (solo test, nessun file di produzione
-  toccato). Non ancora affrontato: lo stesso tipo di prova end-to-end per l'agente a passi
-  (`core/agent.py::TaskAgent`, un terzo chokepoint che scrive ricevute).
+- `F1.7.8` (chiusura) — 13/09/2026: "testare modalita' privata end-to-end su tutti i nuovi
+  record". Verifica, non un fix - `ActionLedger.record()`/`SessionRecorder.record_failure()`
+  gia' ritornano subito quando `private=True`, indipendentemente da COSA contenga la ricevuta
+  (comportamento corretto per costruzione), ma nessun test lo dimostrava con un
+  `ActionLedger`/`SessionRecorder` VERI (file temporanei reali) DOPO le aggiunte di questa
+  sessione (`policy_reason`, F1.2.6) per due dei tre chokepoint che scrivono ricevute. Il
+  percorso interattivo (`JakeCore._handle_confirmation`) aveva gia' questa prova end-to-end
+  (`tests/test_jake_core_permissions.py::test_private_mode_does_not_persist_revoked_action`,
+  scritta durante il lavoro su F1.2.6) - non toccato, gia' a posto. Il percorso automatico
+  (`PlanExecutor`, primo passo di questa voce) e l'agente a passi (`core/agent.py::TaskAgent`,
+  secondo passo) avevano invece solo prove indirette: le suite esistenti verificavano che
+  `record()`/`log_action` venissero CHIAMATI con `private=True` su un `Mock`, non che il file su
+  disco restasse vuoto per davvero con un intent BLOCCATO che avrebbe popolato `policy_reason`
+  se non fosse stato privato. Aggiunti 2 nuovi test in
+  `tests/test_plan_executor.py::PrivateModeEndToEndTests` (con una prova di controllo che lo
+  stesso scenario SENZA `private=True` scrive davvero, a dimostrare che il primo test non passa
+  solo perche' non c'era nulla da scrivere) e 1 in
+  `tests/test_jake_core_policy_ledger.py::PolicyLedgerTests` (che aveva gia' tutti i fixture
+  giusti - `AgentRegistry`, ledger su file reale - per il percorso agente, bastava aggiungere il
+  caso; il test gemello `test_agent_block_records_the_reason`, gia' esistente e senza
+  `private=True`, funge da prova di controllo). Con questo, tutti e tre i chokepoint che scrivono
+  una `ActionReceipt` hanno una prova end-to-end reale che la modalita' privata sospende
+  davvero la scrittura, non solo che il flag venga passato. Prova: 2.220/2.220 test,
+  ruff/compileall verdi (solo test, nessun file di produzione toccato).
 
 ### F1.8 — Concorrenza, code e arresto
 
@@ -2689,7 +2694,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 18 incrementi completati e verificati (PR #28-#45), la
+Aggiornato 13/09/2026. Sessione lunga con 19 incrementi completati e verificati (PR #28-#46), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -2707,9 +2712,10 @@ resto: `F1.2.6` (percorso interattivo/agente, ripreso da lavoro non committato),
 switch propagato a RUN_COMMAND, con due buchi ulteriori trovati verificando il fix), `F1.8.4`
 (tre punti di visibilita' sui fallimenti: shutdown, `on_step` dell'agente, chiusura HUD),
 `F1.8.6` (verifica, non un fix), `F1.7.2` (parziale - la notifica di un'automazione ora porta lo
-stesso trace_id delle ricevute che l'ha prodotta), `F1.7.8` (parziale - verifica end-to-end che
-la modalita' privata non scrive nulla nel percorso automatico, nemmeno i campi nuovi di questa
-sessione). `master` e' pulito, 2.219/2.219 test, ruff/mypy/compileall verdi. `G1` resta aperto.
+stesso trace_id delle ricevute che l'ha prodotta), `F1.7.8` (CHIUSO - verifica end-to-end che la
+modalita' privata non scrive nulla in nessuno dei tre chokepoint - diretto, agente, automatico -
+nemmeno i campi nuovi di questa sessione). `master` e' pulito, 2.220/2.220 test,
+ruff/mypy/compileall verdi. `G1` resta aperto.
 
 Restano fuori discussione, senza un nuovo via libera esplicito, i due lavori grandi gia' proposti
 e rifiutati: `F1.6` (sandbox permanente per le skill forgiate - Job Object/AppContainer) e
@@ -2727,9 +2733,9 @@ intent di sola lettura), `F1.2.3` (intersezione permessi utente/dispositivo/agen
 sessione - oggi solo un allowlist utente, nessuna intersezione), il resto di `F1.4` (una vera
 classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7` (il resto di `F1.7.2` -
 undo, mai wired a una ricevuta propria; `F1.7.3` retention differenziata; il resto di `F1.7.4` -
-altri tipi di dato, classificazione per nome del parametro non solo contenuto; il resto di
-`F1.7.8` - stessa prova end-to-end per l'agente a passi, `core/agent.py::TaskAgent`), il resto di
-`F1.8` (il resto di `F1.8.1` - identita' di canale/sessione vera per due conferme concorrenti
+altri tipi di dato, classificazione per nome del parametro non solo contenuto - `F1.7.8` e'
+chiuso), il resto di `F1.8` (il resto di `F1.8.1` - identita' di canale/sessione vera per due
+conferme concorrenti
 distinte, coda generale per
 azioni concorrenti non legate a una conferma; il resto di `F1.8.4` - drain limitato di un'azione
 in corso, checkpoint vero, release device audio; `F1.8.5` deadlock timeout; `F1.8.7` test di
