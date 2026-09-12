@@ -1,7 +1,9 @@
 """Test unitari della comprensione (v3.0): non richiedono Ollama, microfono o GUI.
 Esecuzione: .venv\\Scripts\\python.exe -m unittest discover -s tests -t . -v"""
 import json
+import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -119,6 +121,43 @@ class ExampleStoreTests(unittest.TestCase):
 
     def test_normalize_key(self):
         self.assertEqual(normalize_key("  Ciao!!  "), "ciao")
+
+
+class ExampleStoreConcurrentAccessTests(unittest.TestCase):
+    """F1.8.2 (stesso principio gia' applicato altrove in questa sessione): buco reale,
+    riprodotto per davvero prima del fix - ExampleStore e' condivisa tra tutto cio' che passa da
+    JakeCore._process() (comando insegnato, apprendimento automatico), raggiungibile sia dal
+    loop voce sia dal ThreadingHTTPServer del companion server (vedi F1.8.1). add_learned()
+    mutava self._learned in piu' passi separati senza alcuna sincronizzazione: due thread che
+    imparavano esempi diversi contemporaneamente potevano perdere l'uno l'apprendimento
+    dell'altro."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self._original_switch_interval = sys.getswitchinterval()
+        sys.setswitchinterval(0.00001)
+        self.addCleanup(sys.setswitchinterval, self._original_switch_interval)
+
+    def test_many_concurrent_add_learned_calls_lose_nothing(self):
+        store = ExampleStore(
+            builtin_path=Path(self.tmp.name) / "builtin.jsonl", learned_path=Path(self.tmp.name) / "learned.jsonl",
+        )
+        THREAD_COUNT, PER_THREAD = 10, 20
+
+        def _learn(thread_id):
+            for i in range(PER_THREAD):
+                store.add_learned(f"frase-{thread_id}-{i}", "SOME_INTENT", source="auto")
+
+        threads = [threading.Thread(target=_learn, args=(t,)) for t in range(THREAD_COUNT)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        expected = THREAD_COUNT * PER_THREAD
+        self.assertEqual(len(store.learned()), expected)
+        self.assertEqual(len(ExampleStore._read_jsonl(store.learned_path, "taught")), expected)
 
 
 class SemanticIndexTests(unittest.TestCase):
