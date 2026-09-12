@@ -104,6 +104,12 @@ class JakeCore:
         # sessione), da li' allo stesso oggetto.
         self.kill_switch = KillSwitch()
         self.skill_registry.plan_executor.kill_switch = self.kill_switch
+        # F1.8.3: RUN_COMMAND e' l'unica skill con un subprocess bloccante abbastanza lungo
+        # (fino a 30s) da rendere il controllo "solo tra un passo e il successivo" di
+        # TaskAgent/PlanExecutor insufficiente - vedi il docstring di skills/run_command.py.
+        run_command_skill = self.skill_registry.get_skill("RUN_COMMAND")
+        if run_command_skill is not None:
+            run_command_skill.kill_switch = self.kill_switch
 
         # Protocollo eventi + server companion (v4.9.1 HUD IPC transport, v5.8 Mobile
         # Companion, v5.9 Ambient Computing): qualsiasi presentazione esterna (HUD nativo,
