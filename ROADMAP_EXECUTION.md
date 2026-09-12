@@ -666,11 +666,10 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   (rollback): gia' coperto da `F1.2.5` sopra. Percorso 7 (`SkillRegistry.execute()`): nessun test
   di bypass possibile da scrivere finche' `F1.2.1` non gli aggiunge un controllo proprio - il gap
   resta documentato, non "testato" nel senso di verificarne la chiusura.
-- Non ancora affrontato: `F1.2.1` (PolicyEngine come unico gate: `core/skill_registry.py::
-  execute()` resta un dispatcher senza controllo di policy proprio, i percorsi normali lo
-  proteggono chiamandolo solo dopo una decisione, ma nulla lo impedisce strutturalmente);
-  `F1.2.2`-`F1.2.4`, `F1.2.6`-`F1.2.7`; il resto di `F1.2.5` (retry e sotto-azioni di workflow
-  non ancora passati in rassegna allo stesso modo).
+- Non ancora affrontato: il resto di `F1.2.1` (percorso 7, `SkillRegistry.execute()` resta un
+  dispatcher senza controllo di policy proprio - vedi sopra); `F1.2.2`-`F1.2.3`, `F1.2.6`-`F1.2.7`;
+  il resto di `F1.2.5` (sotto-azioni di workflow non ancora passate in rassegna allo stesso modo -
+  il retry e' invece coperto separatamente da `F1.3.6`, vedi sotto).
 
 ### F1.3 — Verifica degli effetti e undo
 
@@ -689,8 +688,8 @@ Dipende da: F1.1 e F1.2.
 Criterio di uscita: tutte le azioni external/destructive/admin hanno prova; l'80% delle azioni
 reversibili dispone di undo testato.
 
-- Stato: `DOING`; `F1.3.1` e `F1.3.3` chiusi, resto aperto (`F1.3.2` per ora solo filesystem, non
-  ancora processi/finestre/browser/casa).
+- Stato: `DOING`; `F1.3.1`, `F1.3.3` e `F1.3.6` chiusi, resto aperto (`F1.3.2` per ora solo
+  filesystem, non ancora processi/finestre/browser/casa).
 - `F1.3.1` — 11/09/2026: `core/execution_safety.py` aveva tre strutture parallele da tenere
   sincronizzate a mano - `VERIFIABLE_INTENTS` (insieme), l'if/elif di `verify_effect`,
   `ROLLBACK_HANDLERS` + `ROLLBACK_COMPENSATING_INTENT` (due dizionari) - esattamente il pattern
@@ -717,6 +716,31 @@ reversibili dispone di undo testato.
   e' stato toccato, resta `Optional[bool]` con la propria semantica invariata; i test che lo
   verificano (`test_non_verifiable_intent_leaves_verified_absent*`) restano corretti cosi' come
   sono. Prova: 1.973/1.973 test, ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.3.6` — 12/09/2026: `core/execution_safety.py::execute_with_retry` ritentava CIECAMENTE
+  qualunque intent con un errore in `RETRYABLE_ERRORS` (`OPERATION_FAILED`/`NETWORK_UNAVAILABLE`),
+  senza sapere se ripetere la skill potesse produrre un EFFETTO DOPPIO - non un rischio teorico:
+  verificato leggendo il codice che ~37 skill (tra cui `skills/notes.py::ADD_NOTE`,
+  `skills/contacts.py`, `skills/git_control.py`) possono davvero restituire `OPERATION_FAILED`, e
+  un secondo tentativo dopo che la prima scrittura era gia' andata a buon fine per un'altra
+  ragione avrebbe aggiunto lo stesso appunto/contatto due volte. Nuovo
+  `is_safe_to_auto_retry(intent)`: sicuro da ritentare automaticamente solo se l'intent e'
+  `READ_ONLY` (nessun effetto da poter raddoppiare) oppure e' uno dei quattro intent filesystem
+  in `INTENT_SAFETY_REGISTRY` (F1.3.1), naturalmente idempotenti per costruzione. Per tutti gli
+  altri ~196 intent, un errore transitorio non viene piu' ritentato automaticamente (`attempts=1`,
+  fallimento immediato) - coerente con "minimo privilegio"/"negare per default" (F1.2.4). **Buco
+  reale trovato e corretto mentre si scriveva il test di regressione**:
+  `tests/test_agent.py::RetryOnTransientErrorTests::test_transient_failure_is_retried_and_succeeds`
+  usava proprio `ADD_NOTE` per testare il retry - lo stesso test che dimostrava il comportamento
+  rischioso che questo passo doveva chiudere. Riscritto in due test: uno con `CREATE_PATH`
+  (retry-safe, comportamento invariato) e uno nuovo con `ADD_NOTE` che dimostra `attempts=1`
+  invece di 2. Aggiunti `IsSafeToAutoRetryTests`/`ExecuteWithRetryRespectsIdempotenceTests` in
+  `tests/test_execution_safety.py` (7 nuovi test). Non e' ancora l'enforcement con chiave di
+  idempotenza descritta in F1.1 (`idempotency_key_of`, gia' tracciata ma non applicata) - quella
+  decisione di policy (rifiutare un duplicato? restituire il risultato precedente?) resta
+  volutamente rimandata a una revisione dedicata, non improvvisata qui: questo passo riduce solo
+  il rischio di un EFFETTO DOPPIO causato dal retry automatico stesso, un problema piu' stretto e
+  senza ambiguita' di policy. Prova: 2.002/2.002 test, ruff/mypy/compileall verdi su tutti i file
+  toccati.
 
 ### F1.4 — Identità, autenticazione e segreti
 
