@@ -33,10 +33,15 @@ CAPABILITIES = {
 class FakeRegistry:
     """Simula SkillRegistry: CREATE_PATH/DELETE_PATH toccano davvero il filesystem (serve a
     verify_effect/rollback_effect, che controllano lo stato reale su disco), ADD_NOTE pesca da
-    una coda di risultati gia' pronti per simulare un fallimento transitorio seguito da successo."""
+    una coda di risultati gia' pronti per simulare un fallimento transitorio seguito da successo.
+    create_path_results (F1.3.6): coda opzionale di risultati PRIMA del touch reale, per simulare
+    un CREATE_PATH che fallisce transitoriamente prima di riuscire - CREATE_PATH e' uno dei pochi
+    intent che execute_with_retry considera sicuri da ritentare (vedi
+    core/execution_safety.py::is_safe_to_auto_retry), a differenza di ADD_NOTE."""
 
-    def __init__(self, add_note_results: list = None):
+    def __init__(self, add_note_results: list = None, create_path_results: list = None):
         self._add_note_queue = list(add_note_results or [])
+        self._create_path_queue = list(create_path_results or [])
         self.calls = []
 
     def list_capabilities(self):
@@ -46,6 +51,10 @@ class FakeRegistry:
         parameters = parameters or {}
         self.calls.append((intent, dict(parameters)))
         if intent == "CREATE_PATH":
+            if self._create_path_queue:
+                queued = self._create_path_queue.pop(0)
+                if not queued.success:
+                    return queued
             Path(parameters["path"]).touch()
             return SkillResult(success=True, data={"path": parameters["path"]})
         if intent == "DELETE_PATH":
@@ -92,22 +101,45 @@ def _agent(registry, client, executor=None) -> TaskAgent:
 
 
 class RetryOnTransientErrorTests(unittest.TestCase):
-    def test_transient_failure_is_retried_and_succeeds(self):
-        registry = FakeRegistry(add_note_results=[
-            SkillResult(success=False, data={}, error="OPERATION_FAILED"),
-            SkillResult(success=True, data={}),
-        ])
+    def test_transient_failure_on_a_retry_safe_intent_is_retried_and_succeeds(self):
+        """CREATE_PATH e' naturalmente idempotente (ricreare lo stesso percorso raggiunge lo
+        stesso stato finale), quindi execute_with_retry lo considera sicuro da ritentare - vedi
+        core/execution_safety.py::is_safe_to_auto_retry (F1.3.6)."""
+        tmp_dir = Path(tempfile.mkdtemp(prefix="jake_agent_retry_"))
+        self.addCleanup(shutil.rmtree, tmp_dir, ignore_errors=True)
+        target = tmp_dir / "nuovo_file.txt"
+        registry = FakeRegistry(create_path_results=[SkillResult(success=False, data={}, error="OPERATION_FAILED")])
         client = ScriptedOllamaClient([
-            {"thought": "Aggiungo l'appunto", "action": {"intent": "ADD_NOTE", "parameters": {"text": "prova"}},
+            {"thought": "Creo il file", "action": {"intent": "CREATE_PATH", "parameters": {"path": str(target)}},
              "final_answer": "", "ask_user": ""},
             {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto.", "ask_user": ""},
         ])
-        outcome = _agent(registry, client).run("aggiungi un appunto")
+        outcome = _agent(registry, client).run("crea un file")
 
         self.assertEqual(len(outcome.steps), 1)
         self.assertEqual(outcome.steps[0].attempts, 2)
         self.assertTrue(outcome.steps[0].result.success)
         self.assertEqual(outcome.final_answer, "Fatto.")
+
+    def test_transient_failure_on_a_non_idempotent_intent_is_not_retried(self):
+        """F1.3.6 ("impedire retry automatico per azioni non idempotenti senza chiave
+        deduplica"): ADD_NOTE non e' READ_ONLY ne' nell'elenco filesystem naturalmente
+        idempotente - ritentarlo alla cieca rischierebbe di aggiungere lo stesso appunto due
+        volte se il primo tentativo fosse in realta' gia' andato a buon fine su disco.
+        Prima della correzione, questo test avrebbe visto attempts=2 e un secondo elemento MAI
+        consumato dalla coda (con RiskLevel.LOCAL_REVERSIBLE E fuori da INTENT_SAFETY_REGISTRY,
+        ADD_NOTE veniva comunque ritentato)."""
+        registry = FakeRegistry(add_note_results=[SkillResult(success=False, data={}, error="OPERATION_FAILED")])
+        client = ScriptedOllamaClient([
+            {"thought": "Aggiungo l'appunto", "action": {"intent": "ADD_NOTE", "parameters": {"text": "prova"}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Non riuscito.", "ask_user": ""},
+        ])
+        outcome = _agent(registry, client).run("aggiungi un appunto")
+
+        self.assertEqual(outcome.steps[0].attempts, 1)
+        self.assertFalse(outcome.steps[0].result.success)
+        self.assertEqual(outcome.steps[0].result.error, "OPERATION_FAILED")
 
     def test_non_transient_failure_is_not_retried(self):
         registry = FakeRegistry(add_note_results=[SkillResult(success=False, data={}, error="MISSING_PARAMETERS")])

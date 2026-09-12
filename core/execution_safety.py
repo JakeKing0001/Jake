@@ -13,21 +13,46 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
+from core.risk import RiskLevel, risk_of
 from core.skill_result import SkillResult
 
 RETRYABLE_ERRORS = {"OPERATION_FAILED", "NETWORK_UNAVAILABLE"}
 MAX_ATTEMPTS = 2
 
 
+def is_safe_to_auto_retry(intent: str) -> bool:
+    """F1.3.6 ("impedire retry automatico per azioni non idempotenti senza chiave deduplica"):
+    execute_with_retry() ritentava CIECAMENTE qualunque intent con un errore transitorio, senza
+    sapere se ripetere la skill potesse produrre un EFFETTO DOPPIO - verificato che non e' un
+    rischio teorico: ~37 skill (tra cui skills/notes.py::ADD_NOTE, skills/contacts.py,
+    skills/git_control.py) possono davvero restituire OPERATION_FAILED, e un secondo tentativo
+    dopo che la prima scrittura era gia' andata a buon fine per un'altra ragione aggiungerebbe lo
+    stesso appunto/contatto due volte. Un intent e' considerato sicuro da ritentare
+    automaticamente solo se: (a) e' READ_ONLY (nessun effetto collaterale da poter raddoppiare),
+    oppure (b) e' uno dei quattro intent filesystem in INTENT_SAFETY_REGISTRY (definito piu'
+    sotto in questo stesso modulo) - naturalmente idempotenti per costruzione: ricreare/ri-
+    cancellare/ri-rinominare/ri-spostare lo stesso percorso raggiunge lo stesso stato finale o
+    fallisce in modo pulito (es. PATH_NOT_FOUND), mai un doppio effetto. Per tutti gli altri
+    intent, un errore transitorio non viene piu' ritentato automaticamente - piu' sicuro
+    ("minimo privilegio"/"negare per default", vedi ROADMAP_EXECUTION.md F1.2.4) che rischiare un
+    effetto doppio su una skill mai controllata caso per caso. Una vera enforcement con chiave di
+    idempotenza (gia' tracciata da idempotency_key_of in core/action_ledger.py, non ancora
+    applicata) resta lavoro futuro dichiarato, non questo."""
+    return risk_of(intent) == RiskLevel.READ_ONLY or intent in INTENT_SAFETY_REGISTRY
+
+
 def execute_with_retry(execute_fn, intent: str, parameters: dict) -> tuple[SkillResult, int]:
-    """Chiama execute_fn(intent, parameters), ritentando fino a MAX_ATTEMPTS volte se
-    l'errore e' tra quelli transitori (RETRYABLE_ERRORS). execute_fn e' un callable qualsiasi
-    (SkillRegistry.execute, o il ripiego piu' ricco di JakeCore._resolve_and_execute): questa
-    funzione non sa e non le importa cosa faccia davvero, ritenta solo in base al risultato.
-    Restituisce (risultato, tentativi fatti)."""
+    """Chiama execute_fn(intent, parameters), ritentando fino a MAX_ATTEMPTS volte se l'errore e'
+    tra quelli transitori (RETRYABLE_ERRORS) E l'intent e' sicuro da ritentare automaticamente
+    (vedi is_safe_to_auto_retry, F1.3.6) - per un intent non idempotente il primo errore
+    transitorio e' gia' definitivo, per non rischiare un effetto doppio. execute_fn e' un
+    callable qualsiasi (SkillRegistry.execute, o il ripiego piu' ricco di JakeCore.
+    _resolve_and_execute): questa funzione non sa e non le importa cosa faccia davvero, decide
+    solo in base al risultato e all'intent. Restituisce (risultato, tentativi fatti)."""
     attempts = 0
     result: SkillResult | None = None
-    while attempts < MAX_ATTEMPTS:
+    max_attempts = MAX_ATTEMPTS if is_safe_to_auto_retry(intent) else 1
+    while attempts < max_attempts:
         attempts += 1
         result = execute_fn(intent, parameters)
         if result is None:
@@ -35,7 +60,7 @@ def execute_with_retry(execute_fn, intent: str, parameters: dict) -> tuple[Skill
             break
         if result.success or result.error not in RETRYABLE_ERRORS:
             break
-    # MAX_ATTEMPTS >= 1 garantisce che il ciclo giri almeno una volta, quindi result non e' mai
+    # max_attempts >= 1 garantisce che il ciclo giri almeno una volta, quindi result non e' mai
     # None qui davvero - ma un ripiego esplicito (invece di fidarsi solo di quell'invariante)
     # evita che un futuro MAX_ATTEMPTS = 0 restituisca None a un chiamante che si aspetta sempre
     # un vero SkillResult.

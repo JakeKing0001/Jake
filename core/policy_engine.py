@@ -59,6 +59,21 @@ def strip_authorization_signals(parameters: dict) -> dict:
     return {key: value for key, value in (parameters or {}).items() if key not in AUTHORIZATION_SIGNAL_KEYS}
 
 
+# F1.2.6 ("salvare la motivazione della decisione nel ledger senza salvare segreti"): un
+# vocabolario CHIUSO, non testo libero - ne' _decide_*_reasoned() ne' chi le chiama puo' far
+# finire un valore di parametro (potenzialmente un segreto: un token, un percorso privato, il
+# contenuto di un messaggio) dentro la motivazione, perche' la motivazione e' sempre UNA di
+# queste quattro costanti, mai una stringa costruita da `intent`/`parameters`. Questo e' cio'
+# che rende "senza salvare segreti" vero per costruzione, non per convenzione.
+POLICY_REASON_BLOCKED = "intent_in_blocked_intents"
+POLICY_REASON_REQUIRE_AUTH = "intent_in_require_auth_intents_and_auth_gate_enabled"
+POLICY_REASON_CONFIRM = "intent_in_always_confirm_intents"
+POLICY_REASON_ALLOWED = "no_restriction_matched"
+POLICY_REASONS = frozenset({
+    POLICY_REASON_BLOCKED, POLICY_REASON_REQUIRE_AUTH, POLICY_REASON_CONFIRM, POLICY_REASON_ALLOWED,
+})
+
+
 class PolicyEngine:
     """Un'istanza per JakeCore, condivisa PER RIFERIMENTO (non copiata) con tutto cio' che deve
     decidere se un intent puo' eseguire: JakeCore stesso, PlanExecutor (tramite `execute()`),
@@ -106,19 +121,7 @@ class PolicyEngine:
         perche' l'agente a passi non passa MAI da _execute_command: prima di questo modulo un
         intent disabilitato dall'utente in config.json restava eseguibile da un compito
         composto."""
-        parameters = parameters or {}
-        if intent in self.blocked_intents:
-            return PolicyDecision.BLOCK
-        if (
-            self.auth_gate is not None
-            and getattr(self.auth_gate, "enabled", False)
-            and intent in self.require_auth_intents
-            and not parameters.get("authenticated")
-        ):
-            return PolicyDecision.REQUIRE_AUTH
-        if intent in self.always_confirm_intents and not parameters.get("confirmed"):
-            return PolicyDecision.CONFIRM
-        return PolicyDecision.ALLOW
+        return self._decide_interactive_reasoned(intent, parameters)[0]
 
     def decide_automated(self, intent: str) -> PolicyDecision:
         """Percorso automatico: PlanExecutor (il ripiego del planner, RUN_WORKFLOW, i trigger).
@@ -131,8 +134,64 @@ class PolicyEngine:
           strip_authorization_signals() prima di eseguirlo: questo metodo non guarda i
           parametri del tutto, decide solo in base all'intent, cosi' un "confirmed": true
           falsificato non ha nessun modo di influenzare il risultato."""
+        return self._decide_automated_reasoned(intent)[0]
+
+    # ---- F1.2.7 (policy simulator): "mostra se e perche' un'azione sarebbe permessa" ---------
+    #
+    # Le due varianti "_reasoned" sotto sono l'UNICA fonte della logica di decisione: decide_
+    # interactive()/decide_automated() sopra ne scartano solo il motivo, invece di duplicare gli
+    # stessi if/elif in una seconda copia - esattamente il pattern di bug (due strutture quasi
+    # identiche che divergono in silenzio) gia' documentato nel docstring del modulo per
+    # RunWorkflowSkill. explain() le chiama entrambe e le espone insieme, per capire in anticipo
+    # (senza eseguire nulla) cosa succederebbe a un intent sia da un comando diretto sia da
+    # un'automazione - i due percorsi possono dare esiti diversi (REQUIRE_AUTH esiste solo per
+    # quello interattivo).
+
+    def _decide_interactive_reasoned(self, intent: str, parameters: dict | None) -> tuple[PolicyDecision, str]:
+        parameters = parameters or {}
         if intent in self.blocked_intents:
-            return PolicyDecision.BLOCK
+            return PolicyDecision.BLOCK, POLICY_REASON_BLOCKED
+        if (
+            self.auth_gate is not None
+            and getattr(self.auth_gate, "enabled", False)
+            and intent in self.require_auth_intents
+            and not parameters.get("authenticated")
+        ):
+            return PolicyDecision.REQUIRE_AUTH, POLICY_REASON_REQUIRE_AUTH
+        if intent in self.always_confirm_intents and not parameters.get("confirmed"):
+            return PolicyDecision.CONFIRM, POLICY_REASON_CONFIRM
+        return PolicyDecision.ALLOW, POLICY_REASON_ALLOWED
+
+    def _decide_automated_reasoned(self, intent: str) -> tuple[PolicyDecision, str]:
+        if intent in self.blocked_intents:
+            return PolicyDecision.BLOCK, POLICY_REASON_BLOCKED
         if intent in self.always_confirm_intents:
-            return PolicyDecision.CONFIRM
-        return PolicyDecision.ALLOW
+            return PolicyDecision.CONFIRM, POLICY_REASON_CONFIRM
+        return PolicyDecision.ALLOW, POLICY_REASON_ALLOWED
+
+    # F1.2.6: varianti PUBBLICHE delle due sopra, per chi (PlanExecutor, F1.2.6) ha bisogno di
+    # salvare la motivazione nel ledger insieme alla decisione, senza ricalcolarla una seconda
+    # volta con explain() (che calcola anche il verdetto dell'altro percorso, inutile qui) ne'
+    # accedere a un metodo "privato" da fuori il modulo.
+    def decide_interactive_with_reason(self, intent: str, parameters: dict | None) -> tuple[PolicyDecision, str]:
+        return self._decide_interactive_reasoned(intent, parameters)
+
+    def decide_automated_with_reason(self, intent: str) -> tuple[PolicyDecision, str]:
+        return self._decide_automated_reasoned(intent)
+
+    def explain(self, intent: str, parameters: dict | None = None) -> dict:
+        """Simula la policy per `intent` SENZA eseguire nulla: utile per un pannello diagnostico
+        (HUD/companion, non ancora costruito) o per debug locale - "perche' Jake mi ha chiesto
+        conferma per X?"/"questa automazione si fermerebbe?". `parameters` conta solo per il
+        verdetto interattivo (`confirmed`/`authenticated`, coerenti con decide_interactive): il
+        verdetto automatico non li considera mai, per lo stesso motivo per cui decide_automated()
+        non li guarda (nessun segnale di autorizzazione e' mai genuino in un percorso automatico -
+        vedi strip_authorization_signals). Restituisce entrambi i verdetti perche' possono
+        differire: REQUIRE_AUTH esiste solo per il percorso interattivo."""
+        interactive_decision, interactive_reason = self._decide_interactive_reasoned(intent, parameters)
+        automated_decision, automated_reason = self._decide_automated_reasoned(intent)
+        return {
+            "intent": intent,
+            "interactive": {"decision": interactive_decision.value, "reason": interactive_reason},
+            "automated": {"decision": automated_decision.value, "reason": automated_reason},
+        }

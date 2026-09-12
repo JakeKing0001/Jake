@@ -516,8 +516,62 @@ Dipende da: G0.
 
 Criterio di uscita: il 100% dei percorsi produce lo stesso `ActionReceipt` validato.
 
-- Stato: `DOING`; `F1.1.1`, `F1.1.3` (parzialmente), `F1.1.4` e `F1.1.8` conclusi con evidenza;
-  `F1.1.2`, `F1.1.5`, `F1.1.6`, `F1.1.7` restano aperti.
+- Stato: `DOING`; `F1.1.1`, `F1.1.2`, `F1.1.3` (parzialmente), `F1.1.4`, `F1.1.6` (pilota su 5
+  intent) e `F1.1.8` conclusi con evidenza; `F1.1.5`, `F1.1.7` restano aperti.
+- `F1.1.6` — 12/09/2026: pilota di adozione dei contratti F1.1.2 su un intent reale per
+  ciascun `RiskLevel` (letterale dalla roadmap: "un intent read-only, uno reversibile, uno
+  external, uno destructive e uno admin") - `GET_TIME`, `ADD_NOTE`, `CONTROL_SMART_DEVICE`,
+  `DELETE_PATH`, `SYSTEM_POWER`. A differenza di F1.1.2 (tipi definiti ma isolati), qui
+  `core/jake_core.py::_resolve_and_execute` costruisce e valida DAVVERO un `ActionProposal`
+  (`ActionProposal.for_intent(resolved.intent, resolved.parameters, "user")` +
+  `validate_action_proposal`) prima di passare `proposal.intent`/`proposal.parameters` a
+  `PolicyEngine.decide_interactive` - `proposal.parameters` e' una COPIA (vedi
+  `ActionProposal.for_intent`), quindi il comando eseguito davvero piu' sotto resta
+  `resolved.parameters`, l'originale: nessun cambio di comportamento, verificato sia dalla suite
+  invariata (2.042/2.042 verdi PRIMA di aggiungere nuovi test) sia da un test dedicato che sporca
+  `proposal.parameters` e verifica che la skill riceva comunque i parametri originali.
+  `_log_action_outcome`/`_log_denied_action` costruiscono un `ActionError.from_result(result)`
+  (validato da `validate_action_error`) e ne usano `.category` per `ActionReceipt.error_category`
+  - stesso valore di prima (`error_category_of(result)`, F1.1.4), ma ora attraverso il tipo
+  condiviso invece che dalla funzione diretta. Questo e' deliberatamente un percorso reale
+  toccato (non piu' solo codice isolato come F1.1.2): rischio piu' alto, per questo limitato a
+  UN chokepoint (il percorso a comando singolo/agente, "percorso 1/2" dell'inventario F1.1.1) e
+  verificato con la suite completa PRIMA e DOPO la modifica, oltre a 6 nuovi test dedicati
+  (`tests/test_jake_core_action_contracts.py`) che esercitano tutti e 5 i livelli di rischio
+  contro il codice vero, non un doppio isolato. `TaskAgent`/`PlanExecutor` (gli altri due
+  chokepoint) NON sono stati toccati in questo passo - restano su `error_category_of()` diretto,
+  comportamento identico a prima, adozione rimandata a `F1.1.7`. Prova: 2.048/2.048 test,
+  ruff/mypy (incluso il set selettivo di `pyproject.toml`, che include `core/jake_core.py`)/
+  compileall verdi.
+- `F1.1.2` — 12/09/2026: creato `core/action_contracts.py` con i cinque contratti mancanti
+  (`ActionProposal`, `ActionContext`, `VerificationEvidence`, `UndoDescriptor`, `ActionError`) -
+  `ActionReceipt` esisteva gia' (`core/action_ledger.py`). **Deliberatamente NON collegati** ai
+  quattro chokepoint reali (`JakeCore`/`TaskAgent`/`PlanExecutor`) ne' alle ~200 skill (restano su
+  `SkillResult`): quella migrazione e' F1.1.6 ("adattare prima un intent read-only, uno
+  reversibile, uno external, uno destructive e uno admin") e F1.1.7 ("migrare tutti gli intent"),
+  numerati separatamente nella roadmap proprio perche' un progetto a se', troppo rischioso da fare
+  nello stesso commit di 5 tipi nuovi mai usati (vedi Definition of Done, punto 8: "il commit
+  contiene una sola unita' logica"). Ogni tipo RIUSA una tassonomia/costante gia' esistente invece
+  di introdurne una copia parallela (lo stesso principio gia' applicato in F1.1.4/F1.3.3):
+  `VerificationEvidence.status` e `ActionError.category` usano le costanti gia' presenti in
+  `core/action_ledger.py` (`VERIFICATION_*`, ora anche pubblico `ERROR_CATEGORIES` invece del
+  precedente `_ERROR_CATEGORIES` privato, cosi' `action_contracts.py` puo' validare senza un
+  secondo elenco a mano); `ActionProposal.risk` usa `core.risk.RiskLevel`; `ActionError.retryable`
+  usa `execution_safety.RETRYABLE_ERRORS`. Estratto anche `normalize_result_code()` da
+  `error_category_of()` (stesso comportamento, nessun cambio) perche' sia questa sia
+  `ActionError.from_result()` avevano bisogno della stessa normalizzazione "error:" - una funzione
+  sola, non due copie. `effect_class` (`ActionProposal`) e' volutamente un campo dichiarato dal
+  chiamante, non calcolato da `risk_of()`: i due assi (rischio vs. tipo di effetto) non si
+  derivano l'uno dall'altro in modo affidabile per le ~200 skill non ancora censite; resta `None`
+  quando ignoto invece di un valore indovinato. `UndoDescriptor` e' distinto dal `RollbackAction`
+  gia' esistente in `execution_safety.py`: quello e' il template PER CLASSE DI INTENT, questo
+  l'istanza PER AZIONE GIA' ESEGUITA con parametri risolti e stato (`used`/`expires_at`) - due
+  esecuzioni dello stesso intent condividono lo stesso `RollbackAction` ma hanno due
+  `UndoDescriptor` diversi. Nuovo `tests/test_action_contracts.py` (33 test): copre costruzione,
+  validazione e - per ogni tipo che riusa una costante condivisa - un test esplicito che il valore
+  coincide con quello della fonte originale (es. `ActionError.retryable` per ogni codice REALE di
+  `RETRYABLE_ERRORS`, non solo un esempio a mano). Prova: 2.042/2.042 test, ruff/mypy/compileall
+  verdi su tutti i file toccati (incluso il refactor non invasivo di `error_category_of`).
 - `F1.1.4` — 12/09/2026: definita la tassonomia in `core/action_ledger.py`
   (`ERROR_CATEGORY_*`: le nove categorie elencate sopra piu' due necessarie perche' non ogni
   ricevuta e' un errore - `success` e `pending` - piu' un fallback onesto `uncategorized` per i
@@ -550,9 +604,10 @@ Criterio di uscita: il 100% dei percorsi produce lo stesso `ActionReceipt` valid
   esistano ancora (incluso il buco noto e documentato di `SkillRegistry.execute()`, F1.2.1), cosi'
   un rinominamento futuro fa fallire il test invece di lasciare il documento silenziosamente
   disallineato dal codice.
-- Ricognizione 11/09/2026: `ActionProposal`, `ActionContext`, `VerificationEvidence`,
-  `UndoDescriptor` ed `ActionError` non esistono ancora come classi (solo prosa nella roadmap);
-  esiste solo `ActionReceipt` (`core/action_ledger.py`) e `PolicyEngine`
+- Ricognizione 11/09/2026 (superata da `F1.1.2` sopra, conservata come prova dello stato di
+  partenza): `ActionProposal`, `ActionContext`, `VerificationEvidence`, `UndoDescriptor` ed
+  `ActionError` non esistevano ancora come classi (solo prosa nella roadmap); esisteva solo
+  `ActionReceipt` (`core/action_ledger.py`) e `PolicyEngine`
   (`core/policy_engine.py`). Le skill restituiscono `SkillResult` (piu' sottile del contratto
   target); la ricevuta viene sintetizzata solo in 4 punti di orchestrazione
   (`JakeCore._log_action_outcome`/`_log_denied_action`, `TaskAgent._log_step`,
@@ -571,10 +626,15 @@ Criterio di uscita: il 100% dei percorsi produce lo stesso `ActionReceipt` valid
   test_action_ledger.py` aggiornato per la nuova obbligatorietà. Prova: 1.955/1.955 test (36/36
   su `test_action_ledger`+`test_action_contract`), ruff e mypy puliti su
   `core/action_ledger.py`, compileall verde.
-- Non ancora affrontato: `effect_class`/"parametri validati"/"actor" distinto da "source" come
-  campi propri (`requested_by` li conflette in una sola stringa); tassonomia errori (`F1.1.4`);
-  migrazione reale delle skill sul contratto (`F1.1.6`/`F1.1.7`). Il bypass di policy nel
-  rollback e' stato parzialmente chiuso, vedi `F1.2.5`.
+- Non ancora affrontato: `effect_class` esiste ora come campo di `ActionProposal` (`F1.1.2`) ma
+  resta dichiarato dal chiamante, non calcolato automaticamente; "parametri validati"/"actor"
+  distinto da "source" come campi propri (`requested_by` li conflette in una sola stringa,
+  `ActionContext` non ha ancora un campo `actor` separato); migrazione reale delle skill sul
+  contratto (`F1.1.7`, dopo il pilota di `F1.1.6` su un solo chokepoint) - `TaskAgent`/
+  `PlanExecutor` continuano a costruire `ActionReceipt` direttamente senza passare da un
+  `ActionProposal`/`ActionError`, e nessuna delle ~200 skill costruisce ancora questi contratti
+  da sola (restano su `SkillResult`). Il bypass di policy nel rollback e' stato parzialmente
+  chiuso, vedi `F1.2.5`.
 
 ### F1.2 — Policy kernel e capability
 
@@ -593,7 +653,8 @@ Dipende da: F1.1.
 Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa dal PolicyEngine.
 
 - Stato: `DOING`; `F1.2.5` chiuso solo per il rollback filesystem; `F1.2.1` chiuso parzialmente
-  (percorso 3, vedi sotto); `F1.2.4` chiuso per il percorso planner (vedi sotto); resto aperto.
+  (percorso 3, vedi sotto); `F1.2.4` chiuso per il percorso planner (vedi sotto); `F1.2.6`
+  (parziale, solo PlanExecutor) e `F1.2.7` chiusi (vedi sotto); resto aperto.
 - `F1.2.1` (parziale) — 12/09/2026: chiuso il buco concreto documentato in
   [docs/action-execution-paths.md](docs/action-execution-paths.md) ("Nota sul percorso 3"):
   `PlanExecutor.execute(plan, policy_engine=None, ...)` trattava l'assenza di policy_engine come
@@ -666,11 +727,54 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   (rollback): gia' coperto da `F1.2.5` sopra. Percorso 7 (`SkillRegistry.execute()`): nessun test
   di bypass possibile da scrivere finche' `F1.2.1` non gli aggiunge un controllo proprio - il gap
   resta documentato, non "testato" nel senso di verificarne la chiusura.
-- Non ancora affrontato: `F1.2.1` (PolicyEngine come unico gate: `core/skill_registry.py::
-  execute()` resta un dispatcher senza controllo di policy proprio, i percorsi normali lo
-  proteggono chiamandolo solo dopo una decisione, ma nulla lo impedisce strutturalmente);
-  `F1.2.2`-`F1.2.4`, `F1.2.6`-`F1.2.7`; il resto di `F1.2.5` (retry e sotto-azioni di workflow
-  non ancora passati in rassegna allo stesso modo).
+- `F1.2.7` — 12/09/2026: aggiunto `PolicyEngine.explain(intent, parameters=None) -> dict`
+  ("policy simulator": mostra se e perche' un'azione sarebbe permessa, SENZA eseguire nulla).
+  Refattorizzata la logica di `decide_interactive`/`decide_automated` in due varianti private
+  `_decide_*_reasoned()` che restituiscono anche il motivo (`intent_in_blocked_intents`, ...):
+  `explain()` le chiama entrambe, `decide_interactive`/`decide_automated` restano identici
+  all'esterno (ne scartano solo il motivo) - UNA sola fonte della logica, non una copia
+  duplicata per il simulatore (esattamente il pattern di bug gia' documentato nel modulo per
+  RunWorkflowSkill: due strutture quasi identiche che divergono in silenzio). Restituisce
+  entrambi i verdetti (interattivo E automatico) perche' possono differire - es. `REQUIRE_AUTH`
+  esiste solo per il percorso interattivo, verificato da un test dedicato. Nessun cambio di
+  comportamento per `decide_interactive`/`decide_automated` (22/22 test esistenti verdi senza
+  modifiche); aggiunti 5 nuovi test in `tests/test_policy_engine.py::ExplainTests`, ciascuno
+  gemello di uno scenario gia' coperto per le due decisioni originali. Non ancora collegato a
+  un'interfaccia reale (HUD/companion/CLI): resta una funzione di libreria pronta per un futuro
+  pannello diagnostico, come dichiarato dalla roadmap stessa ("mostra se e perche'"). Prova:
+  2.007/2.007 test, ruff/mypy/compileall verdi.
+- `F1.2.6` (parziale) — 12/09/2026: "salvare la motivazione della decisione nel ledger senza
+  salvare segreti". Estratte in `core/policy_engine.py` le quattro costanti gia' usate
+  (letteralmente, come stringhe) dentro `_decide_*_reasoned()` (F1.2.7) - `POLICY_REASON_BLOCKED`/
+  `_REQUIRE_AUTH`/`_CONFIRM`/`_ALLOWED` - piu' `POLICY_REASONS`, il vocabolario CHIUSO che le
+  raccoglie. E' proprio la chiusura del vocabolario a rendere "senza segreti" vero per
+  costruzione, non per convenzione: la motivazione non e' mai testo libero costruito da
+  `intent`/`parameters` (che potrebbero contenere un token o un percorso privato), sempre una di
+  quattro costanti fisse. Aggiunti i metodi pubblici `decide_interactive_with_reason`/
+  `decide_automated_with_reason` (wrapper su `_decide_*_reasoned`, senza calcolare anche il
+  verdetto dell'altro percorso come farebbe `explain()` - inutile per chi deve solo loggare).
+  Aggiunto `ActionReceipt.policy_reason: Optional[str] = None`, validato da
+  `validate_action_receipt` contro `POLICY_REASONS` quando presente. Collegato SOLO a
+  `PlanExecutor._log_step` (il percorso automatico: `decide_automated_with_reason` sostituisce
+  `decide_automated` nel ciclo di `execute()`, la motivazione della decisione fluisce fino alla
+  ricevuta per ogni passo bloccato/da confermare/consentito - verificato con un `ActionLedger`
+  vero su file temporaneo, non solo in memoria). `JakeCore._resolve_and_execute` (il percorso
+  interattivo) NON e' stato toccato in questo passo: la motivazione li' richiederebbe threadare
+  un valore in piu' attraverso il ritorno di `_resolve_and_execute` (oggi una tupla a 3, usata da
+  3 chiamanti reali) fino al punto - diverso - che costruisce la ricevuta
+  (`_log_action_outcome`), una modifica di plumbing piu' ampia rimandata deliberatamente per
+  restare in un incremento verificabile. Un passo interrotto dal kill switch non ha
+  `policy_reason` (resta `None`/assente dal JSON): non e' una decisione di policy, non deve
+  sembrare che lo sia. Nessun cambio di comportamento (28/28 test di `test_plan_executor`
+  invariati verdi); aggiunti 4+3+4 nuovi test rispettivamente in `tests/test_plan_executor.py::
+  PolicyReasonInTheLedgerTests`, `tests/test_policy_engine.py::DecideWithReasonTests`,
+  `tests/test_action_ledger.py::ActionReceiptPolicyReasonValidationTests`. Prova: 2.059/2.059
+  test, ruff/mypy/compileall verdi su tutti i file toccati.
+- Non ancora affrontato: il resto di `F1.2.1` (percorso 7, `SkillRegistry.execute()` resta un
+  dispatcher senza controllo di policy proprio - vedi sopra); `F1.2.2`-`F1.2.3`; il resto di
+  `F1.2.5` (sotto-azioni di workflow non ancora passate in rassegna allo stesso modo - il retry
+  e' invece coperto separatamente da `F1.3.6`, vedi sotto); il resto di `F1.2.6` (il percorso
+  interattivo di `JakeCore`, vedi sopra).
 
 ### F1.3 — Verifica degli effetti e undo
 
@@ -689,8 +793,8 @@ Dipende da: F1.1 e F1.2.
 Criterio di uscita: tutte le azioni external/destructive/admin hanno prova; l'80% delle azioni
 reversibili dispone di undo testato.
 
-- Stato: `DOING`; `F1.3.1` e `F1.3.3` chiusi, resto aperto (`F1.3.2` per ora solo filesystem, non
-  ancora processi/finestre/browser/casa).
+- Stato: `DOING`; `F1.3.1`, `F1.3.3` e `F1.3.6` chiusi, resto aperto (`F1.3.2` per ora solo
+  filesystem, non ancora processi/finestre/browser/casa).
 - `F1.3.1` — 11/09/2026: `core/execution_safety.py` aveva tre strutture parallele da tenere
   sincronizzate a mano - `VERIFIABLE_INTENTS` (insieme), l'if/elif di `verify_effect`,
   `ROLLBACK_HANDLERS` + `ROLLBACK_COMPENSATING_INTENT` (due dizionari) - esattamente il pattern
@@ -717,6 +821,31 @@ reversibili dispone di undo testato.
   e' stato toccato, resta `Optional[bool]` con la propria semantica invariata; i test che lo
   verificano (`test_non_verifiable_intent_leaves_verified_absent*`) restano corretti cosi' come
   sono. Prova: 1.973/1.973 test, ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.3.6` — 12/09/2026: `core/execution_safety.py::execute_with_retry` ritentava CIECAMENTE
+  qualunque intent con un errore in `RETRYABLE_ERRORS` (`OPERATION_FAILED`/`NETWORK_UNAVAILABLE`),
+  senza sapere se ripetere la skill potesse produrre un EFFETTO DOPPIO - non un rischio teorico:
+  verificato leggendo il codice che ~37 skill (tra cui `skills/notes.py::ADD_NOTE`,
+  `skills/contacts.py`, `skills/git_control.py`) possono davvero restituire `OPERATION_FAILED`, e
+  un secondo tentativo dopo che la prima scrittura era gia' andata a buon fine per un'altra
+  ragione avrebbe aggiunto lo stesso appunto/contatto due volte. Nuovo
+  `is_safe_to_auto_retry(intent)`: sicuro da ritentare automaticamente solo se l'intent e'
+  `READ_ONLY` (nessun effetto da poter raddoppiare) oppure e' uno dei quattro intent filesystem
+  in `INTENT_SAFETY_REGISTRY` (F1.3.1), naturalmente idempotenti per costruzione. Per tutti gli
+  altri ~196 intent, un errore transitorio non viene piu' ritentato automaticamente (`attempts=1`,
+  fallimento immediato) - coerente con "minimo privilegio"/"negare per default" (F1.2.4). **Buco
+  reale trovato e corretto mentre si scriveva il test di regressione**:
+  `tests/test_agent.py::RetryOnTransientErrorTests::test_transient_failure_is_retried_and_succeeds`
+  usava proprio `ADD_NOTE` per testare il retry - lo stesso test che dimostrava il comportamento
+  rischioso che questo passo doveva chiudere. Riscritto in due test: uno con `CREATE_PATH`
+  (retry-safe, comportamento invariato) e uno nuovo con `ADD_NOTE` che dimostra `attempts=1`
+  invece di 2. Aggiunti `IsSafeToAutoRetryTests`/`ExecuteWithRetryRespectsIdempotenceTests` in
+  `tests/test_execution_safety.py` (7 nuovi test). Non e' ancora l'enforcement con chiave di
+  idempotenza descritta in F1.1 (`idempotency_key_of`, gia' tracciata ma non applicata) - quella
+  decisione di policy (rifiutare un duplicato? restituire il risultato precedente?) resta
+  volutamente rimandata a una revisione dedicata, non improvvisata qui: questo passo riduce solo
+  il rischio di un EFFETTO DOPPIO causato dal retry automatico stesso, un problema piu' stretto e
+  senza ambiguita' di policy. Prova: 2.002/2.002 test, ruff/mypy/compileall verdi su tutti i file
+  toccati.
 
 ### F1.4 — Identità, autenticazione e segreti
 
@@ -777,6 +906,25 @@ Dipende da: F1.1 e F1.3.
 8. `F1.7.8` Testare modalità privata end-to-end su tutti i nuovi record.
 
 Criterio di uscita: una failure end-to-end è ricostruibile senza esporre contenuti privati.
+
+- Stato: `DOING`; `F1.7.6` chiuso parzialmente (failure taxonomy, non ancora rollback rate),
+  resto aperto.
+- `F1.7.6` (parziale) — 12/09/2026: `tools/dashboard.py` (F0, gia' mostrava p50/p95 per skill e
+  overall e verification rate) mostra ora anche la "failure taxonomy": una nuova sezione
+  "Categoria di errore" che applica la STESSA `error_category_of()` gia' introdotta per l'action
+  ledger (F1.1.4) al campo `result` di `data/jake_actions.jsonl` - stesso formato in entrambi i
+  log (verificato leggendo il codice: `core/logger.log_action` riceve il `result` gia' calcolato
+  dagli stessi quattro chokepoint prima di scriverlo sia li' sia nel ledger), quindi la stessa
+  funzione pura si riusa senza adattamenti. "rollback rate" resta esplicitamente NON mostrato:
+  ne' `core/logger.log_action` ne' `core/action_ledger.py` producono oggi un evento distinto per
+  un rollback (vedi il docstring di `action_ledger.py`, "il rollback stesso non produce una
+  ricevuta separata" - F1.7.2 dovrebbe risolvere questo prima), quindi calcolarlo produrrebbe un
+  numero inventato invece di una metrica vera - dichiarato onestamente nella dashboard stessa
+  invece di stimarlo. Aggiunti 2 nuovi test in `tests/test_dashboard.py`. Prova: 2.009/2.009
+  test, ruff/compileall verdi; `mypy tools/dashboard.py` ha 8 errori di tipizzazione preesistenti
+  e indipendenti da questa modifica (verificato confrontando col file prima della modifica,
+  stesso numero di errori) - il file non fa parte del set coperto da "mypy selettivo" in CI,
+  dichiarato qui invece di essere ignorato silenziosamente.
 
 ### F1.8 — Concorrenza, code e arresto
 
