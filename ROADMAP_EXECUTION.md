@@ -993,8 +993,8 @@ Dipende da: F1.1.
 
 Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock o ledger incoerente.
 
-- Stato: `DOING`; `F1.8.2` chiuso parzialmente (il ledger, non ancora altre risorse condivise);
-  resto della fase non affrontato.
+- Stato: `DOING`; `F1.8.2` chiuso parzialmente (ledger, promemoria, todo - non ancora
+  `MemoryManager`); resto della fase non affrontato.
 - `F1.8.2` (parziale) — 12/09/2026: **buco reale trovato e corretto, riprodotto per davvero**
   (non solo ipotizzato) - `core/action_ledger.py::ActionLedger.record()` apriva il file con un
   `open()` grezzo a ogni chiamata, senza alcuna sincronizzazione tra thread. A differenza di
@@ -1015,12 +1015,35 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
   reale su file vero (20x20 scritture concorrenti, verifica che tutte le 400 righe siano presenti
   e valide) e uno deterministico che sostituisce il lock con uno che rileva se due thread sono
   MAI stati dentro la sezione critica insieme, cosi' da dimostrare l'invariante (mutua esclusione)
-  invece di affidarsi al caso del timing. Non ancora affrontato: le altre risorse condivise tra
-  thread (`Config`, `SkillRegistry`, il file system delle skill/note/todo) non sono state
-  passate in rassegna con lo stesso livello di dettaglio - questo passo chiude solo il ledger,
-  dove il rischio era piu' alto (scritture append-only frequenti da piu' thread contemporanei);
-  il resto di F1.8 (coda per azioni concorrenti, drain allo shutdown, deadlock timeout, client
-  lenti sull'event bus, test di race su reminder/trigger/handoff/conferma/undo) resta da fare.
+  invece di affidarsi al caso del timing.
+- `F1.8.2` (parziale, continuazione) — 12/09/2026: stesso buco, stessa causa, in altri due
+  moduli che condividono lo stesso pattern - connessione SQLite `check_same_thread=False`
+  (necessaria perche' `ReminderScheduler`/`SystemAdvisor`, entrambi su thread separati dal
+  principale, leggono `due_reminders()`/`list_stale_pending()` periodicamente) ma NESSUNA
+  sincronizzazione propria, contro l'avvertenza esplicita della documentazione di `sqlite3`
+  ("disattivare check_same_thread sposta la responsabilita' di serializzare l'accesso su chi
+  chiama"). **Riprodotto in modo ancora piu' netto del ledger, non solo per analogia**: lo stesso
+  scenario di `TodoManager.complete_matching()` (una SELECT poi una UPDATE sullo stesso id - una
+  finestra TOCTOU, non solo una scrittura grezza non sincronizzata) provato senza lock ha fatto
+  credere a **6 thread su 10** di aver completato lo STESSO identico task unico, con in piu'
+  `sqlite3.InterfaceError: bad parameter or other API misuse` sollevato da piu' thread - non un
+  doppio conteggio benigno, un errore vero e proprio dalla libreria standard per accesso
+  concorrente non sincronizzato alla stessa connessione. Corretto aggiungendo un
+  `threading.RLock()` per istanza a `core/reminder_manager.py::ReminderManager` e
+  `core/todo_manager.py::TodoManager`, avvolgendo l'INTERO corpo di ogni metodo pubblico (non
+  solo la singola query): `RLock`, non un `Lock` semplice, perche' `delete_matching`/
+  `snooze_matching`/`complete_matching` chiamano al proprio interno un altro metodo che vuole
+  anch'esso il lock (`find_matching`, o la stessa SELECT inline) - un lock non rientrante si
+  bloccherebbe per sempre nello stesso thread. Aggiunti 4 nuovi test (2 per modulo): uno stress
+  su molte `add()` concorrenti (nessuna riga persa/duplicata) e uno che forza piu' thread a
+  contendersi lo STESSO record con `complete_matching`/`delete_matching`, verificando che
+  esattamente uno solo lo trovi/gestisca. Non ancora affrontato: `core/memory_manager.py` (432
+  righe, condivisa da `WorkflowManager`/`TriggerManager` oltre che da REMEMBER/RECALL diretti) ha
+  lo stesso pattern `check_same_thread=False` senza lock, ma e' molto piu' grande - lasciata
+  esplicitamente per un passo successivo dedicato, invece di essere infilata di corsa qui; ne'
+  la coda per azioni concorrenti, il drain allo shutdown, il deadlock timeout, i client lenti
+  sull'event bus, ne' i test di race su trigger/handoff/conferma/undo (il resto di F1.8) sono
+  stati affrontati. Prova: 2.081/2.081 test, ruff/mypy/compileall verdi su tutti i file toccati.
   Prova: 2.077/2.077 test, ruff/mypy/compileall verdi su tutti i file toccati.
 
 ### Gate G1 — Nucleo fidato

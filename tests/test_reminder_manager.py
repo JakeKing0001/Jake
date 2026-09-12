@@ -11,6 +11,7 @@ chiamata SUCCESSIVA di due_reminders() (ogni 20s) lo faceva scattare di nuovo, e
 la data non raggiungeva oggi - un promemoria perso per 3 giorni suonava 4 volte di fila nel giro
 di un minuto invece di una sola."""
 import tempfile
+import threading
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -148,6 +149,53 @@ class SchemaResilienceTests(unittest.TestCase):
         second = ReminderManager(db_path=db_path)  # non deve sollevare
         self.assertEqual(len(second.list_upcoming()), 1)
         second.close()
+
+
+class ConcurrentAccessTests(_WithManager):
+    """F1.8.2 ("serializzare azioni che toccano lo stesso resource key"): la connessione e'
+    `check_same_thread=False` perche' ReminderScheduler (core/scheduler.py) chiama
+    due_reminders() ogni pochi secondi da un thread separato, mentre il thread principale puo'
+    chiamare add()/delete_matching()/snooze_matching() nello stesso istante. Verificato che
+    delete_matching()/snooze_matching() (SELECT poi UPDATE/DELETE sullo stesso id) non
+    producano mai un doppio esito quando piu' thread cercano lo stesso promemoria insieme."""
+
+    def test_concurrent_delete_matching_on_the_same_reminder_succeeds_exactly_once(self):
+        self.manager.add("promemoria unico", _utc(minutes=5))
+        thread_count = 10
+        barrier = threading.Barrier(thread_count)
+        results: list[dict | None] = [None] * thread_count
+
+        def _try_delete(index: int):
+            barrier.wait()
+            results[index] = self.manager.delete_matching("promemoria unico")
+
+        threads = [threading.Thread(target=_try_delete, args=(i,)) for i in range(thread_count)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        successes = [r for r in results if r is not None]
+        self.assertEqual(len(successes), 1, "esattamente un thread deve trovare/cancellare il promemoria")
+        self.assertEqual(self.manager.list_upcoming(), [])
+
+    def test_concurrent_add_from_many_threads_loses_nothing(self):
+        thread_count, per_thread = 10, 10
+        barrier = threading.Barrier(thread_count)
+
+        def _add_many(thread_index: int):
+            barrier.wait()
+            for i in range(per_thread):
+                self.manager.add(f"promemoria-{thread_index}-{i}", _utc(minutes=5))
+
+        threads = [threading.Thread(target=_add_many, args=(i,)) for i in range(thread_count)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        upcoming = self.manager.list_upcoming(limit=thread_count * per_thread + 10)
+        self.assertEqual(len(upcoming), thread_count * per_thread)
 
 
 if __name__ == "__main__":
