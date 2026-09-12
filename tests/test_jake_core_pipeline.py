@@ -15,6 +15,7 @@ ed EventBus sono usati REALI (leggeri, solo in memoria, nessun I/O): la logica c
 verificare qui e' come JakeCore li usa, non se loro stessi funzionano (gia' testati altrove).
 ActionLedger usa sempre un percorso temporaneo (mai il registro vero data/jake_ledger.jsonl)."""
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -424,6 +425,43 @@ class ExecuteCommandTests(_JakeCoreTestCase):
         core = self._core(skill_registry=registry, router=FakeRouter(Command("OPEN_APP", {"app": "chrome"})))
         core._execute_command("apri chrome", Command("OPEN_APP", {"app": "chrome"}))
         self.assertEqual(core.conversation_state.get_entities().get("app"), "chrome")
+
+
+class ConcurrentPendingActionConfirmationTests(_JakeCoreTestCase):
+    """F1.8.1 ("definire ownership della sessione... per azioni concorrenti"): sanity di
+    integrazione - dimostra che _process()/_handle_confirmation() usano davvero
+    take_pending_action() (non piu' has_pending_action()/get_pending_action()/
+    clear_pending_action() separati). La prova rigorosa dell'atomicita' in se' (con una finestra
+    di gara forzata, non affidata alla sola sovrapposizione best-effort di questo test) e' in
+    tests/test_conversation_state.py::ConcurrentTakePendingActionTests, incluso il test che
+    dimostra come il vecchio pattern a tre chiamate resti racy anche con ciascuna chiamata
+    bloccata singolarmente - la causa esatta del buco reale gia' corretto qui."""
+
+    def test_two_concurrent_confirmations_of_the_same_pending_action_execute_it_only_once(self):
+        skill = FakeSkill(SkillResult(success=True, data={}))
+        registry = FakeRegistry({"DELETE_PATH": skill})
+        core = self._core(skill_registry=registry)
+        core.conversation_state.set_pending_action({
+            "intent": "DELETE_PATH", "parameters": {"path": "C:/tmp/x.txt", "confirmed": True},
+            "reason": "confirmation_required", "text": "cancella",
+        })
+
+        THREAD_COUNT = 20
+        barrier = threading.Barrier(THREAD_COUNT)
+
+        def _confirm():
+            barrier.wait()  # massimizza la sovrapposizione reale, non affidata al caso
+            with mock.patch("core.jake_core.intent_patterns.is_positive_answer", return_value=True):
+                core._process("si")
+
+        threads = [threading.Thread(target=_confirm) for _ in range(THREAD_COUNT)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(len(skill.calls), 1, "l'azione deve essere eseguita esattamente una volta, non una per thread")
+        self.assertFalse(core.conversation_state.has_pending_action())
 
 
 class PendingPolicyIntegrationTests(_JakeCoreTestCase):
