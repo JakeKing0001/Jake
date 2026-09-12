@@ -16,6 +16,7 @@ Due modalita', entrambe disattivate per default (config `session_recording_enabl
   altra forma di logging in questo progetto (vedi core/jake_core.py, core/logger.py)."""
 import json
 import logging
+import re
 import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -24,15 +25,54 @@ DEFAULT_PATH = Path(__file__).resolve().parent.parent / "data" / "jake_sessions.
 MAX_LOG_BYTES = 2_000_000
 BACKUP_COUNT = 3
 
+# F1.7.4 ("redazione strutturata per tipo di dato, non solo lunghezza stringa"): prima di questi
+# pattern, un percorso, un URL o un indirizzo email diventavano tutti lo stesso "<str:N
+# caratteri>" - abbastanza per contare i caratteri, non per capire CHE FORMA aveva il valore
+# senza riaprire il file verbatim. Deliberatamente conservativo: quando un valore non corrisponde
+# chiaramente a uno di questi tre pattern, resta il segnaposto generico di prima - un falso
+# negativo (un percorso non riconosciuto) e' innocuo, un falso positivo rischierebbe di far
+# sembrare "sicura" una stringa che in realta' e' testo libero (un appunto, un messaggio).
+_EMAIL_RE = re.compile(r"^[^\s@]+@([^\s@]+\.[^\s@]+)$")
+_URL_RE = re.compile(r"^(?:https?://|www\.)([^/\s]+)", re.IGNORECASE)
+_WINDOWS_DRIVE_RE = re.compile(r"^[a-zA-Z]:[\\/]")
+_UNC_RE = re.compile(r"^\\\\")
+_EXTENSION_RE = re.compile(r"\.([A-Za-z0-9]{1,6})$")
+
+
+def _looks_like_path(value: str) -> bool:
+    # Un backslash e' un segnale forte da solo (raro in una frase scritta a mano); "/" da solo
+    # e' troppo ambiguo (date, frazioni, "10/09/2026") - richiede anche un'estensione file
+    # riconoscibile alla fine per contare come percorso.
+    if _WINDOWS_DRIVE_RE.match(value) or _UNC_RE.match(value) or "\\" in value:
+        return True
+    return "/" in value and bool(_EXTENSION_RE.search(value))
+
 
 def redact_value(value):
-    """Sostituisce ogni stringa con un segnaposto "<str:N caratteri>" (ricorsivamente dentro
-    dict/list), abbastanza per capire la FORMA di un valore senza scriverne il contenuto vero.
+    """Sostituisce ogni stringa con un segnaposto che rivela la FORMA del valore senza il
+    contenuto vero (ricorsivamente dentro dict/list). Il segnaposto generico "<str:N caratteri>"
+    resta il default; email/URL/percorsi riconosciuti diventano rispettivamente "<email:N
+    caratteri, dominio=...>"/"<url:N caratteri, dominio=...>"/"<path:N caratteri,
+    estensione=...>" - il dominio o l'estensione soli raramente identificano una persona, ma
+    aiutano a capire il fallimento (es. "il bug capita solo con i PDF") senza scrivere su disco
+    l'indirizzo, l'URL completo (che puo' contenere un token in query string) o il percorso vero.
     Pubblica (non piu' `_redact`) perche' anche `tools/diagnostic_bundle.py` (F1.7.7) ha bisogno
     della stessa identica redazione per i parametri che finiscono in un bundle diagnostico - una
     sola funzione, non una seconda copia con una convenzione leggermente diversa."""
     if isinstance(value, str):
-        return f"<str:{len(value)} caratteri>"
+        length = len(value)
+        email_match = _EMAIL_RE.match(value)
+        if email_match:
+            return f"<email:{length} caratteri, dominio={email_match.group(1).lower()}>"
+        url_match = _URL_RE.match(value)
+        if url_match:
+            return f"<url:{length} caratteri, dominio={url_match.group(1).lower()}>"
+        if _looks_like_path(value):
+            ext_match = _EXTENSION_RE.search(value)
+            if ext_match:
+                return f"<path:{length} caratteri, estensione=.{ext_match.group(1).lower()}>"
+            return f"<path:{length} caratteri>"
+        return f"<str:{length} caratteri>"
     if isinstance(value, dict):
         return {key: redact_value(item) for key, item in value.items()}
     if isinstance(value, list):

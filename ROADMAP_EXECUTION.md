@@ -1132,8 +1132,9 @@ Dipende da: F1.1 e F1.3.
 Criterio di uscita: una failure end-to-end è ricostruibile senza esporre contenuti privati.
 
 - Stato: `DOING`; `F1.7.1` chiuso; `F1.7.2` chiuso parzialmente (solo la notifica di
-  un'automazione, vedi sotto); `F1.7.5` chiuso; `F1.7.6` chiuso parzialmente (failure taxonomy,
-  non ancora rollback rate), `F1.7.7` chiuso; resto aperto.
+  un'automazione, vedi sotto); `F1.7.4` chiuso parzialmente (percorsi/URL/email, vedi sotto);
+  `F1.7.5` chiuso; `F1.7.6` chiuso parzialmente (failure taxonomy, non ancora rollback rate),
+  `F1.7.7` chiuso; resto aperto.
 - `F1.7.2` (parziale, notifica di un'automazione) — 13/09/2026: "collegare command, sub-step,
   verifica, undo e notifica con lo stesso trace id". Buco reale, non ipotizzato -
   `PlanExecutor.execute()` correla gia' ogni singolo passo alla stessa ricevuta nel ledger
@@ -1163,6 +1164,33 @@ Criterio di uscita: una failure end-to-end è ricostruibile senza esporre conten
   ruff/mypy/compileall verdi su tutti i file toccati. Non ancora affrontato: il resto di F1.7.2
   (undo, gia' dichiarato non wired in `F1.7.6`/il docstring di `action_ledger.py` - "il rollback
   stesso non produce una ricevuta separata").
+- `F1.7.4` — 13/09/2026: "aggiungere redazione strutturata per tipo di dato, non solo lunghezza
+  stringa". Non un buco trovato e corretto, una funzionalita' NUOVA - `core/session_recorder.py::
+  redact_value()` sostituiva OGNI stringa con lo stesso segnaposto generico `<str:N caratteri>`,
+  che dice quanti caratteri aveva un valore ma non CHE FORMA (un percorso, un URL, un indirizzo
+  email sono indistinguibili l'uno dall'altro nel record redatto). Prima fetta verticale,
+  deliberatamente limitata a tre tipi riconoscibili con un'euristica conservativa (mai un falso
+  positivo che faccia sembrare "sicuro" un testo libero, un falso negativo che ricade sul
+  segnaposto generico e' innocuo): percorso (`<path:N caratteri, estensione=.pdf>` - riconosciuto
+  da un backslash, un prefisso `C:\`/`\\server\`, o uno slash combinato con un'estensione file
+  riconoscibile alla fine, cosi' una data "10/09/2026" o una frazione non vengono scambiate per
+  un percorso), URL (`<url:N caratteri, dominio=example.com>` - il dominio passa, il resto
+  dell'URL no: una query string con un token di sessione non finisce mai nel record redatto),
+  email (`<email:N caratteri, dominio=example.com>` - il dominio passa, la parte locale
+  (l'identita' della persona) no). Riusata da `tools/diagnostic_bundle.py` (F1.7.7) senza
+  modifiche, essendo la stessa funzione pubblica. Un bare filename senza separatore (es.
+  "tesi.pdf", il caso piu' comune per FIND_FILE) resta deliberatamente il segnaposto generico:
+  senza un separatore di percorso non c'e' abbastanza segnale per distinguerlo da una parola
+  qualsiasi che finisce per coincidenza con un'estensione. Aggiornato un test esistente che
+  affermava il vecchio comportamento generico come quello desiderato (`test_string_becomes_a_
+  length_placeholder`, usava proprio un percorso con estensione come esempio) e aggiunti 10 nuovi
+  test in `tests/test_session_recorder.py::StructuredRedactionByTypeTests`, inclusi i casi limite
+  che l'euristica deve rifiutare (una data, un "@" dentro una frase normale, un nome file senza
+  separatore). Non ancora affrontato: altri tipi di dato (numero di telefono, indirizzo IP,
+  identificatore di dispositivo...), e la classificazione resta basata sul CONTENUTO della
+  stringa, non sul nome del parametro (un cambio piu' ampio, richiederebbe passare il nome della
+  chiave fino a `redact_value()`, oggi puramente ricorsivo su valori). Prova: 2.217/2.217 test,
+  ruff/mypy/compileall verdi su tutti i file toccati.
 - `F1.7.5` — 12/09/2026: "rendere replay sicuro: dry-run predefinito, scope temporaneo e conferma
   per effetti". Buco reale, riprodotto prima del fix - **un bypass completo dell'intera
   architettura di autorizzazione costruita in questa sessione, in uno strumento di debug**.
@@ -2641,23 +2669,26 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 16 incrementi completati e verificati (PR #28-#43),
-quasi tutti buchi reali riprodotti empiricamente prima del fix, non ipotizzati leggendo il
-codice - vedi le singole voci datate 12-13/09/2026 nelle rispettive sezioni F1.2/F1.4/F1.7/F1.8
-per i dettagli completi di ciascuno. In sintesi: `F1.2.6` (percorso interattivo/agente, ripreso
-da lavoro non committato), `F1.7.1` (ledger resistente a record parziali), `F1.8.3` (kill switch
-propagato a RUN_COMMAND, con due buchi ulteriori trovati verificando il fix), `F1.4.1` (scrittura
-atomica di config/settings.json), `F1.7.5` (replay sicuro - bypass completo dell'autorizzazione),
-`F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step` dell'agente, chiusura
-HUD), `F1.2.2` (prima capability vera - radici filesystem, l'unica funzionalita' NUOVA della
-sessione, non un fix), `F1.8.6` (verifica, non un fix - il codice era gia' corretto), `F1.4.3`
-(canale laterale temporale sulla passphrase admin), `F1.8.1` (doppia esecuzione di un'azione in
-sospeso da due canali concorrenti), `F1.8.2` (TRE strutture in piu' trovate senza sincronizzazione
-- centro notifiche con oltre il 98% di notifiche perse, `SkillRegistry.list_capabilities()` con
-un crash riproducibile, `ExampleStore` con oltre il 60% di esempi imparati persi), `F1.7.2`
-(parziale - la notifica di un'automazione ora porta lo stesso trace_id delle ricevute che
-l'ha prodotta, `PlanOutcome` non lo portava mai prima). `master` e' pulito, 2.207/2.207 test,
-ruff/mypy/compileall verdi. `G1` resta aperto.
+Aggiornato 13/09/2026. Sessione lunga con 17 incrementi completati e verificati (PR #28-#44), la
+maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
+codice), un paio funzionalita' NUOVE scelte come fette verticali strette - vedi le singole voci
+datate 12-13/09/2026 nelle rispettive sezioni F1.2/F1.4/F1.7/F1.8 per i dettagli completi di
+ciascuno. I piu' rilevanti: `F1.8.1` (doppia esecuzione di un'azione DESTRUCTIVE/ADMIN in sospeso
+da due canali concorrenti - voce + companion server), `F1.8.2` (tre strutture condivise tra
+thread senza sincronizzazione: centro notifiche con oltre il 98% di notifiche perse, crash
+riproducibile in `SkillRegistry.list_capabilities()`, `ExampleStore` con oltre il 60% di esempi
+imparati persi), `F1.7.5` (bypass completo dell'autorizzazione in `tools/replay_session.py
+--replay`), `F1.4.1`/`F1.7.1` (scritture non atomiche - config e ledger - che un crash a meta'
+avrebbe potuto corrompere), `F1.4.3` (canale laterale temporale sulla passphrase admin). Le due
+funzionalita' nuove: `F1.2.2` (prima capability vera - radici filesystem consentite) e `F1.7.4`
+(redazione strutturata per tipo di dato - percorso/URL/email invece del generico "<str:N
+caratteri>"). Il resto: `F1.2.6` (percorso interattivo/agente, ripreso da lavoro non
+committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
+verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
+dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix - il codice era gia' corretto),
+`F1.7.2` (parziale - la notifica di un'automazione ora porta lo stesso trace_id delle ricevute
+che l'ha prodotta). `master` e' pulito, 2.217/2.217 test, ruff/mypy/compileall verdi. `G1` resta
+aperto.
 
 Restano fuori discussione, senza un nuovo via libera esplicito, i due lavori grandi gia' proposti
 e rifiutati: `F1.6` (sandbox permanente per le skill forgiate - Job Object/AppContainer) e
@@ -2674,14 +2705,16 @@ dominio web/device/HA/rete/durata; estendere le radici filesystem al percorso au
 intent di sola lettura), `F1.2.3` (intersezione permessi utente/dispositivo/agente/skill/
 sessione - oggi solo un allowlist utente, nessuna intersezione), il resto di `F1.4` (una vera
 classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7` (il resto di `F1.7.2` -
-undo, mai wired a una ricevuta propria; `F1.7.3` retention differenziata; `F1.7.4` redazione
-strutturata per tipo di dato; `F1.7.8` modalita' privata end-to-end su ogni nuovo record), il
-resto di `F1.8`
-(il resto di `F1.8.1` - identita' di canale/sessione vera per due conferme concorrenti distinte,
-coda generale per azioni concorrenti non legate a una conferma; il resto di `F1.8.4` - drain
-limitato di un'azione in corso, checkpoint vero, release device audio; `F1.8.5` deadlock timeout;
-`F1.8.7` test di race su trigger/handoff/undo). Vale la pena anche un altro giro di ricerca
-mirata di race condition non ancora trovate in strutture condivise tra thread non ancora
-esaminate (es. `core/learning_manager.py`, `core/desktop_context.py` gia' ha un lock proprio da
-verificare comunque con un test dedicato), visto quante ne sono emerse in questa sola sessione
-con la stessa tecnica (`sys.setswitchinterval()` abbassato per forzare la sovrapposizione reale).
+undo, mai wired a una ricevuta propria; `F1.7.3` retention differenziata; il resto di `F1.7.4` -
+altri tipi di dato, classificazione per nome del parametro non solo contenuto; `F1.7.8`
+modalita' privata end-to-end su ogni nuovo record), il resto di `F1.8` (il resto di `F1.8.1` -
+identita' di canale/sessione vera per due conferme concorrenti distinte, coda generale per
+azioni concorrenti non legate a una conferma; il resto di `F1.8.4` - drain limitato di un'azione
+in corso, checkpoint vero, release device audio; `F1.8.5` deadlock timeout; `F1.8.7` test di
+race su trigger/handoff/undo). Vale la pena anche un altro giro di ricerca mirata di race
+condition non ancora trovate in strutture condivise tra thread non ancora esaminate (es.
+`core/learning_manager.py` - trovato un `_pending` a slot singolo con lo stesso pattern, ma
+l'effetto peggiore e' un doppio apprendimento innocuo, non una perdita/corruzione - deciso di non
+aprire un incremento dedicato solo per quello), visto quante ne sono emerse in questa sola
+sessione con la stessa tecnica (`sys.setswitchinterval()` abbassato per forzare la
+sovrapposizione reale).
