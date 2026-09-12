@@ -54,11 +54,14 @@ def authorization_of(result: str, parameters: dict | None) -> str:
     (AUTHORIZATION_PENDING): a differenza di quella, qui l'azione non partira' piu' per questo
     turno, ed e' comunque un evento di sicurezza degno di una ricevuta (vedi ROADMAP.md, F1)."""
     parameters = parameters or {}
-    if result in ("blocked_by_policy", "policy_blocked"):
+    # I chokepoint usano sia codici nudi sia "error:CODICE". Una revoca dopo Windows Hello
+    # resta un blocco anche se i parametri conservano i segnali dell'identita' verificata.
+    result_code = normalize_result_code(result)
+    if result_code in ("BLOCKED_BY_POLICY", "POLICY_BLOCKED"):
         return AUTHORIZATION_BLOCKED
-    if result in ("denied_auth", "denied_confirmation"):
+    if result_code in ("DENIED_AUTH", "DENIED_CONFIRMATION"):
         return AUTHORIZATION_DENIED
-    if result in ("confirmation_required", "auth_required"):
+    if result_code in ("CONFIRMATION_REQUIRED", "AUTH_REQUIRED"):
         return AUTHORIZATION_PENDING
     if parameters.get("authenticated"):
         if parameters.get("authenticated_via") == "windows_hello":

@@ -31,6 +31,7 @@ from core.plan_executor import PlanOutcome, StepOutcome
 from core.policy_engine import PolicyEngine
 from core.session_recorder import SessionRecorder
 from core.skill_result import SkillResult
+from skills.delete_path import DeletePathSkill
 
 
 class FakeSkill:
@@ -420,6 +421,118 @@ class ExecuteCommandTests(_JakeCoreTestCase):
         core = self._core(skill_registry=registry, router=FakeRouter(Command("OPEN_APP", {"app": "chrome"})))
         core._execute_command("apri chrome", Command("OPEN_APP", {"app": "chrome"}))
         self.assertEqual(core.conversation_state.get_entities().get("app"), "chrome")
+
+
+class PendingPolicyIntegrationTests(_JakeCoreTestCase):
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch("core.jake_core.log_action")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_revocation_between_answer_turns_preserves_a_real_temporary_file(self):
+        target = Path(self._tmp.name) / "fixture.txt"
+        target.write_text("fixture", encoding="utf-8")
+        core = self._core(
+            skill_registry=FakeRegistry({"DELETE_PATH": DeletePathSkill()}),
+            router=FakeRouter(Command("DELETE_PATH", {"path": str(target)})),
+            always_confirm_intents={"DELETE_PATH"},
+        )
+
+        core.answer("elimina il file temporaneo fixture")
+        self.assertTrue(core.conversation_state.has_pending_action())
+        core.policy_engine.blocked_intents.add("DELETE_PATH")
+        core.answer("si")
+
+        self.assertTrue(target.exists())
+        pending, blocked = core.action_ledger.read_all()
+        self.assertEqual(pending["authorization"], "pending")
+        self.assertEqual(blocked["authorization"], "blocked")
+        self.assertEqual(pending["trace_id"], blocked["trace_id"])
+
+    def test_agent_pending_action_also_obeys_a_subsequent_revocation(self):
+        skill = FakeSkill()
+        core = self._core(
+            skill_registry=FakeRegistry({"DELETE_PATH": skill}),
+            orchestrator=FakeOrchestrator(AgentOutcome(pending_confirmation={
+                "intent": "DELETE_PATH", "parameters": {"path": "fixture", "confirmed": True},
+                "message": "Confermi?",
+            })),
+        )
+
+        core._run_agent("elimina la fixture")
+        core.policy_engine.blocked_intents.add("DELETE_PATH")
+        core.answer("si")
+
+        self.assertEqual(skill.calls, [])
+        self.assertEqual(core.action_ledger.read_all()[0]["authorization"], "blocked")
+
+    def test_correct_authentication_is_not_followed_by_a_redundant_consent_prompt(self):
+        skill = FakeSkill()
+        core = self._core(
+            skill_registry=FakeRegistry({"SET_POWER_PLAN": skill}),
+            router=FakeRouter(Command("SET_POWER_PLAN", {"plan": "balanced"})),
+            auth_gate=AuthGate(passphrase="fixture passphrase"), always_confirm_intents={"SET_POWER_PLAN"},
+        )
+        core.policy_engine.require_auth_intents.add("SET_POWER_PLAN")
+
+        core.answer("imposta il piano energetico fixture")
+        core.answer("fixture passphrase")
+
+        self.assertEqual(len(skill.calls), 1)
+        self.assertFalse(core.conversation_state.has_pending_action())
+        pending, success = core.action_ledger.read_all()
+        self.assertEqual(pending["authorization"], "pending")
+        self.assertEqual(success["authorization"], "passphrase")
+        self.assertEqual(pending["trace_id"], success["trace_id"])
+
+    def test_revocation_during_windows_hello_is_a_blocked_receipt_not_auth_success(self):
+        skill = FakeSkill()
+        core = self._core(
+            skill_registry=FakeRegistry({"SET_POWER_PLAN": skill}),
+            router=FakeRouter(Command("SET_POWER_PLAN", {"plan": "balanced"})),
+            auth_gate=AuthGate(windows_hello_enabled=True),
+        )
+        core.policy_engine.require_auth_intents.add("SET_POWER_PLAN")
+
+        def verify_and_revoke(reason):
+            core.policy_engine.blocked_intents.add("SET_POWER_PLAN")
+            return True
+
+        core.auth_gate._windows_hello_verify = verify_and_revoke
+        core.answer("imposta il piano energetico fixture")
+
+        self.assertEqual(skill.calls, [])
+        (receipt,) = core.action_ledger.read_all()
+        self.assertEqual(receipt["authorization"], "blocked")
+        self.assertEqual(receipt["error_category"], "denied")
+
+    def test_two_stage_confirmation_keeps_internal_parameters_and_trace(self):
+        skill = FakeSkill()
+        skill.execute = mock.Mock(side_effect=[
+            SkillResult(success=False, error="CONFIRMATION_REQUIRED", data={
+                "message": "Attivo la bozza?", "confirm_parameters": {
+                    "request": "fixture", "draft_id": "fixture-draft", "confirmed": True,
+                },
+            }),
+            SkillResult(success=True, data={}),
+        ])
+        core = self._core(
+            skill_registry=FakeRegistry({"CREATE_SKILL": skill}), always_confirm_intents={"CREATE_SKILL"},
+        )
+
+        core._execute_command("impara fixture", Command("CREATE_SKILL", {"request": "fixture"}))
+        core.answer("si")
+        self.assertTrue(core.conversation_state.has_pending_action())
+        core.answer("si")
+
+        self.assertFalse(core.conversation_state.has_pending_action())
+        self.assertEqual(skill.execute.call_args.args, ({
+            "request": "fixture", "draft_id": "fixture-draft", "confirmed": True,
+        },))
+        receipts = core.action_ledger.read_all()
+        self.assertEqual([r["authorization"] for r in receipts], ["pending", "pending", "confirmed"])
+        self.assertEqual(len({r["trace_id"] for r in receipts}), 1)
 
 
 class RunAgentTests(_JakeCoreTestCase):

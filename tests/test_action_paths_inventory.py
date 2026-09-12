@@ -22,6 +22,8 @@ import skills.workflow
 class DocumentedSymbolsStillExistTests(unittest.TestCase):
     def test_direct_command_path(self):
         self.assertTrue(hasattr(core.jake_core.JakeCore, "_resolve_and_execute"))
+        self.assertTrue(hasattr(core.jake_core.JakeCore, "_authorize_command"))
+        self.assertTrue(hasattr(core.jake_core.JakeCore, "_finalize_pending_action"))
         self.assertTrue(hasattr(core.jake_core.JakeCore, "_log_action_outcome"))
         self.assertTrue(hasattr(core.jake_core.JakeCore, "_log_denied_action"))
 
@@ -42,7 +44,7 @@ class DocumentedSymbolsStillExistTests(unittest.TestCase):
         params = inspect.signature(core.plan_executor.PlanExecutor.execute).parameters
         self.assertIn("policy_engine", params)
         # I tre chiamanti reali che devono passare il proprio policy_engine (vedi la nota nel
-        # documento: policy_engine=None equivale a "nessun controllo").
+        # documento: policy_engine=None ora e' fail-closed).
         self.assertTrue(hasattr(core.jake_core.JakeCore, "_try_plan"))
         self.assertTrue(hasattr(skills.workflow, "RunWorkflowSkill"))
         self.assertTrue(hasattr(core.trigger_scheduler.TriggerScheduler, "_fire"))

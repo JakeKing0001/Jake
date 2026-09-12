@@ -64,10 +64,19 @@ class AuthorizationOfTests(unittest.TestCase):
     def test_confirmation_required_is_pending_not_none(self):
         self.assertEqual(authorization_of("confirmation_required", {}), AUTHORIZATION_PENDING)
         self.assertEqual(authorization_of("auth_required", {}), AUTHORIZATION_PENDING)
+        self.assertEqual(authorization_of("error:CONFIRMATION_REQUIRED", {"confirmed": True}), AUTHORIZATION_PENDING)
+        self.assertEqual(authorization_of("error:AUTH_REQUIRED", {"authenticated": True}), AUTHORIZATION_PENDING)
 
     def test_blocked_by_policy_is_blocked(self):
         self.assertEqual(authorization_of("blocked_by_policy", {}), AUTHORIZATION_BLOCKED)
         self.assertEqual(authorization_of("policy_blocked", {}), AUTHORIZATION_BLOCKED)
+
+    def test_prefixed_policy_block_overrides_even_verified_authorization_markers(self):
+        for result in ("error:POLICY_BLOCKED", "POLICY_BLOCKED", " error:policy_blocked "):
+            with self.subTest(result=result):
+                self.assertEqual(authorization_of(result, {
+                    "confirmed": True, "authenticated": True, "authenticated_via": "windows_hello",
+                }), AUTHORIZATION_BLOCKED)
 
     def test_denied_results_are_denied_not_pending(self):
         """Un diniego vero (passphrase sbagliata, "no" a una conferma) e' distinto da
@@ -76,6 +85,8 @@ class AuthorizationOfTests(unittest.TestCase):
         degno di una ricevuta")."""
         self.assertEqual(authorization_of("denied_auth", {}), AUTHORIZATION_DENIED)
         self.assertEqual(authorization_of("denied_confirmation", {}), AUTHORIZATION_DENIED)
+        self.assertEqual(authorization_of("error:DENIED_AUTH", {"authenticated": True}), AUTHORIZATION_DENIED)
+        self.assertEqual(authorization_of("error:DENIED_CONFIRMATION", {"confirmed": True}), AUTHORIZATION_DENIED)
 
     def test_none_parameters_does_not_crash(self):
         self.assertEqual(authorization_of("success", None), AUTHORIZATION_NONE)
