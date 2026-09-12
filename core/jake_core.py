@@ -1031,15 +1031,26 @@ class JakeCore:
     # ---- chiusura ------------------------------------------------------------------------
 
     def shutdown(self) -> None:
-        for component in (
-            self.scheduler, self.trigger_scheduler, self.system_advisor, self.desktop_context, self.companion_server,
+        # F1.8.4 ("gestire shutdown con drain limitato, checkpoint e release dei device"): buco
+        # reale - un `except Exception: pass` silenzioso per ognuno di questi passi significava
+        # che un component.stop() fallito (una connessione companion non chiusa, un hook
+        # desktop_context non rimosso...) o un salvataggio di cache fallito (disco pieno,
+        # permessi) sparivano senza lasciare TRACCIA in nessun log: un utente che si accorge che
+        # NEST "dimentica" la cache dopo un riavvio, o che un socket resta occupato, non avrebbe
+        # avuto modo di scoprire perche'. Ogni passo di chiusura logga ora l'eccezione con il
+        # nome del componente prima di continuare con gli altri (non ferma lo shutdown: un
+        # componente che non si chiude bene non deve impedire agli altri di provarci).
+        for name, component in (
+            ("scheduler", self.scheduler), ("trigger_scheduler", self.trigger_scheduler),
+            ("system_advisor", self.system_advisor), ("desktop_context", self.desktop_context),
+            ("companion_server", self.companion_server),
         ):
             try:
                 component.stop()
             except Exception:
-                pass
+                self.logger.exception("Errore chiudendo %s durante lo shutdown", name)
         try:
             self.retriever.example_index.save_cache()
             self.retriever.capability_index.save_cache()
         except Exception:
-            pass
+            self.logger.exception("Errore salvando la cache degli indici semantici durante lo shutdown")
