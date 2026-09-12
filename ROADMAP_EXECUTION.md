@@ -867,9 +867,28 @@ reversibili dispone di undo testato.
   due contro un PROCESSO VERO generato dal test stesso (non un doppio) - uno dimostra che quando
   `execute()` ritorna il processo e' gia' morto per davvero (`psutil.pid_exists` restituisce
   `False`), l'altro che un processo che rifiuta/non fa in tempo a morire produce un fallimento
-  onesto, non un successo mai verificato. Non ancora affrontato: finestre/browser/casa (il resto
-  di F1.3.2) restano senza prova indipendente. Prova: 2.091/2.091 test, ruff/mypy (per
+  onesto, non un successo mai verificato. Prova: 2.091/2.091 test, ruff/mypy (per
   `core/execution_safety.py`, nel set selettivo)/compileall verdi su tutti i file toccati.
+- `F1.3.2` (stesso buco, secondo modulo) — 12/09/2026: **lo stesso identico buco reale trovato
+  poco prima in `KillProcessByPortSkill`, presente anche in `skills/process_control.py::
+  CloseAppSkill`** (il ramo "termina il processo" di CLOSE_APP, usato quando l'app non ha
+  finestre visibili da chiudere gentilmente) - `success=True` (con `closed`/i nomi dei processi)
+  dichiarato subito dopo `process.terminate()`, senza aspettare la morte reale. Corretto con lo
+  stesso rimedio: `process.wait(timeout=3)` dopo `terminate()`, un processo che non muore in
+  tempo non viene piu' contato tra i "chiusi" (l'intera azione fallisce con `OPERATION_FAILED`
+  se era l'unico match), uno che muore da solo nella finestra tra le due chiamate resta un
+  successo. Aggiunto `data["pids"]` (lista, CLOSE_APP puo' terminare piu' processi con lo stesso
+  nome filtro - a differenza di KILL_PROCESS_BY_PORT che ne termina sempre uno solo). Non
+  aggiunta una voce in `INTENT_SAFETY_REGISTRY` per CLOSE_APP in questo passo: a differenza di
+  KILL_PROCESS_BY_PORT (un pid singolo e stabile), qui "chiusi" puo' contenere piu' pid e la
+  skill puo' anche prendere il ramo "gentile" (WM_CLOSE, nessun pid coinvolto) - un verificatore
+  generico per entrambi i rami richiederebbe distinguerli nella busta dati, rimandato a un
+  passo successivo dedicato invece di infilarlo di corsa qui. Aggiunti 3 nuovi test in
+  `tests/test_process_control_skill.py::CloseAppVerifiedTerminationTests`, incluso uno contro un
+  PROCESSO VERO (stesso principio del modulo gemello). Con questi due moduli, `F1.3.2` ha chiuso
+  ogni istanza nota di "successo dichiarato subito dopo terminate(), senza aspettare" nel
+  progetto; finestre/browser/casa (il resto della fase) restano senza prova indipendente. Prova:
+  2.094/2.094 test, ruff/compileall verdi su tutti i file toccati.
 
 ### F1.4 — Identità, autenticazione e segreti
 

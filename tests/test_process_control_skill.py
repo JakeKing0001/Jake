@@ -12,8 +12,12 @@ visibili (Opera, Impostazioni, Nahimic, l'overlay NVIDIA - verificato per davver
 finestre reali di questa macchina, non un'ipotesi). Con il ramo "gentile" che non chiede mai
 conferma, un comando vocale male trascritto o troppo generico ('chiudi a') avrebbe chiuso
 finestre reali dell'utente in silenzio."""
+import subprocess
+import sys
 import unittest
 from unittest import mock
+
+import psutil
 
 from skills.process_control import CloseAppSkill, ListProcessesSkill, _matching_processes, _process_needle
 
@@ -119,6 +123,61 @@ class CloseAppBasicTests(unittest.TestCase):
                     result = CloseAppSkill().execute({"name": "background", "confirmed": True})
         self.assertFalse(result.success)
         self.assertEqual(result.error, "OPERATION_FAILED")
+
+
+class CloseAppVerifiedTerminationTests(unittest.TestCase):
+    """F1.3.2 ("prove forti per... processi"): stesso buco reale gia' trovato e corretto in
+    skills/dev_tools.py::KillProcessByPortSkill. Prima di questa correzione, success=True (e
+    'closed'/'pids' popolati) veniva riportato subito dopo process.terminate(), senza aspettare
+    che il processo fosse davvero morto."""
+
+    def test_process_that_does_not_die_in_time_is_not_counted_as_closed(self):
+        fake_process = mock.MagicMock()
+        fake_process.info = {"pid": 4242, "name": "background.exe"}
+        fake_process.wait.side_effect = psutil.TimeoutExpired(seconds=3, pid=4242)
+        with mock.patch("skills.process_control._matching_processes", return_value=[fake_process]):
+            with mock.patch.object(CloseAppSkill, "_close_windows", return_value=[]):
+                with mock.patch.object(CloseAppSkill, "_close_windows_by_title", return_value=[]):
+                    result = CloseAppSkill().execute({"name": "background", "confirmed": True})
+
+        self.assertFalse(result.success, "non deve dichiarare successo se il processo non e' confermato morto")
+        self.assertEqual(result.error, "OPERATION_FAILED")
+
+    def test_process_already_gone_between_terminate_and_wait_is_still_counted_as_closed(self):
+        fake_process = mock.MagicMock()
+        fake_process.info = {"pid": 4242, "name": "background.exe"}
+        fake_process.pid = 4242
+        fake_process.wait.side_effect = psutil.NoSuchProcess(4242)
+        with mock.patch("skills.process_control._matching_processes", return_value=[fake_process]):
+            with mock.patch.object(CloseAppSkill, "_close_windows", return_value=[]):
+                with mock.patch.object(CloseAppSkill, "_close_windows_by_title", return_value=[]):
+                    result = CloseAppSkill().execute({"name": "background", "confirmed": True})
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.data["pids"], [4242])
+
+    def test_confirmed_termination_of_a_real_process_waits_for_real_death(self):
+        """Un processo VERO (non un doppio): quando execute() ritorna, il processo deve essere
+        gia' morto per davvero, non 'forse morira' a breve'."""
+        process = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        self.addCleanup(lambda: process.poll() is None and process.kill())
+        fake_process = mock.MagicMock()
+        fake_process.info = {"pid": process.pid, "name": "python.exe"}
+        fake_process.pid = process.pid
+        fake_process.terminate.side_effect = lambda: psutil.Process(process.pid).terminate()
+        fake_process.wait.side_effect = lambda timeout=None: psutil.Process(process.pid).wait(timeout=timeout)
+
+        with mock.patch("skills.process_control._matching_processes", return_value=[fake_process]):
+            with mock.patch.object(CloseAppSkill, "_close_windows", return_value=[]):
+                with mock.patch.object(CloseAppSkill, "_close_windows_by_title", return_value=[]):
+                    result = CloseAppSkill().execute({"name": "python", "confirmed": True})
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.data["pids"], [process.pid])
+        self.assertFalse(psutil.pid_exists(process.pid), "il processo deve essere gia' morto quando execute() ritorna")
 
 
 class ListProcessesBasicTests(unittest.TestCase):
