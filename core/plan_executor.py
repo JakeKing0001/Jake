@@ -2,8 +2,8 @@ import time
 from dataclasses import dataclass, field
 
 from core.action_ledger import (
-    ActionLedger, ActionReceipt, authorization_of, idempotency_key_of, new_action_id,
-    verification_status_of,
+    ActionLedger, ActionReceipt, authorization_of, error_category_of, idempotency_key_of,
+    new_action_id, verification_status_of,
 )
 from core.execution_safety import VERIFIABLE_INTENTS, execute_with_retry, rollback_effect, verify_effect
 from core.kill_switch import KillSwitch
@@ -217,7 +217,8 @@ class PlanExecutor:
                 action_id=new_action_id(), trace_id=trace_id, ts=time.time(), intent=intent,
                 requested_by=requested_by, risk_decision=risk, authorization=authorization_of(result, parameters),
                 result=result, idempotency_key=idempotency_key_of(intent, parameters),
-                verified=verification_status_of(verified), duration_ms=duration_ms, model=model,
+                verified=verification_status_of(verified), error_category=error_category_of(result),
+                duration_ms=duration_ms, model=model,
             ),
             private=private,
         )
