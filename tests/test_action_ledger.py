@@ -3,6 +3,7 @@ e la fase F1 in ROADMAP.md): a differenza di core/logger.log_action (F0), qui si
 non ruoti mai e che authorization_of() derivi correttamente lo stato di autorizzazione dagli
 stessi segnali gia' usati altrove, invece di essere dichiarato a mano da chi registra."""
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -282,6 +283,84 @@ class RecordTests(ActionLedgerTestCase):
     def test_private_flag_suppresses_recording(self):
         self.ledger.record(self._receipt(), private=True)
         self.assertEqual(self.ledger.read_all(), [])
+
+
+class ConcurrentWritesTests(ActionLedgerTestCase):
+    """F1.8.2 ("serializzare azioni che toccano lo stesso resource key"): buco reale, non solo
+    teorico - record() apriva il file con un open() grezzo a ogni chiamata, senza alcuna
+    sincronizzazione tra thread. ActionLedger e' condivisa PER RIFERIMENTO tra JakeCore,
+    TaskAgent, PlanExecutor e TriggerScheduler (quest'ultimo su un thread separato): un'
+    automazione partita da sola mentre il thread principale registra un comando diretto poteva
+    intrecciare le due scritture nello stesso file, producendo righe JSON corrotte in un
+    registro che per design non deve mai perderne ne' corromperne una (vedi il docstring del
+    modulo)."""
+
+    THREAD_COUNT = 20
+    RECORDS_PER_THREAD = 20
+
+    def test_many_threads_writing_concurrently_produce_no_corrupted_lines(self):
+        """Stress reale su file vero: ogni riga scritta deve restare JSON valido e nessuna deve
+        andare persa, anche con piu' thread che scrivono nello stesso istante."""
+        barrier = threading.Barrier(self.THREAD_COUNT)
+
+        def _write_many(thread_index: int):
+            barrier.wait()  # massimizza la sovrapposizione reale, non affidata al caso
+            for i in range(self.RECORDS_PER_THREAD):
+                self.ledger.record(self._receipt(action_id=f"t{thread_index}-{i}"))
+
+        threads = [threading.Thread(target=_write_many, args=(i,)) for i in range(self.THREAD_COUNT)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        records = self.ledger.read_all()  # read_all() salta le righe non-JSON: una corruzione le farebbe sparire
+        self.assertEqual(len(records), self.THREAD_COUNT * self.RECORDS_PER_THREAD)
+        self.assertEqual(len({r["action_id"] for r in records}), self.THREAD_COUNT * self.RECORDS_PER_THREAD)
+
+    def test_the_write_lock_enforces_mutual_exclusion_deterministically(self):
+        """Non affidato alla fortuna del timing come il test sopra: sostituisce il lock vero con
+        uno che registra se mai due thread si sono trovati DENTRO la sezione critica nello stesso
+        istante - dimostra l'invariante (mutua esclusione), non solo la sua conseguenza
+        probabile."""
+
+        class _OverlapDetectingLock:
+            def __init__(self):
+                self._real_lock = threading.Lock()
+                self._active = 0
+                self._guard = threading.Lock()
+                self.overlap_detected = False
+
+            def __enter__(self):
+                self._real_lock.acquire()
+                with self._guard:
+                    self._active += 1
+                    if self._active > 1:
+                        self.overlap_detected = True
+                return self
+
+            def __exit__(self, *exc_info):
+                with self._guard:
+                    self._active -= 1
+                self._real_lock.release()
+                return False
+
+        tracking_lock = _OverlapDetectingLock()
+        self.ledger._write_lock = tracking_lock
+        barrier = threading.Barrier(self.THREAD_COUNT)
+
+        def _write_many(thread_index: int):
+            barrier.wait()
+            for i in range(self.RECORDS_PER_THREAD):
+                self.ledger.record(self._receipt(action_id=f"t{thread_index}-{i}"))
+
+        threads = [threading.Thread(target=_write_many, args=(i,)) for i in range(self.THREAD_COUNT)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertFalse(tracking_lock.overlap_detected, "due thread erano dentro la sezione critica insieme")
 
 
 class QueryTests(ActionLedgerTestCase):
