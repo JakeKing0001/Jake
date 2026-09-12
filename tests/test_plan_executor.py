@@ -8,9 +8,11 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
+from core.action_ledger import ActionLedger
 from core.plan_executor import PlanExecutor
 from core.planner import Plan, PlanStep
 from core.policy_engine import PolicyEngine
+from core.session_recorder import SessionRecorder
 from core.skill_result import SkillResult
 
 
@@ -308,6 +310,56 @@ class ActionLedgerWiringTests(unittest.TestCase):
             executor.execute(plan, policy_engine=PolicyEngine())
 
         self.assertEqual(ledger.record.call_args.args[0].requested_by, "user")
+
+
+class PrivateModeEndToEndTests(unittest.TestCase):
+    """F1.7.8 ("testare modalita' privata end-to-end su tutti i nuovi record"): a differenza
+    delle altre suite di questa classe, usa un ActionLedger e un SessionRecorder VERI (file
+    temporanei reali, non un Mock) - la garanzia che conta non e' "record() e' stato chiamato
+    con private=True" (gia' verificato altrove), ma che in modalita' privata NULLA finisca
+    davvero scritto su disco, nemmeno i campi introdotti in questa sessione (policy_reason,
+    error_category) per un passo BLOCCATO."""
+
+    def test_a_blocked_step_in_private_mode_writes_nothing_to_either_file_on_disk(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            ledger_path = Path(tmp_dir) / "ledger.jsonl"
+            session_path = Path(tmp_dir) / "sessions.jsonl"
+            registry = FakeRegistry()
+            plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
+            executor = PlanExecutor(
+                registry,
+                action_ledger=ActionLedger(path=ledger_path),
+                session_recorder=SessionRecorder(enabled=True, verbatim=True, path=session_path),
+            )
+
+            with unittest.mock.patch("core.plan_executor.log_action") as mock_log:
+                outcome = executor.execute(
+                    plan, policy_engine=PolicyEngine(blocked_intents={"ADD_NOTE"}), private=True,
+                )
+
+            # La policy si e' davvero attivata (altrimenti il test non proverebbe nulla sul
+            # campo policy_reason che avrebbe popolato) ma il passo non e' mai stato eseguito.
+            self.assertFalse(outcome.success)
+            self.assertEqual(registry.calls, [])
+            self.assertTrue(mock_log.call_args.kwargs["private"])
+            self.assertFalse(ledger_path.exists(), "il ledger non deve scrivere nulla in modalita' privata")
+            self.assertFalse(session_path.exists(), "il session recorder non deve scrivere nulla in modalita' privata")
+
+    def test_the_same_blocked_step_without_private_mode_does_write_a_receipt(self):
+        """Prova di controllo: senza private=True lo stesso identico scenario SCRIVE davvero -
+        dimostra che il test sopra non passa solo perche' non c'era nulla da scrivere."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            ledger_path = Path(tmp_dir) / "ledger.jsonl"
+            registry = FakeRegistry()
+            plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
+            executor = PlanExecutor(registry, action_ledger=ActionLedger(path=ledger_path))
+
+            with unittest.mock.patch("core.plan_executor.log_action"):
+                executor.execute(plan, policy_engine=PolicyEngine(blocked_intents={"ADD_NOTE"}), private=False)
+
+            records = ActionLedger(path=ledger_path).read_all()
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0]["policy_reason"], "intent_in_blocked_intents")
 
 
 class KillSwitchStopsThePlanTests(unittest.TestCase):
