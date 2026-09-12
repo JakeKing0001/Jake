@@ -516,8 +516,33 @@ Dipende da: G0.
 
 Criterio di uscita: il 100% dei percorsi produce lo stesso `ActionReceipt` validato.
 
-- Stato: `DOING`; `F1.1.1`, `F1.1.2` (solo i tipi, non l'adozione), `F1.1.3` (parzialmente),
-  `F1.1.4` e `F1.1.8` conclusi con evidenza; `F1.1.5`, `F1.1.6`, `F1.1.7` restano aperti.
+- Stato: `DOING`; `F1.1.1`, `F1.1.2`, `F1.1.3` (parzialmente), `F1.1.4`, `F1.1.6` (pilota su 5
+  intent) e `F1.1.8` conclusi con evidenza; `F1.1.5`, `F1.1.7` restano aperti.
+- `F1.1.6` — 12/09/2026: pilota di adozione dei contratti F1.1.2 su un intent reale per
+  ciascun `RiskLevel` (letterale dalla roadmap: "un intent read-only, uno reversibile, uno
+  external, uno destructive e uno admin") - `GET_TIME`, `ADD_NOTE`, `CONTROL_SMART_DEVICE`,
+  `DELETE_PATH`, `SYSTEM_POWER`. A differenza di F1.1.2 (tipi definiti ma isolati), qui
+  `core/jake_core.py::_resolve_and_execute` costruisce e valida DAVVERO un `ActionProposal`
+  (`ActionProposal.for_intent(resolved.intent, resolved.parameters, "user")` +
+  `validate_action_proposal`) prima di passare `proposal.intent`/`proposal.parameters` a
+  `PolicyEngine.decide_interactive` - `proposal.parameters` e' una COPIA (vedi
+  `ActionProposal.for_intent`), quindi il comando eseguito davvero piu' sotto resta
+  `resolved.parameters`, l'originale: nessun cambio di comportamento, verificato sia dalla suite
+  invariata (2.042/2.042 verdi PRIMA di aggiungere nuovi test) sia da un test dedicato che sporca
+  `proposal.parameters` e verifica che la skill riceva comunque i parametri originali.
+  `_log_action_outcome`/`_log_denied_action` costruiscono un `ActionError.from_result(result)`
+  (validato da `validate_action_error`) e ne usano `.category` per `ActionReceipt.error_category`
+  - stesso valore di prima (`error_category_of(result)`, F1.1.4), ma ora attraverso il tipo
+  condiviso invece che dalla funzione diretta. Questo e' deliberatamente un percorso reale
+  toccato (non piu' solo codice isolato come F1.1.2): rischio piu' alto, per questo limitato a
+  UN chokepoint (il percorso a comando singolo/agente, "percorso 1/2" dell'inventario F1.1.1) e
+  verificato con la suite completa PRIMA e DOPO la modifica, oltre a 6 nuovi test dedicati
+  (`tests/test_jake_core_action_contracts.py`) che esercitano tutti e 5 i livelli di rischio
+  contro il codice vero, non un doppio isolato. `TaskAgent`/`PlanExecutor` (gli altri due
+  chokepoint) NON sono stati toccati in questo passo - restano su `error_category_of()` diretto,
+  comportamento identico a prima, adozione rimandata a `F1.1.7`. Prova: 2.048/2.048 test,
+  ruff/mypy (incluso il set selettivo di `pyproject.toml`, che include `core/jake_core.py`)/
+  compileall verdi.
 - `F1.1.2` — 12/09/2026: creato `core/action_contracts.py` con i cinque contratti mancanti
   (`ActionProposal`, `ActionContext`, `VerificationEvidence`, `UndoDescriptor`, `ActionError`) -
   `ActionReceipt` esisteva gia' (`core/action_ledger.py`). **Deliberatamente NON collegati** ai
@@ -605,9 +630,11 @@ Criterio di uscita: il 100% dei percorsi produce lo stesso `ActionReceipt` valid
   resta dichiarato dal chiamante, non calcolato automaticamente; "parametri validati"/"actor"
   distinto da "source" come campi propri (`requested_by` li conflette in una sola stringa,
   `ActionContext` non ha ancora un campo `actor` separato); migrazione reale delle skill sul
-  contratto (`F1.1.6`/`F1.1.7`) - i quattro chokepoint continuano a costruire `ActionReceipt`
-  direttamente, non ancora a partire da un `ActionProposal`. Il bypass di policy nel rollback e'
-  stato parzialmente chiuso, vedi `F1.2.5`.
+  contratto (`F1.1.7`, dopo il pilota di `F1.1.6` su un solo chokepoint) - `TaskAgent`/
+  `PlanExecutor` continuano a costruire `ActionReceipt` direttamente senza passare da un
+  `ActionProposal`/`ActionError`, e nessuna delle ~200 skill costruisce ancora questi contratti
+  da sola (restano su `SkillResult`). Il bypass di policy nel rollback e' stato parzialmente
+  chiuso, vedi `F1.2.5`.
 
 ### F1.2 — Policy kernel e capability
 

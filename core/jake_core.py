@@ -2,9 +2,8 @@ import time
 
 from core import fallbacks
 from core import intent_patterns
-from core.action_ledger import (
-    ActionLedger, ActionReceipt, authorization_of, error_category_of, idempotency_key_of, new_action_id,
-)
+from core.action_contracts import ActionError, ActionProposal, validate_action_error, validate_action_proposal
+from core.action_ledger import ActionLedger, ActionReceipt, authorization_of, idempotency_key_of, new_action_id
 from core.agent import TaskAgent
 from core.auth_gate import AuthGate
 from core.autonomy_budget import AutonomyBudget
@@ -570,7 +569,15 @@ class JakeCore:
         (v5.4/5.5) viene controllato PRIMA di quello CONFIRM: un'azione ADMIN, quando
         l'autenticazione e' attiva, chiede la passphrase invece della semplice conferma si'/no."""
         resolved = fallbacks.pre_execution_rewrite(command, self.skill_registry)
-        decision = self.policy_engine.decide_interactive(resolved.intent, resolved.parameters)
+        # F1.1.6 (pilota di adozione del contratto, F1.1.2): ActionProposal.for_intent() ricava il
+        # rischio da risk_of() (la stessa fonte gia' usata da PolicyEngine/SkillRegistry, vedi il
+        # docstring di ActionProposal) e proposal.parameters e' una COPIA di resolved.parameters -
+        # decide_interactive() qui sotto legge valori identici a prima, nessun cambio di
+        # comportamento. resolved.parameters (l'originale, non la copia) resta quello davvero
+        # eseguito piu' sotto: il proposal descrive l'intenzione, non sostituisce l'esecuzione.
+        proposal = ActionProposal.for_intent(resolved.intent, resolved.parameters, "user")
+        validate_action_proposal(proposal)
+        decision = self.policy_engine.decide_interactive(proposal.intent, proposal.parameters)
         if decision == PolicyDecision.BLOCK:
             return resolved, SkillResult(success=False, data={}, error="POLICY_BLOCKED"), None
         if decision == PolicyDecision.REQUIRE_AUTH:
@@ -798,12 +805,20 @@ class JakeCore:
             trace_id, private=self.private_mode, duration_ms=duration_ms, model=self.model,
             skill=intent, risk_decision=risk, result=result,
         )
+        # F1.1.6 (pilota di adozione del contratto, un intent per livello di rischio - vedi
+        # tests/test_jake_core_action_contracts.py): ActionError.from_result() sostituisce qui la
+        # chiamata diretta a error_category_of() (F1.1.4) con l'oggetto tipizzato che la
+        # racchiude - stesso valore per receipt.error_category, nessun cambio di comportamento,
+        # ma ora e' il tipo condiviso (core/action_contracts.py, F1.1.2) a passare per davvero da
+        # QUESTO chokepoint reale, non solo da test isolati.
+        action_error = ActionError.from_result(result)
+        validate_action_error(action_error)
         self.action_ledger.record(
             ActionReceipt(
                 action_id=new_action_id(), trace_id=trace_id, ts=time.time(), intent=intent,
                 requested_by="user", risk_decision=risk, authorization=authorization_of(result, parameters),
                 result=result, idempotency_key=idempotency_key_of(intent, parameters),
-                error_category=error_category_of(result), duration_ms=duration_ms, model=self.model,
+                error_category=action_error.category, duration_ms=duration_ms, model=self.model,
             ),
             private=self.private_mode,
         )
@@ -886,13 +901,17 @@ class JakeCore:
         trace_id = action.get("trace_id") or new_trace_id()
         intent = action["intent"]
         parameters = action["parameters"]
+        # F1.1.6: stesso principio di _log_action_outcome sopra - ActionError.from_result() al
+        # posto della chiamata diretta a error_category_of().
+        action_error = ActionError.from_result(result)
+        validate_action_error(action_error)
         self.action_ledger.record(
             ActionReceipt(
                 action_id=new_action_id(), trace_id=trace_id, ts=time.time(), intent=intent,
                 requested_by="user", risk_decision=risk_of(intent).value,
                 authorization=authorization_of(result, parameters), result=result,
                 idempotency_key=idempotency_key_of(intent, parameters),
-                error_category=error_category_of(result),
+                error_category=action_error.category,
             ),
             private=self.private_mode,
         )
