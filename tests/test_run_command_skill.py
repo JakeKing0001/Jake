@@ -8,8 +8,12 @@ F1: buco reale trovato e corretto in questa sessione. Un comando che fallisce pe
 (codice di uscita diverso da zero) veniva comunque riportato come success=True - l'utente se ne
 accorgeva leggendo "codice N" nella risposta testuale, ma il campo strutturato result.success,
 di cui si fidano il ledger di audit e la dashboard (successi/fallimenti per skill), mentiva."""
+import threading
+import time
 import unittest
+from unittest import mock
 
+from core.kill_switch import KillSwitch
 from core.response_formatter import format_skill_result
 from skills.run_command import RunCommandSkill
 
@@ -83,6 +87,74 @@ class OutputTruncationTests(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertLessEqual(len(result.data["output"]), 1600)
         self.assertIn("troncato", result.data["output"])
+
+
+class KillSwitchCancellationTests(unittest.TestCase):
+    """F1.8.3 ("propagare cancellazione dal kill switch a... subprocess"): buco reale, riprodotto
+    prima del fix - subprocess.run(..., timeout=30) e' una chiamata bloccante che TaskAgent/
+    PlanExecutor non possono interrompere (controllano kill_switch.is_active() solo TRA un passo
+    e il successivo), quindi un comando lungo continuava fino alla fine anche con l'utente che
+    aveva gia' premuto il kill switch (riprodotto: un comando che dorme 3s finiva comunque dopo
+    ~3s con il kill switch attivo dopo 0.3s). Processi VERI, non mock: e' proprio l'interazione
+    con subprocess.Popen/communicate/kill a essere la parte interessante da verificare."""
+
+    LONG_SLEEP_COMMAND = 'python -c "import time; time.sleep(3)"'
+
+    def _skill_with_kill_switch_activated_after(self, delay: float) -> RunCommandSkill:
+        skill = RunCommandSkill()
+        skill.kill_switch = KillSwitch()
+
+        def _activate_soon():
+            time.sleep(delay)
+            skill.kill_switch.activate()
+
+        threading.Thread(target=_activate_soon, daemon=True).start()
+        return skill
+
+    def test_activating_the_kill_switch_stops_a_long_running_command_quickly(self):
+        skill = self._skill_with_kill_switch_activated_after(0.3)
+        start = time.time()
+        result = skill.execute({"command": self.LONG_SLEEP_COMMAND, "confirmed": True})
+        elapsed = time.time() - start
+
+        self.assertEqual(result.error, "KILLED")
+        self.assertFalse(result.success)
+        self.assertLess(elapsed, 1.5, "il comando ha ignorato il kill switch (bloccato per l'intera durata)")
+
+    def test_without_a_kill_switch_a_long_command_is_not_cancellable(self):
+        """Comportamento invariato quando nessun kill switch e' stato iniettato (self.kill_switch
+        resta None: contesti di test o percorsi che non lo passano ancora) - stesso
+        subprocess.run bloccante di prima, nessuna regressione per chi non usa questa capacita'."""
+        skill = RunCommandSkill()
+        self.assertIsNone(skill.kill_switch)
+        result = skill.execute({"command": "exit 0", "confirmed": True})
+        self.assertTrue(result.success)
+
+    def test_a_command_that_finishes_on_its_own_is_not_affected_by_an_unused_kill_switch(self):
+        skill = RunCommandSkill()
+        skill.kill_switch = KillSwitch()  # presente ma mai attivato
+        result = skill.execute({"command": "echo ciao", "confirmed": True})
+        self.assertTrue(result.success)
+        self.assertIn("ciao", result.data["output"])
+
+    def test_a_failing_command_still_reports_the_real_exit_code_through_the_cancellable_path(self):
+        skill = RunCommandSkill()
+        skill.kill_switch = KillSwitch()
+        result = skill.execute({"command": "exit 3", "confirmed": True})
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "NONZERO_EXIT")
+        self.assertEqual(result.data["return_code"], 3)
+
+    def test_timeout_still_fires_through_the_cancellable_path_when_the_kill_switch_never_activates(self):
+        skill = RunCommandSkill()
+        skill.kill_switch = KillSwitch()  # mai attivato: deve scattare il timeout, non il kill switch
+        with mock.patch("skills.run_command.COMMAND_TIMEOUT_SECONDS", 1):
+            start = time.time()
+            result = skill.execute({"command": self.LONG_SLEEP_COMMAND, "confirmed": True})
+            elapsed = time.time() - start
+
+        self.assertEqual(result.error, "TIMEOUT")
+        self.assertLess(elapsed, 2.0)
 
 
 if __name__ == "__main__":
