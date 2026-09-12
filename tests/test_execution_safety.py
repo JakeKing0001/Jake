@@ -7,8 +7,8 @@ reimplementazione: solo cosi' un rollback che sembra corretto leggendo il codice
 diversamente con la skill vera (una chiave del dizionario data scritta in modo leggermente
 diverso, un parametro mancante...) verrebbe scoperto. Prima di questi test, MOVE_PATH e
 RENAME_PATH non avevano MAI un test end-to-end per il proprio rollback
-(core/execution_safety.py, ROLLBACK_HANDLERS): solo CREATE_PATH era verificato, e solo passando
-dall'agente intero (tests/test_agent.py::RollbackAfterFatalErrorTests)."""
+(core/execution_safety.py, INTENT_SAFETY_REGISTRY): solo CREATE_PATH era verificato, e solo
+passando dall'agente intero (tests/test_agent.py::RollbackAfterFatalErrorTests)."""
 import shutil
 import tempfile
 import unittest
@@ -41,8 +41,8 @@ class RealSkillRegistry:
 class RollbackCreatePathTests(unittest.TestCase):
     """CREATE_PATH e' gia' verificato end-to-end passando dall'agente intero
     (tests/test_agent.py): qui lo si copre anche in isolamento, come per MOVE_PATH/RENAME_PATH
-    sotto, cosi' i tre handler in ROLLBACK_HANDLERS hanno la stessa profondita' di test invece
-    di lasciarne due scoperti."""
+    sotto, cosi' i tre handler in INTENT_SAFETY_REGISTRY hanno la stessa profondita' di test
+    invece di lasciarne due scoperti."""
 
     def test_rollback_deletes_the_created_file(self):
         tmp_dir = Path(tempfile.mkdtemp(prefix="jake_execution_safety_"))
@@ -119,7 +119,7 @@ class RollbackRenamePathTests(unittest.TestCase):
 
 class RollbackRespectsBlockedIntentsTests(unittest.TestCase):
     """F1.2.5: un rollback e' la compensazione di un effetto gia' approvato, ma l'intent che
-    esegue davvero (vedi ROLLBACK_COMPENSATING_INTENT in core/execution_safety.py) resta
+    esegue davvero (RollbackAction.compensating_intent in core/execution_safety.py) resta
     soggetto a blocked_intents - un DELETE_PATH disabilitato in config.json non deve eseguire
     nemmeno come "annullamento" di un CREATE_PATH."""
 
@@ -163,6 +163,29 @@ class RollbackEdgeCaseTests(unittest.TestCase):
                 raise RuntimeError("boom")
 
         self.assertFalse(rollback_effect(ExplodingRegistry(), "CREATE_PATH", {"path": "x"}))
+
+
+class IntentSafetyRegistryConsistencyTests(unittest.TestCase):
+    """F1.3.1: VERIFIABLE_INTENTS e' DERIVATO da INTENT_SAFETY_REGISTRY (frozenset comprehension
+    sui verifier non-None), non piu' un insieme mantenuto a mano in parallelo a verify_effect -
+    quindi questi due non possono divergere per costruzione, non solo per disciplina. Questo test
+    lo dimostra piuttosto che fidarsi solo della lettura del codice: se in futuro qualcuno
+    reintroducesse un insieme separato, questo test lo scoprirebbe solo se quell'insieme si
+    disallineasse da INTENT_SAFETY_REGISTRY - il che e' esattamente il rischio da coprire."""
+
+    def test_verifiable_intents_matches_the_registry_exactly(self):
+        from core.execution_safety import INTENT_SAFETY_REGISTRY, VERIFIABLE_INTENTS
+
+        expected = {intent for intent, entry in INTENT_SAFETY_REGISTRY.items() if entry.verifier is not None}
+        self.assertEqual(set(VERIFIABLE_INTENTS), expected)
+        self.assertEqual(VERIFIABLE_INTENTS, {"CREATE_PATH", "RENAME_PATH", "MOVE_PATH", "DELETE_PATH"})
+
+    def test_every_verifiable_intent_verifier_is_actually_callable(self):
+        from core.execution_safety import INTENT_SAFETY_REGISTRY, VERIFIABLE_INTENTS
+
+        for intent in VERIFIABLE_INTENTS:
+            with self.subTest(intent=intent):
+                self.assertTrue(callable(INTENT_SAFETY_REGISTRY[intent].verifier))
 
 
 if __name__ == "__main__":

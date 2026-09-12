@@ -620,8 +620,20 @@ Dipende da: F1.1 e F1.2.
 Criterio di uscita: tutte le azioni external/destructive/admin hanno prova; l'80% delle azioni
 reversibili dispone di undo testato.
 
-- Stato: `DOING`; `F1.3.3` chiuso, resto aperto (`F1.3.1`/`F1.3.2` esistono solo in forma
-  minimale/implicita in `core/execution_safety.py`, non come registry vero e proprio).
+- Stato: `DOING`; `F1.3.1` e `F1.3.3` chiusi, resto aperto (`F1.3.2` per ora solo filesystem, non
+  ancora processi/finestre/browser/casa).
+- `F1.3.1` — 11/09/2026: `core/execution_safety.py` aveva tre strutture parallele da tenere
+  sincronizzate a mano - `VERIFIABLE_INTENTS` (insieme), l'if/elif di `verify_effect`,
+  `ROLLBACK_HANDLERS` + `ROLLBACK_COMPENSATING_INTENT` (due dizionari) - esattamente il pattern
+  di bug gia' documentato altrove nel progetto (`core/policy_engine.py`, il bug storico di
+  RunWorkflowSkill nato da due insiemi paralleli scollegati). Unificate in un solo
+  `INTENT_SAFETY_REGISTRY: dict[str, IntentSafetyEntry]` (`verifier`, `rollback` opzionali per
+  intent); `VERIFIABLE_INTENTS` e' ora una `frozenset` DERIVATA dal registry (non puo' piu'
+  divergere da `verify_effect`, che consulta la stessa fonte). Nessun cambio di comportamento:
+  stesso identico esito per ogni intent, verificato dalla suite invariata (63/63 test di
+  `test_execution_safety`/`test_agent`/`test_plan_executor` verdi senza modifiche alle
+  asserzioni esistenti) piu' due nuovi test che dimostrano l'impossibilita' di disallineamento.
+  Prova: 1.975/1.975 test, ruff/mypy/compileall verdi.
 - `F1.3.3` — 11/09/2026: `ActionReceipt.verified` era `Optional[bool] = None`, e `to_json()`
   omette i campi `None` - una ricevuta "mai verificata" (nessun verificatore per l'intent) finiva
   nel ledger IDENTICA a una scritta da uno schema piu' vecchio senza questo campo affatto,
