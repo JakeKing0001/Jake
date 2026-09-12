@@ -28,6 +28,17 @@ class PlanOutcome:
     completed: list[StepOutcome] = field(default_factory=list)
     stopped_step: StepOutcome | None = None
     rolled_back: list[StepOutcome] = field(default_factory=list)
+    # F1.7.2 ("collegare command, sub-step, verifica, undo e notifica con lo stesso trace id"):
+    # buco reale - execute() gia' correla ogni singolo passo alla stessa ricevuta nel ledger
+    # tramite trace_id (vedi _log_step), ma l'OUTCOME restituito al chiamante non lo portava mai
+    # con se'. Per un piano lanciato da un comando diretto questo non si notava (l'intera
+    # richiesta resta nello stesso turno, gia' correlato altrove), ma per TriggerScheduler - che
+    # fa partire un piano DA SOLO, in background, senza alcun turno di conversazione a cui
+    # agganciarsi - la notifica finale ("Ho eseguito automaticamente 'X'") non aveva NESSUN modo
+    # di essere ricollegata alle ricevute nel ledger che quella stessa esecuzione ha prodotto.
+    # Stringa vuota (non None) come default: un trace_id vuoto e' visibilmente "non impostato"
+    # invece di richiedere un controllo None ovunque venga letto.
+    trace_id: str = ""
 
     @property
     def success(self) -> bool:
@@ -99,7 +110,7 @@ class PlanExecutor:
         sequenza REALE che accadrebbe, non una finta in cui tutto va sempre bene. Nessun
         log_action/ricevuta nel ledger per un passo simulato: non e' mai successo per davvero."""
         trace_id = trace_id or new_trace_id()
-        outcome = PlanOutcome()
+        outcome = PlanOutcome(trace_id=trace_id)
         for step in plan.steps:
             # F1: mai i parametri originali del passo da qui in poi (esecuzione E logging) - vedi
             # core/policy_engine.py sul perche' un piano automatico non puo' mai arrivare gia'
