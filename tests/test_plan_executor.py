@@ -57,6 +57,73 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(registry.calls, [])
 
 
+class PolicyReasonInTheLedgerTests(unittest.TestCase):
+    """F1.2.6 ("salvare la motivazione della decisione nel ledger senza salvare segreti"):
+    verificato cosa finisce DAVVERO nella ricevuta scritta su disco (ActionLedger vero su file
+    temporaneo), non solo cosa la funzione calcola in memoria."""
+
+    def _last_receipt(self, ledger):
+        receipts = ledger.read_all()
+        self.assertEqual(len(receipts), 1)
+        return receipts[0]
+
+    def test_blocked_step_records_why_it_was_blocked(self):
+        registry = FakeRegistry()
+        plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
+        with tempfile.TemporaryDirectory() as tmp:
+            from core.action_ledger import ActionLedger
+
+            executor = PlanExecutor(registry)
+            executor.action_ledger = ActionLedger(path=Path(tmp) / "ledger.jsonl")
+
+            executor.execute(plan, policy_engine=PolicyEngine(blocked_intents={"ADD_NOTE"}))
+
+            self.assertEqual(self._last_receipt(executor.action_ledger)["policy_reason"], "intent_in_blocked_intents")
+
+    def test_confirm_step_records_why_it_needs_confirmation(self):
+        registry = FakeRegistry()
+        plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
+        with tempfile.TemporaryDirectory() as tmp:
+            from core.action_ledger import ActionLedger
+
+            executor = PlanExecutor(registry)
+            executor.action_ledger = ActionLedger(path=Path(tmp) / "ledger.jsonl")
+
+            executor.execute(plan, policy_engine=PolicyEngine(always_confirm_intents={"ADD_NOTE"}))
+
+            self.assertEqual(self._last_receipt(executor.action_ledger)["policy_reason"], "intent_in_always_confirm_intents")
+
+    def test_allowed_step_records_that_no_restriction_matched(self):
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
+        plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
+        with tempfile.TemporaryDirectory() as tmp:
+            from core.action_ledger import ActionLedger
+
+            executor = PlanExecutor(registry)
+            executor.action_ledger = ActionLedger(path=Path(tmp) / "ledger.jsonl")
+
+            executor.execute(plan, policy_engine=PolicyEngine())
+
+            self.assertEqual(self._last_receipt(executor.action_ledger)["policy_reason"], "no_restriction_matched")
+
+    def test_killed_step_has_no_policy_reason_since_no_policy_decision_was_made(self):
+        from core.kill_switch import KillSwitch
+
+        registry = FakeRegistry()
+        plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
+        with tempfile.TemporaryDirectory() as tmp:
+            from core.action_ledger import ActionLedger
+
+            executor = PlanExecutor(registry)
+            executor.action_ledger = ActionLedger(path=Path(tmp) / "ledger.jsonl")
+            executor.kill_switch = KillSwitch()
+            executor.kill_switch.activate()
+
+            executor.execute(plan, policy_engine=PolicyEngine())
+
+            self.assertNotIn("policy_reason", self._last_receipt(executor.action_ledger))
+
+
 class IndependentVerificationTests(unittest.TestCase):
     def test_success_claim_without_real_effect_is_downgraded_to_verification_failed(self):
         class LyingRegistry(FakeRegistry):

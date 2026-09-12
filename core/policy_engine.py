@@ -59,6 +59,21 @@ def strip_authorization_signals(parameters: dict) -> dict:
     return {key: value for key, value in (parameters or {}).items() if key not in AUTHORIZATION_SIGNAL_KEYS}
 
 
+# F1.2.6 ("salvare la motivazione della decisione nel ledger senza salvare segreti"): un
+# vocabolario CHIUSO, non testo libero - ne' _decide_*_reasoned() ne' chi le chiama puo' far
+# finire un valore di parametro (potenzialmente un segreto: un token, un percorso privato, il
+# contenuto di un messaggio) dentro la motivazione, perche' la motivazione e' sempre UNA di
+# queste quattro costanti, mai una stringa costruita da `intent`/`parameters`. Questo e' cio'
+# che rende "senza salvare segreti" vero per costruzione, non per convenzione.
+POLICY_REASON_BLOCKED = "intent_in_blocked_intents"
+POLICY_REASON_REQUIRE_AUTH = "intent_in_require_auth_intents_and_auth_gate_enabled"
+POLICY_REASON_CONFIRM = "intent_in_always_confirm_intents"
+POLICY_REASON_ALLOWED = "no_restriction_matched"
+POLICY_REASONS = frozenset({
+    POLICY_REASON_BLOCKED, POLICY_REASON_REQUIRE_AUTH, POLICY_REASON_CONFIRM, POLICY_REASON_ALLOWED,
+})
+
+
 class PolicyEngine:
     """Un'istanza per JakeCore, condivisa PER RIFERIMENTO (non copiata) con tutto cio' che deve
     decidere se un intent puo' eseguire: JakeCore stesso, PlanExecutor (tramite `execute()`),
@@ -135,24 +150,34 @@ class PolicyEngine:
     def _decide_interactive_reasoned(self, intent: str, parameters: dict | None) -> tuple[PolicyDecision, str]:
         parameters = parameters or {}
         if intent in self.blocked_intents:
-            return PolicyDecision.BLOCK, "intent_in_blocked_intents"
+            return PolicyDecision.BLOCK, POLICY_REASON_BLOCKED
         if (
             self.auth_gate is not None
             and getattr(self.auth_gate, "enabled", False)
             and intent in self.require_auth_intents
             and not parameters.get("authenticated")
         ):
-            return PolicyDecision.REQUIRE_AUTH, "intent_in_require_auth_intents_and_auth_gate_enabled"
+            return PolicyDecision.REQUIRE_AUTH, POLICY_REASON_REQUIRE_AUTH
         if intent in self.always_confirm_intents and not parameters.get("confirmed"):
-            return PolicyDecision.CONFIRM, "intent_in_always_confirm_intents"
-        return PolicyDecision.ALLOW, "no_restriction_matched"
+            return PolicyDecision.CONFIRM, POLICY_REASON_CONFIRM
+        return PolicyDecision.ALLOW, POLICY_REASON_ALLOWED
 
     def _decide_automated_reasoned(self, intent: str) -> tuple[PolicyDecision, str]:
         if intent in self.blocked_intents:
-            return PolicyDecision.BLOCK, "intent_in_blocked_intents"
+            return PolicyDecision.BLOCK, POLICY_REASON_BLOCKED
         if intent in self.always_confirm_intents:
-            return PolicyDecision.CONFIRM, "intent_in_always_confirm_intents"
-        return PolicyDecision.ALLOW, "no_restriction_matched"
+            return PolicyDecision.CONFIRM, POLICY_REASON_CONFIRM
+        return PolicyDecision.ALLOW, POLICY_REASON_ALLOWED
+
+    # F1.2.6: varianti PUBBLICHE delle due sopra, per chi (PlanExecutor, F1.2.6) ha bisogno di
+    # salvare la motivazione nel ledger insieme alla decisione, senza ricalcolarla una seconda
+    # volta con explain() (che calcola anche il verdetto dell'altro percorso, inutile qui) ne'
+    # accedere a un metodo "privato" da fuori il modulo.
+    def decide_interactive_with_reason(self, intent: str, parameters: dict | None) -> tuple[PolicyDecision, str]:
+        return self._decide_interactive_reasoned(intent, parameters)
+
+    def decide_automated_with_reason(self, intent: str) -> tuple[PolicyDecision, str]:
+        return self._decide_automated_reasoned(intent)
 
     def explain(self, intent: str, parameters: dict | None = None) -> dict:
         """Simula la policy per `intent` SENZA eseguire nulla: utile per un pannello diagnostico
