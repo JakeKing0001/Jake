@@ -993,6 +993,36 @@ Dipende da: F1.1.
 
 Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock o ledger incoerente.
 
+- Stato: `DOING`; `F1.8.2` chiuso parzialmente (il ledger, non ancora altre risorse condivise);
+  resto della fase non affrontato.
+- `F1.8.2` (parziale) — 12/09/2026: **buco reale trovato e corretto, riprodotto per davvero**
+  (non solo ipotizzato) - `core/action_ledger.py::ActionLedger.record()` apriva il file con un
+  `open()` grezzo a ogni chiamata, senza alcuna sincronizzazione tra thread. A differenza di
+  `core/logger.log_action` e `core/session_recorder.SessionRecorder` (entrambi basati su
+  `logging.Logger`/`RotatingFileHandler`, gia' thread-safe per costruzione della libreria
+  standard), il ledger non aveva questa protezione. `ActionLedger` e' condivisa PER RIFERIMENTO
+  tra `JakeCore`, `TaskAgent`, `PlanExecutor` e `TriggerScheduler` (quest'ultimo su un thread
+  separato dal principale, vedi `core/trigger_scheduler.py`): un'automazione partita da sola
+  mentre il thread principale registra un comando diretto potevano intrecciare le loro scritture
+  nello stesso file. **Riprodotto per davvero, non a tavolino**: 20 thread x 20 scritture
+  concorrenti sulla vecchia implementazione hanno prodotto 394 righe su disco invece di 400 (6
+  perse) e solo 391 righe erano JSON valido (3 ulteriori corrotte da un'interlacciatura parziale)
+  - un registro che per design non deve mai perdere ne' corrompere una voce (vedi il docstring
+  del modulo) falliva silenziosamente sotto carico concorrente reale. Corretto aggiungendo
+  `threading.Lock()` per istanza, che serializza la sezione critica (apertura+scrittura) senza
+  toccare i lettori (`read_all`/`by_*`, che non mutano nulla e restano sicuri in lettura
+  parallela). Aggiunti 2 test in `tests/test_action_ledger.py::ConcurrentWritesTests`: uno stress
+  reale su file vero (20x20 scritture concorrenti, verifica che tutte le 400 righe siano presenti
+  e valide) e uno deterministico che sostituisce il lock con uno che rileva se due thread sono
+  MAI stati dentro la sezione critica insieme, cosi' da dimostrare l'invariante (mutua esclusione)
+  invece di affidarsi al caso del timing. Non ancora affrontato: le altre risorse condivise tra
+  thread (`Config`, `SkillRegistry`, il file system delle skill/note/todo) non sono state
+  passate in rassegna con lo stesso livello di dettaglio - questo passo chiude solo il ledger,
+  dove il rischio era piu' alto (scritture append-only frequenti da piu' thread contemporanei);
+  il resto di F1.8 (coda per azioni concorrenti, drain allo shutdown, deadlock timeout, client
+  lenti sull'event bus, test di race su reminder/trigger/handoff/conferma/undo) resta da fare.
+  Prova: 2.077/2.077 test, ruff/mypy/compileall verdi su tutti i file toccati.
+
 ### Gate G1 — Nucleo fidato
 
 G1 è superato soltanto se:

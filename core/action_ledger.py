@@ -17,6 +17,7 @@ un campo inventato: "none" quando l'azione non ha mai avuto bisogno di autorizza
 "confirmed"/"passphrase" quando l'ha ricevuta, "pending"/"blocked" quando e' in attesa o negata."""
 import hashlib
 import json
+import threading
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
@@ -293,8 +294,22 @@ def validate_action_receipt(receipt: ActionReceipt) -> None:
 
 
 class ActionLedger:
+    """F1.8.2 ("serializzare azioni che toccano lo stesso resource key"): UNA istanza e'
+    condivisa per riferimento tra JakeCore, TaskAgent, PlanExecutor e TriggerScheduler (vedi
+    JakeCore.__init__) - a differenza di core/logger.log_action e core/session_recorder.
+    SessionRecorder (entrambi basati su logging.Logger/RotatingFileHandler, gia' thread-safe
+    per costruzione della libreria standard), record() qui apriva il file con un `open()` grezzo
+    a ogni chiamata, senza alcuna sincronizzazione: due thread che chiamano record()
+    contemporaneamente (es. TriggerScheduler su un'automazione partita da sola, mentre il thread
+    principale registra un comando diretto) potevano intrecciare le loro scritture nello stesso
+    file, producendo righe JSON corrotte in un registro che per design non deve mai perdere ne'
+    corrompere una voce (vedi il docstring del modulo). Un `threading.Lock()` per istanza
+    serializza le scritture reali sullo stesso file, senza bisogno di toccare i lettori
+    (read_all/by_*), che non mutano nulla."""
+
     def __init__(self, path: Path | None = None):
         self._path = Path(path) if path else DEFAULT_LEDGER_PATH
+        self._write_lock = threading.Lock()
 
     def record(self, receipt: ActionReceipt, *, private: bool = False) -> None:
         # Stessa policy di core/logger.log_action e core/session_recorder.SessionRecorder:
@@ -302,8 +317,9 @@ class ActionLedger:
         if private:
             return
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self._path, "a", encoding="utf-8") as handle:
-            handle.write(receipt.to_json() + "\n")
+        line = receipt.to_json() + "\n"
+        with self._write_lock, open(self._path, "a", encoding="utf-8") as handle:
+            handle.write(line)
 
     def read_all(self) -> list[dict]:
         if not self._path.is_file():
