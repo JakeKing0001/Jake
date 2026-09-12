@@ -1,11 +1,24 @@
 import json
 import sqlite3
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
 class MemoryManager:
-    """Gestisce la memoria a lungo termine di Jake su SQLite (ricordi, preferenze, cronologia)."""
+    """Gestisce la memoria a lungo termine di Jake su SQLite (ricordi, preferenze, cronologia).
+
+    F1.8.2 ("serializzare azioni che toccano lo stesso resource key"): stesso principio gia'
+    applicato a `core/reminder_manager.py`/`core/todo_manager.py` - la connessione e'
+    `check_same_thread=False` perche' `TriggerScheduler` legge/scrive `WorkflowManager`/
+    `TriggerManager` (entrambi backed da questa stessa connessione) da un thread separato dal
+    principale, ma disattivare quel controllo NON rende la connessione sicura da usare
+    concorrentemente da sola (la documentazione di sqlite3 e' esplicita: la responsabilita' di
+    serializzare l'accesso resta di chi chiama). Un `RLock` (non un `Lock` semplice) perche'
+    diversi metodi pubblici ne chiamano un altro internamente restando nella stessa sezione
+    critica (`related()` chiama `recall()`, `summarize_old_history()` chiama `remember()`,
+    `set_preference()`/`get_preference()` chiamano `remember()`/`recall()`): un lock non
+    rientrante si bloccherebbe per sempre nello stesso thread."""
 
     DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "jake_memory.db"
     MAX_HISTORY_ENTRIES = 200
@@ -19,6 +32,7 @@ class MemoryManager:
     def __init__(self, db_path: Path | None = None):
         self.db_path = Path(db_path) if db_path else self.DEFAULT_DB_PATH
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
         # check_same_thread=False: dalla v3.0 TriggerScheduler legge/scrive workflow_manager e
         # trigger_manager (entrambi backed da questa stessa connessione) da un thread in
         # background - stesso accorgimento gia' usato in ReminderManager per lo stesso motivo.
@@ -114,34 +128,35 @@ class MemoryManager:
         subito'. Un ttl esplicito e' una decisione presa da CHI SALVA il ricordo (sa gia' che
         quel fatto ha vita breve, es. 'oggi piove'), diverso da purge_history_older_than (una
         policy di retention decisa DOPO, dall'utente, per la privacy)."""
-        now = self._now()
-        embedding_json = json.dumps(embedding) if embedding else None
-        expires_at = (
-            (datetime.now(timezone.utc) + timedelta(days=ttl_days)).isoformat() if ttl_days is not None else None
-        )
+        with self._lock:
+            now = self._now()
+            embedding_json = json.dumps(embedding) if embedding else None
+            expires_at = (
+                (datetime.now(timezone.utc) + timedelta(days=ttl_days)).isoformat() if ttl_days is not None else None
+            )
 
-        if embedding:
-            duplicate_key = self._find_duplicate_key(embedding, category, project, exclude_key=key)
-            if duplicate_key is not None:
-                key = duplicate_key
+            if embedding:
+                duplicate_key = self._find_duplicate_key(embedding, category, project, exclude_key=key)
+                if duplicate_key is not None:
+                    key = duplicate_key
 
-        self._connection.execute(
-            """
-            INSERT INTO memories
-                (key, value, category, importance, created_at, updated_at, embedding, project, source, expires_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(key, category) DO UPDATE SET
-                value = excluded.value,
-                importance = excluded.importance,
-                updated_at = excluded.updated_at,
-                embedding = excluded.embedding,
-                project = excluded.project,
-                source = excluded.source,
-                expires_at = excluded.expires_at
-            """,
-            (key, value, category, importance, now, now, embedding_json, project, source, expires_at),
-        )
-        self._connection.commit()
+            self._connection.execute(
+                """
+                INSERT INTO memories
+                    (key, value, category, importance, created_at, updated_at, embedding, project, source, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(key, category) DO UPDATE SET
+                    value = excluded.value,
+                    importance = excluded.importance,
+                    updated_at = excluded.updated_at,
+                    embedding = excluded.embedding,
+                    project = excluded.project,
+                    source = excluded.source,
+                    expires_at = excluded.expires_at
+                """,
+                (key, value, category, importance, now, now, embedding_json, project, source, expires_at),
+            )
+            self._connection.commit()
 
     def _find_duplicate_key(self, embedding: list, category: str, project: str | None, exclude_key: str) -> str | None:
         """Chiave del ricordo esistente piu' simile semanticamente a embedding, nella stessa
@@ -213,12 +228,13 @@ class MemoryManager:
             params.append(self._now())
 
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        rows = self._connection.execute(
-            f"SELECT {self._RETURNED_COLUMNS} FROM memories "
-            f"{where} ORDER BY importance DESC, updated_at DESC LIMIT ?",
-            (*params, limit),
-        ).fetchall()
-        return [dict(row) for row in rows]
+        with self._lock:
+            rows = self._connection.execute(
+                f"SELECT {self._RETURNED_COLUMNS} FROM memories "
+                f"{where} ORDER BY importance DESC, updated_at DESC LIMIT ?",
+                (*params, limit),
+            ).fetchall()
+            return [dict(row) for row in rows]
 
     def semantic_recall(
         self, query_embedding: list, category: str | None = None, project: str | None = None, limit: int = 5,
@@ -243,11 +259,12 @@ class MemoryManager:
             clauses.append("(expires_at IS NULL OR expires_at >= ?)")
             params.append(self._now())
 
-        rows = self._connection.execute(
-            f"SELECT {self._RETURNED_COLUMNS}, embedding "
-            f"FROM memories WHERE {' AND '.join(clauses)}",
-            params,
-        ).fetchall()
+        with self._lock:
+            rows = self._connection.execute(
+                f"SELECT {self._RETURNED_COLUMNS}, embedding "
+                f"FROM memories WHERE {' AND '.join(clauses)}",
+                params,
+            ).fetchall()
 
         scored = []
         for row in rows:
@@ -266,35 +283,38 @@ class MemoryManager:
         recall()/semantic_recall() gia' li nascondono di default, quindi non c'e' fretta di
         cancellarli - questo metodo esiste per una pulizia periodica esplicita (es. un futuro
         hook di manutenzione in core/system_advisor.py), non per essere invocato ad ogni turno."""
-        cursor = self._connection.execute(
-            "DELETE FROM memories WHERE expires_at IS NOT NULL AND expires_at < ?", (self._now(),)
-        )
-        self._connection.commit()
-        return cursor.rowcount
+        with self._lock:
+            cursor = self._connection.execute(
+                "DELETE FROM memories WHERE expires_at IS NOT NULL AND expires_at < ?", (self._now(),)
+            )
+            self._connection.commit()
+            return cursor.rowcount
 
     def forget(self, key: str, category: str | None = None) -> bool:
         """Elimina i ricordi con la chiave indicata. Restituisce True se qualcosa e' stato rimosso."""
-        if category:
-            cursor = self._connection.execute(
-                "DELETE FROM memories WHERE key = ? AND category = ?", (key, category)
-            )
-            self._connection.execute(
-                "DELETE FROM memory_relations WHERE (subject_key = ? AND subject_category = ?) "
-                "OR (object_key = ? AND object_category = ?)", (key, category, key, category),
-            )
-        else:
-            cursor = self._connection.execute("DELETE FROM memories WHERE key = ?", (key,))
-            # Senza categoria puo' esserci piu' di un ricordo con questa chiave: rimuove i
-            # collegamenti di ognuno, per non lasciare archi del grafo che puntano al nulla.
-            self._connection.execute(
-                "DELETE FROM memory_relations WHERE subject_key = ? OR object_key = ?", (key, key),
-            )
-        self._connection.commit()
-        return cursor.rowcount > 0
+        with self._lock:
+            if category:
+                cursor = self._connection.execute(
+                    "DELETE FROM memories WHERE key = ? AND category = ?", (key, category)
+                )
+                self._connection.execute(
+                    "DELETE FROM memory_relations WHERE (subject_key = ? AND subject_category = ?) "
+                    "OR (object_key = ? AND object_category = ?)", (key, category, key, category),
+                )
+            else:
+                cursor = self._connection.execute("DELETE FROM memories WHERE key = ?", (key,))
+                # Senza categoria puo' esserci piu' di un ricordo con questa chiave: rimuove i
+                # collegamenti di ognuno, per non lasciare archi del grafo che puntano al nulla.
+                self._connection.execute(
+                    "DELETE FROM memory_relations WHERE subject_key = ? OR object_key = ?", (key, key),
+                )
+            self._connection.commit()
+            return cursor.rowcount > 0
 
     def count_memories(self) -> int:
-        row = self._connection.execute("SELECT COUNT(*) FROM memories").fetchone()
-        return row[0] if row else 0
+        with self._lock:
+            row = self._connection.execute("SELECT COUNT(*) FROM memories").fetchone()
+            return row[0] if row else 0
 
     # ---- grafo di conoscenza personale (v4.4, Personal Knowledge Graph) -------------------
     # Le altre memorie di Jake (ricordi, contatti, todo, automazioni...) restano ognuna nel
@@ -307,24 +327,26 @@ class MemoryManager:
 
     def link(self, subject_key: str, subject_category: str, predicate: str, object_key: str, object_category: str) -> None:
         """Crea una relazione con nome tra due ricordi gia' esistenti (es. 'Mario' -lavora_per-> 'Acme')."""
-        self._connection.execute(
-            """
-            INSERT OR IGNORE INTO memory_relations
-                (subject_key, subject_category, predicate, object_key, object_category, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (subject_key, subject_category, predicate, object_key, object_category, self._now()),
-        )
-        self._connection.commit()
+        with self._lock:
+            self._connection.execute(
+                """
+                INSERT OR IGNORE INTO memory_relations
+                    (subject_key, subject_category, predicate, object_key, object_category, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (subject_key, subject_category, predicate, object_key, object_category, self._now()),
+            )
+            self._connection.commit()
 
     def unlink(self, subject_key: str, subject_category: str, predicate: str, object_key: str, object_category: str) -> bool:
-        cursor = self._connection.execute(
-            "DELETE FROM memory_relations WHERE subject_key = ? AND subject_category = ? AND predicate = ? "
-            "AND object_key = ? AND object_category = ?",
-            (subject_key, subject_category, predicate, object_key, object_category),
-        )
-        self._connection.commit()
-        return cursor.rowcount > 0
+        with self._lock:
+            cursor = self._connection.execute(
+                "DELETE FROM memory_relations WHERE subject_key = ? AND subject_category = ? AND predicate = ? "
+                "AND object_key = ? AND object_category = ?",
+                (subject_key, subject_category, predicate, object_key, object_category),
+            )
+            self._connection.commit()
+            return cursor.rowcount > 0
 
     def related(self, key: str, category: str = "fact", predicate: str | None = None) -> list[dict]:
         """Ricordi collegati a (key, category) come soggetto, con il predicato e il valore
@@ -337,22 +359,25 @@ class MemoryManager:
             clauses.append("predicate = ?")
             params.append(predicate)
 
-        rows = self._connection.execute(
-            f"SELECT predicate, object_key, object_category FROM memory_relations WHERE {' AND '.join(clauses)}"
-            " ORDER BY id ASC",
-            params,
-        ).fetchall()
+        # RLock rientrante: recall() qui sotto riacquisisce lo stesso lock nello stesso thread
+        # senza bloccarsi, cosi' l'intera query+arricchimento resta una sola sezione critica.
+        with self._lock:
+            rows = self._connection.execute(
+                f"SELECT predicate, object_key, object_category FROM memory_relations WHERE {' AND '.join(clauses)}"
+                " ORDER BY id ASC",
+                params,
+            ).fetchall()
 
-        related_entries = []
-        for row in rows:
-            target = self.recall(key=row["object_key"], category=row["object_category"], limit=1)
-            related_entries.append({
-                "predicate": row["predicate"],
-                "key": row["object_key"],
-                "category": row["object_category"],
-                "value": target[0]["value"] if target else None,
-            })
-        return related_entries
+            related_entries = []
+            for row in rows:
+                target = self.recall(key=row["object_key"], category=row["object_category"], limit=1)
+                related_entries.append({
+                    "predicate": row["predicate"],
+                    "key": row["object_key"],
+                    "category": row["object_category"],
+                    "value": target[0]["value"] if target else None,
+                })
+            return related_entries
 
     def set_preference(self, name: str, value: str) -> None:
         self.remember(name, value, category="preference")
@@ -363,50 +388,53 @@ class MemoryManager:
 
     def log_turn(self, role: str, text: str) -> None:
         """Registra un turno di conversazione nella cronologia a lungo termine."""
-        self._connection.execute(
-            "INSERT INTO conversation_history (role, text, created_at) VALUES (?, ?, ?)",
-            (role, text, self._now()),
-        )
-        self._connection.execute(
-            """
-            DELETE FROM conversation_history WHERE id NOT IN (
-                SELECT id FROM conversation_history ORDER BY id DESC LIMIT ?
+        with self._lock:
+            self._connection.execute(
+                "INSERT INTO conversation_history (role, text, created_at) VALUES (?, ?, ?)",
+                (role, text, self._now()),
             )
-            """,
-            (self.MAX_HISTORY_ENTRIES,),
-        )
-        self._connection.commit()
+            self._connection.execute(
+                """
+                DELETE FROM conversation_history WHERE id NOT IN (
+                    SELECT id FROM conversation_history ORDER BY id DESC LIMIT ?
+                )
+                """,
+                (self.MAX_HISTORY_ENTRIES,),
+            )
+            self._connection.commit()
 
     def get_recent_history(self, limit: int = 10) -> list[dict]:
         """Restituisce gli ultimi turni di conversazione in ordine cronologico."""
-        rows = self._connection.execute(
-            "SELECT role, text, created_at FROM conversation_history ORDER BY id DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
-        return [dict(row) for row in reversed(rows)]
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT role, text, created_at FROM conversation_history ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return [dict(row) for row in reversed(rows)]
 
     def summarize_old_history(self, summarizer, keep_recent: int = 50) -> bool:
         """Comprime i turni piu' vecchi di keep_recent in un'unica memoria 'summary', poi li elimina.
 
         Non ha effetto (ritorna False) finche' la cronologia resta sotto la soglia: e' economico
         richiamarlo a ogni turno, il lavoro vero scatta solo occasionalmente."""
-        rows = self._connection.execute(
-            "SELECT id, role, text, created_at FROM conversation_history ORDER BY id ASC"
-        ).fetchall()
-        if len(rows) <= keep_recent:
-            return False
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT id, role, text, created_at FROM conversation_history ORDER BY id ASC"
+            ).fetchall()
+            if len(rows) <= keep_recent:
+                return False
 
-        overflow = rows[: len(rows) - keep_recent]
-        summary_text = summarizer.summarize([dict(row) for row in overflow])
-        if not summary_text:
-            return False
+            overflow = rows[: len(rows) - keep_recent]
+            summary_text = summarizer.summarize([dict(row) for row in overflow])
+            if not summary_text:
+                return False
 
-        self.remember(f"riassunto conversazione del {self._now()}", summary_text, category="summary")
-        self._connection.executemany(
-            "DELETE FROM conversation_history WHERE id = ?", [(row["id"],) for row in overflow]
-        )
-        self._connection.commit()
-        return True
+            self.remember(f"riassunto conversazione del {self._now()}", summary_text, category="summary")
+            self._connection.executemany(
+                "DELETE FROM conversation_history WHERE id = ?", [(row["id"],) for row in overflow]
+            )
+            self._connection.commit()
+            return True
 
     def purge_history_older_than(self, days: float) -> int:
         """Elimina la cronologia di conversazione (e i suoi riassunti automatici, categoria
@@ -419,14 +447,16 @@ class MemoryManager:
         tocca le altre categorie di ricordi (fact/preference/...): quelle l'utente le ha chieste
         esplicitamente di ricordare, un limite di tempo automatico le tradirebbe."""
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        history_cursor = self._connection.execute(
-            "DELETE FROM conversation_history WHERE created_at < ?", (cutoff,)
-        )
-        summary_cursor = self._connection.execute(
-            "DELETE FROM memories WHERE category = 'summary' AND created_at < ?", (cutoff,)
-        )
-        self._connection.commit()
-        return history_cursor.rowcount + summary_cursor.rowcount
+        with self._lock:
+            history_cursor = self._connection.execute(
+                "DELETE FROM conversation_history WHERE created_at < ?", (cutoff,)
+            )
+            summary_cursor = self._connection.execute(
+                "DELETE FROM memories WHERE category = 'summary' AND created_at < ?", (cutoff,)
+            )
+            self._connection.commit()
+            return history_cursor.rowcount + summary_cursor.rowcount
 
     def close(self) -> None:
-        self._connection.close()
+        with self._lock:
+            self._connection.close()
