@@ -7,21 +7,21 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from core.session_recorder import SessionRecorder, _redact
+from core.session_recorder import SessionRecorder, redact_value
 
 
 class RedactTests(unittest.TestCase):
     def test_string_becomes_a_length_placeholder(self):
         text = "documenti/tesi.pdf"
-        self.assertEqual(_redact(text), f"<str:{len(text)} caratteri>")
+        self.assertEqual(redact_value(text), f"<str:{len(text)} caratteri>")
 
     def test_non_string_scalars_pass_through(self):
-        self.assertEqual(_redact(True), True)
-        self.assertEqual(_redact(42), 42)
-        self.assertIsNone(_redact(None))
+        self.assertEqual(redact_value(True), True)
+        self.assertEqual(redact_value(42), 42)
+        self.assertIsNone(redact_value(None))
 
     def test_nested_dict_and_list_are_redacted_recursively(self):
-        redacted = _redact({"path": "c:/nota.txt", "tags": ["personale", "urgente"], "confirmed": True})
+        redacted = redact_value({"path": "c:/nota.txt", "tags": ["personale", "urgente"], "confirmed": True})
         self.assertEqual(redacted, {
             "path": "<str:11 caratteri>", "tags": ["<str:9 caratteri>", "<str:7 caratteri>"], "confirmed": True,
         })
