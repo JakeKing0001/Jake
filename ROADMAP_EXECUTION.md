@@ -993,8 +993,10 @@ Dipende da: F1.1.
 
 Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock o ledger incoerente.
 
-- Stato: `DOING`; `F1.8.2` chiuso parzialmente (ledger, promemoria, todo - non ancora
-  `MemoryManager`); resto della fase non affrontato.
+- Stato: `DOING`; `F1.8.2` chiuso per tutti i registri/store condivisi tra thread (ledger,
+  promemoria, todo, memoria a lungo termine); resto della fase (coda per azioni concorrenti,
+  drain allo shutdown, deadlock timeout, client lenti sull'event bus, test di race su
+  trigger/handoff/conferma/undo) non affrontato.
 - `F1.8.2` (parziale) — 12/09/2026: **buco reale trovato e corretto, riprodotto per davvero**
   (non solo ipotizzato) - `core/action_ledger.py::ActionLedger.record()` apriva il file con un
   `open()` grezzo a ogni chiamata, senza alcuna sincronizzazione tra thread. A differenza di
@@ -1037,14 +1039,29 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
   bloccherebbe per sempre nello stesso thread. Aggiunti 4 nuovi test (2 per modulo): uno stress
   su molte `add()` concorrenti (nessuna riga persa/duplicata) e uno che forza piu' thread a
   contendersi lo STESSO record con `complete_matching`/`delete_matching`, verificando che
-  esattamente uno solo lo trovi/gestisca. Non ancora affrontato: `core/memory_manager.py` (432
-  righe, condivisa da `WorkflowManager`/`TriggerManager` oltre che da REMEMBER/RECALL diretti) ha
-  lo stesso pattern `check_same_thread=False` senza lock, ma e' molto piu' grande - lasciata
-  esplicitamente per un passo successivo dedicato, invece di essere infilata di corsa qui; ne'
-  la coda per azioni concorrenti, il drain allo shutdown, il deadlock timeout, i client lenti
-  sull'event bus, ne' i test di race su trigger/handoff/conferma/undo (il resto di F1.8) sono
-  stati affrontati. Prova: 2.081/2.081 test, ruff/mypy/compileall verdi su tutti i file toccati.
-  Prova: 2.077/2.077 test, ruff/mypy/compileall verdi su tutti i file toccati.
+  esattamente uno solo lo trovi/gestisca. Prova: 2.081/2.081 test, ruff/mypy/compileall verdi su
+  tutti i file toccati.
+- `F1.8.2` (chiusura) — 12/09/2026: ultimo store rimasto, `core/memory_manager.py` (432 righe,
+  condivisa da `WorkflowManager`/`TriggerManager` oltre che da REMEMBER/RECALL diretti - vedi
+  sopra "non ancora affrontato" nella voce precedente). Stesso pattern, stessa causa
+  (`check_same_thread=False` per `TriggerScheduler`, nessun lock proprio), stesso rimedio: un
+  `threading.RLock()` per istanza attorno al corpo di ognuno dei 15 metodi pubblici (`remember`,
+  `recall`, `semantic_recall`, `purge_expired`, `forget`, `count_memories`, `link`, `unlink`,
+  `related`, `log_turn`, `get_recent_history`, `summarize_old_history`,
+  `purge_history_older_than`, `close`; `set_preference`/`get_preference` restano senza un lock
+  proprio perche' delegano per intero a `remember`/`recall`, gia' protetti). `RLock` necessario
+  qui piu' che altrove: `related()` chiama `recall()`, `summarize_old_history()` chiama
+  `remember()`, entrambi internamente - un lock non rientrante si sarebbe bloccato per sempre.
+  **Riprodotto per davvero anche qui**: lo stesso scenario di `log_turn()` (un INSERT seguito da
+  una DELETE di pulizia, il pattern piu' simile a `due_reminders()`) provato senza lock con 10
+  thread x 10 chiamate ha lasciato solo 23 righe su 100 attese, con 9 thread che sollevavano
+  `sqlite3.InterfaceError: bad parameter or other API misuse`. Aggiunti 2 nuovi test in
+  `tests/test_memory_manager.py::ConcurrentAccessTests` (molte `remember()` concorrenti su chiavi
+  diverse, molte `log_turn()` concorrenti). Con questo, `F1.8.2` copre tutti e quattro gli store
+  condivisi tra thread del progetto (ledger, promemoria, todo, memoria a lungo termine) - il
+  resto di F1.8 (coda per azioni concorrenti, drain allo shutdown, deadlock timeout, client lenti
+  sull'event bus, test di race su trigger/handoff/conferma/undo) resta comunque da fare. Prova:
+  2.083/2.083 test, ruff/mypy/compileall verdi su tutti i file toccati.
 
 ### Gate G1 — Nucleo fidato
 
