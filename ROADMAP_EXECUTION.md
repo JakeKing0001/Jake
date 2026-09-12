@@ -969,11 +969,37 @@ Dipende da: F1.2.
 
 Criterio di uscita: nessun segreto in chiaro e ogni azione admin richiede un fattore non vocale.
 
-- Stato: `DOING`; `F1.4.8` chiuso parzialmente (vault corrotto/profilo diverso, non ancora
-  migrazione/backup end-to-end); il resto della fase non ha ancora una voce di evidenza in
-  questo documento (`core/secrets_vault.py`/DPAPI, `core/windows_hello.py` esistono gia' - vedi
-  l'audit storico in [ROADMAP.md](ROADMAP.md) fase F1 - ma non sono stati riletti contro
-  l'elenco piu' fine `F1.4.1`-`F1.4.7` di qui).
+- Stato: `DOING`; `F1.4.1` chiuso parzialmente (scrittura atomica di config/settings.json, non
+  ancora una classe `SecretsVault` vera - vedi sotto); `F1.4.8` chiuso parzialmente (vault
+  corrotto/profilo diverso, non ancora migrazione/backup end-to-end); il resto della fase non ha
+  ancora una voce di evidenza in questo documento (`core/secrets_vault.py`/DPAPI,
+  `core/windows_hello.py` esistono gia' - vedi l'audit storico in [ROADMAP.md](ROADMAP.md) fase
+  F1 - ma non sono stati riletti contro l'elenco piu' fine `F1.4.1`-`F1.4.7` di qui).
+- `F1.4.1` (parziale, scrittura atomica) — 12/09/2026: "consolidare DPAPI in un SecretsVault
+  con versione e migrazione atomica". Buco reale, riprodotto prima del fix, PIU' grave del suo
+  gemello gia' chiuso in `F1.7.1` per il ledger - `Config._write()` usava
+  `self.path.write_text(...)`, che tronca `config/settings.json` e riscrive l'INTERO file in una
+  sola chiamata. Un arresto improvviso a meta' (kill, crash, mancanza di corrente) lascia il
+  file troncato; a differenza del ledger (append-only: `read_all()` scarta solo la riga rotta,
+  le altre restano), qui `_load()` incontra un `json.JSONDecodeError` sul file INTERO e torna
+  `{}` - **perdendo OGNI valore**, non solo l'ultimo scritto: `admin_passphrase`,
+  `home_assistant_token`, il modello scelto, tutto. Riprodotto per davvero: tre `set()` reali
+  seguiti da un troncamento a meta' del file hanno fatto sparire tutti e tre i valori al
+  riavvio. Corretto scrivendo prima su un file temporaneo (`settings.json.tmp`) nella STESSA
+  directory (stesso filesystem, condizione richiesta perche' `os.replace()` sia atomico sia su
+  Windows sia su POSIX) e poi rinominandolo sopra il file finale: o il file vecchio completo
+  resta intatto, o il nuovo file completo prende il suo posto, mai uno stato a meta'. Non
+  risolto, dichiarato onestamente: un crash tra la scrittura del temporaneo e `os.replace()`
+  lascia un `.tmp` orfano ma innocuo (il file reale non viene mai toccato prima del replace),
+  non ripulito automaticamente; una corruzione del file REALE per altre vie (modifica a mano,
+  disco) resta comunque irrecuperabile - l'atomicita' protegge dal NOSTRO percorso di scrittura,
+  non da ogni causa di corruzione (dimostrato da un test dedicato che riproduce anche questo
+  caso, per onesta' sui limiti del fix). Aggiunti 3 nuovi test in
+  `tests/test_config.py::AtomicWriteTests`. Non ancora affrontato: nessuna classe `SecretsVault`
+  esiste ancora (`core/secrets_vault.py` resta un modulo di funzioni libere `is_protected/
+  protect/unprotect`, senza versione ne' un oggetto proprio) - il resto di `F1.4.1` e tutto
+  `F1.4.2`-`F1.4.7` restano aperti. Prova: 2.147/2.147 test, ruff/mypy/compileall verdi su
+  `core/config.py` e `tests/test_config.py`.
 - `F1.4.8` (parziale) — 12/09/2026: **buco reale trovato e corretto, non solo testato** -
   `core/secrets_vault.py::unprotect()` sollevava un'eccezione non catturata
   (`binascii.Error` per un base64 malformato, `pywintypes.error` per un blob DPAPI incompatibile)
@@ -2329,11 +2355,14 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 ## 24. Prossima azione esatta
 
 Aggiornato 12/09/2026. `F1.2.6` (percorso interattivo/agente, ripreso da lavoro non committato di
-una sessione precedente), `F1.7.1` (ledger resistente a record parziali/arresto improvviso) e
-`F1.8.3` (kill switch propagato a RUN_COMMAND) sono stati completati e verificati in questa
-sessione, ciascuno con un buco reale riprodotto empiricamente prima del fix - `F1.8.3` addirittura
-con due buchi ULTERIORI trovati durante la verifica del fix stesso (vedi la voce in sezione F1.8).
-`master` e' pulito, 2.144/2.144 test, ruff/mypy/compileall verdi. `G1` resta aperto.
+una sessione precedente), `F1.7.1` (ledger resistente a record parziali/arresto improvviso),
+`F1.8.3` (kill switch propagato a RUN_COMMAND) e `F1.4.1` (scrittura atomica di
+config/settings.json) sono stati completati e verificati in questa sessione, ciascuno con un
+buco reale riprodotto empiricamente prima del fix - `F1.8.3` addirittura con due buchi ULTERIORI
+trovati durante la verifica del fix stesso, e `F1.4.1` lo stesso identico buco di `F1.7.1` ma con
+un impatto piu' grave (perdita di OGNI valore, non solo l'ultimo) perche' config/settings.json non
+e' append-only (vedi le rispettive voci in sezione F1.8/F1.4). `master` e' pulito, 2.147/2.147
+test, ruff/mypy/compileall verdi. `G1` resta aperto.
 
 L'utente aveva chiesto di fermarsi dopo la sessione precedente, poi ha esplicitamente chiesto di
 controllare le cose non committate e continuare da li' - il lavoro prosegue. Restano fuori
@@ -2345,8 +2374,8 @@ buchi in questa roadmap sono stati trovati SOLO eseguendo davvero il codice), ri
 quando possibile (riprodurre il buco con il codice vecchio prima di dichiararlo risolto),
 aggiornamento di questo file, e commit/PR separati invece di un unico commit enorme.
 Candidati piccoli ancora aperti in F1: il resto di `F1.2.1` (percorso 7,
-`SkillRegistry.execute()`), `F1.2.2`-`F1.2.3` (capability/intersezione permessi), `F1.4.1`-`F1.4.7`
-(consolidamento SecretsVault, oltre a quanto gia' in `core/secrets_vault.py`), il resto di `F1.7`
+`SkillRegistry.execute()`), `F1.2.2`-`F1.2.3` (capability/intersezione permessi), il resto di
+`F1.4` (una vera classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7`
 (`F1.7.2` trace id condiviso con undo/notifica, `F1.7.3` retention differenziata, `F1.7.4`
 redazione strutturata per tipo di dato, `F1.7.5`/`F1.7.8` replay sicuro), il resto di `F1.8`
 (`F1.8.1` coda azioni concorrenti, `F1.8.4` drain allo shutdown, `F1.8.5` deadlock timeout,
