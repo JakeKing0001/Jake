@@ -620,6 +620,23 @@ Dipende da: F1.1 e F1.2.
 Criterio di uscita: tutte le azioni external/destructive/admin hanno prova; l'80% delle azioni
 reversibili dispone di undo testato.
 
+- Stato: `DOING`; `F1.3.3` chiuso, resto aperto (`F1.3.1`/`F1.3.2` esistono solo in forma
+  minimale/implicita in `core/execution_safety.py`, non come registry vero e proprio).
+- `F1.3.3` — 11/09/2026: `ActionReceipt.verified` era `Optional[bool] = None`, e `to_json()`
+  omette i campi `None` - una ricevuta "mai verificata" (nessun verificatore per l'intent) finiva
+  nel ledger IDENTICA a una scritta da uno schema piu' vecchio senza questo campo affatto,
+  violando esattamente il criterio di questo passo ("mai inferire... dall'assenza"). Il campo e'
+  ora una stringa sempre presente, una delle tre costanti `VERIFICATION_VERIFIED`/
+  `VERIFICATION_UNVERIFIED`/`VERIFICATION_FAILED` (default `unverified`, mai omesso). Il nuovo
+  `verification_status_of(bool | None)` converte il tri-stato gia' calcolato da `TaskAgent`/
+  `PlanExecutor` (via `core/execution_safety.py::verify_effect`) senza cambiarne la logica;
+  `validate_action_receipt()` (F1.1.8) rifiuta ora anche un valore non riconosciuto. Ambito
+  volutamente limitato al ledger F1 (`core/action_ledger.py`): `core/logger.py::log_action` (F0,
+  log di debug rotante, sistema diverso per progetto - vedi il docstring di action_ledger.py) non
+  e' stato toccato, resta `Optional[bool]` con la propria semantica invariata; i test che lo
+  verificano (`test_non_verifiable_intent_leaves_verified_absent*`) restano corretti cosi' come
+  sono. Prova: 1.973/1.973 test, ruff/mypy/compileall verdi su tutti i file toccati.
+
 ### F1.4 — Identità, autenticazione e segreti
 
 Dipende da: F1.2.

@@ -90,6 +90,29 @@ def idempotency_key_of(intent: str, parameters: dict | None) -> str:
 # ricevute create da adesso in poi, non quelle gia' scritte prima che esistesse.
 ACTION_RECEIPT_SCHEMA_VERSION = 1
 
+# F1.3.3: tre stati espliciti, mai un quarto "non detto" - prima di questa correzione
+# ActionReceipt.verified era Optional[bool] e to_json() ometteva il campo quando None (vedi
+# sotto), cosi' una ricevuta "mai verificata" finiva nel ledger IDENTICA a una scritta da uno
+# schema piu' vecchio senza questo campo: nessun modo di distinguere "non c'e' un verificatore
+# per questo intent" da "questa versione del ledger non registrava ancora la verifica". Ora il
+# campo e' sempre una di queste tre stringhe, mai assente.
+VERIFICATION_VERIFIED = "verified"
+VERIFICATION_UNVERIFIED = "unverified"
+VERIFICATION_FAILED = "verification_failed"
+_VERIFICATION_STATUSES = (VERIFICATION_VERIFIED, VERIFICATION_UNVERIFIED, VERIFICATION_FAILED)
+
+
+def verification_status_of(verified: Optional[bool]) -> str:
+    """Converte il tri-stato bool|None gia' calcolato da TaskAgent/PlanExecutor (vedi
+    core/execution_safety.py::verify_effect) nella stringa esplicita da salvare nel ledger:
+    None (nessun verificatore indipendente per questo intent) -> "unverified", True -> "verified",
+    False (il verificatore ha girato e ha trovato l'effetto mancante) -> "verification_failed".
+    I chiamanti non cambiano la propria logica bool|None, gia' corretta: solo il valore scritto
+    nel ledger diventa esplicito invece di sparire quando None."""
+    if verified is None:
+        return VERIFICATION_UNVERIFIED
+    return VERIFICATION_VERIFIED if verified else VERIFICATION_FAILED
+
 
 @dataclass
 class ActionReceipt:
@@ -106,7 +129,11 @@ class ActionReceipt:
     # calcolano gia' sempre con idempotency_key_of(); renderla facoltativa qui nasconderebbe in
     # silenzio un futuro punto che se ne dimenticasse (vedi validate_action_receipt).
     idempotency_key: str
-    verified: Optional[bool] = None
+    # F1.3.3: default "unverified", mai None - vedi verification_status_of() e il commento sopra
+    # le tre costanti. JakeCore._log_action_outcome/_log_denied_action non passano mai questo
+    # campo (il percorso a comando singolo non verifica ancora l'effetto): il default lo rende
+    # comunque esplicito nel ledger invece di ometterlo.
+    verified: str = VERIFICATION_UNVERIFIED
     duration_ms: Optional[float] = None
     model: Optional[str] = None
     schema_version: int = ACTION_RECEIPT_SCHEMA_VERSION
@@ -134,6 +161,11 @@ def validate_action_receipt(receipt: ActionReceipt) -> None:
             raise ValueError(f"ActionReceipt.{field} e' obbligatorio e non puo' essere vuoto")
     if receipt.ts <= 0:
         raise ValueError("ActionReceipt.ts deve essere un timestamp positivo")
+    if receipt.verified not in _VERIFICATION_STATUSES:
+        raise ValueError(
+            f"ActionReceipt.verified={receipt.verified!r} non e' uno stato valido "
+            f"({', '.join(_VERIFICATION_STATUSES)})"
+        )
     if receipt.schema_version != ACTION_RECEIPT_SCHEMA_VERSION:
         raise ValueError(
             f"ActionReceipt.schema_version={receipt.schema_version!r} non supportata "
