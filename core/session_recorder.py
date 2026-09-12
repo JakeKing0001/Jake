@@ -25,13 +25,18 @@ MAX_LOG_BYTES = 2_000_000
 BACKUP_COUNT = 3
 
 
-def _redact(value):
+def redact_value(value):
+    """Sostituisce ogni stringa con un segnaposto "<str:N caratteri>" (ricorsivamente dentro
+    dict/list), abbastanza per capire la FORMA di un valore senza scriverne il contenuto vero.
+    Pubblica (non piu' `_redact`) perche' anche `tools/diagnostic_bundle.py` (F1.7.7) ha bisogno
+    della stessa identica redazione per i parametri che finiscono in un bundle diagnostico - una
+    sola funzione, non una seconda copia con una convenzione leggermente diversa."""
     if isinstance(value, str):
         return f"<str:{len(value)} caratteri>"
     if isinstance(value, dict):
-        return {key: _redact(item) for key, item in value.items()}
+        return {key: redact_value(item) for key, item in value.items()}
     if isinstance(value, list):
-        return [_redact(item) for item in value]
+        return [redact_value(item) for item in value]
     return value  # bool/int/float/None: raramente identificano una persona da soli
 
 
@@ -73,7 +78,7 @@ class SessionRecorder:
             "ts": time.time(),
             "trace_id": trace_id,
             "intent": intent,
-            "parameters": dict(parameters or {}) if self.verbatim else _redact(dict(parameters or {})),
+            "parameters": dict(parameters or {}) if self.verbatim else redact_value(dict(parameters or {})),
             "verbatim": self.verbatim,
             "error": error,
             "risk_decision": risk_decision,

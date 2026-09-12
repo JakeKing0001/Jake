@@ -940,7 +940,7 @@ Dipende da: F1.1 e F1.3.
 Criterio di uscita: una failure end-to-end è ricostruibile senza esporre contenuti privati.
 
 - Stato: `DOING`; `F1.7.6` chiuso parzialmente (failure taxonomy, non ancora rollback rate),
-  resto aperto.
+  `F1.7.7` chiuso; resto aperto.
 - `F1.7.6` (parziale) — 12/09/2026: `tools/dashboard.py` (F0, gia' mostrava p50/p95 per skill e
   overall e verification rate) mostra ora anche la "failure taxonomy": una nuova sezione
   "Categoria di errore" che applica la STESSA `error_category_of()` gia' introdotta per l'action
@@ -957,6 +957,27 @@ Criterio di uscita: una failure end-to-end è ricostruibile senza esporre conten
   e indipendenti da questa modifica (verificato confrontando col file prima della modifica,
   stesso numero di errori) - il file non fa parte del set coperto da "mypy selettivo" in CI,
   dichiarato qui invece di essere ignorato silenziosamente.
+- `F1.7.7` — 12/09/2026: nuovo `tools/diagnostic_bundle.py`, un bundle diagnostico in un solo
+  file JSON locale (le ultime N righe di `data/jake_actions.jsonl`, `data/jake_ledger.jsonl` e
+  `data/jake_sessions.jsonl`, piu' versione Jake/Python/piattaforma) - stesso principio "local-
+  first" della dashboard (F0): nessun invio automatico, solo un file da APRIRE E LEGGERE prima di
+  condividerlo con chiunque. Le prime due fonti non contengono mai parametri veri per costruzione
+  (`ActionReceipt`/i record di `log_action` portano intent/skill/rischio/esito/durata, non i
+  valori passati alla skill), quindi passano nel bundle senza modifiche; `jake_sessions.jsonl`
+  invece PUO' contenere parametri verbatim (`session_recording_verbatim`, una scelta locale di
+  debug - vedi `core/session_recorder.py`) - ogni record di sessione viene ora ri-redatto
+  incondizionatamente prima di finire nel bundle, indipendentemente dal flag `verbatim` gia'
+  scritto nel record originale, salvo l'opt-in esplicito `--include-verbatim-sessions`: un bundle
+  pensato per la condivisione non deve propagare una scelta di debug locale a chi lo riceve senza
+  che l'utente lo chieda esplicitamente. Riusa `core.session_recorder.redact_value()` (rinominata
+  da `_redact`, ora pubblica) invece di una seconda funzione di redazione con una convenzione
+  magari leggermente diversa - stesso principio applicato ripetutamente in questa sessione.
+  Aggiunti `tests/test_diagnostic_bundle.py` (10 test, incluso uno che dimostra la ri-redazione
+  di un record gia' marcato `verbatim: true`) e aggiornato `tests/test_session_recorder.py` per
+  il nuovo nome pubblico (comportamento invariato). Non ancora affrontato: nessuna interfaccia
+  per condividere il bundle (resta intenzionalmente cosi', vedi sopra), ne' un formato compresso
+  per bundle molto grandi. Prova: 2.075/2.075 test, ruff/mypy/compileall verdi su tutti i file
+  toccati.
 
 ### F1.8 — Concorrenza, code e arresto
 
