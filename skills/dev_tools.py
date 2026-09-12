@@ -168,7 +168,18 @@ class CheckPortInUseSkill:
 
 class KillProcessByPortSkill:
     """Termina il processo in ascolto su una porta: azione irreversibile su un processo
-    potenzialmente non identificato dall'utente per nome, quindi richiede sempre conferma."""
+    potenzialmente non identificato dall'utente per nome, quindi richiede sempre conferma.
+
+    F1.3.2 ("prove forti per... processi"): prima di questa correzione, `success=True` veniva
+    restituito subito dopo aver CHIESTO la terminazione (`psutil.Process.terminate()`), senza
+    aspettare che il processo fosse davvero morto - `terminate()` invia solo la richiesta, non
+    garantisce che sia gia' avvenuta quando la chiamata ritorna. Ora attende fino a
+    `TERMINATE_WAIT_SECONDS` che il processo esca per davvero prima di dichiarare successo;
+    se non muore in tempo, riporta onestamente un fallimento invece di affermare un effetto mai
+    confermato. `data["pid"]` (assente prima) permette a un futuro verificatore indipendente
+    (core/execution_safety.py::INTENT_SAFETY_REGISTRY) di ricontrollare lo stesso fatto."""
+
+    TERMINATE_WAIT_SECONDS = 3
 
     metadata = {
         "intent": "KILL_PROCESS_BY_PORT",
@@ -212,8 +223,17 @@ class KillProcessByPortSkill:
             )
 
         try:
-            psutil.Process(target_pid).terminate()
+            process = psutil.Process(target_pid)
+            process.terminate()
+            process.wait(timeout=self.TERMINATE_WAIT_SECONDS)
+        except psutil.NoSuchProcess:
+            pass  # gia' terminato per conto suo tra la richiesta e l'attesa: comunque un successo
+        except psutil.TimeoutExpired:
+            return SkillResult(
+                success=False, data={"port": port, "pid": target_pid, "process": process_name},
+                error="OPERATION_FAILED",
+            )
         except psutil.Error:
             return SkillResult(success=False, data={"port": port}, error="OPERATION_FAILED")
 
-        return SkillResult(success=True, data={"port": port, "process": process_name})
+        return SkillResult(success=True, data={"port": port, "pid": target_pid, "process": process_name})

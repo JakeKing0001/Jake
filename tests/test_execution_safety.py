@@ -179,7 +179,9 @@ class IntentSafetyRegistryConsistencyTests(unittest.TestCase):
 
         expected = {intent for intent, entry in INTENT_SAFETY_REGISTRY.items() if entry.verifier is not None}
         self.assertEqual(set(VERIFIABLE_INTENTS), expected)
-        self.assertEqual(VERIFIABLE_INTENTS, {"CREATE_PATH", "RENAME_PATH", "MOVE_PATH", "DELETE_PATH"})
+        self.assertEqual(
+            VERIFIABLE_INTENTS, {"CREATE_PATH", "RENAME_PATH", "MOVE_PATH", "DELETE_PATH", "KILL_PROCESS_BY_PORT"},
+        )
 
     def test_every_verifiable_intent_verifier_is_actually_callable(self):
         from core.execution_safety import INTENT_SAFETY_REGISTRY, VERIFIABLE_INTENTS
