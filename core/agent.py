@@ -454,7 +454,7 @@ class TaskAgent:
             # ramo lasciava final_answer vuoto anche quando dei passi erano gia' riusciti: chi
             # chiama (JakeCore._run_agent) degradava allora a un generico "non so fare questa
             # cosa", buttando via il lavoro reale gia' fatto. Ora si riassume comunque quello che
-            # e' successo, e gli effetti collaterali reversibili (vedi ROLLBACK_HANDLERS in
+            # e' successo, e gli effetti collaterali reversibili (vedi INTENT_SAFETY_REGISTRY in
             # core/execution_safety.py) vengono annullati invece di restare a meta', stessa
             # filosofia gia' usata da PlanExecutor per il vecchio piano fisso.
             if not outcome.final_answer:
