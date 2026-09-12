@@ -11,7 +11,9 @@ consumatore puo' dimenticare di collegare a meta' (esattamente il difetto strutt
 bug di RunWorkflowSkill). Questi test coprono la logica in isolamento; tests/test_jake_core_
 permissions.py, tests/test_plan_executor.py e tests/test_workflow_skills.py coprono che i
 consumatori reali la usino davvero."""
+import tempfile
 import unittest
+from pathlib import Path
 
 from core.auth_gate import AuthGate
 from core.policy_engine import PolicyDecision, PolicyEngine, strip_authorization_signals
@@ -269,7 +271,7 @@ class DecideWithReasonTests(unittest.TestCase):
         self.assertEqual(decision, engine.decide_interactive("DELETE_TODO", {}))
         self.assertEqual(reason, "intent_in_always_confirm_intents")
 
-    def test_every_reason_constant_is_one_of_the_four_closed_values(self):
+    def test_every_reason_constant_is_one_of_the_closed_values(self):
         """POLICY_REASONS e' un vocabolario chiuso (F1.2.6): nessuna motivazione reale puo'
         uscirne, ne' per il percorso interattivo ne' per quello automatico."""
         from core.policy_engine import POLICY_REASONS
@@ -286,6 +288,116 @@ class DecideWithReasonTests(unittest.TestCase):
                 _, automated_reason = engine.decide_automated_with_reason("X")
                 self.assertIn(interactive_reason, POLICY_REASONS)
                 self.assertIn(automated_reason, POLICY_REASONS)
+
+
+class FilesystemCapabilityTests(unittest.TestCase):
+    """F1.2.2 (primo pezzo di capability: radici filesystem consentite). Solo il percorso
+    interattivo e solo i quattro intent di mutazione (CREATE_PATH/RENAME_PATH/MOVE_PATH/
+    DELETE_PATH) rispettano allowed_filesystem_roots oggi - vedi il docstring del modulo per il
+    perche' decide_automated ne resta fuori."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.allowed_root = Path(self._tmpdir.name) / "allowed"
+        self.allowed_root.mkdir()
+        self.outside_root = Path(self._tmpdir.name) / "outside"
+        self.outside_root.mkdir()
+
+    def test_no_configured_roots_means_no_restriction_at_all(self):
+        """Comportamento invariato per chi non configura nulla (default vuoto)."""
+        engine = PolicyEngine()
+        decision = engine.decide_interactive("DELETE_PATH", {"path": str(self.outside_root / "x.txt")})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_a_path_inside_an_allowed_root_is_permitted(self):
+        engine = PolicyEngine(allowed_filesystem_roots={str(self.allowed_root)})
+        decision = engine.decide_interactive("DELETE_PATH", {"path": str(self.allowed_root / "x.txt")})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_the_root_itself_is_permitted_not_only_its_descendants(self):
+        engine = PolicyEngine(allowed_filesystem_roots={str(self.allowed_root)})
+        decision = engine.decide_interactive("DELETE_PATH", {"path": str(self.allowed_root)})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_a_path_outside_every_allowed_root_is_blocked(self):
+        engine = PolicyEngine(allowed_filesystem_roots={str(self.allowed_root)})
+        decision, reason = engine.decide_interactive_with_reason(
+            "DELETE_PATH", {"path": str(self.outside_root / "x.txt")},
+        )
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+        self.assertEqual(reason, "path_outside_allowed_filesystem_roots")
+
+    def test_a_sibling_directory_with_a_similar_prefix_is_not_confused_for_a_descendant(self):
+        """"C:\\Allowed" non deve corrispondere per errore a "C:\\AllowedButNot" solo perche'
+        condividono un prefisso di stringa - deve esserci un confine di directory vero."""
+        similarly_prefixed = Path(str(self.allowed_root) + "ButNot")
+        similarly_prefixed.mkdir()
+        engine = PolicyEngine(allowed_filesystem_roots={str(self.allowed_root)})
+        decision = engine.decide_interactive("DELETE_PATH", {"path": str(similarly_prefixed / "x.txt")})
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+
+    def test_move_path_destination_outside_an_allowed_root_is_blocked_even_if_the_source_is_inside(self):
+        """Altrimenti MOVE_PATH sarebbe un modo per far uscire un file dal recinto consentito
+        partendo da un percorso permesso."""
+        engine = PolicyEngine(allowed_filesystem_roots={str(self.allowed_root)})
+        decision = engine.decide_interactive(
+            "MOVE_PATH",
+            {"path": str(self.allowed_root / "x.txt"), "destination": str(self.outside_root)},
+        )
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+
+    def test_move_path_with_both_source_and_destination_inside_is_permitted(self):
+        engine = PolicyEngine(allowed_filesystem_roots={str(self.allowed_root)})
+        subdir = self.allowed_root / "sub"
+        subdir.mkdir()
+        decision = engine.decide_interactive(
+            "MOVE_PATH", {"path": str(self.allowed_root / "x.txt"), "destination": str(subdir)},
+        )
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_a_dot_dot_traversal_attempt_out_of_an_allowed_root_is_blocked(self):
+        engine = PolicyEngine(allowed_filesystem_roots={str(self.allowed_root)})
+        traversal = str(self.allowed_root / ".." / "outside" / "x.txt")
+        decision = engine.decide_interactive("DELETE_PATH", {"path": traversal})
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+
+    def test_read_only_path_intents_are_not_covered_yet(self):
+        """Dichiarato apertamente nel modulo: solo le quattro mutazioni sono coperte oggi, non
+        FIND_FILE/GET_FILE_INFO/READ_FILE_TEXT."""
+        engine = PolicyEngine(allowed_filesystem_roots={str(self.allowed_root)})
+        decision = engine.decide_interactive("FIND_FILE", {"path": str(self.outside_root)})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_capability_denial_is_checked_before_confirmation_would_otherwise_apply(self):
+        """Un DELETE_PATH gia' 'confirmed' non deve bypassare la capability - il controllo di
+        percorso viene prima, non dopo, del gate di conferma."""
+        engine = PolicyEngine(allowed_filesystem_roots={str(self.allowed_root)})
+        decision = engine.decide_interactive(
+            "DELETE_PATH", {"path": str(self.outside_root / "x.txt"), "confirmed": True},
+        )
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+
+    def test_a_blocked_intent_still_wins_over_the_capability_check(self):
+        engine = PolicyEngine(blocked_intents={"DELETE_PATH"}, allowed_filesystem_roots={str(self.allowed_root)})
+        decision, reason = engine.decide_interactive_with_reason(
+            "DELETE_PATH", {"path": str(self.allowed_root / "x.txt")},
+        )
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+        self.assertEqual(reason, "intent_in_blocked_intents")
+
+    def test_decide_automated_does_not_yet_enforce_filesystem_roots(self):
+        """Dichiarato apertamente: decide_automated() non riceve parametri, quindi non puo'
+        ancora applicare questa capability - vedi il docstring del modulo."""
+        engine = PolicyEngine(allowed_filesystem_roots={str(self.allowed_root)})
+        decision = engine.decide_automated("DELETE_PATH")
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_explain_reports_the_capability_denial_for_the_interactive_verdict(self):
+        engine = PolicyEngine(allowed_filesystem_roots={str(self.allowed_root)})
+        result = engine.explain("DELETE_PATH", {"path": str(self.outside_root / "x.txt")})
+        self.assertEqual(result["interactive"]["decision"], "block")
+        self.assertEqual(result["interactive"]["reason"], "path_outside_allowed_filesystem_roots")
 
 
 if __name__ == "__main__":
