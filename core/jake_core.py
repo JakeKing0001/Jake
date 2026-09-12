@@ -12,6 +12,7 @@ from core.companion_server import CompanionServer
 from core.context_summarizer import ContextSummarizer
 from core.desktop_context import DesktopContextTracker
 from core.event_bus import EventBus
+from core.execution_safety import ActionExecution
 from core.hud_protocol import EventType, HudEvent
 from core.kill_switch import KillSwitch
 from core.learning_manager import LearningManager
@@ -25,7 +26,7 @@ from core.notification_center import NotificationCenter
 from core.ollama_client import OllamaClient
 from core import orchestrator
 from core.orchestrator import JakeOrchestrator
-from core.policy_engine import PolicyDecision, PolicyEngine, strip_authorization_signals
+from core.policy_engine import POLICY_REASONS, PolicyDecision, PolicyEngine, strip_authorization_signals
 from core.plugin_loader import load_plugins
 from core.response_formatter import format_plan_outcome, format_skill_result
 from core.risk import risk_of
@@ -150,7 +151,7 @@ class JakeCore:
             format_result=lambda intent, result: format_skill_result(intent, result, self.skill_registry),
             logger=self.logger,
             context_provider=lambda: self._agent_context(),
-            executor=lambda intent, parameters: self._resolve_and_execute(Command(intent, parameters))[1],
+            executor=lambda intent, parameters: self._resolve_and_execute(Command(intent, parameters)),
             session_recorder=self.session_recorder, action_ledger=self.action_ledger, agent_name="general",
             kill_switch=self.kill_switch,
         )
@@ -165,7 +166,7 @@ class JakeCore:
             "format_result": lambda intent, result: format_skill_result(intent, result, self.skill_registry),
             "logger": self.logger,
             "context_provider": lambda: self._agent_context(),
-            "executor": lambda intent, parameters: self._resolve_and_execute(Command(intent, parameters))[1],
+            "executor": lambda intent, parameters: self._resolve_and_execute(Command(intent, parameters)),
             "session_recorder": self.session_recorder, "action_ledger": self.action_ledger,
             "kill_switch": self.kill_switch,
         }
@@ -552,7 +553,7 @@ class JakeCore:
     def _resolve_pronouns(self, text: str) -> str:
         return intent_patterns.resolve_pronouns(text, self.conversation_state.get_entities())
 
-    def _authorize_command(self, resolved: Command) -> tuple[Command, SkillResult | None]:
+    def _authorize_command(self, resolved: Command) -> tuple[Command, SkillResult | None, str]:
         """Gate condiviso da comando diretto, agente e ripresa dopo il consenso (F1.2.5).
 
         Non riscrive l'intent e non esegue skill: restituisce un comando autorizzato oppure
@@ -566,9 +567,9 @@ class JakeCore:
         # eseguito piu' sotto: il proposal descrive l'intenzione, non sostituisce l'esecuzione.
         proposal = ActionProposal.for_intent(resolved.intent, resolved.parameters, "user")
         validate_action_proposal(proposal)
-        decision = self.policy_engine.decide_interactive(proposal.intent, proposal.parameters)
+        decision, policy_reason = self.policy_engine.decide_interactive_with_reason(proposal.intent, proposal.parameters)
         if decision == PolicyDecision.BLOCK:
-            return resolved, SkillResult(success=False, data={}, error="POLICY_BLOCKED")
+            return resolved, SkillResult(success=False, data={}, error="POLICY_BLOCKED"), policy_reason
         if decision == PolicyDecision.REQUIRE_AUTH:
             # F1: Windows Hello tentato PRIMA della passphrase quando e' attivo - un fattore che
             # non passa dalla voce (vedi core/auth_gate.py) e non richiede un secondo turno di
@@ -597,7 +598,7 @@ class JakeCore:
                     "confirm_intent": resolved.intent,
                 },
                 error="AUTH_REQUIRED",
-            )
+            ), policy_reason
         if decision == PolicyDecision.CONFIRM:
             return resolved, SkillResult(
                 success=False,
@@ -607,19 +608,20 @@ class JakeCore:
                     "confirm_intent": resolved.intent,
                 },
                 error="CONFIRMATION_REQUIRED",
-            )
-        return resolved, None
+            ), policy_reason
+        return resolved, None, policy_reason
 
-    def _resolve_and_execute(self, command: Command) -> tuple[Command, SkillResult | None, str | None]:
+    def _resolve_and_execute(self, command: Command) -> ActionExecution:
         """Riscrive, autorizza ed esegue per comando diretto e agente.
 
-        Restituisce (comando eseguito, risultato, nota). I fallback hanno un gate proprio;
+        Restituisce comando eseguito, risultato, nota e motivazione per-azione, non stato globale.
+        I fallback hanno un gate proprio;
         la ripresa di un consenso usa invece _authorize_command senza cambiare il bersaglio.
         """
         resolved = fallbacks.pre_execution_rewrite(command, self.skill_registry)
-        resolved, policy_result = self._authorize_command(resolved)
+        resolved, policy_result, policy_reason = self._authorize_command(resolved)
         if policy_result is not None:
-            return resolved, policy_result, None
+            return ActionExecution(resolved, policy_result, policy_reason=policy_reason)
         result = self.skill_registry.execute(resolved.intent, resolved.parameters)
         if result is not None and not result.success and result.error != "CONFIRMATION_REQUIRED":
             alt_command, note = fallbacks.alternative_for(resolved, result, self.skill_registry)
@@ -632,11 +634,11 @@ class JakeCore:
                 # senza conferma. Un'alternativa che la policy fermerebbe viene semplicemente
                 # scartata (si ripiega sul fallimento originale) invece di aprire una SECONDA
                 # richiesta di conferma per qualcosa che l'utente non ha chiesto direttamente.
-                alt_decision = self.policy_engine.decide_interactive(alt_command.intent, alt_command.parameters)
+                alt_decision, alt_reason = self.policy_engine.decide_interactive_with_reason(alt_command.intent, alt_command.parameters)
                 if alt_decision == PolicyDecision.ALLOW:
                     alt_result = self.skill_registry.execute(alt_command.intent, alt_command.parameters)
                     if alt_result is not None and alt_result.success:
-                        return alt_command, alt_result, note
+                        return ActionExecution(alt_command, alt_result, note, alt_reason)
             else:
                 offer = fallbacks.offer_after_failure(resolved, result)
                 if offer is not None:
@@ -648,7 +650,7 @@ class JakeCore:
                         },
                         error="CONFIRMATION_REQUIRED",
                     )
-        return resolved, result, None
+        return ActionExecution(resolved, result, policy_reason=policy_reason)
 
     def _run_agent(self, request: str, remember_text: str | None = None) -> str:
         """Richiesta composta o non riconosciuta: l'orchestratore (v5.0, core/orchestrator.py)
@@ -657,10 +659,11 @@ class JakeCore:
         di eseguire un piano fisso scritto in anticipo. Se il modello non e' raggiungibile o non
         conclude nulla, ripiega sul vecchio planner a piano fisso; se fallisce anche quello, NO_PLAN."""
         remember_text = remember_text if remember_text is not None else request
+        trace_id = new_trace_id()
         try:
             outcome = self.orchestrator.run(
                 request, history=self.conversation_state.get_short_term_history(),
-                trace_id=new_trace_id(), private=self.private_mode,
+                trace_id=trace_id, private=self.private_mode,
             )
         except Exception:
             self.logger.exception("Errore nell'agente per: %s", request)
@@ -680,7 +683,8 @@ class JakeCore:
                 # dell'esecuzione vera, dopo la conferma, correlata alla stessa richiesta invece
                 # di un trace_id scollegato - vedi TaskAgent._log_step per il trace_id dei passi
                 # dell'agente che hanno gia' portato a questa richiesta di conferma.
-                "trace_id": new_trace_id(),
+                "trace_id": trace_id,
+                "policy_reason": outcome.pending_confirmation.get("policy_reason"),
             })
             message = outcome.pending_confirmation["message"]
             self._remember_exchange(remember_text, Command("AGENT", {"request": request}), message)
@@ -715,9 +719,12 @@ class JakeCore:
         intent = command.intent
         trace_id = new_trace_id()
         started = time.monotonic()
-        if intent in self.policy_engine.blocked_intents:
+        decision, policy_reason = self.policy_engine.decide_interactive_with_reason(intent, command.parameters)
+        if decision == PolicyDecision.BLOCK:
             self.logger.warning("Azione bloccata da policy: %s", intent)
-            self._log_action_outcome(trace_id, started, intent, command.parameters, result="blocked_by_policy")
+            self._log_action_outcome(
+                trace_id, started, intent, command.parameters, result="blocked_by_policy", policy_reason=policy_reason,
+            )
             return f"L'azione {intent} è disabilitata nella configurazione."
 
         skill = self.skill_registry.get_skill(intent)
@@ -725,7 +732,8 @@ class JakeCore:
             self._log_action_outcome(trace_id, started, intent, command.parameters, result="skill_not_found")
             return f"Skill non trovata per {intent}"
 
-        resolved, result, note = self._resolve_and_execute(command)
+        execution = self._resolve_and_execute(command)
+        resolved, result, note = execution.command, execution.result, execution.note
         if result is not None and result.error in ("CONFIRMATION_REQUIRED", "AUTH_REQUIRED"):
             reason = "auth_required" if result.error == "AUTH_REQUIRED" else "confirmation_required"
             # F1: buco reale trovato e corretto in questa sessione - chiamava _safe_confirm_envelope
@@ -743,9 +751,12 @@ class JakeCore:
                 "reason": reason,
                 "text": text,
                 "trace_id": trace_id,  # F1: la ricevuta della conferma si correla a questa
+                "policy_reason": execution.policy_reason if envelope.get("confirm_intent", resolved.intent) == resolved.intent else None,
             })
             self._remember_exchange(text, resolved, envelope.get("message", ""))
-            self._log_action_outcome(trace_id, started, resolved.intent, resolved.parameters, result=reason)
+            self._log_action_outcome(
+                trace_id, started, resolved.intent, resolved.parameters, result=reason, policy_reason=execution.policy_reason,
+            )
             return envelope.get("message", "Confermi questa azione?")
 
         response = format_skill_result(resolved.intent, result, self.skill_registry)
@@ -757,7 +768,9 @@ class JakeCore:
             self.learning.observe(text, resolved, result, route=self.router.last_route)
         self._remember_exchange(text, resolved, response)
         outcome = "success" if (result is not None and result.success) else f"error:{result.error}" if result is not None else "no_result"
-        self._log_action_outcome(trace_id, started, resolved.intent, resolved.parameters, result=outcome)
+        self._log_action_outcome(
+            trace_id, started, resolved.intent, resolved.parameters, result=outcome, policy_reason=execution.policy_reason,
+        )
         return response
 
     # Un esito che non e' un vero fallimento da poter far ripartire (una conferma in attesa non
@@ -787,7 +800,10 @@ class JakeCore:
             "message": f"Confermi: {self.describe_command(Command(intent, parameters))}?",
         }
 
-    def _log_action_outcome(self, trace_id: str, started: float, intent: str, parameters: dict | None, *, result: str) -> None:
+    def _log_action_outcome(
+        self, trace_id: str, started: float, intent: str, parameters: dict | None, *, result: str,
+        policy_reason: str | None = None,
+    ) -> None:
         """Punto unico da cui _execute_command scrive in jake_actions.jsonl (F0: log strutturati
         con trace_id, durata, modello, skill, decisione di rischio, risultato). verified resta
         assente (vedi log_action): questo percorso a comando singolo non verifica ancora
@@ -820,7 +836,7 @@ class JakeCore:
                 action_id=new_action_id(), trace_id=trace_id, ts=time.time(), intent=intent,
                 requested_by="user", risk_decision=risk, authorization=authorization_of(result, parameters),
                 result=result, idempotency_key=idempotency_key_of(intent, parameters),
-                error_category=action_error.category, duration_ms=duration_ms, model=self.model,
+                error_category=action_error.category, policy_reason=policy_reason, duration_ms=duration_ms, model=self.model,
             ),
             private=self.private_mode,
         )
@@ -903,6 +919,9 @@ class JakeCore:
         trace_id = action.get("trace_id") or new_trace_id()
         intent = action["intent"]
         parameters = action["parameters"]
+        policy_reason = action.get("policy_reason")
+        if not isinstance(policy_reason, str) or policy_reason not in POLICY_REASONS:
+            policy_reason = None  # vecchi pending o metadati malformati: non inventare/esporre valori
         # F1.1.6: stesso principio di _log_action_outcome sopra - ActionError.from_result() al
         # posto della chiamata diretta a error_category_of().
         action_error = ActionError.from_result(result)
@@ -913,7 +932,7 @@ class JakeCore:
                 requested_by="user", risk_decision=risk_of(intent).value,
                 authorization=authorization_of(result, parameters), result=result,
                 idempotency_key=idempotency_key_of(intent, parameters),
-                error_category=action_error.category,
+                error_category=action_error.category, policy_reason=policy_reason,
             ),
             private=self.private_mode,
         )
@@ -937,7 +956,7 @@ class JakeCore:
         parameters = {**strip_authorization_signals(action["parameters"]), "confirmed": True}
         if action.get("reason") == "auth_required":
             parameters.update(authenticated=True, authenticated_via="passphrase")
-        command, result = self._authorize_command(Command(action["intent"], parameters))
+        command, result, policy_reason = self._authorize_command(Command(action["intent"], parameters))
         if result is None:
             result = self.skill_registry.execute(command.intent, command.parameters)
         # Una conferma puo' chiederne un'altra (CREATE_SKILL: "provo a imparare?" -> codice
@@ -951,11 +970,16 @@ class JakeCore:
                 "reason": reason,
                 "text": action.get("text", ""),
                 "trace_id": trace_id,
+                "policy_reason": policy_reason if envelope.get("confirm_intent", command.intent) == command.intent else None,
             })
-            self._log_action_outcome(trace_id, started, command.intent, command.parameters, result=reason)
+            self._log_action_outcome(
+                trace_id, started, command.intent, command.parameters, result=reason, policy_reason=policy_reason,
+            )
             return envelope.get("message", "Confermi questa azione?")
         outcome = "success" if (result is not None and result.success) else f"error:{result.error}" if result is not None else "no_result"
-        self._log_action_outcome(trace_id, started, command.intent, command.parameters, result=outcome)
+        self._log_action_outcome(
+            trace_id, started, command.intent, command.parameters, result=outcome, policy_reason=policy_reason,
+        )
         response = format_skill_result(command.intent, result, self.skill_registry)
         if result is not None and result.success:
             self.conversation_state.remember_entities(command.intent, command.parameters, result.data or {})

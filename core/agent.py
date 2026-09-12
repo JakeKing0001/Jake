@@ -17,7 +17,7 @@ from core.action_ledger import (
     ActionLedger, ActionReceipt, authorization_of, error_category_of, idempotency_key_of,
     new_action_id, verification_status_of,
 )
-from core.execution_safety import VERIFIABLE_INTENTS, execute_with_retry, rollback_effect, verify_effect
+from core.execution_safety import VERIFIABLE_INTENTS, execute_action_with_retry, rollback_effect, verify_effect
 from core.kill_switch import KillSwitch
 from core.logger import log_action, new_trace_id
 from core.ollama_client import OllamaClient, OllamaError
@@ -62,6 +62,7 @@ class AgentStep:
     result: SkillResult | None = None
     observation: str = ""
     attempts: int = 1  # >1 se e' scattato un retry automatico su un errore transitorio (v3.3)
+    policy_reason: str | None = None
 
 
 @dataclass
@@ -239,7 +240,7 @@ class TaskAgent:
 
     def _log_step(
         self, trace_id: str, private: bool, started: float, model: str, intent: str, parameters: dict,
-        *, result: str, verified: bool | None,
+        *, result: str, verified: bool | None, policy_reason: str | None = None,
     ) -> None:
         """Un record in jake_actions.jsonl per passo dell'agente (F0: log strutturati), stesso
         formato e stesso trace_id condiviso con JakeCore._execute_command per il percorso a
@@ -262,7 +263,7 @@ class TaskAgent:
                 authorization=authorization_of(result, parameters), result=result,
                 idempotency_key=idempotency_key_of(intent, parameters),
                 verified=verification_status_of(verified), error_category=error_category_of(result),
-                duration_ms=duration_ms, model=model,
+                policy_reason=policy_reason, duration_ms=duration_ms, model=model,
             ),
             private=private,
         )
@@ -384,7 +385,9 @@ class TaskAgent:
                         self.on_step(step_index, thought or valid[intent].get("description", intent).split(".")[0])
                     except Exception:
                         pass
-                result, attempts = execute_with_retry(self.executor, intent, parameters)
+                execution, attempts = execute_action_with_retry(self.executor, intent, parameters)
+                intent, parameters = execution.command.intent, execution.command.parameters or {}
+                result = execution.result
                 verified = None
                 if result is not None and result.success:
                     effect_confirmed = verify_effect(intent, result.data or {})
@@ -401,7 +404,10 @@ class TaskAgent:
                         # l'effetto: meglio trattarlo come fallito che riportare all'utente qualcosa
                         # che in realta' non e' successo.
                         result = SkillResult(success=False, data=result.data, error="VERIFICATION_FAILED")
-                step = AgentStep(intent=intent, parameters=parameters, thought=thought, result=result, attempts=attempts)
+                step = AgentStep(
+                    intent=intent, parameters=parameters, thought=thought, result=result, attempts=attempts,
+                    policy_reason=execution.policy_reason,
+                )
                 if result is not None and result.error in ("CONFIRMATION_REQUIRED", "AUTH_REQUIRED"):
                     outcome.steps.append(step)
                     # F1: valida la busta prima di fidarsene (core/schema_validation.py) - una
@@ -420,19 +426,28 @@ class TaskAgent:
                     else:
                         envelope = result.data
                     outcome.pending_confirmation = {
-                        "intent": intent,
+                        "intent": envelope.get("confirm_intent", intent),
                         "parameters": envelope.get("confirm_parameters", parameters),
                         "message": envelope.get("message", "Confermi questa azione?"),
                         # v5.4/5.5: distingue una conferma si'/no da un'autenticazione vera,
                         # cosi' JakeCore._run_agent puo' passare il tipo giusto di attesa
                         # (vedi conversation_state pending_action.reason).
                         "kind": result.error,
+                        "policy_reason": execution.policy_reason if envelope.get("confirm_intent", intent) == intent else None,
                     }
-                    self._log_step(trace_id, private, step_started, model, intent, parameters, result=result.error.lower(), verified=verified)
+                    self._log_step(
+                        trace_id, private, step_started, model, intent, parameters, result=result.error.lower(),
+                        verified=verified, policy_reason=execution.policy_reason,
+                    )
                     return outcome
                 step.observation = self._observe(intent, result)
+                if execution.note:
+                    step.observation = f"{execution.note} {step.observation}"
                 outcome_label = "success" if (result is not None and result.success) else f"error:{result.error}" if result is not None else "no_result"
-                self._log_step(trace_id, private, step_started, model, intent, parameters, result=outcome_label, verified=verified)
+                self._log_step(
+                    trace_id, private, step_started, model, intent, parameters, result=outcome_label,
+                    verified=verified, policy_reason=execution.policy_reason,
+                )
             outcome.steps.append(step)
             if self.logger:
                 self.logger.info("Agente passo %d: %s %s -> %s", step_index, intent, parameters, step.observation[:160])

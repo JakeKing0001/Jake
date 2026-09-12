@@ -70,7 +70,8 @@ class ResolveAndExecuteConfirmationGateTests(unittest.TestCase):
         registry = FakeRegistry({"FORGET": skill})
         core = _bare_core(registry, always_confirm_intents={"FORGET"})
 
-        resolved, result, note = core._resolve_and_execute(Command("FORGET", {"topic": "tutto"}))
+        execution = core._resolve_and_execute(Command("FORGET", {"topic": "tutto"}))
+        resolved, result, note = execution.command, execution.result, execution.note
 
         self.assertEqual(resolved.intent, "FORGET")
         self.assertEqual(result.error, "CONFIRMATION_REQUIRED")
@@ -82,7 +83,8 @@ class ResolveAndExecuteConfirmationGateTests(unittest.TestCase):
         registry = FakeRegistry({"FORGET": skill})
         core = _bare_core(registry, always_confirm_intents={"FORGET"})
 
-        _, result, _ = core._resolve_and_execute(Command("FORGET", {"topic": "tutto"}))
+        execution = core._resolve_and_execute(Command("FORGET", {"topic": "tutto"}))
+        result = execution.result
 
         self.assertIn("Confermi", result.data["message"])
         self.assertEqual(result.data["confirm_intent"], "FORGET")
@@ -93,7 +95,8 @@ class ResolveAndExecuteConfirmationGateTests(unittest.TestCase):
         registry = FakeRegistry({"FORGET": skill})
         core = _bare_core(registry, always_confirm_intents={"FORGET"})
 
-        resolved, result, _ = core._resolve_and_execute(Command("FORGET", {"topic": "tutto", "confirmed": True}))
+        execution = core._resolve_and_execute(Command("FORGET", {"topic": "tutto", "confirmed": True}))
+        resolved, result = execution.command, execution.result
 
         self.assertEqual(len(skill.calls), 1)
         self.assertTrue(result.success)
@@ -104,7 +107,8 @@ class ResolveAndExecuteConfirmationGateTests(unittest.TestCase):
         registry = FakeRegistry({"GET_TIME": skill})
         core = _bare_core(registry, always_confirm_intents={"FORGET"})
 
-        _, result, _ = core._resolve_and_execute(Command("GET_TIME", {}))
+        execution = core._resolve_and_execute(Command("GET_TIME", {}))
+        result = execution.result
 
         self.assertEqual(len(skill.calls), 1)
         self.assertTrue(result.success)
@@ -114,7 +118,8 @@ class ResolveAndExecuteConfirmationGateTests(unittest.TestCase):
         registry = FakeRegistry({"DELETE_TODO": skill})
         core = _bare_core(registry, always_confirm_intents=set())
 
-        _, result, _ = core._resolve_and_execute(Command("DELETE_TODO", {"id": 1}))
+        execution = core._resolve_and_execute(Command("DELETE_TODO", {"id": 1}))
+        result = execution.result
 
         self.assertEqual(len(skill.calls), 1)
         self.assertTrue(result.success)
@@ -133,7 +138,7 @@ class SharedGateCoversAgentAndDirectPathsTests(unittest.TestCase):
         core = _bare_core(registry, always_confirm_intents={"RESTART_EXPLORER"})
 
         # Stessa identica chiamata che TaskAgent.executor farebbe per un passo dell'agente.
-        executor = lambda intent, parameters: core._resolve_and_execute(Command(intent, parameters))[1]
+        executor = lambda intent, parameters: core._resolve_and_execute(Command(intent, parameters)).result
         result = executor("RESTART_EXPLORER", {})
 
         self.assertEqual(result.error, "CONFIRMATION_REQUIRED")
@@ -161,7 +166,8 @@ class FallbackAlternativeGateTests(unittest.TestCase):
             "core.jake_core.fallbacks.alternative_for",
             return_value=(Command("RISKY_ALT", {}), None),
         ):
-            _, result, note = core._resolve_and_execute(Command("OPEN_APP", {"app": "x"}))
+            execution = core._resolve_and_execute(Command("OPEN_APP", {"app": "x"}))
+            result = execution.result
 
         self.assertEqual(risky_alt_skill.calls, [], "l'alternativa rischiosa non deve eseguire senza conferma")
         self.assertFalse(result.success)
@@ -181,7 +187,8 @@ class FallbackAlternativeGateTests(unittest.TestCase):
             "core.jake_core.fallbacks.alternative_for",
             return_value=(Command("OPEN_URL", {"url": "https://example.com"}), None),
         ):
-            resolved, result, note = core._resolve_and_execute(Command("OPEN_APP", {"app": "example.com"}))
+            execution = core._resolve_and_execute(Command("OPEN_APP", {"app": "example.com"}))
+            resolved, result = execution.command, execution.result
 
         self.assertEqual(len(safe_alt_skill.calls), 1)
         self.assertTrue(result.success)
@@ -203,7 +210,7 @@ class BlockedIntentsGateTests(unittest.TestCase):
         registry = FakeRegistry({"CLEAR_TEMP_FILES": skill})
         core = _bare_core(registry, always_confirm_intents=set(), blocked_intents={"CLEAR_TEMP_FILES"})
 
-        executor = lambda intent, parameters: core._resolve_and_execute(Command(intent, parameters))[1]
+        executor = lambda intent, parameters: core._resolve_and_execute(Command(intent, parameters)).result
         result = executor("CLEAR_TEMP_FILES", {})
 
         self.assertEqual(result.error, "POLICY_BLOCKED")
@@ -216,7 +223,8 @@ class BlockedIntentsGateTests(unittest.TestCase):
         registry = FakeRegistry({"CLEAR_TEMP_FILES": skill})
         core = _bare_core(registry, always_confirm_intents=set(), blocked_intents={"CLEAR_TEMP_FILES"})
 
-        _, result, _ = core._resolve_and_execute(Command("CLEAR_TEMP_FILES", {"confirmed": True}))
+        execution = core._resolve_and_execute(Command("CLEAR_TEMP_FILES", {"confirmed": True}))
+        result = execution.result
 
         self.assertEqual(result.error, "POLICY_BLOCKED")
         self.assertEqual(skill.calls, [])
@@ -226,7 +234,8 @@ class BlockedIntentsGateTests(unittest.TestCase):
         registry = FakeRegistry({"GET_TIME": skill})
         core = _bare_core(registry, always_confirm_intents=set(), blocked_intents={"CLEAR_TEMP_FILES"})
 
-        _, result, _ = core._resolve_and_execute(Command("GET_TIME", {}))
+        execution = core._resolve_and_execute(Command("GET_TIME", {}))
+        result = execution.result
 
         self.assertTrue(result.success)
         self.assertEqual(len(skill.calls), 1)
@@ -245,7 +254,8 @@ class RequireAuthGateTests(unittest.TestCase):
             require_auth_intents={"SET_POWER_PLAN"},
         )
 
-        resolved, result, note = core._resolve_and_execute(Command("SET_POWER_PLAN", {"plan": "balanced"}))
+        execution = core._resolve_and_execute(Command("SET_POWER_PLAN", {"plan": "balanced"}))
+        result = execution.result
 
         self.assertEqual(result.error, "AUTH_REQUIRED")
         self.assertEqual(skill.calls, [], "la skill non deve eseguire finche' non e' autenticata")
@@ -262,7 +272,8 @@ class RequireAuthGateTests(unittest.TestCase):
         registry = FakeRegistry({"SET_POWER_PLAN": skill})
         core = _bare_core(registry, always_confirm_intents=set(), require_auth_intents={"SET_POWER_PLAN"})
 
-        _, result, _ = core._resolve_and_execute(Command("SET_POWER_PLAN", {"plan": "balanced"}))
+        execution = core._resolve_and_execute(Command("SET_POWER_PLAN", {"plan": "balanced"}))
+        result = execution.result
 
         self.assertEqual(len(skill.calls), 1)
         self.assertTrue(result.success)
@@ -275,7 +286,8 @@ class RequireAuthGateTests(unittest.TestCase):
             require_auth_intents={"SET_POWER_PLAN"},
         )
 
-        _, result, _ = core._resolve_and_execute(Command("SET_POWER_PLAN", {"plan": "balanced", "authenticated": True}))
+        execution = core._resolve_and_execute(Command("SET_POWER_PLAN", {"plan": "balanced", "authenticated": True}))
+        result = execution.result
 
         self.assertEqual(len(skill.calls), 1)
         self.assertTrue(result.success)
@@ -290,7 +302,8 @@ class RequireAuthGateTests(unittest.TestCase):
             require_auth_intents={"SET_POWER_PLAN"},
         )
 
-        _, result, _ = core._resolve_and_execute(Command("SET_POWER_PLAN", {"plan": "balanced"}))
+        execution = core._resolve_and_execute(Command("SET_POWER_PLAN", {"plan": "balanced"}))
+        result = execution.result
 
         self.assertEqual(result.error, "AUTH_REQUIRED")
 
@@ -311,7 +324,8 @@ class WindowsHelloAuthTests(unittest.TestCase):
             require_auth_intents={"SET_POWER_PLAN"},
         )
 
-        resolved, result, _ = core._resolve_and_execute(Command("SET_POWER_PLAN", {"plan": "balanced"}))
+        execution = core._resolve_and_execute(Command("SET_POWER_PLAN", {"plan": "balanced"}))
+        resolved, result = execution.command, execution.result
 
         self.assertEqual(len(skill.calls), 1)
         self.assertTrue(result.success)
@@ -330,7 +344,8 @@ class WindowsHelloAuthTests(unittest.TestCase):
             require_auth_intents={"SET_POWER_PLAN"},
         )
 
-        _, result, _ = core._resolve_and_execute(Command("SET_POWER_PLAN", {"plan": "balanced"}))
+        execution = core._resolve_and_execute(Command("SET_POWER_PLAN", {"plan": "balanced"}))
+        result = execution.result
 
         self.assertEqual(result.error, "AUTH_REQUIRED")
         self.assertEqual(skill.calls, [], "la skill non deve eseguire finche' non e' autenticata")
@@ -349,7 +364,8 @@ class WindowsHelloAuthTests(unittest.TestCase):
             require_auth_intents={"SET_POWER_PLAN"},
         )
 
-        _, result, _ = core._resolve_and_execute(Command("SET_POWER_PLAN", {"plan": "balanced"}))
+        execution = core._resolve_and_execute(Command("SET_POWER_PLAN", {"plan": "balanced"}))
+        result = execution.result
 
         self.assertEqual(calls, [])
         self.assertEqual(result.error, "AUTH_REQUIRED")
@@ -366,7 +382,8 @@ class WindowsHelloAuthTests(unittest.TestCase):
             return True
 
         core.auth_gate._windows_hello_verify = verify_and_revoke
-        _, result, _ = core._resolve_and_execute(Command("SET_POWER_PLAN", {"plan": "balanced"}))
+        execution = core._resolve_and_execute(Command("SET_POWER_PLAN", {"plan": "balanced"}))
+        result = execution.result
 
         self.assertEqual(skill.calls, [])
         self.assertEqual(result.error, "POLICY_BLOCKED")
@@ -722,7 +739,8 @@ class OnSkillInstalledGateWiringTests(unittest.TestCase):
         core = self._core(registry)
         core._on_skill_installed(FakeDraft("SOME_BRAND_NEW_FORGED_SKILL"))
 
-        _, result, _ = core._resolve_and_execute(Command("SOME_BRAND_NEW_FORGED_SKILL", {}))
+        execution = core._resolve_and_execute(Command("SOME_BRAND_NEW_FORGED_SKILL", {}))
+        result = execution.result
 
         self.assertEqual(skill.calls, [], "la skill forgiata non deve eseguire prima di conferma/auth")
         self.assertIsNotNone(result)
