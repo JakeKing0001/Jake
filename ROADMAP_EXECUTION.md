@@ -1072,8 +1072,39 @@ Dipende da: F1.1 e F1.3.
 
 Criterio di uscita: una failure end-to-end è ricostruibile senza esporre contenuti privati.
 
-- Stato: `DOING`; `F1.7.1` chiuso; `F1.7.6` chiuso parzialmente (failure taxonomy, non ancora
-  rollback rate), `F1.7.7` chiuso; resto aperto.
+- Stato: `DOING`; `F1.7.1` chiuso; `F1.7.5` chiuso; `F1.7.6` chiuso parzialmente (failure
+  taxonomy, non ancora rollback rate), `F1.7.7` chiuso; resto aperto.
+- `F1.7.5` — 12/09/2026: "rendere replay sicuro: dry-run predefinito, scope temporaneo e conferma
+  per effetti". Buco reale, riprodotto prima del fix - **un bypass completo dell'intera
+  architettura di autorizzazione costruita in questa sessione, in uno strumento di debug**.
+  `tools/replay_session.py::replay_one()` rieseguiva un fallimento verbatim chiamando
+  `SkillRegistry.execute()` DIRETTAMENTE - lo stesso "percorso 7" (dispatcher grezzo) gia'
+  documentato come privo di controllo di policy proprio (`docs/action-execution-paths.md`,
+  `F1.2.1`). Un record verbatim salva i parametri ESATTI passati all'epoca, inclusi eventuali
+  `"confirmed": true`/`"authenticated": true` - del tutto plausibile per un'azione CONFERMATA che
+  e' comunque fallita dopo (permesso negato, disco pieno, file bloccato...) e finisce comunque
+  registrata come fallimento. Riprodotto per davvero, non ipotizzato: un record
+  `{"intent": "DELETE_PATH", "parameters": {"path": "<file vero>", "confirmed": true}}` rilanciato
+  con `replay_one()` sulla vecchia implementazione ha CANCELLATO DAVVERO il file sul disco, senza
+  alcuna richiesta di conferma - un utente che esegue `--replay` per verificare un fix su un
+  fallimento storico poteva ririeseguire inconsapevolmente un'azione distruttiva gia' "autorizzata"
+  nel passato. Corretto su due livelli indipendenti, entrambi necessari (dimostrato dai test): (1)
+  `strip_authorization_signals()` (lo stesso di `PlanExecutor`, F1.2) toglie `confirmed`/
+  `authenticated` dai parametri prima di eseguire - un record non puo' auto-autorizzarsi piu' di
+  quanto potrebbe un piano automatico, e per gli intent "self-confirming" (`DELETE_PATH`,
+  `RUN_COMMAND`... - vedi `core/risk.py::SELF_CONFIRMING_INTENTS`) questo da solo forza la skill a
+  richiedere una conferma che nessuno puo' dare in un replay batch, fermandola onestamente; (2)
+  `PolicyEngine.decide_automated(intent)` (nessun utente presente per confermare durante un replay
+  batch, esattamente come per `PlanExecutor`) blocca comunque gli intent DESTRUCTIVE/ADMIN
+  centralmente gestiti (non self-confirming, es. `DELETE_TODO`/`FORGET`) PRIMA di toccare
+  `SkillRegistry.execute()`, restituendo un messaggio onesto invece di un silenzio. Un intent
+  `READ_ONLY` (es. `GET_TIME`) resta rieseguibile per davvero, altrimenti lo strumento
+  perderebbe il suo scopo. `policy_engine`/`registry` sono ora iniettabili in `replay_one()`
+  (default `None`, costruiti da una configurazione vera se assenti) per permettere test isolati
+  senza dipendere dal vero `config/settings.json` su disco. Nessuna suite esisteva per l'intero
+  modulo: aggiunto `tests/test_replay_session.py` (14 test), incluso uno contro un FILE VERO che
+  dimostra che `DELETE_PATH` gia' "confermato" nel record non cancella piu' nulla. Prova:
+  2.161/2.161 test, ruff/compileall verdi (il file non e' nel set selettivo di mypy).
 - `F1.7.1` — 12/09/2026: "rendere ledger append-only resistente a record parziali e arresto
   improvviso". Buco reale, non solo teorico - riprodotto prima di correggerlo:
   `ActionLedger.record()` apriva sempre il file in append e scriveva la riga cosi' com'era, senza
@@ -2356,13 +2387,15 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 Aggiornato 12/09/2026. `F1.2.6` (percorso interattivo/agente, ripreso da lavoro non committato di
 una sessione precedente), `F1.7.1` (ledger resistente a record parziali/arresto improvviso),
-`F1.8.3` (kill switch propagato a RUN_COMMAND) e `F1.4.1` (scrittura atomica di
-config/settings.json) sono stati completati e verificati in questa sessione, ciascuno con un
-buco reale riprodotto empiricamente prima del fix - `F1.8.3` addirittura con due buchi ULTERIORI
-trovati durante la verifica del fix stesso, e `F1.4.1` lo stesso identico buco di `F1.7.1` ma con
-un impatto piu' grave (perdita di OGNI valore, non solo l'ultimo) perche' config/settings.json non
-e' append-only (vedi le rispettive voci in sezione F1.8/F1.4). `master` e' pulito, 2.147/2.147
-test, ruff/mypy/compileall verdi. `G1` resta aperto.
+`F1.8.3` (kill switch propagato a RUN_COMMAND), `F1.4.1` (scrittura atomica di
+config/settings.json) e `F1.7.5` (replay sicuro) sono stati completati e verificati in questa
+sessione, ciascuno con un buco reale riprodotto empiricamente prima del fix - `F1.8.3`
+addirittura con due buchi ULTERIORI trovati durante la verifica del fix stesso, `F1.4.1` lo stesso
+identico buco di `F1.7.1` ma con un impatto piu' grave, e `F1.7.5` un bypass completo
+dell'autorizzazione (un `DELETE_PATH` gia' "confermato" nel record veniva rieseguito da
+`tools/replay_session.py --replay` cancellando un file vero, senza alcun controllo) - vedi le
+rispettive voci in sezione F1.8/F1.4/F1.7. `master` e' pulito, 2.161/2.161 test,
+ruff/mypy/compileall verdi. `G1` resta aperto.
 
 L'utente aveva chiesto di fermarsi dopo la sessione precedente, poi ha esplicitamente chiesto di
 controllare le cose non committate e continuare da li' - il lavoro prosegue. Restano fuori
@@ -2377,6 +2410,7 @@ Candidati piccoli ancora aperti in F1: il resto di `F1.2.1` (percorso 7,
 `SkillRegistry.execute()`), `F1.2.2`-`F1.2.3` (capability/intersezione permessi), il resto di
 `F1.4` (una vera classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7`
 (`F1.7.2` trace id condiviso con undo/notifica, `F1.7.3` retention differenziata, `F1.7.4`
-redazione strutturata per tipo di dato, `F1.7.5`/`F1.7.8` replay sicuro), il resto di `F1.8`
-(`F1.8.1` coda azioni concorrenti, `F1.8.4` drain allo shutdown, `F1.8.5` deadlock timeout,
-`F1.8.6` client lenti sull'event bus, `F1.8.7` test di race su trigger/handoff/conferma/undo).
+redazione strutturata per tipo di dato, `F1.7.8` modalita' privata end-to-end su ogni nuovo
+record), il resto di `F1.8` (`F1.8.1` coda azioni concorrenti, `F1.8.4` drain allo shutdown,
+`F1.8.5` deadlock timeout, `F1.8.6` client lenti sull'event bus, `F1.8.7` test di race su
+trigger/handoff/conferma/undo).
