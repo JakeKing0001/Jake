@@ -6,6 +6,8 @@ costruisce anche MemoryManager/NestClient/EmbeddingProvider/VisionProvider/Plann
 la nota in tests/__init__.py): usa SkillRegistry.__new__ per un oggetto "spoglio" con solo gli
 attributi che register_skill() legge (skills, logger), stesso approccio gia' usato per JakeCore
 in tests/test_jake_core_permissions.py."""
+import sys
+import threading
 import unittest
 
 from core.skill_registry import SkillRegistry
@@ -70,6 +72,47 @@ class RegisterSkillCollisionTests(unittest.TestCase):
         registry.register_skill("SOME_INTENT", skill)
 
         self.assertEqual(registry.logger.warnings, [])
+
+
+class ConcurrentListCapabilitiesTests(unittest.TestCase):
+    """F1.8.2 (stesso principio gia' applicato altrove in questa sessione): buco reale,
+    riprodotto per davvero prima del fix - list_capabilities() iterava self.skills DIRETTAMENTE
+    (`for intent, skill in self.skills.items():`), un dict LIVE che register_skill() (il punto
+    d'ingresso di plugin/Skill Forge, raggiungibile da un comando voce/companion mentre
+    un'altra richiesta concorrente sta facendo routing/retrieval semantico) puo' mutare in
+    qualsiasi momento da un altro thread. Un ciclo `for` su un dict live e' un punto di cambio
+    thread naturale a ogni iterazione: se la dimensione del dict cambia a meta' ciclo, Python
+    solleva RuntimeError, facendo fallire l'intera richiesta in corso."""
+
+    def setUp(self):
+        self._original_switch_interval = sys.getswitchinterval()
+        sys.setswitchinterval(0.00001)
+        self.addCleanup(sys.setswitchinterval, self._original_switch_interval)
+
+    def test_registering_a_skill_while_listing_capabilities_never_raises(self):
+        registry = _bare_registry({f"INTENT_{i}": FakeSkill() for i in range(2000)})
+        errors: list[Exception] = []
+        errors_lock = threading.Lock()
+
+        def _list_repeatedly():
+            for _ in range(50):
+                try:
+                    registry.list_capabilities()
+                except RuntimeError as exc:
+                    with errors_lock:
+                        errors.append(exc)
+
+        def _register_many():
+            for i in range(5000):
+                registry.register_skill(f"NEW_INTENT_{i}", FakeSkill())
+
+        threads = [threading.Thread(target=_list_repeatedly), threading.Thread(target=_register_many)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(errors, [], "list_capabilities() non deve mai sollevare per una mutazione concorrente")
 
 
 if __name__ == "__main__":

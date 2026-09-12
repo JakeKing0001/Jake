@@ -129,9 +129,22 @@ class SkillRegistry:
 
     def list_capabilities(self) -> list[dict]:
         """Restituisce i metadata delle skill registrate, incluso il livello di rischio
-        (v3.2, vedi core/risk.py: READ_ONLY/LOCAL_REVERSIBLE/EXTERNAL_ACTION/DESTRUCTIVE/ADMIN)."""
+        (v3.2, vedi core/risk.py: READ_ONLY/LOCAL_REVERSIBLE/EXTERNAL_ACTION/DESTRUCTIVE/ADMIN).
+
+        F1.8.2: buco reale, riprodotto per davvero prima del fix - `register_skill()` (il punto
+        d'ingresso della Skill Forge/dei plugin, raggiungibile da un comando voce/companion
+        mentre un'ALTRA richiesta concorrente sta chiamando `list_capabilities()`, es. per il
+        routing/retrieval semantico di un intent) aggiunge una nuova chiave a `self.skills`. Un
+        `for intent, skill in self.skills.items():` diretto itera il dict LIVE un elemento alla
+        volta (un punto di cambio thread naturale a ogni iterazione): se `register_skill()`
+        cambia la dimensione del dict a meta' di questo ciclo, Python solleva
+        `RuntimeError: dictionary changed size during iteration`, facendo fallire l'intera
+        richiesta in corso. Riprodotto con `sys.setswitchinterval()` abbassato per forzare la
+        sovrapposizione reale. Corretto iterando su `list(self.skills.items())`, uno snapshot
+        preso in un'unica chiamata atomica (mai interrotta a meta' da una mutazione Python-level
+        di un altro thread), invece del dict live."""
         capabilities = []
-        for intent, skill in self.skills.items():
+        for intent, skill in list(self.skills.items()):
             metadata = deepcopy(getattr(skill, "metadata", {}))
             metadata.setdefault("intent", intent)
             metadata.setdefault("description", "")
