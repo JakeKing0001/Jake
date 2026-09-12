@@ -1260,6 +1260,19 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
   nasconde un bug rilevante, a differenza di una notifica UI o di uno shutdown). Aggiunti 2 nuovi
   test in `tests/test_agent.py::OnStepCallbackFailureTests`. Prova: 2.190/2.190 test,
   ruff/mypy/compileall verdi su `core/agent.py` e `tests/test_agent.py`.
+- `F1.8.4` (parziale, continuazione - terzo punto: chiusura del HUD) — 12/09/2026: stesso
+  principio, terzo punto trovato - `core/gui/hud/app.py::JarvisApp._cleanup()` (chiamato alla
+  chiusura di Jake) racchiudeva l'arresto della sessione voce, `core.shutdown()` E la rimozione
+  degli hotkey globali in tre `except Exception: pass` distinti, senza alcun log. Un utente che
+  chiude Jake e nota l'hotkey globale ancora attivo (non rimosso), o che una cache non e' stata
+  salvata (`core.shutdown()` fallito nel proprio ciclo, non solo per un singolo componente - gia'
+  reso robusto da quello, F1.8.4 sopra), non avrebbe avuto modo di scoprire perche'. Corretto
+  aggiungendo `self.logger.exception(...)` a ciascuno dei tre passi, senza cambiare il
+  comportamento (nessuno dei tre deve MAI impedire agli altri di essere tentati - verificato con
+  un test dedicato che un `session.stop()` rotto non impedisce comunque a `core.shutdown()` di
+  essere chiamato). Aggiunti 2 nuovi test in
+  `tests/test_hud_app.py::OpenSettingsAndCleanupTests`. Prova: 2.192/2.192 test,
+  ruff/compileall verdi (il file non e' nel set selettivo di mypy - stub PySide6 incompleti).
 - `F1.8.6` — 12/09/2026: "impedire che un client lento blocchi event bus o altri client".
   Diverso dal resto di questa sezione: non un buco trovato e corretto, ma una VERIFICA - il
   codice di `core/event_bus.py::EventBus.publish()` sembrava gia' corretto per costruzione (coda
@@ -2504,17 +2517,17 @@ una sessione precedente), `F1.7.1` (ledger resistente a record parziali/arresto 
 config/settings.json), `F1.7.5` (replay sicuro), `F1.8.4` (parziale, visibilita' dei fallimenti
 di shutdown), `F1.2.2` (parziale, prima capability vera - radici filesystem consentite per le
 quattro mutazioni sul percorso interattivo), `F1.8.6` (verificato con una suite dedicata), `F1.4.3` (parziale, confronto a tempo costante della
-passphrase admin) e una seconda voce di `F1.8.4` (notifica `on_step` dell'agente loggata come lo
-shutdown) sono stati completati e verificati in questa sessione. La maggior parte erano buchi
-reali riprodotti empiricamente prima del fix (`F1.8.3` con due buchi ULTERIORI trovati durante la
-verifica del fix stesso, `F1.4.1` lo stesso identico buco di `F1.7.1` ma con un impatto piu'
-grave, `F1.7.5` un bypass completo dell'autorizzazione in `tools/replay_session.py --replay`,
-`F1.4.3` un canale laterale temporale sulla passphrase admin - `AuthGate.check()` usava `==`
-invece di `hmac.compare_digest`, gia' usato correttamente per lo stesso scopo altrove nel
-progetto); `F1.2.2` e' la prima funzionalita' NUOVA della sessione (non un fix), scelta come
-fetta verticale stretta del "kernel dei permessi"; `F1.8.6` e' una VERIFICA (il codice era gia'
-corretto per costruzione, mancava solo una prova a cronometro). `master` e' pulito, 2.190/2.190
-test, ruff/mypy/compileall verdi. `G1` resta aperto.
+passphrase admin) e due voci aggiuntive di `F1.8.4` (notifica `on_step` dell'agente e chiusura
+del HUD loggate come lo shutdown di `JakeCore`) sono stati completati e verificati in questa
+sessione. La maggior parte erano buchi reali riprodotti empiricamente prima del fix (`F1.8.3` con
+due buchi ULTERIORI trovati durante la verifica del fix stesso, `F1.4.1` lo stesso identico buco
+di `F1.7.1` ma con un impatto piu' grave, `F1.7.5` un bypass completo dell'autorizzazione in
+`tools/replay_session.py --replay`, `F1.4.3` un canale laterale temporale sulla passphrase admin -
+`AuthGate.check()` usava `==` invece di `hmac.compare_digest`, gia' usato correttamente per lo
+stesso scopo altrove nel progetto); `F1.2.2` e' la prima funzionalita' NUOVA della sessione (non
+un fix), scelta come fetta verticale stretta del "kernel dei permessi"; `F1.8.6` e' una VERIFICA
+(il codice era gia' corretto per costruzione, mancava solo una prova a cronometro). `master` e'
+pulito, 2.192/2.192 test, ruff/mypy/compileall verdi. `G1` resta aperto.
 
 L'utente aveva chiesto di fermarsi dopo la sessione precedente, poi ha esplicitamente chiesto di
 controllare le cose non committate e continuare da li' - il lavoro prosegue. Restano fuori
