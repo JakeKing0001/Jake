@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 
+from core.logger import get_logger
 from core.secrets_vault import is_protected, protect, unprotect
 
 # Chiavi cifrate a riposo con DPAPI (F1, vedi core/secrets_vault.py) invece di restare in chiaro
@@ -24,6 +25,7 @@ class Config:
 
     def __init__(self, path: Path | None = None):
         self.path = Path(path) if path else self.DEFAULT_PATH
+        self._logger = get_logger()
         self._values = self._load()
         self._migrate_secrets()
 
@@ -59,7 +61,22 @@ class Config:
         # non silenziosamente scartata.
         value = self._values.get(key, default)
         if key in SECRET_KEYS and isinstance(value, str):
+            # F1.4.8: unprotect() restituisce None quando il valore ERA protetto ma non e' piu'
+            # decifrabile (vault corrotto, o cifrato su un profilo Windows/una macchina diversa -
+            # vedi core/secrets_vault.py) - trattato qui come "segreto mai impostato" (torna
+            # default, di solito None), non come un crash che si propagherebbe fino
+            # all'avvio di JakeCore. Un avviso esplicito, non un fallimento silenzioso: l'utente
+            # deve capire perche' la sua passphrase/il suo token ha smesso di funzionare, invece
+            # di scoprire "stranamente" che l'autenticazione non e' piu' attiva.
+            was_protected = is_protected(value)
             value = unprotect(value)
+            if value is None and was_protected:
+                self._logger.warning(
+                    "Impossibile decifrare '%s' da %s (vault corrotto o profilo Windows diverso "
+                    "da quello che lo ha cifrato): trattato come mai impostato, va reinserito.",
+                    key, self.path,
+                )
+                return default
         return value
 
     def set(self, key: str, value) -> None:
