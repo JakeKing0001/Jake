@@ -363,15 +363,26 @@ class JakeCore:
 
     # ---- callback di default -------------------------------------------------------------
 
-    def notify(self, kind: str, message: str) -> str | None:
+    def notify(self, kind: str, message: str, *, trace_id: str | None = None) -> str | None:
         """Punto unico da cui passa ogni notifica proattiva (promemoria/avviso/automazione)
         prima di essere presentata, sia in CLI (qui sotto) sia in voce (vedi WakeWordSession,
         core/voice/wake_word_session.py, che chiama questo stesso metodo): applica la modalita'
         di notifica corrente (v4.3). Restituisce il messaggio da presentare subito, o None se
-        e' stato solo messo in coda per quando la modalita' tornera' a permetterlo."""
+        e' stato solo messo in coda per quando la modalita' tornera' a permetterlo.
+
+        F1.7.2: `trace_id` (opzionale - solo un'automazione ne ha gia' uno reale, vedi
+        `_default_on_trigger_fired`) collega l'evento HUD alle ricevute nel ledger che la stessa
+        esecuzione ha gia' prodotto - senza, una notifica "Ho eseguito X" non aveva NESSUN modo
+        di essere ricollegata a cosa e' successo davvero. Non propagato al percorso in coda
+        (`NotificationCenter._queued`/`set_mode()`): una notifica rimandata riemerge oggi solo
+        dentro il risultato testuale di `SET_NOTIFICATION_MODE`, mai come un secondo `HudEvent` -
+        non c'e' un evento successivo a cui riattaccare il trace_id, dichiarato apertamente."""
         gated = self.notification_center.gate(kind, message)
         if gated is not None:
-            self.event_bus.publish(HudEvent(EventType.NOTIFICATION, {"kind": kind, "text": gated}))
+            payload = {"kind": kind, "text": gated}
+            if trace_id:
+                payload["trace_id"] = trace_id
+            self.event_bus.publish(HudEvent(EventType.NOTIFICATION, payload))
         return gated
 
     def _default_on_reminder_due(self, reminder: dict) -> None:
@@ -395,7 +406,10 @@ class JakeCore:
 
     def _default_on_trigger_fired(self, trigger: dict, outcome, total_steps: int) -> None:
         summary = format_plan_outcome(outcome, total_steps, self.skill_registry)
-        message = self.notify("trigger", f"Ho eseguito automaticamente '{trigger.get('name')}':\n{summary}")
+        message = self.notify(
+            "trigger", f"Ho eseguito automaticamente '{trigger.get('name')}':\n{summary}",
+            trace_id=getattr(outcome, "trace_id", None),
+        )
         if message is None:
             return
         print(f"\nJake > {message}\nTu > ", end="", flush=True)
