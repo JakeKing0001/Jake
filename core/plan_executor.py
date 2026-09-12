@@ -60,12 +60,22 @@ class PlanExecutor:
         trace_id: str | None = None, private: bool = False, model: str | None = None, requested_by: str = "user",
         dry_run: bool = False,
     ) -> PlanOutcome:
-        """policy_engine (core/policy_engine.py::PolicyEngine) e' opzionale (default None =
-        nessun controllo, comportamento identico a prima di F1) perche' non tutti i chiamanti
-        di questo metodo esistevano ancora quando fu introdotto. Un passo che la policy
-        classifica CONFIRM va trattato come se richiedesse conferma (il piano si mette in pausa
-        su quel passo, senza eseguirlo: nessuno e' pronto a rispondere "confermi?" in un
-        percorso automatico), e uno BLOCK va bloccato allo stesso modo di un fallimento.
+        """policy_engine (core/policy_engine.py::PolicyEngine) e' opzionale ma FAIL-CLOSED
+        (F1.2.1, 12/09/2026): senza un policy_engine reale, OGNI passo si ferma con
+        POLICY_BLOCKED invece di eseguire. Prima di questa correzione `None` significava
+        "nessun controllo" (ALLOW per qualunque intent) - un default pericoloso perche' un
+        futuro chiamante di questo metodo che dimenticasse di passare policy_engine (un piano
+        automatico, per definizione senza nessuno pronto a confermare in tempo reale)
+        eseguirebbe SILENZIOSAMENTE senza alcun gate, esattamente il rischio gia' documentato
+        in docs/action-execution-paths.md ("Nota sul percorso 3"). I tre chiamanti reali
+        (JakeCore._try_plan, RunWorkflowSkill dopo che JakeCore li' assegna, TriggerScheduler)
+        passano gia' tutti self.policy_engine esplicitamente, quindi questo non cambia il loro
+        comportamento - cambia solo l'esito di un chiamante che se ne dimenticasse, da "esegue
+        tutto" a "si ferma su ogni passo", coerente con "minimo privilegio"/"negare per default"
+        (ROADMAP_EXECUTION.md, F1.2.4). Un passo che la policy classifica CONFIRM va trattato
+        come se richiedesse conferma (il piano si mette in pausa su quel passo, senza
+        eseguirlo: nessuno e' pronto a rispondere "confermi?" in un percorso automatico), e uno
+        BLOCK va bloccato allo stesso modo di un fallimento.
 
         F1: prima era blocked_intents/always_confirm_intents, due insiemi separati passati a
         mano - esattamente la frammentazione che ha causato il bug di RunWorkflowSkill (che ne
@@ -111,7 +121,9 @@ class PlanExecutor:
             # JakeCore (decide_interactive), nella sua variante senza REQUIRE_AUTH - qui nessuno
             # e' pronto a rispondere "confermi?" in tempo reale, quindi un intent DESTRUCTIVE/
             # ADMIN si ferma sempre, un intent bloccato dall'utente in config.json pure.
-            decision = policy_engine.decide_automated(step.intent) if policy_engine is not None else PolicyDecision.ALLOW
+            # F1.2.1: policy_engine=None e' FAIL-CLOSED (BLOCK), non piu' ALLOW - vedi il
+            # docstring di execute() sul perche'.
+            decision = policy_engine.decide_automated(step.intent) if policy_engine is not None else PolicyDecision.BLOCK
             if decision == PolicyDecision.BLOCK:
                 outcome.stopped_step = StepOutcome(
                     step=step,
