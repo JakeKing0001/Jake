@@ -80,7 +80,7 @@ class ActionProposal:
 
     @classmethod
     def for_intent(
-        cls, intent: str, parameters: dict, requested_by: str, *,
+        cls, intent: str, parameters: Optional[dict], requested_by: str, *,
         effect_class: Optional[str] = None, preconditions: Optional[str] = None,
         expected_effect: Optional[str] = None,
     ) -> "ActionProposal":
