@@ -11,8 +11,8 @@ from core.session_recorder import SessionRecorder, redact_value
 
 
 class RedactTests(unittest.TestCase):
-    def test_string_becomes_a_length_placeholder(self):
-        text = "documenti/tesi.pdf"
+    def test_generic_string_becomes_a_length_placeholder(self):
+        text = "questo e' un appunto qualsiasi, non un percorso ne' un url"
         self.assertEqual(redact_value(text), f"<str:{len(text)} caratteri>")
 
     def test_non_string_scalars_pass_through(self):
@@ -21,10 +21,62 @@ class RedactTests(unittest.TestCase):
         self.assertIsNone(redact_value(None))
 
     def test_nested_dict_and_list_are_redacted_recursively(self):
-        redacted = redact_value({"path": "c:/nota.txt", "tags": ["personale", "urgente"], "confirmed": True})
+        redacted = redact_value({"note": "un appunto personale", "tags": ["personale", "urgente"], "confirmed": True})
         self.assertEqual(redacted, {
-            "path": "<str:11 caratteri>", "tags": ["<str:9 caratteri>", "<str:7 caratteri>"], "confirmed": True,
+            "note": "<str:20 caratteri>", "tags": ["<str:9 caratteri>", "<str:7 caratteri>"], "confirmed": True,
         })
+
+
+class StructuredRedactionByTypeTests(unittest.TestCase):
+    """F1.7.4 ("redazione strutturata per tipo di dato, non solo lunghezza stringa"): un
+    percorso, un URL o un email diventavano tutti lo stesso "<str:N caratteri>" - abbastanza per
+    contare i caratteri, non per capire la FORMA del fallimento (es. "capita solo con i PDF")
+    senza riaprire il file verbatim."""
+
+    def test_windows_absolute_path_with_extension_shows_the_extension(self):
+        value = "C:\\Users\\david\\Desktop\\tesi_finale.pdf"
+        self.assertEqual(redact_value(value), f"<path:{len(value)} caratteri, estensione=.pdf>")
+
+    def test_windows_path_without_an_extension_shows_no_extension(self):
+        value = "C:\\Users\\david\\Desktop"
+        self.assertEqual(redact_value(value), f"<path:{len(value)} caratteri>")
+
+    def test_unc_path_is_recognized(self):
+        value = "\\\\server\\condivisa\\report.docx"
+        self.assertEqual(redact_value(value), f"<path:{len(value)} caratteri, estensione=.docx>")
+
+    def test_forward_slash_path_with_extension_is_recognized(self):
+        value = "documenti/tesi.pdf"
+        self.assertEqual(redact_value(value), f"<path:{len(value)} caratteri, estensione=.pdf>")
+
+    def test_a_bare_date_like_fraction_is_not_misclassified_as_a_path(self):
+        """"/" da solo e' troppo ambiguo (date, frazioni) - senza un'estensione file
+        riconoscibile alla fine, deve restare il segnaposto generico."""
+        value = "10/09/2026"
+        self.assertEqual(redact_value(value), f"<str:{len(value)} caratteri>")
+
+    def test_url_shows_only_the_domain_not_the_path_or_query_string(self):
+        value = "https://example.com/reset-password?token=segreto123"
+        self.assertEqual(redact_value(value), f"<url:{len(value)} caratteri, dominio=example.com>")
+
+    def test_www_url_without_a_scheme_is_recognized(self):
+        value = "www.example.com/pagina"
+        self.assertEqual(redact_value(value), f"<url:{len(value)} caratteri, dominio=example.com>")
+
+    def test_email_shows_only_the_domain_not_the_local_part(self):
+        value = "mario.rossi@example.com"
+        self.assertEqual(redact_value(value), f"<email:{len(value)} caratteri, dominio=example.com>")
+
+    def test_a_string_with_an_at_sign_that_is_not_a_whole_email_is_not_misclassified(self):
+        value = "aspetta @qualcuno per favore"
+        self.assertEqual(redact_value(value), f"<str:{len(value)} caratteri>")
+
+    def test_a_bare_filename_without_a_separator_is_not_classified_as_a_path(self):
+        """Coerente con l'uso reale (skills/find_file.py passa spesso solo il nome, non un
+        percorso completo): senza un separatore, non c'e' abbastanza segnale per dire che SIA
+        un percorso invece di una parola qualsiasi che finisce per coincidenza con un'estensione."""
+        value = "tesi_finale.pdf"
+        self.assertEqual(redact_value(value), f"<str:{len(value)} caratteri>")
 
 
 class SessionRecorderTestCase(unittest.TestCase):
