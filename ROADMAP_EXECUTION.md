@@ -568,7 +568,31 @@ Dipende da: F1.1.
 
 Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa dal PolicyEngine.
 
-- Stato: `DOING`; `F1.2.5` chiuso solo per il rollback filesystem, resto aperto.
+- Stato: `DOING`; `F1.2.5` chiuso solo per il rollback filesystem; `F1.2.1` chiuso parzialmente
+  (percorso 3, vedi sotto); resto aperto.
+- `F1.2.1` (parziale) — 12/09/2026: chiuso il buco concreto documentato in
+  [docs/action-execution-paths.md](docs/action-execution-paths.md) ("Nota sul percorso 3"):
+  `PlanExecutor.execute(plan, policy_engine=None, ...)` trattava l'assenza di policy_engine come
+  `PolicyDecision.ALLOW` per ogni passo - un default fail-open sicuro SOLO perche' i tre
+  chiamanti reali (`JakeCore._try_plan`, `RunWorkflowSkill`, `TriggerScheduler`) passano gia'
+  tutti `policy_engine` esplicitamente, non perche' fosse impedito strutturalmente non farlo.
+  Cambiato il default a `PolicyDecision.BLOCK` (fail-closed): un piano eseguito senza un
+  `policy_engine` vero si ferma ora su ogni passo con `POLICY_BLOCKED`, incluso in `dry_run`,
+  invece di eseguire silenziosamente senza alcun controllo. Verificato che nessuno dei tre
+  chiamanti reali sia impattato (passano gia' tutti `self.policy_engine`, letto direttamente dal
+  codice, non ipotizzato). Aggiornati i ~15 test di `tests/test_plan_executor.py` che si
+  affidavano al vecchio default per passare ora un `PolicyEngine()` permissivo esplicito (stesso
+  principio di "aggiornato i test per la nuova obbligatorietà" gia' usato in F1.1.3), e aggiunta
+  `MissingPolicyEngineFailsClosedTests` (2 test) che riproduce esattamente il bypass: con il
+  comportamento precedente questi due test avrebbero fallito (`registry.calls` non vuoto,
+  errore diverso da `POLICY_BLOCKED`). Non ancora chiuso: percorso 7 (`SkillRegistry.execute()`,
+  il dispatcher grezzo) resta senza controllo proprio - renderlo fail-closed richiederebbe prima
+  distinguere le centinaia di test di skill in isolamento (che chiamano `execute()` apposta senza
+  policy) dalle chiamate di produzione, non ancora deciso; ne' `TaskAgent`'s default `executor`
+  (un fallback usato solo da test/tool, mai da `JakeCore` in produzione - verificato che
+  `self.agent`/`self.coding_agent`/`self.research_agent` ricevano sempre un executor esplicito
+  gia' passato attraverso `_resolve_and_execute`). Prova: 1.977/1.977 test, ruff/mypy/compileall
+  verdi su `core/plan_executor.py` e `tests/test_plan_executor.py`.
 - `F1.2.5` (parziale) — 11/09/2026: `core/execution_safety.py::rollback_effect` eseguiva sempre
   l'intent compensatorio (`DELETE_PATH`/`RENAME_PATH`/`MOVE_PATH`, con `confirmed: True`
   auto-iniettato) chiamando `registry.execute()` direttamente, bypassando `PolicyEngine` del
