@@ -569,7 +569,7 @@ Dipende da: F1.1.
 Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa dal PolicyEngine.
 
 - Stato: `DOING`; `F1.2.5` chiuso solo per il rollback filesystem; `F1.2.1` chiuso parzialmente
-  (percorso 3, vedi sotto); resto aperto.
+  (percorso 3, vedi sotto); `F1.2.4` chiuso per il percorso planner (vedi sotto); resto aperto.
 - `F1.2.1` (parziale) — 12/09/2026: chiuso il buco concreto documentato in
   [docs/action-execution-paths.md](docs/action-execution-paths.md) ("Nota sul percorso 3"):
   `PlanExecutor.execute(plan, policy_engine=None, ...)` trattava l'assenza di policy_engine come
@@ -593,6 +593,27 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   `self.agent`/`self.coding_agent`/`self.research_agent` ricevano sempre un executor esplicito
   gia' passato attraverso `_resolve_and_execute`). Prova: 1.977/1.977 test, ruff/mypy/compileall
   verdi su `core/plan_executor.py` e `tests/test_plan_executor.py`.
+- `F1.2.4` — 12/09/2026: `core/planner_provider.py::_build_output_schema()` chiedeva a Ollama
+  passi con `"parameters": {"type": "object"}` SENZA alcuna restrizione sulle chiavi - la causa
+  originale del bug corretto in F1.2.5 (un passo poteva arrivare gia' con `"confirmed": true`
+  dentro, perche' nulla nello schema lo vietava; solo `PlanExecutor.strip_authorization_signals()`
+  lo neutralizzava a runtime, dopo il fatto). Corretto su due livelli: (1) lo schema JSON ora
+  applica `additionalProperties: False` sull'UNIONE dei nomi di parametro dichiarati da tutte le
+  capacita' note (stessa tecnica gia' in produzione per l'agente a passi, vedi
+  `TaskAgent._schema` in `core/agent.py`), rendendo strutturalmente impossibile per il modello
+  produrre una chiave mai dichiarata da nessuna skill; (2) `_plan_from_payload()` aggiunge un
+  controllo PER-INTENT piu' stretto (`_known_parameters_by_intent()`), che rifiuta un passo con
+  una chiave dichiarata da un'ALTRA skill ma non da quella del passo stesso (l'unione da sola non
+  lo vieterebbe) - difesa in profondita' anche se un backend diverso da Ollama non rispettasse lo
+  schema richiesto. Non sostituisce `strip_authorization_signals()` (resta l'ultima difesa a
+  runtime), la precede. Aggiunti `BuildOutputSchemaTests`/`PlanFromPayloadUnknownParameterTests`
+  in `tests/test_planner_provider.py` (5 nuovi test), incluso uno che riproduce esattamente lo
+  scenario storico di F1.2.5 (`DELETE_PATH` con `"confirmed": true` gia' nel payload: prima
+  veniva accettato dal planner e solo fermato a runtime, ora il piano viene rifiutato alla
+  costruzione). Prova: 1.982/1.982 test, ruff/mypy/compileall verdi su `core/planner_provider.py`
+  e `tests/test_planner_provider.py`. Non ancora affrontato: `F1.2.2`-`F1.2.3`, `F1.2.6`-`F1.2.7`;
+  lo stesso irrigidimento non e' stato applicato a `core/agent.py::TaskAgent._schema()` (gia' ha
+  `additionalProperties: False` sull'unione, ma non il controllo per-intent piu' stretto).
 - `F1.2.5` (parziale) — 11/09/2026: `core/execution_safety.py::rollback_effect` eseguiva sempre
   l'intent compensatorio (`DELETE_PATH`/`RENAME_PATH`/`MOVE_PATH`, con `confirmed: True`
   auto-iniettato) chiamando `registry.execute()` direttamente, bypassando `PolicyEngine` del

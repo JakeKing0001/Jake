@@ -43,6 +43,15 @@ class PlannerProvider:
     def _valid_intents(self) -> list[str]:
         return [capability["intent"] for capability in self.registry.list_capabilities()]
 
+    def _known_parameters_by_intent(self) -> dict[str, set[str]]:
+        """F1.2.4 ("negare per default parametri sconosciuti"): i nomi di parametro
+        effettivamente dichiarati da ogni skill, per rifiutare un passo che ne porti altri -
+        vedi _plan_from_payload."""
+        return {
+            capability["intent"]: set(capability.get("parameters", {}))
+            for capability in self.registry.list_capabilities()
+        }
+
     def _build_system_prompt(self) -> str:
         lines = [
             "Sei il pianificatore di Jake, un assistente personale locale.",
@@ -77,6 +86,25 @@ class PlannerProvider:
         return "\n".join(lines)
 
     def _build_output_schema(self) -> dict:
+        """F1.2.4 ("negare per default parametri sconosciuti"): prima, 'parameters' era
+        {"type": "object"} SENZA alcuna restrizione sulle chiavi - la causa originale del bug
+        di auto-autorizzazione corretto in F1.2.5 (un passo poteva arrivare gia' con
+        "confirmed": true dentro, perche' nulla nello schema lo vietava). additionalProperties:
+        False sulla UNIONE dei parametri di tutte le capacita' note (stessa tecnica gia' in
+        produzione per l'agente a passi, vedi TaskAgent._schema in core/agent.py) rende
+        strutturalmente impossibile per il modello produrre una chiave mai dichiarata da
+        nessuna skill - non sostituisce strip_authorization_signals() (resta comunque l'ultima
+        difesa se un backend diverso da Ollama non rispettasse lo schema), ma restringe cosa il
+        modello puo' produrre in primo luogo. Come per TaskAgent, questa e' un'unione tra TUTTE
+        le capacita', non ancora uno schema condizionale per-intent (vedi
+        _known_parameters_by_intent, che copre invece il controllo per-intent lato parsing)."""
+        parameter_properties: dict[str, dict] = {}
+        for capability in self.registry.list_capabilities():
+            for name, meta in capability.get("parameters", {}).items():
+                if meta.get("type") == "array":
+                    parameter_properties.setdefault(name, {"type": "array", "items": {"type": "string"}})
+                else:
+                    parameter_properties.setdefault(name, {"type": meta.get("type", "string")})
         return {
             "type": "object",
             "additionalProperties": False,
@@ -91,7 +119,10 @@ class PlannerProvider:
                         "required": ["intent", "parameters", "description"],
                         "properties": {
                             "intent": {"type": "string", "enum": self._valid_intents()},
-                            "parameters": {"type": "object"},
+                            "parameters": {
+                                "type": "object", "additionalProperties": False,
+                                "properties": parameter_properties,
+                            },
                             "description": {"type": "string"},
                         },
                     },
@@ -132,6 +163,7 @@ class PlannerProvider:
 
     def _plan_from_payload(self, payload: dict) -> Plan:
         valid_intents = self._valid_intents()
+        known_parameters_by_intent = self._known_parameters_by_intent()
         steps = []
         for raw_step in payload["steps"]:
             intent = raw_step.get("intent")
@@ -139,6 +171,13 @@ class PlannerProvider:
             description = raw_step.get("description", "")
             if intent not in valid_intents or not isinstance(parameters, dict):
                 raise ValueError("Invalid plan step")
+            # F1.2.4: controllo PER-INTENT (piu' stretto della sola unione nello schema JSON,
+            # vedi _build_output_schema) - rifiuta un passo che porti una chiave non dichiarata
+            # da QUESTO intent, anche se quella chiave e' un parametro legittimo di un'altra
+            # skill (l'unione nello schema da sola non lo vieterebbe) o se un backend diverso da
+            # Ollama non rispettasse lo schema JSON richiesto.
+            if not set(parameters) <= known_parameters_by_intent.get(intent, set()):
+                raise ValueError("Plan step has parameters not declared for its intent")
             if self._has_unresolved_placeholder(parameters):
                 # Il modello a volte "inventa" un riferimento al risultato di un passo
                 # precedente (es. "{{ path_from_last_opened_project }}") che l'esecutore
