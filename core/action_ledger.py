@@ -321,8 +321,32 @@ class ActionLedger:
             return
         self._path.parent.mkdir(parents=True, exist_ok=True)
         line = receipt.to_json() + "\n"
-        with self._write_lock, open(self._path, "a", encoding="utf-8") as handle:
-            handle.write(line)
+        with self._write_lock:
+            needs_separator = self._last_write_was_truncated()
+            with open(self._path, "a", encoding="utf-8") as handle:
+                if needs_separator:
+                    handle.write("\n")
+                handle.write(line)
+
+    def _last_write_was_truncated(self) -> bool:
+        """F1.7.1 ("resistente a record parziali e arresto improvviso"): True se il file esiste,
+        non e' vuoto e NON termina gia' con un newline - capita solo dopo che il processo e'
+        morto a meta' di una write() precedente (kill, crash, mancanza di corrente), lasciando
+        un ultimo record troncato senza terminatore. Senza questo controllo la prossima riga si
+        concatenerebbe sulla STESSA riga fisica del record troncato: un'unica riga JSON non
+        valida che read_all() scarta per intero, perdendo non solo il record vecchio (gia'
+        irrimediabilmente perso) ma anche quello nuovo, appena scritto con successo (riprodotto
+        con un troncamento vero prima di questo fix: il record nuovo spariva da read_all()).
+        Un newline di separazione isola il danno al solo record troncato."""
+        try:
+            with open(self._path, "rb") as handle:
+                handle.seek(0, 2)
+                if handle.tell() == 0:
+                    return False
+                handle.seek(-1, 2)
+                return handle.read(1) != b"\n"
+        except FileNotFoundError:
+            return False
 
     def read_all(self) -> list[dict]:
         if not self._path.is_file():

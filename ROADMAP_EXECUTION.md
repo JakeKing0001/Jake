@@ -1046,8 +1046,30 @@ Dipende da: F1.1 e F1.3.
 
 Criterio di uscita: una failure end-to-end è ricostruibile senza esporre contenuti privati.
 
-- Stato: `DOING`; `F1.7.6` chiuso parzialmente (failure taxonomy, non ancora rollback rate),
-  `F1.7.7` chiuso; resto aperto.
+- Stato: `DOING`; `F1.7.1` chiuso; `F1.7.6` chiuso parzialmente (failure taxonomy, non ancora
+  rollback rate), `F1.7.7` chiuso; resto aperto.
+- `F1.7.1` — 12/09/2026: "rendere ledger append-only resistente a record parziali e arresto
+  improvviso". Buco reale, non solo teorico - riprodotto prima di correggerlo:
+  `ActionLedger.record()` apriva sempre il file in append e scriveva la riga cosi' com'era, senza
+  mai controllare se l'ultimo byte gia' su disco fosse un newline. Un arresto improvviso (kill,
+  crash, mancanza di corrente) a meta' di una `write()` precedente lascia sul disco un ultimo
+  record TRONCATO, senza newline finale; alla ripartenza, la prossima chiamata a `record()` si
+  concatenava sulla STESSA riga fisica del record troncato, producendo un'unica riga JSON non
+  valida che `read_all()` scarta per intero (gia' tollerava righe corrotte, ma un'intera riga alla
+  volta) - perdendo cosi' non solo il record vecchio (gia' irrimediabilmente perso, inevitabile)
+  ma anche quello NUOVO, scritto con successo subito dopo il riavvio. Riprodotto con un
+  troncamento vero (scrittura diretta di un frammento JSON senza `\n` finale) seguito da un
+  `record()` reale: il record nuovo spariva da `read_all()` prima del fix. Corretto aggiungendo
+  `ActionLedger._last_write_was_truncated()` (apre il file in lettura binaria, legge solo l'ultimo
+  byte) chiamato DENTRO `self._write_lock` prima di ogni scrittura: se il file esiste, non e'
+  vuoto e non termina in `\n`, un newline di separazione viene scritto prima della riga nuova,
+  isolando il danno al solo record troncato invece di farlo propagare a quello successivo. Nessun
+  cambio per il caso normale (file gia' terminato in `\n`, o file nuovo/vuoto): verificato con
+  test dedicati che non compare alcuna riga vuota extra. Aggiunti 4 nuovi test in
+  `tests/test_action_ledger.py::TruncatedLastLineTests`. Prova: 2.139/2.139 test (56/56 su
+  `test_action_ledger`), ruff/mypy/compileall verdi su `core/action_ledger.py` e
+  `tests/test_action_ledger.py`. Non ancora affrontato: il resto di F1.7 (trace id condiviso con
+  undo/notifica, retention differenziata, redazione strutturata per tipo di dato, replay sicuro).
 - `F1.7.6` (parziale) — 12/09/2026: `tools/dashboard.py` (F0, gia' mostrava p50/p95 per skill e
   overall e verification rate) mostra ora anche la "failure taxonomy": una nuova sezione
   "Categoria di errore" che applica la STESSA `error_category_of()` gia' introdotta per l'action
@@ -2271,25 +2293,24 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 12/09/2026. Il lavoro descritto qui sotto come "in corso, non committato" al momento
-dell'ultimo aggiornamento e' stato ripreso, COMPLETATO e verificato da zero (non semplicemente
-committato cosi' com'era): vedi `F1.2.6` in sezione F1.2 per i dettagli, incluso un buco reale
-trovato durante la ripresa (23 + 3 test rotti dal cambio di tipo di ritorno di
-`_resolve_and_execute`, mai rieseguiti prima di allora). `master` e' pulito, 2.135/2.135 test,
-ruff/mypy/compileall verdi. `G1` resta aperto.
+Aggiornato 12/09/2026. `F1.2.6` (percorso interattivo/agente, ripreso da lavoro non committato di
+una sessione precedente) e `F1.7.1` (ledger resistente a record parziali/arresto improvviso) sono
+stati completati e verificati in questa sessione, ciascuno con un buco reale riprodotto
+empiricamente prima del fix (vedi le rispettive voci in sezione F1.2/F1.7). `master` e' pulito,
+2.139/2.139 test, ruff/mypy/compileall verdi. `G1` resta aperto.
 
-L'utente ha chiesto esplicitamente di FERMARSI qui per ora, dopo una lunga sessione di incrementi
-piccoli e verificabili su F1: non iniziare autonomamente uno dei due lavori grandi gia' proposti
-e rifiutati per ora (`F1.6`, sandbox permanente per le skill forgiate - Job Object/AppContainer;
-`F1.1.7`, migrazione delle ~200 skill da `SkillResult` ad `ActionProposal`/`ActionError`) senza
-un nuovo via libera esplicito. Se una sessione futura riprende da qui, il ritmo preferito
-dall'utente resta: un incremento alla volta, ciascuno con test reali (non solo letti a tavolino -
-diversi buchi in questa roadmap sono stati trovati SOLO eseguendo davvero il codice), riprova
-empirica quando possibile (riprodurre il buco con il codice vecchio prima di dichiararlo
-risolto), aggiornamento di questo file, e commit/PR separati invece di un unico commit enorme.
-Candidati piccoli ancora aperti in F1 quando si riprende: il resto di `F1.2.1` (percorso 7,
+L'utente aveva chiesto di fermarsi dopo la sessione precedente, poi ha esplicitamente chiesto di
+controllare le cose non committate e continuare da li' - il lavoro prosegue. Restano fuori
+discussione, senza un nuovo via libera esplicito, i due lavori grandi gia' proposti e rifiutati:
+`F1.6` (sandbox permanente per le skill forgiate - Job Object/AppContainer) e `F1.1.7`
+(migrazione delle ~200 skill da `SkillResult` ad `ActionProposal`/`ActionError`). Ritmo per chi
+riprende: un incremento alla volta, ciascuno con test reali (non solo letti a tavolino - diversi
+buchi in questa roadmap sono stati trovati SOLO eseguendo davvero il codice), riprova empirica
+quando possibile (riprodurre il buco con il codice vecchio prima di dichiararlo risolto),
+aggiornamento di questo file, e commit/PR separati invece di un unico commit enorme.
+Candidati piccoli ancora aperti in F1: il resto di `F1.2.1` (percorso 7,
 `SkillRegistry.execute()`), `F1.2.2`-`F1.2.3` (capability/intersezione permessi), `F1.4.1`-`F1.4.7`
-(consolidamento SecretsVault, oltre a quanto gia' in `core/secrets_vault.py`), `F1.7.1`-`F1.7.5`/
-`F1.7.8` (ledger resistente a scritture parziali, retention, redazione strutturata, replay
-sicuro), `F1.8.1`/`F1.8.3`-`F1.8.7` (coda azioni concorrenti, drain allo shutdown, deadlock
-timeout, test di race).
+(consolidamento SecretsVault, oltre a quanto gia' in `core/secrets_vault.py`), il resto di `F1.7`
+(`F1.7.2` trace id condiviso con undo/notifica, `F1.7.3` retention differenziata, `F1.7.4`
+redazione strutturata per tipo di dato, `F1.7.5`/`F1.7.8` replay sicuro), `F1.8.1`/`F1.8.3`-`F1.8.7`
+(coda azioni concorrenti, drain allo shutdown, deadlock timeout, test di race).
