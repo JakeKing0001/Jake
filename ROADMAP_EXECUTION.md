@@ -654,8 +654,45 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
 
 - Stato: `DOING`; `F1.2.5` parziale per rollback filesystem e ripresa del consenso (questa
   ultima verificata localmente, in attesa di CI); `F1.2.1` chiuso parzialmente
-  (percorso 3, vedi sotto); `F1.2.4` chiuso per il percorso planner (vedi sotto); `F1.2.6` e
-  `F1.2.7` chiusi (vedi sotto); resto aperto.
+  (percorso 3, vedi sotto); `F1.2.2` chiuso parzialmente (prima capability vera - radici
+  filesystem, solo percorso interattivo, solo quattro intent, vedi sotto); `F1.2.4` chiuso per
+  il percorso planner (vedi sotto); `F1.2.6` e `F1.2.7` chiusi (vedi sotto); `F1.2.3`/resto
+  aperto.
+- `F1.2.2` (parziale, prima capability: radici filesystem) — 12/09/2026: "definire capability per
+  filesystem root, app, contatto, dominio web, device, servizio Home Assistant, rete e durata" -
+  la prima delle otto, scelta perche' e' l'unica gia' collegabile senza dover prima costruire
+  un'infrastruttura di identita'/registrazione device separata (app/contatto/dominio web/
+  device/HA/rete/durata restano tutte aperte). Non un fix di un buco preesistente (la capability
+  non esisteva affatto prima), ma una FUNZIONALITA' NUOVA, scelta deliberatamente in una fetta
+  verticale stretta invece di un tentativo generico: `PolicyEngine(allowed_filesystem_roots=...)`
+  - opt-in, vuoto per default (comportamento identico a prima per chi non lo configura, stesso
+  principio di `blocked_intents`), applicato SOLO ai quattro intent di mutazione filesystem gia'
+  raggruppati altrove come naturalmente idempotenti (`CREATE_PATH`/`RENAME_PATH`/`MOVE_PATH`/
+  `DELETE_PATH`, vedi `core/execution_safety.py::INTENT_SAFETY_REGISTRY`) e SOLO sul percorso
+  interattivo (`decide_interactive`): `decide_automated()` non riceve affatto `parameters` oggi
+  (design deliberato di F1.2, vedi il docstring del modulo - un piano automatico non deve mai
+  fidarsi di segnali nei parametri), quindi estenderlo per la capability e' un cambio di firma
+  piu' ampio (tocca `PlanExecutor`, `execution_safety.rollback_effect`, `RunWorkflowSkill`,
+  `TriggerScheduler` e i rispettivi test) rimandato deliberatamente - `PlanExecutor`/
+  `RUN_WORKFLOW`/i trigger NON rispettano ancora le radici consentite, dichiarato apertamente nel
+  codice, non nascosto. Confronto per confini di directory veri (non un semplice prefisso di
+  stringa: "C:\Allowed" non deve corrispondere a "C:\AllowedButNot"), `Path.resolve()` per
+  neutralizzare traversal con `..` e seguire i symlink fino al bersaglio reale, `os.path.normcase`
+  per il confronto case-insensitive su Windows. `MOVE_PATH` controlla sia `path` sia
+  `destination`: altrimenti spostare un file FUORI da una radice consentita partendo da un
+  percorso permesso sarebbe un modo banale per aggirare la capability. Aggiunta la nuova
+  motivazione chiusa `POLICY_REASON_CAPABILITY_DENIED` al vocabolario di `F1.2.6` (una radice
+  negata e' concettualmente diversa da un intent sempre bloccato: lo stesso intent puo' essere
+  permesso o negato a seconda del parametro). Verificato anche end-to-end attraverso
+  `JakeCore._resolve_and_execute` (non solo a livello di `PolicyEngine` in isolamento): un
+  `DELETE_PATH` gia' `"confirmed": true` fuori da ogni radice consentita si ferma con
+  `POLICY_BLOCKED` PRIMA di raggiungere la skill, la skill non viene mai chiamata. Aggiunti 12
+  nuovi test in `tests/test_policy_engine.py::FilesystemCapabilityTests`. Non ancora affrontato:
+  le altre sette capability elencate dalla roadmap, `F1.2.3` (intersezione permessi
+  utente/dispositivo/agente/skill/sessione - qui c'e' solo un allowlist a livello utente, nessuna
+  intersezione), la copertura degli intent di sola lettura (`FIND_FILE`/`GET_FILE_INFO`/
+  `READ_FILE_TEXT`...) e del percorso automatico. Prova: 2.176/2.176 test, ruff/mypy/compileall
+  verdi su tutti i file toccati.
 - `F1.2.1` (parziale) — 12/09/2026: chiuso il buco concreto documentato in
   [docs/action-execution-paths.md](docs/action-execution-paths.md) ("Nota sul percorso 3"):
   `PlanExecutor.execute(plan, policy_engine=None, ...)` trattava l'assenza di policy_engine come
@@ -2407,14 +2444,17 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 Aggiornato 12/09/2026. `F1.2.6` (percorso interattivo/agente, ripreso da lavoro non committato di
 una sessione precedente), `F1.7.1` (ledger resistente a record parziali/arresto improvviso),
 `F1.8.3` (kill switch propagato a RUN_COMMAND), `F1.4.1` (scrittura atomica di
-config/settings.json), `F1.7.5` (replay sicuro) e `F1.8.4` (parziale, visibilita' dei fallimenti
-di shutdown) sono stati completati e verificati in questa sessione, ciascuno con un buco reale
-riprodotto empiricamente prima del fix - `F1.8.3` addirittura con due buchi ULTERIORI trovati
-durante la verifica del fix stesso, `F1.4.1` lo stesso identico buco di `F1.7.1` ma con un impatto
-piu' grave, e `F1.7.5` un bypass completo dell'autorizzazione (un `DELETE_PATH` gia' "confermato"
-nel record veniva rieseguito da `tools/replay_session.py --replay` cancellando un file vero, senza
-alcun controllo) - vedi le rispettive voci in sezione F1.8/F1.4/F1.7. `master` e' pulito,
-2.163/2.163 test, ruff/mypy/compileall verdi. `G1` resta aperto.
+config/settings.json), `F1.7.5` (replay sicuro), `F1.8.4` (parziale, visibilita' dei fallimenti
+di shutdown) e `F1.2.2` (parziale, prima capability vera - radici filesystem consentite per le
+quattro mutazioni sul percorso interattivo) sono stati completati e verificati in questa sessione.
+I primi sei erano buchi reali riprodotti empiricamente prima del fix (`F1.8.3` con due buchi
+ULTERIORI trovati durante la verifica del fix stesso, `F1.4.1` lo stesso identico buco di `F1.7.1`
+ma con un impatto piu' grave, `F1.7.5` un bypass completo dell'autorizzazione in
+`tools/replay_session.py --replay`); `F1.2.2` e' invece la prima funzionalita' NUOVA della
+sessione (non un fix), scelta come fetta verticale stretta del "kernel dei permessi" invece di un
+tentativo generico su tutte e otto le capability elencate dalla roadmap - vedi le rispettive voci
+in sezione F1.8/F1.4/F1.7/F1.2. `master` e' pulito, 2.176/2.176 test, ruff/mypy/compileall verdi.
+`G1` resta aperto.
 
 L'utente aveva chiesto di fermarsi dopo la sessione precedente, poi ha esplicitamente chiesto di
 controllare le cose non committate e continuare da li' - il lavoro prosegue. Restano fuori
@@ -2426,10 +2466,15 @@ buchi in questa roadmap sono stati trovati SOLO eseguendo davvero il codice), ri
 quando possibile (riprodurre il buco con il codice vecchio prima di dichiararlo risolto),
 aggiornamento di questo file, e commit/PR separati invece di un unico commit enorme.
 Candidati piccoli ancora aperti in F1: il resto di `F1.2.1` (percorso 7,
-`SkillRegistry.execute()`), `F1.2.2`-`F1.2.3` (capability/intersezione permessi), il resto di
-`F1.4` (una vera classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7`
-(`F1.7.2` trace id condiviso con undo/notifica, `F1.7.3` retention differenziata, `F1.7.4`
-redazione strutturata per tipo di dato, `F1.7.8` modalita' privata end-to-end su ogni nuovo
-record), il resto di `F1.8` (`F1.8.1` coda azioni concorrenti, il resto di `F1.8.4` - drain
-limitato di un'azione in corso, checkpoint vero, release device audio, `F1.8.5` deadlock timeout,
-`F1.8.6` client lenti sull'event bus, `F1.8.7` test di race su trigger/handoff/conferma/undo).
+`SkillRegistry.execute()`), il resto di `F1.2.2` (le altre sette capability - app/contatto/
+dominio web/device/HA/rete/durata; estendere le radici filesystem al percorso automatico e agli
+intent di sola lettura), `F1.2.3` (intersezione permessi utente/dispositivo/agente/skill/
+sessione - oggi solo un allowlist utente, nessuna intersezione), il resto di `F1.4` (una vera
+classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7` (`F1.7.2` trace id
+condiviso con undo/notifica, `F1.7.3` retention differenziata, `F1.7.4` redazione strutturata per
+tipo di dato, `F1.7.8` modalita' privata end-to-end su ogni nuovo record), il resto di `F1.8`
+(`F1.8.1` coda azioni concorrenti, il resto di `F1.8.4` - drain limitato di un'azione in corso,
+checkpoint vero, release device audio, `F1.8.5` deadlock timeout, `F1.8.6` client lenti
+sull'event bus - gia' probabilmente a posto per costruzione con `queue.Queue` limitata e
+`put_nowait`, da verificare con test dedicati non ancora scritti, `F1.8.7` test di race su
+trigger/handoff/conferma/undo).

@@ -223,6 +223,10 @@ class JakeCore:
             auth_gate=self.auth_gate,
             blocked_intents=config.get("blocked_intents", []) or [],
             always_confirm_intents=config.get("always_confirm_intents", []) or [],
+            # F1.2.2: vuoto per default (nessuna restrizione, comportamento invariato) - un
+            # utente avanzato puo' limitare CREATE_PATH/RENAME_PATH/MOVE_PATH/DELETE_PATH a
+            # cartelle esplicite in config.json, come gia' fa con blocked_intents.
+            allowed_filesystem_roots=config.get("allowed_filesystem_roots", []) or [],
         )
         # F1.2.5: collegato DOPO la creazione (self.agent/coding_agent/research_agent esistono
         # gia', self.policy_engine no, quando i tre TaskAgent vengono costruiti sopra) - senza
