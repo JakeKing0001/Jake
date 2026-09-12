@@ -516,8 +516,37 @@ Dipende da: G0.
 
 Criterio di uscita: il 100% dei percorsi produce lo stesso `ActionReceipt` validato.
 
-- Stato: `DOING`; `F1.1.1`, `F1.1.3` (parzialmente), `F1.1.4` e `F1.1.8` conclusi con evidenza;
-  `F1.1.2`, `F1.1.5`, `F1.1.6`, `F1.1.7` restano aperti.
+- Stato: `DOING`; `F1.1.1`, `F1.1.2` (solo i tipi, non l'adozione), `F1.1.3` (parzialmente),
+  `F1.1.4` e `F1.1.8` conclusi con evidenza; `F1.1.5`, `F1.1.6`, `F1.1.7` restano aperti.
+- `F1.1.2` — 12/09/2026: creato `core/action_contracts.py` con i cinque contratti mancanti
+  (`ActionProposal`, `ActionContext`, `VerificationEvidence`, `UndoDescriptor`, `ActionError`) -
+  `ActionReceipt` esisteva gia' (`core/action_ledger.py`). **Deliberatamente NON collegati** ai
+  quattro chokepoint reali (`JakeCore`/`TaskAgent`/`PlanExecutor`) ne' alle ~200 skill (restano su
+  `SkillResult`): quella migrazione e' F1.1.6 ("adattare prima un intent read-only, uno
+  reversibile, uno external, uno destructive e uno admin") e F1.1.7 ("migrare tutti gli intent"),
+  numerati separatamente nella roadmap proprio perche' un progetto a se', troppo rischioso da fare
+  nello stesso commit di 5 tipi nuovi mai usati (vedi Definition of Done, punto 8: "il commit
+  contiene una sola unita' logica"). Ogni tipo RIUSA una tassonomia/costante gia' esistente invece
+  di introdurne una copia parallela (lo stesso principio gia' applicato in F1.1.4/F1.3.3):
+  `VerificationEvidence.status` e `ActionError.category` usano le costanti gia' presenti in
+  `core/action_ledger.py` (`VERIFICATION_*`, ora anche pubblico `ERROR_CATEGORIES` invece del
+  precedente `_ERROR_CATEGORIES` privato, cosi' `action_contracts.py` puo' validare senza un
+  secondo elenco a mano); `ActionProposal.risk` usa `core.risk.RiskLevel`; `ActionError.retryable`
+  usa `execution_safety.RETRYABLE_ERRORS`. Estratto anche `normalize_result_code()` da
+  `error_category_of()` (stesso comportamento, nessun cambio) perche' sia questa sia
+  `ActionError.from_result()` avevano bisogno della stessa normalizzazione "error:" - una funzione
+  sola, non due copie. `effect_class` (`ActionProposal`) e' volutamente un campo dichiarato dal
+  chiamante, non calcolato da `risk_of()`: i due assi (rischio vs. tipo di effetto) non si
+  derivano l'uno dall'altro in modo affidabile per le ~200 skill non ancora censite; resta `None`
+  quando ignoto invece di un valore indovinato. `UndoDescriptor` e' distinto dal `RollbackAction`
+  gia' esistente in `execution_safety.py`: quello e' il template PER CLASSE DI INTENT, questo
+  l'istanza PER AZIONE GIA' ESEGUITA con parametri risolti e stato (`used`/`expires_at`) - due
+  esecuzioni dello stesso intent condividono lo stesso `RollbackAction` ma hanno due
+  `UndoDescriptor` diversi. Nuovo `tests/test_action_contracts.py` (33 test): copre costruzione,
+  validazione e - per ogni tipo che riusa una costante condivisa - un test esplicito che il valore
+  coincide con quello della fonte originale (es. `ActionError.retryable` per ogni codice REALE di
+  `RETRYABLE_ERRORS`, non solo un esempio a mano). Prova: 2.042/2.042 test, ruff/mypy/compileall
+  verdi su tutti i file toccati (incluso il refactor non invasivo di `error_category_of`).
 - `F1.1.4` — 12/09/2026: definita la tassonomia in `core/action_ledger.py`
   (`ERROR_CATEGORY_*`: le nove categorie elencate sopra piu' due necessarie perche' non ogni
   ricevuta e' un errore - `success` e `pending` - piu' un fallback onesto `uncategorized` per i
@@ -550,9 +579,10 @@ Criterio di uscita: il 100% dei percorsi produce lo stesso `ActionReceipt` valid
   esistano ancora (incluso il buco noto e documentato di `SkillRegistry.execute()`, F1.2.1), cosi'
   un rinominamento futuro fa fallire il test invece di lasciare il documento silenziosamente
   disallineato dal codice.
-- Ricognizione 11/09/2026: `ActionProposal`, `ActionContext`, `VerificationEvidence`,
-  `UndoDescriptor` ed `ActionError` non esistono ancora come classi (solo prosa nella roadmap);
-  esiste solo `ActionReceipt` (`core/action_ledger.py`) e `PolicyEngine`
+- Ricognizione 11/09/2026 (superata da `F1.1.2` sopra, conservata come prova dello stato di
+  partenza): `ActionProposal`, `ActionContext`, `VerificationEvidence`, `UndoDescriptor` ed
+  `ActionError` non esistevano ancora come classi (solo prosa nella roadmap); esisteva solo
+  `ActionReceipt` (`core/action_ledger.py`) e `PolicyEngine`
   (`core/policy_engine.py`). Le skill restituiscono `SkillResult` (piu' sottile del contratto
   target); la ricevuta viene sintetizzata solo in 4 punti di orchestrazione
   (`JakeCore._log_action_outcome`/`_log_denied_action`, `TaskAgent._log_step`,
@@ -571,10 +601,13 @@ Criterio di uscita: il 100% dei percorsi produce lo stesso `ActionReceipt` valid
   test_action_ledger.py` aggiornato per la nuova obbligatorietà. Prova: 1.955/1.955 test (36/36
   su `test_action_ledger`+`test_action_contract`), ruff e mypy puliti su
   `core/action_ledger.py`, compileall verde.
-- Non ancora affrontato: `effect_class`/"parametri validati"/"actor" distinto da "source" come
-  campi propri (`requested_by` li conflette in una sola stringa); tassonomia errori (`F1.1.4`);
-  migrazione reale delle skill sul contratto (`F1.1.6`/`F1.1.7`). Il bypass di policy nel
-  rollback e' stato parzialmente chiuso, vedi `F1.2.5`.
+- Non ancora affrontato: `effect_class` esiste ora come campo di `ActionProposal` (`F1.1.2`) ma
+  resta dichiarato dal chiamante, non calcolato automaticamente; "parametri validati"/"actor"
+  distinto da "source" come campi propri (`requested_by` li conflette in una sola stringa,
+  `ActionContext` non ha ancora un campo `actor` separato); migrazione reale delle skill sul
+  contratto (`F1.1.6`/`F1.1.7`) - i quattro chokepoint continuano a costruire `ActionReceipt`
+  direttamente, non ancora a partire da un `ActionProposal`. Il bypass di policy nel rollback e'
+  stato parzialmente chiuso, vedi `F1.2.5`.
 
 ### F1.2 — Policy kernel e capability
 
