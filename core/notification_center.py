@@ -11,7 +11,24 @@ modalita' corrente decide quali tipi sono ammessi subito e quali vanno in coda p
 I promemoria (kind="reminder") sono trattati diversamente dagli altri due: l'utente li ha
 chiesti esplicitamente per un orario preciso ("ricordami di prendere la medicina alle 15"),
 quindi restano ammessi in ogni modalita' tranne MEETING, dove anche solo far parlare Jake ad
-alta voce durante una riunione sarebbe comunque sbagliato indipendentemente dal contenuto."""
+alta voce durante una riunione sarebbe comunque sbagliato indipendentemente dal contenuto.
+
+F1.8.2 (stesso principio gia' applicato a ActionLedger/ReminderManager/TodoManager/MemoryManager
+in questa sessione): buco reale, riprodotto per davvero prima del fix - `NotificationCenter` e'
+UN'istanza condivisa PER RIFERIMENTO tra `JakeCore.notify()` (chiamato dai thread separati di
+`TriggerScheduler`/`ReminderScheduler`/`SystemAdvisor` per reminder/avvisi/automazioni) e
+`SetNotificationModeSkill`/`GetNotificationModeSkill` (raggiungibili da voce o dal companion
+server, altri thread ancora), ma `gate()`/`set_mode()` mutavano `self._queued` senza alcuna
+sincronizzazione. `set_mode()` in particolare legge e riscrive `_queued` in DUE passaggi separati
+(prima calcola `released` filtrando la coda, poi la riassegna filtrata di nuovo): se un `gate()`
+concorrente aggiunge un elemento esattamente tra i due passaggi, quell'elemento non finisce ne'
+in `released` (calcolato prima che arrivasse) ne' resta in coda (la riscrittura successiva lo
+esclude se il suo tipo e' ora ammesso) - sparisce per sempre, senza errore ne' log. Riprodotto
+per davvero con `sys.setswitchinterval()` abbassato per forzare la sovrapposizione: su 30 prove
+con 500 `gate()` concorrenti a un `set_mode()`, in media oltre il 98% delle notifiche spariva
+senza lasciare traccia. Uno scenario reale, non di laboratorio: l'utente esce da "modalita'
+studio" proprio mentre uno scheduler in background mette in coda un nuovo avviso/promemoria."""
+import threading
 from enum import Enum
 
 
@@ -51,6 +68,7 @@ class NotificationCenter:
     def __init__(self, mode: NotificationMode = NotificationMode.NORMAL):
         self.mode = mode
         self._queued: list[dict] = []
+        self._lock = threading.Lock()
 
     def gate(self, kind: str, message: str) -> str | None:
         """Se 'kind' e' ammesso nella modalita' corrente restituisce il messaggio (da
@@ -58,18 +76,27 @@ class NotificationCenter:
         if message and kind in MODE_ALLOWED_KINDS.get(self.mode, frozenset()):
             return message
         if message:
-            self._queued.append({"kind": kind, "message": message})
+            with self._lock:
+                self._queued.append({"kind": kind, "message": message})
         return None
 
     def set_mode(self, mode: NotificationMode) -> list[str]:
         """Cambia modalita' e restituisce (nell'ordine di arrivo) i messaggi in coda ora
         ammessi dalla nuova modalita', togliendoli dalla coda; quelli ancora non ammessi
-        restano in coda per la prossima volta."""
-        self.mode = mode
+        restano in coda per la prossima volta. Filtra la coda in UNA sola passata sotto lock
+        (non piu' due liste separate): un `gate()` concorrente non puo' piu' infilarsi nella
+        finestra tra "calcola i rilasciati" e "riscrivi la coda" e sparire senza finire ne'
+        nell'uno ne' nell'altra (vedi F1.8.2 nel docstring del modulo)."""
         allowed = MODE_ALLOWED_KINDS.get(mode, frozenset())
-        released = [item["message"] for item in self._queued if item["kind"] in allowed]
-        self._queued = [item for item in self._queued if item["kind"] not in allowed]
-        return released
+        with self._lock:
+            self.mode = mode
+            released: list[dict] = []
+            remaining: list[dict] = []
+            for item in self._queued:
+                (released if item["kind"] in allowed else remaining).append(item)
+            self._queued = remaining
+            return [item["message"] for item in released]
 
     def pending_count(self) -> int:
-        return len(self._queued)
+        with self._lock:
+            return len(self._queued)

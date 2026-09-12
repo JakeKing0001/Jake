@@ -1241,7 +1241,7 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
 - Stato: `DOING`; `F1.8.1` chiuso parzialmente (la forma piu' grave del buco - doppia esecuzione
   della stessa azione in sospeso - chiusa, non l'intera ownership di sessione, vedi sotto);
   `F1.8.2` chiuso per tutti i registri/store condivisi tra thread (ledger, promemoria, todo,
-  memoria a lungo termine); `F1.8.3` chiuso per RUN_COMMAND (il solo subprocess bloccante
+  memoria a lungo termine, centro notifiche); `F1.8.3` chiuso per RUN_COMMAND (il solo subprocess bloccante
   abbastanza lungo da essere rilevante, vedi sotto); `F1.8.4` chiuso parzialmente (visibilita'
   dei fallimenti di shutdown, non ancora drain/checkpoint veri); `F1.8.6` chiuso (verificato,
   vedi sotto); resto della fase (deadlock timeout, test di race su trigger/handoff/undo) non
@@ -1441,11 +1441,34 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
   thread x 10 chiamate ha lasciato solo 23 righe su 100 attese, con 9 thread che sollevavano
   `sqlite3.InterfaceError: bad parameter or other API misuse`. Aggiunti 2 nuovi test in
   `tests/test_memory_manager.py::ConcurrentAccessTests` (molte `remember()` concorrenti su chiavi
-  diverse, molte `log_turn()` concorrenti). Con questo, `F1.8.2` copre tutti e quattro gli store
-  condivisi tra thread del progetto (ledger, promemoria, todo, memoria a lungo termine) - il
-  resto di F1.8 (coda per azioni concorrenti, drain allo shutdown, deadlock timeout, client lenti
-  sull'event bus, test di race su trigger/handoff/conferma/undo) resta comunque da fare. Prova:
-  2.083/2.083 test, ruff/mypy/compileall verdi su tutti i file toccati.
+  diverse, molte `log_turn()` concorrenti). Con questo, `F1.8.2` copriva tutti e quattro gli
+  store SQLite-backed condivisi tra thread del progetto (ledger, promemoria, todo, memoria a
+  lungo termine) individuati fino a quel momento - un quinto store condiviso (non SQLite,
+  vedi sotto) e' stato trovato in una sessione successiva. Prova: 2.083/2.083 test,
+  ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.8.2` (continuazione, quinto store: centro notifiche) — 12/09/2026: stesso pattern, causa
+  diversa - `core/notification_center.py::NotificationCenter` e' condivisa PER RIFERIMENTO tra
+  `JakeCore.notify()` (chiamato dai thread separati di `TriggerScheduler`/`ReminderScheduler`/
+  `SystemAdvisor`) e `SetNotificationModeSkill`/`GetNotificationModeSkill` (voce/companion
+  server, altri thread), ma non e' basata su SQLite: `gate()`/`set_mode()` mutavano una lista
+  Python in RAM senza alcuna sincronizzazione. `set_mode()` era il piu' pericoloso dei due:
+  leggeva e riscriveva `self._queued` in DUE passaggi separati (prima calcola i messaggi
+  rilasciati filtrando la coda, poi la riassegna filtrata di nuovo) - un `gate()` concorrente che
+  arrivava esattamente tra i due passaggi spariva per sempre, ne' rilasciato ne' rimasto in coda.
+  **Riprodotto con una severita' insolita anche per questa sessione**: con `sys.setswitchinterval()`
+  abbassato per forzare la sovrapposizione reale (il caso normale di `pytest`/produzione non la
+  garantisce sempre, ma lo scenario - l'utente esce da una modalita' ristretta proprio mentre uno
+  scheduler in background mette in coda un nuovo avviso - e' realistico, non di laboratorio), su
+  30 prove con 500 `gate()` concorrenti a un `set_mode()` in media OLTRE IL 98% delle notifiche
+  spariva senza lasciare traccia. Corretto con un `threading.Lock()` per istanza: `set_mode()`
+  filtra la coda in UNA sola passata sotto lock invece di due liste separate, cosi' un `gate()`
+  concorrente non puo' piu' infilarsi nella finestra tra le due. Aggiunto
+  `tests/test_notification_center.py::ConcurrentAccessTests` (stessa tecnica di riproduzione
+  forzata, verificato che fallisce contro il codice precedente). Con questo, `F1.8.2` copre ora
+  cinque strutture condivise tra thread (i quattro store SQLite-backed sopra, piu' il centro
+  notifiche in RAM) - il resto di F1.8 (coda per azioni concorrenti, drain allo shutdown,
+  deadlock timeout, test di race su trigger/handoff/undo) resta comunque da fare. Prova:
+  2.200/2.200 test, ruff/mypy/compileall verdi su tutti i file toccati.
 
 ### Gate G1 — Nucleo fidato
 
@@ -2555,18 +2578,20 @@ config/settings.json), `F1.7.5` (replay sicuro), `F1.8.4` (parziale, visibilita'
 di shutdown), `F1.2.2` (parziale, prima capability vera - radici filesystem consentite per le
 quattro mutazioni sul percorso interattivo), `F1.8.6` (verificato con una suite dedicata), `F1.4.3` (parziale, confronto a tempo costante della
 passphrase admin), due voci aggiuntive di `F1.8.4` (notifica `on_step` dell'agente e chiusura
-del HUD loggate come lo shutdown di `JakeCore`) e `F1.8.1` (parziale, doppia esecuzione di
-un'azione in sospeso confermata da due canali concorrenti) sono stati completati e verificati in
-questa sessione. La maggior parte erano buchi reali riprodotti empiricamente prima del fix
-(`F1.8.3` con due buchi ULTERIORI trovati durante la verifica del fix stesso, `F1.4.1` lo stesso
-identico buco di `F1.7.1` ma con un impatto piu' grave, `F1.7.5` un bypass completo
-dell'autorizzazione in `tools/replay_session.py --replay`, `F1.4.3` un canale laterale temporale
-sulla passphrase admin, `F1.8.1` una doppia esecuzione reale - `JakeCore.answer()` e' condiviso
-tra il loop voce e il `ThreadingHTTPServer` del companion server, e il controllo di un'azione in
-sospeso era tre chiamate separate senza sincronizzazione); `F1.2.2` e' la prima funzionalita'
-NUOVA della sessione (non un fix), scelta come fetta verticale stretta del "kernel dei permessi";
-`F1.8.6` e' una VERIFICA (il codice era gia' corretto per costruzione, mancava solo una prova a
-cronometro). `master` e' pulito, 2.199/2.199 test, ruff/mypy/compileall verdi. `G1` resta aperto.
+del HUD loggate come lo shutdown di `JakeCore`), `F1.8.1` (parziale, doppia esecuzione di
+un'azione in sospeso confermata da due canali concorrenti) e un quinto store di `F1.8.2` (il
+centro notifiche, con oltre il 98% di notifiche perse sotto carico concorrente prima del fix)
+sono stati completati e verificati in questa sessione. La maggior parte erano buchi reali
+riprodotti empiricamente prima del fix (`F1.8.3` con due buchi ULTERIORI trovati durante la
+verifica del fix stesso, `F1.4.1` lo stesso identico buco di `F1.7.1` ma con un impatto piu'
+grave, `F1.7.5` un bypass completo dell'autorizzazione in `tools/replay_session.py --replay`,
+`F1.4.3` un canale laterale temporale sulla passphrase admin, `F1.8.1` una doppia esecuzione
+reale - `JakeCore.answer()` e' condiviso tra il loop voce e il `ThreadingHTTPServer` del
+companion server, `F1.8.2` una perdita quasi totale di notifiche concorrenti in
+`NotificationCenter.set_mode()`); `F1.2.2` e' la prima funzionalita' NUOVA della sessione (non un
+fix), scelta come fetta verticale stretta del "kernel dei permessi"; `F1.8.6` e' una VERIFICA (il
+codice era gia' corretto per costruzione, mancava solo una prova a cronometro). `master` e'
+pulito, 2.200/2.200 test, ruff/mypy/compileall verdi. `G1` resta aperto.
 
 L'utente aveva chiesto di fermarsi dopo la sessione precedente, poi ha esplicitamente chiesto di
 controllare le cose non committate e continuare da li' - il lavoro prosegue. Restano fuori
