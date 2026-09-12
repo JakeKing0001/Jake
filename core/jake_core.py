@@ -25,7 +25,7 @@ from core.notification_center import NotificationCenter
 from core.ollama_client import OllamaClient
 from core import orchestrator
 from core.orchestrator import JakeOrchestrator
-from core.policy_engine import PolicyDecision, PolicyEngine
+from core.policy_engine import PolicyDecision, PolicyEngine, strip_authorization_signals
 from core.plugin_loader import load_plugins
 from core.response_formatter import format_plan_outcome, format_skill_result
 from core.risk import risk_of
@@ -552,23 +552,12 @@ class JakeCore:
     def _resolve_pronouns(self, text: str) -> str:
         return intent_patterns.resolve_pronouns(text, self.conversation_state.get_entities())
 
-    def _resolve_and_execute(self, command: Command) -> tuple[Command, SkillResult | None, str | None]:
-        """Esegue un comando applicando i ripieghi (v3.1, vedi core/fallbacks.py): riscrittura
-        prima dell'esecuzione (es. OPEN_URL su un nome di app installata -> OPEN_APP), e se
-        fallisce prova un'alternativa sensata o propone un'azione da confermare, invece di
-        fermarsi al primo 'non trovato'. Restituisce (comando davvero eseguito, risultato, nota
-        da anteporre alla risposta o None). Questo e' anche il punto in cui entra il motore di
-        policy centralizzato (v3.2, F1: core/policy_engine.py, decide_interactive()) - un intent
-        in always_confirm_intents (config manuale + classificazione del rischio, vedi
-        core/risk.py) chiede conferma qui, PRIMA di eseguire davvero, invece che solo nel
-        percorso a comando singolo di JakeCore._execute_command. Questo copre anche l'agente a
-        passi (core/agent.py), che esegue le skill passando da qui e non da _execute_command -
-        F1: e' anche il motivo per cui blocked_intents va ricontrollato qui, non solo a monte in
-        _execute_command: un intent disabilitato dall'utente in config.json restava altrimenti
-        eseguibile da un compito composto, che non passa mai da li'. Il gradino REQUIRE_AUTH
-        (v5.4/5.5) viene controllato PRIMA di quello CONFIRM: un'azione ADMIN, quando
-        l'autenticazione e' attiva, chiede la passphrase invece della semplice conferma si'/no."""
-        resolved = fallbacks.pre_execution_rewrite(command, self.skill_registry)
+    def _authorize_command(self, resolved: Command) -> tuple[Command, SkillResult | None]:
+        """Gate condiviso da comando diretto, agente e ripresa dopo il consenso (F1.2.5).
+
+        Non riscrive l'intent e non esegue skill: restituisce un comando autorizzato oppure
+        l'esito BLOCK/CONFIRM/REQUIRE_AUTH. Una conferma precedente non congela la policy.
+        """
         # F1.1.6 (pilota di adozione del contratto, F1.1.2): ActionProposal.for_intent() ricava il
         # rischio da risk_of() (la stessa fonte gia' usata da PolicyEngine/SkillRegistry, vedi il
         # docstring di ActionProposal) e proposal.parameters e' una COPIA di resolved.parameters -
@@ -579,7 +568,7 @@ class JakeCore:
         validate_action_proposal(proposal)
         decision = self.policy_engine.decide_interactive(proposal.intent, proposal.parameters)
         if decision == PolicyDecision.BLOCK:
-            return resolved, SkillResult(success=False, data={}, error="POLICY_BLOCKED"), None
+            return resolved, SkillResult(success=False, data={}, error="POLICY_BLOCKED")
         if decision == PolicyDecision.REQUIRE_AUTH:
             # F1: Windows Hello tentato PRIMA della passphrase quando e' attivo - un fattore che
             # non passa dalla voce (vedi core/auth_gate.py) e non richiede un secondo turno di
@@ -597,17 +586,18 @@ class JakeCore:
                 resolved = Command(resolved.intent, {
                     **(resolved.parameters or {}), "authenticated": True, "authenticated_via": "windows_hello", "confirmed": True,
                 })
-                decision = PolicyDecision.ALLOW
-            else:
-                return resolved, SkillResult(
-                    success=False,
-                    data={
-                        "message": f"Serve l'autenticazione: {self.describe_command(resolved)}. Di' la passphrase per confermare.",
-                        "confirm_parameters": {**(resolved.parameters or {}), "authenticated": True, "authenticated_via": "passphrase"},
-                        "confirm_intent": resolved.intent,
-                    },
-                    error="AUTH_REQUIRED",
-                ), None
+                # Il prompt nativo puo' durare: controlla anche una revoca intervenuta mentre
+                # era aperto, usando gli stessi segnali appena verificati (nessun nuovo prompt).
+                return self._authorize_command(resolved)
+            return resolved, SkillResult(
+                success=False,
+                data={
+                    "message": f"Serve l'autenticazione: {self.describe_command(resolved)}. Di' la passphrase per confermare.",
+                    "confirm_parameters": {**(resolved.parameters or {}), "authenticated": True, "authenticated_via": "passphrase"},
+                    "confirm_intent": resolved.intent,
+                },
+                error="AUTH_REQUIRED",
+            )
         if decision == PolicyDecision.CONFIRM:
             return resolved, SkillResult(
                 success=False,
@@ -617,7 +607,19 @@ class JakeCore:
                     "confirm_intent": resolved.intent,
                 },
                 error="CONFIRMATION_REQUIRED",
-            ), None
+            )
+        return resolved, None
+
+    def _resolve_and_execute(self, command: Command) -> tuple[Command, SkillResult | None, str | None]:
+        """Riscrive, autorizza ed esegue per comando diretto e agente.
+
+        Restituisce (comando eseguito, risultato, nota). I fallback hanno un gate proprio;
+        la ripresa di un consenso usa invece _authorize_command senza cambiare il bersaglio.
+        """
+        resolved = fallbacks.pre_execution_rewrite(command, self.skill_registry)
+        resolved, policy_result = self._authorize_command(resolved)
+        if policy_result is not None:
+            return resolved, policy_result, None
         result = self.skill_registry.execute(resolved.intent, resolved.parameters)
         if result is not None and not result.success and result.error != "CONFIRMATION_REQUIRED":
             alt_command, note = fallbacks.alternative_for(resolved, result, self.skill_registry)
@@ -917,9 +919,10 @@ class JakeCore:
         )
 
     def _finalize_pending_action(self, action: dict, fallback_text: str) -> str:
-        """Esegue davvero un'azione in sospeso ormai confermata/autenticata (skill_registry.
-        execute diretto: il gate di _resolve_and_execute non deve scattare una seconda volta
-        su qualcosa che l'utente ha appena approvato).
+        """Rivaluta la policy ed esegue il bersaglio esatto appena approvato (F1.2.5).
+
+        I marcatori della busta non sono prove: il consenso e l'identita' derivano dalla
+        risposta controllata da _handle_confirmation. Nessun rewrite o fallback dopo il si'.
 
         F1: fino a questa correzione, l'azione VERA - quella confermata, spesso la piu'
         rischiosa (DESTRUCTIVE/ADMIN, altrimenti non avrebbe mai chiesto conferma) - non
@@ -931,27 +934,31 @@ class JakeCore:
         ricevuta della conferma si correla a quella della richiesta originale nel ledger."""
         trace_id = action.get("trace_id") or new_trace_id()
         started = time.monotonic()
-        result = self.skill_registry.execute(action["intent"], action["parameters"])
+        parameters = {**strip_authorization_signals(action["parameters"]), "confirmed": True}
+        if action.get("reason") == "auth_required":
+            parameters.update(authenticated=True, authenticated_via="passphrase")
+        command, result = self._authorize_command(Command(action["intent"], parameters))
+        if result is None:
+            result = self.skill_registry.execute(command.intent, command.parameters)
         # Una conferma puo' chiederne un'altra (CREATE_SKILL: "provo a imparare?" -> codice
         # scritto -> "lo attivo?"): stessa gestione del percorso normale.
         if result is not None and result.error in ("CONFIRMATION_REQUIRED", "AUTH_REQUIRED"):
             reason = "auth_required" if result.error == "AUTH_REQUIRED" else "confirmation_required"
-            envelope = self._safe_confirm_envelope(action["intent"], action["parameters"], result, reason)
+            envelope = self._safe_confirm_envelope(command.intent, command.parameters, result, reason)
             self.conversation_state.set_pending_action({
-                "intent": envelope.get("confirm_intent", action["intent"]),
-                "parameters": envelope.get("confirm_parameters", action["parameters"]),
+                "intent": envelope.get("confirm_intent", command.intent),
+                "parameters": envelope.get("confirm_parameters", command.parameters),
                 "reason": reason,
                 "text": action.get("text", ""),
                 "trace_id": trace_id,
             })
-            self._log_action_outcome(trace_id, started, action["intent"], action["parameters"], result=reason)
+            self._log_action_outcome(trace_id, started, command.intent, command.parameters, result=reason)
             return envelope.get("message", "Confermi questa azione?")
         outcome = "success" if (result is not None and result.success) else f"error:{result.error}" if result is not None else "no_result"
-        self._log_action_outcome(trace_id, started, action["intent"], action["parameters"], result=outcome)
-        response = format_skill_result(action["intent"], result, self.skill_registry)
-        command = Command(action["intent"], action["parameters"])
+        self._log_action_outcome(trace_id, started, command.intent, command.parameters, result=outcome)
+        response = format_skill_result(command.intent, result, self.skill_registry)
         if result is not None and result.success:
-            self.conversation_state.remember_entities(action["intent"], action["parameters"], result.data or {})
+            self.conversation_state.remember_entities(command.intent, command.parameters, result.data or {})
         if action.get("reason") in ("confirmation_required", "auth_required") and action.get("text"):
             self.learning.observe(action["text"], command, result, route="llm" if self.last_route == "llm" else "confirmed")
         self._remember_exchange(action.get("text", fallback_text), command, response)

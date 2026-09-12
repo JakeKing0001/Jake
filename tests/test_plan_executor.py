@@ -429,8 +429,8 @@ class AuthorizationSignalStrippingTests(unittest.TestCase):
 
     def test_the_ledger_reflects_no_real_authorization_not_the_spoofed_one(self):
         """Anche il ledger (F1) non deve mai mostrare 'confirmed'/'passphrase' per un'azione
-        che in realta' non ha mai ricevuto nessuna conferma reale - vedi
-        ActionLedgerWiringTests sopra per lo stesso schema di test."""
+        che non ha ricevuto conferma. La skill vera chiede consenso: 'pending', non 'none',
+        come per lo stesso esito restituito direttamente da PolicyEngine."""
         target = Path(tempfile.gettempdir()) / "jake_test_plan_auth_strip_9414.txt"
         target.write_text("dati importanti")
         self.addCleanup(lambda: target.unlink(missing_ok=True))
@@ -445,7 +445,9 @@ class AuthorizationSignalStrippingTests(unittest.TestCase):
 
         ledger.record.assert_called_once()
         (receipt,), _ = ledger.record.call_args
-        self.assertEqual(receipt.authorization, "none")
+        self.assertEqual(receipt.authorization, "pending")
+        self.assertEqual(receipt.error_category, "pending")
+        self.assertTrue(target.exists())
 
     def test_non_authorization_parameters_of_the_same_step_are_left_untouched(self):
         """La sanificazione toglie solo le chiavi di autorizzazione, non altri parametri

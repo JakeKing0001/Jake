@@ -652,7 +652,8 @@ Dipende da: F1.1.
 
 Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa dal PolicyEngine.
 
-- Stato: `DOING`; `F1.2.5` chiuso solo per il rollback filesystem; `F1.2.1` chiuso parzialmente
+- Stato: `DOING`; `F1.2.5` parziale per rollback filesystem e ripresa del consenso (questa
+  ultima verificata localmente, in attesa di CI); `F1.2.1` chiuso parzialmente
   (percorso 3, vedi sotto); `F1.2.4` chiuso per il percorso planner (vedi sotto); `F1.2.6`
   (parziale, solo PlanExecutor) e `F1.2.7` chiusi (vedi sotto); resto aperto.
 - `F1.2.1` (parziale) — 12/09/2026: chiuso il buco concreto documentato in
@@ -714,6 +715,29 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   `tests/test_agent.py`, `tests/test_plan_executor.py` verificano sia il rifiuto (intent
   compensatorio bloccato) sia che un blocco su un intent diverso non impedisca comunque il
   rollback. Prova: 1.959/1.959 test, ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.2.5` (ripresa del consenso, `VERIFY` in attesa di CI) — 12/09/2026:
+  input: azione pending e risposta validata; output: esecuzione del bersaglio approvato,
+  diniego o nuova attesa di autenticazione. Tocca `JakeCore`/ledger e i percorsi 1/2/4, senza nuovi
+  permessi, rete, provider o azioni reali sul PC nei test. `_finalize_pending_action` chiamava
+  il dispatcher grezzo senza rivalutare la policy: una revoca dopo il prompt non fermava
+  l'azione e i marcatori della busta venivano trattati come prove di autenticazione. Sei nuovi
+  test hanno fallito prima del fix. Estratto `_authorize_command`, condiviso con il percorso
+  diretto/agente: rivaluta blocco/conferma/autenticazione, anche dopo Windows Hello. La ripresa
+  elimina i marcatori della busta e ricava consenso e provenienza dalla risposta verificata;
+  nessun rewrite/fallback puo' cambiare il bersaglio approvato. Blocchi e nuove attese restano
+  correlati al `trace_id` originale; diniego `authorization=blocked`, nessuna persistenza in
+  modalita' privata. `authorization_of` normalizza i codici come la tassonomia errori: un
+  `error:POLICY_BLOCKED` non diventa piu' una ricevuta autenticata solo perche' il prompt Hello
+  era riuscito prima della revoca (due ulteriori test rossi prima del fix di audit).
+  Le richieste di consenso della skill, anche con prefisso `error:`, sono ora `pending`
+  come quelle della policy, non `none`; aggiornato il vecchio test di stripping del piano
+  mantenendo la prova che il file resti intatto e nessuna autorizzazione sia stata concessa.
+  Passano 13 nuovi test, inclusi file temporaneo reale preservato dopo
+  revoca, pending dell'agente, passphrase con entrambi i gate e conferma a due stadi.
+  Baseline dell'HEAD `0a004ba`: 2.094 test; dopo il fix: 2.107/2.107,
+  ruff, mypy su 75 file e compileall verdi. Smoke CLI con Ollama irraggiungibile: avvio,
+  risposta e arresto in 4,8 s, exit 0. Rimangono aperti capability, policy completa del
+  rollback/workflow, dispatcher grezzo e ownership/race di sessione; G1 non e' superato.
 - `F1.2.8` — 11/09/2026: audit dei test di bypass gia' esistenti per ognuno dei 7 percorsi di
   [docs/action-execution-paths.md](docs/action-execution-paths.md), integrato dove mancava un
   caso reale invece di riscrivere da zero. Percorso 1/2 (comando diretto/agente):
@@ -2207,16 +2231,23 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 11/09/2026: il sync di `31409cf` ha prodotto il run `34615971747`. Python 3.12 e HUD
-sono completamente verdi; entrambi gli artifact diagnostici vengono pubblicati, quindi il fix
-CI e `F0.2.7` sono verificati. Python 3.11 si arresta nel test GUI con il crash nativo
-`Tcl_AsyncDelete` causato dai molteplici interpreti `Tk` del test harness. La correzione locale
-mantiene un solo interprete Tcl e finestre `Toplevel` isolate; il modulo passa 20/20 e la baseline
-locale e' 1.947/1.947, con ruff, mypy su 75 file e compileall verdi. Il repository e' pubblico e
-`KL-001` e' risolto; `master` resta non protetto.
+Aggiornato 12/09/2026 dopo ricognizione di architettura, pipeline, contratti, lifecycle, test e
+stato remoto. `master` era pulito e sincronizzato su `0a004ba`; il
+[run CI 34704932252](https://github.com/JakeKing0001/Jake/actions/runs/34704932252) e' verde.
+La branch protection richiede Python 3.11, Python 3.12 e HUD nativo, con `strict=true` ed
+enforcement per gli admin. Il vecchio blocco Tcl/sync/protezione non e' piu' corrente: G0 resta
+superato, come gia' documentato al suo gate. Le DLL Qt6 sono presenti accanto al binario locale
+`hud/native/build/JakeHud.exe` e il deploy post-build e' configurato in CMake; questo controllo
+non certifica il comportamento visivo dell'HUD.
 
-La prossima azione esatta e' sincronizzare la correzione Tcl e osservare una nuova CI reale, poi
-configurare i tre check osservati come obbligatori su `master`; infine aggiornare `F0.1`, `F0.2`
-e G0 in base all'esito. Codex non esegue push né modifica impostazioni GitHub: finche' il nuovo
-workflow non e' verde su 3.11/3.12/HUD e `F0.2.6` non e' verificato, non dichiarare G0 superato e
-non iniziare nuove feature fuori da F0.
+L'incremento locale corrente e' `F1.2.5`, ripresa del consenso: 2.107/2.107 test e quality gate
+verdi, evidenza nella sezione F1.2. Resta `VERIFY` per la CI del nuovo commit. La baseline e il
+run completo dopo il fix mostrano anche i warning preesistenti del test harness
+(`ResourceWarning` subprocess e disconnessione HTTP `WinError 10053`), senza test falliti:
+non sono stati risolti o nascosti da questo incremento.
+
+Prossima azione: sincronizzare il commit locale e verificare i tre check sulla sua SHA, senza
+riusare il verde di `0a004ba` per codice diverso. Poi proseguire con `F1.2.6`, motivazione
+di policy nei percorsi interattivi e agente, includendo diniego, fallback e Windows Hello.
+Codex non esegue push ne' cambia impostazioni GitHub: secondo il ritmo della sezione 20,
+non iniziare il prossimo ID prima della nuova CI verde. G1 resta aperto.
