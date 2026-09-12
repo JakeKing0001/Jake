@@ -28,8 +28,23 @@ Non e' ancora un vero "kernel dei permessi" con capability token per skill/agent
 (quello resta un pezzo piu' grande, dichiarato ⬜ in ROADMAP.md): e' la separazione
 planner/policy/executor completata per la parte policy/executor - il planner
 (core/planner_provider.py) resta un produttore di piani che la policy poi giudica, non ancora
-esso stesso un consumatore di PolicyEngine (non ha bisogno di esserlo: non decide, propone)."""
+esso stesso un consumatore di PolicyEngine (non ha bisogno di esserlo: non decide, propone).
+
+F1.2.2 (capability, primo pezzo): `allowed_filesystem_roots` e' la prima capability vera - non
+solo un intent permesso/vietato, ma UN INTENT permesso solo entro certi confini. Deliberatamente
+opt-in e limitata: default vuoto (nessuna restrizione, comportamento identico a prima - Jake
+continua a poter toccare qualunque percorso come sempre, non e' un cambio retroattivo che
+romperebbe l'uso normale senza che l'utente lo chieda), e applicata oggi solo ai quattro intent di
+mutazione filesystem gia' raggruppati altrove (CREATE_PATH/RENAME_PATH/MOVE_PATH/DELETE_PATH, vedi
+core/execution_safety.py::INTENT_SAFETY_REGISTRY) e solo sul percorso interattivo
+(decide_interactive), non ancora su decide_automated (che oggi non riceve affatto `parameters` -
+estenderlo e' un cambio di firma piu' ampio, rimandato deliberatamente invece di infilarlo qui).
+App/contatto/dominio web/device/servizio Home Assistant/rete/durata (le altre capability elencate
+in ROADMAP.md) e l'intersezione multi-livello di F1.2.3 (utente/dispositivo/agente/skill/sessione)
+restano completamente aperte."""
+import os
 from enum import Enum
+from pathlib import Path
 
 
 class PolicyDecision(str, Enum):
@@ -69,9 +84,42 @@ POLICY_REASON_BLOCKED = "intent_in_blocked_intents"
 POLICY_REASON_REQUIRE_AUTH = "intent_in_require_auth_intents_and_auth_gate_enabled"
 POLICY_REASON_CONFIRM = "intent_in_always_confirm_intents"
 POLICY_REASON_ALLOWED = "no_restriction_matched"
+# F1.2.2: un percorso fuori da allowed_filesystem_roots - una motivazione DIVERSA da
+# POLICY_REASON_BLOCKED (che significa "l'intent stesso e' bloccato sempre") perche' qui lo
+# STESSO intent puo' essere permesso o negato a seconda del parametro, non dell'intent da solo.
+POLICY_REASON_CAPABILITY_DENIED = "path_outside_allowed_filesystem_roots"
 POLICY_REASONS = frozenset({
     POLICY_REASON_BLOCKED, POLICY_REASON_REQUIRE_AUTH, POLICY_REASON_CONFIRM, POLICY_REASON_ALLOWED,
+    POLICY_REASON_CAPABILITY_DENIED,
 })
+
+# F1.2.2: gli stessi quattro intent gia' raggruppati in core/execution_safety.py::
+# INTENT_SAFETY_REGISTRY come "i quattro intent filesystem" (naturalmente idempotenti, con
+# rollback) - qui sono anche gli unici che oggi rispettano allowed_filesystem_roots. Trovare/
+# leggere file (FIND_FILE, GET_FILE_INFO, READ_FILE_TEXT...) non e' ancora coperto: un primo
+# passo deliberatamente limitato alle mutazioni, le piu' rischiose.
+FILESYSTEM_CAPABILITY_INTENTS = frozenset({"CREATE_PATH", "RENAME_PATH", "MOVE_PATH", "DELETE_PATH"})
+
+# Nomi di parametro gia' in uso dalle quattro skill sopra per un percorso su cui l'azione ha
+# effetto (vedi le rispettive metadata["parameters"]): "path" da tutte e quattro,
+# "destination" in aggiunta da MOVE_PATH - un file spostato FUORI dalle radici consentite
+# sarebbe un modo per aggirare la capability anche partendo da un percorso permesso.
+_FILESYSTEM_PATH_PARAMETER_KEYS = ("path", "destination")
+
+
+def _normalized_for_comparison(path: Path) -> str:
+    # os.path.normcase abbassa il case su Windows (NTFS e' case-insensitive per default) e non
+    # fa nulla su POSIX - stessa normalizzazione su entrambi i lati del confronto.
+    return os.path.normcase(str(path))
+
+
+def _is_within_root(path: Path, root: Path) -> bool:
+    """True se `path` e' uguale a `root` o un suo discendente. Confronto per stringa (non
+    Path.is_relative_to, che su Windows non normalizza il case) dopo normcase su entrambi i lati;
+    il separatore esplicito nel confronto evita che una radice "C:\\Allowed" corrisponda per
+    errore a un percorso "C:\\AllowedButNot" (stesso prefisso di stringa, cartella diversa)."""
+    path_str, root_str = _normalized_for_comparison(path), _normalized_for_comparison(root)
+    return path_str == root_str or path_str.startswith(root_str + os.sep)
 
 
 class PolicyEngine:
@@ -82,12 +130,18 @@ class PolicyEngine:
 
     def __init__(
         self, auth_gate=None, blocked_intents: set | None = None, always_confirm_intents: set | None = None,
-        require_auth_intents: set | None = None,
+        require_auth_intents: set | None = None, allowed_filesystem_roots: set | list | None = None,
     ):
         self.auth_gate = auth_gate
         self.blocked_intents = set(blocked_intents or set())
         self.always_confirm_intents = set(always_confirm_intents or set())
         self.require_auth_intents = set(require_auth_intents or set())
+        # F1.2.2: vuoto/None (default) = nessuna restrizione, comportamento invariato rispetto a
+        # prima che questa capability esistesse - stesso principio di blocked_intents/
+        # always_confirm_intents, gia' vuoti per default. Risolti una volta qui (non a ogni
+        # controllo): un percorso configurato che non esiste ancora sul disco si risolve comunque
+        # in modo deterministico con Path.resolve() (non richiede che esista).
+        self._allowed_filesystem_roots = [Path(root).resolve() for root in (allowed_filesystem_roots or [])]
 
     def register_intent(self, intent: str) -> None:
         """Sincronizza UN intent con la policy corrente, secondo la sua classificazione del
@@ -151,6 +205,8 @@ class PolicyEngine:
         parameters = parameters or {}
         if intent in self.blocked_intents:
             return PolicyDecision.BLOCK, POLICY_REASON_BLOCKED
+        if intent in FILESYSTEM_CAPABILITY_INTENTS and not self._filesystem_capability_allows(parameters):
+            return PolicyDecision.BLOCK, POLICY_REASON_CAPABILITY_DENIED
         if (
             self.auth_gate is not None
             and getattr(self.auth_gate, "enabled", False)
@@ -163,11 +219,37 @@ class PolicyEngine:
         return PolicyDecision.ALLOW, POLICY_REASON_ALLOWED
 
     def _decide_automated_reasoned(self, intent: str) -> tuple[PolicyDecision, str]:
+        # F1.2.2: allowed_filesystem_roots NON e' ancora applicato qui - decide_automated() non
+        # riceve `parameters` (vedi il docstring del modulo), quindi PlanExecutor/RUN_WORKFLOW/i
+        # trigger possono oggi ancora mutare un percorso fuori dalle radici consentite. Dichiarato
+        # apertamente, non nascosto: estendere la firma e' un cambio piu' ampio (tocca
+        # PlanExecutor, execution_safety.rollback_effect, RunWorkflowSkill, TriggerScheduler e i
+        # rispettivi test), rimandato deliberatamente a un incremento dedicato.
         if intent in self.blocked_intents:
             return PolicyDecision.BLOCK, POLICY_REASON_BLOCKED
         if intent in self.always_confirm_intents:
             return PolicyDecision.CONFIRM, POLICY_REASON_CONFIRM
         return PolicyDecision.ALLOW, POLICY_REASON_ALLOWED
+
+    def _filesystem_capability_allows(self, parameters: dict) -> bool:
+        """True se nessuna radice e' configurata (default, nessuna restrizione) oppure se OGNI
+        parametro-percorso presente (`path`, e `destination` per MOVE_PATH) e' entro una delle
+        radici consentite. Un percorso che non si riesce nemmeno a risolvere (caratteri non
+        validi, troppo lungo) non viene approvato per difetto - vedi validate_action_receipt e lo
+        stesso principio "nega per default" gia' applicato altrove in F1.2."""
+        if not self._allowed_filesystem_roots:
+            return True
+        for key in _FILESYSTEM_PATH_PARAMETER_KEYS:
+            value = parameters.get(key)
+            if not value or not isinstance(value, str):
+                continue
+            try:
+                resolved = Path(value).resolve()
+            except (OSError, ValueError):
+                return False
+            if not any(_is_within_root(resolved, root) for root in self._allowed_filesystem_roots):
+                return False
+        return True
 
     # F1.2.6: varianti PUBBLICHE delle due sopra, per chi (PlanExecutor, F1.2.6) ha bisogno di
     # salvare la motivazione nel ledger insieme alla decisione, senza ricalcolarla una seconda
