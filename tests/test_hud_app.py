@@ -334,6 +334,30 @@ class OpenSettingsAndCleanupTests(unittest.TestCase):
         session.stop.assert_called_once()
         app.tray.hide.assert_called_once()
 
+    def test_a_failing_core_shutdown_is_logged_not_silently_swallowed(self):
+        """F1.8.4 (stesso principio gia' applicato a JakeCore.shutdown/TaskAgent.on_step in
+        questa sessione): un fallimento durante la chiusura del HUD non deve sparire senza
+        log."""
+        core = _fake_core()
+        core.shutdown.side_effect = RuntimeError("boom")
+        app = _jarvis_app(core=core)
+        app.logger = mock.MagicMock()
+        with mock.patch.dict("sys.modules", {"keyboard": mock.MagicMock()}):
+            app._cleanup()  # non deve sollevare
+        app.logger.exception.assert_called_once()
+        app.tray.hide.assert_called_once(), "il resto della pulizia deve comunque completarsi"
+
+    def test_a_failing_session_stop_does_not_prevent_core_shutdown(self):
+        session = mock.MagicMock()
+        session.stop.side_effect = RuntimeError("boom")
+        core = _fake_core()
+        app = _jarvis_app(session=session, core=core)
+        app.logger = mock.MagicMock()
+        with mock.patch.dict("sys.modules", {"keyboard": mock.MagicMock()}):
+            app._cleanup()  # non deve sollevare
+        core.shutdown.assert_called_once()
+        app.logger.exception.assert_called_once()
+
     def test_quit_calls_app_quit(self):
         app = _jarvis_app()
         with mock.patch.object(app.app, "quit") as quit_method:
