@@ -16,6 +16,7 @@ from pathlib import Path
 
 from core.execution_safety import rollback_effect, verify_effect
 from core.policy_engine import PolicyEngine
+from core.skill_result import SkillResult
 from skills.create_path import CreatePathSkill
 from skills.delete_path import DeletePathSkill
 from skills.move_path import MovePathSkill
@@ -186,6 +187,76 @@ class IntentSafetyRegistryConsistencyTests(unittest.TestCase):
         for intent in VERIFIABLE_INTENTS:
             with self.subTest(intent=intent):
                 self.assertTrue(callable(INTENT_SAFETY_REGISTRY[intent].verifier))
+
+
+class IsSafeToAutoRetryTests(unittest.TestCase):
+    """F1.3.6 ("impedire retry automatico per azioni non idempotenti senza chiave deduplica"):
+    solo READ_ONLY e i quattro intent filesystem di INTENT_SAFETY_REGISTRY (naturalmente
+    idempotenti - vedi il docstring di is_safe_to_auto_retry) sono sicuri da ritentare alla
+    cieca. Verificato con intent reali del catalogo, non finti, cosi' una riclassificazione
+    futura di risk.py che cambiasse la categoria di uno di questi intent farebbe fallire il
+    test invece di lasciarlo silenziosamente disallineato."""
+
+    def test_read_only_intent_is_safe_to_retry(self):
+        from core.execution_safety import is_safe_to_auto_retry
+
+        self.assertTrue(is_safe_to_auto_retry("GET_TIME"))
+
+    def test_filesystem_intents_in_the_safety_registry_are_safe_to_retry(self):
+        from core.execution_safety import INTENT_SAFETY_REGISTRY, is_safe_to_auto_retry
+
+        for intent in INTENT_SAFETY_REGISTRY:
+            with self.subTest(intent=intent):
+                self.assertTrue(is_safe_to_auto_retry(intent))
+
+    def test_non_idempotent_local_reversible_intent_is_not_safe_to_retry(self):
+        from core.execution_safety import is_safe_to_auto_retry
+
+        self.assertFalse(is_safe_to_auto_retry("ADD_NOTE"))
+
+    def test_destructive_intent_outside_the_registry_is_not_safe_to_retry(self):
+        from core.execution_safety import is_safe_to_auto_retry
+
+        self.assertFalse(is_safe_to_auto_retry("EMPTY_RECYCLE_BIN"))
+
+
+class ExecuteWithRetryRespectsIdempotenceTests(unittest.TestCase):
+    """Stessa garanzia di IsSafeToAutoRetryTests, ma osservata sul comportamento reale di
+    execute_with_retry (numero di chiamate a execute_fn), non solo sulla funzione di
+    classificazione isolata."""
+
+    def test_retry_safe_intent_is_retried_up_to_max_attempts(self):
+        from core.execution_safety import MAX_ATTEMPTS, execute_with_retry
+
+        calls = []
+
+        def execute_fn(intent, parameters):
+            calls.append(intent)
+            if len(calls) < MAX_ATTEMPTS:
+                return SkillResult(success=False, data={}, error="OPERATION_FAILED")
+            return SkillResult(success=True, data={})
+
+        result, attempts = execute_with_retry(execute_fn, "CREATE_PATH", {"path": "C:/tmp/x.txt"})
+
+        self.assertTrue(result.success)
+        self.assertEqual(attempts, MAX_ATTEMPTS)
+        self.assertEqual(len(calls), MAX_ATTEMPTS)
+
+    def test_non_idempotent_intent_is_not_retried_even_on_a_transient_error(self):
+        from core.execution_safety import execute_with_retry
+
+        calls = []
+
+        def execute_fn(intent, parameters):
+            calls.append(intent)
+            return SkillResult(success=False, data={}, error="OPERATION_FAILED")
+
+        result, attempts = execute_with_retry(execute_fn, "ADD_NOTE", {"text": "prova"})
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "OPERATION_FAILED")
+        self.assertEqual(attempts, 1)
+        self.assertEqual(len(calls), 1, "execute_fn non deve essere richiamata una seconda volta")
 
 
 if __name__ == "__main__":

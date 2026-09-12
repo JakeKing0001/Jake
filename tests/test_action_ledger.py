@@ -215,6 +215,37 @@ class ActionReceiptErrorCategoryValidationTests(unittest.TestCase):
             validate_action_receipt(self._receipt(error_category="not_a_real_category"))
 
 
+class ActionReceiptPolicyReasonValidationTests(unittest.TestCase):
+    """F1.2.6: policy_reason e' facoltativo (None per i chokepoint che non lo popolano ancora -
+    vedi il docstring del campo in core/action_ledger.py) ma, quando presente, deve essere una
+    delle quattro costanti di core.policy_engine.POLICY_REASONS - un vocabolario chiuso, mai
+    testo libero (e' proprio questo che rende impossibile un segreto li' dentro)."""
+
+    def _receipt(self, **overrides) -> ActionReceipt:
+        defaults = {
+            "action_id": "a1", "trace_id": "t1", "ts": 123.0, "intent": "OPEN_APP", "requested_by": "user",
+            "risk_decision": "local_reversible", "authorization": "none", "result": "success",
+            "idempotency_key": "k1",
+        }
+        defaults.update(overrides)
+        return ActionReceipt(**defaults)
+
+    def test_default_policy_reason_is_none(self):
+        self.assertIsNone(self._receipt().policy_reason)
+
+    def test_none_policy_reason_passes_validation(self):
+        validate_action_receipt(self._receipt(policy_reason=None))
+
+    def test_a_known_policy_reason_passes_validation(self):
+        from core.policy_engine import POLICY_REASON_ALLOWED
+
+        validate_action_receipt(self._receipt(policy_reason=POLICY_REASON_ALLOWED))
+
+    def test_an_unrecognized_policy_reason_is_rejected(self):
+        with self.assertRaises(ValueError):
+            validate_action_receipt(self._receipt(policy_reason="not_a_real_reason"))
+
+
 class ActionLedgerTestCase(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()

@@ -114,7 +114,7 @@ class PlanExecutor:
                     outcome.rolled_back = self._rollback(outcome.completed, policy_engine)
                     self._log_step(
                         trace_id, private, model, requested_by, time.monotonic(), step.intent, safe_parameters,
-                        result="error:KILLED", verified=None,
+                        result="error:KILLED", verified=None, policy_reason=None,
                     )
                 return outcome
             # F1 (core/policy_engine.py): stessa decisione usata dal percorso interattivo di
@@ -122,8 +122,14 @@ class PlanExecutor:
             # e' pronto a rispondere "confermi?" in tempo reale, quindi un intent DESTRUCTIVE/
             # ADMIN si ferma sempre, un intent bloccato dall'utente in config.json pure.
             # F1.2.1: policy_engine=None e' FAIL-CLOSED (BLOCK), non piu' ALLOW - vedi il
-            # docstring di execute() sul perche'.
-            decision = policy_engine.decide_automated(step.intent) if policy_engine is not None else PolicyDecision.BLOCK
+            # docstring di execute() sul perche'. F1.2.6: *_with_reason() invece di
+            # decide_automated() - stessa decisione, ma porta anche la motivazione (un
+            # vocabolario chiuso di quattro costanti, mai testo libero - vedi
+            # core/policy_engine.py::POLICY_REASONS) da salvare nel ledger.
+            if policy_engine is not None:
+                decision, policy_reason = policy_engine.decide_automated_with_reason(step.intent)
+            else:
+                decision, policy_reason = PolicyDecision.BLOCK, None
             if decision == PolicyDecision.BLOCK:
                 outcome.stopped_step = StepOutcome(
                     step=step,
@@ -134,7 +140,7 @@ class PlanExecutor:
                     outcome.rolled_back = self._rollback(outcome.completed, policy_engine)
                     self._log_step(
                         trace_id, private, model, requested_by, time.monotonic(), step.intent, safe_parameters,
-                        result="policy_blocked", verified=None,
+                        result="policy_blocked", verified=None, policy_reason=policy_reason,
                     )
                 return outcome
             if decision == PolicyDecision.CONFIRM:
@@ -149,7 +155,7 @@ class PlanExecutor:
                 if not dry_run:
                     self._log_step(
                         trace_id, private, model, requested_by, time.monotonic(), step.intent, safe_parameters,
-                        result="confirmation_required", verified=None,
+                        result="confirmation_required", verified=None, policy_reason=policy_reason,
                     )
                 return outcome
 
@@ -177,7 +183,7 @@ class PlanExecutor:
                 outcome.completed.append(step_outcome)
                 self._log_step(
                     trace_id, private, model, requested_by, step_started, step.intent, safe_parameters,
-                    result="success", verified=verified,
+                    result="success", verified=verified, policy_reason=policy_reason,
                 )
                 continue
 
@@ -186,7 +192,7 @@ class PlanExecutor:
                 outcome.rolled_back = self._rollback(outcome.completed, policy_engine)
             self._log_step(
                 trace_id, private, model, requested_by, step_started, step.intent, safe_parameters,
-                result=f"error:{step_outcome.result.error}", verified=verified,
+                result=f"error:{step_outcome.result.error}", verified=verified, policy_reason=policy_reason,
             )
             return outcome
 
@@ -197,7 +203,7 @@ class PlanExecutor:
 
     def _log_step(
         self, trace_id: str, private: bool, model: str | None, requested_by: str, started: float, intent: str,
-        parameters: dict, *, result: str, verified: bool | None,
+        parameters: dict, *, result: str, verified: bool | None, policy_reason: str | None,
     ) -> None:
         """Stesso formato e stesso trace_id condiviso di TaskAgent._log_step (core/agent.py):
         un piano fisso eseguito da PlanExecutor (il ripiego di JakeCore._try_plan, o
@@ -205,7 +211,9 @@ class PlanExecutor:
         passi, cosi' jake_actions.jsonl non distingue i due esecutori per chi lo legge dopo.
         Un passo fallito alimenta anche session_recorder, coi parametri del passo, per
         tools/replay_session.py. Alimenta anche action_ledger (F1) con lo stesso requested_by
-        di tutto il piano."""
+        di tutto il piano. policy_reason (F1.2.6): None per il passo interrotto dal kill switch
+        (non e' una decisione di policy), altrimenti una delle quattro costanti di
+        core.policy_engine.POLICY_REASONS."""
         duration_ms = (time.monotonic() - started) * 1000
         risk = risk_of(intent).value
         log_action(
@@ -218,7 +226,7 @@ class PlanExecutor:
                 requested_by=requested_by, risk_decision=risk, authorization=authorization_of(result, parameters),
                 result=result, idempotency_key=idempotency_key_of(intent, parameters),
                 verified=verification_status_of(verified), error_category=error_category_of(result),
-                duration_ms=duration_ms, model=model,
+                policy_reason=policy_reason, duration_ms=duration_ms, model=model,
             ),
             private=private,
         )
