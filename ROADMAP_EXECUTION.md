@@ -1181,9 +1181,28 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
 
 - Stato: `DOING`; `F1.8.2` chiuso per tutti i registri/store condivisi tra thread (ledger,
   promemoria, todo, memoria a lungo termine); `F1.8.3` chiuso per RUN_COMMAND (il solo
-  subprocess bloccante abbastanza lungo da essere rilevante, vedi sotto); resto della fase (coda
-  per azioni concorrenti, drain allo shutdown, deadlock timeout, client lenti sull'event bus, test
+  subprocess bloccante abbastanza lungo da essere rilevante, vedi sotto); `F1.8.4` chiuso
+  parzialmente (visibilita' dei fallimenti di shutdown, non ancora drain/checkpoint veri); resto
+  della fase (coda per azioni concorrenti, deadlock timeout, client lenti sull'event bus, test
   di race su trigger/handoff/conferma/undo) non affrontato.
+- `F1.8.4` (parziale, visibilita') — 12/09/2026: "gestire shutdown con drain limitato, checkpoint
+  e release dei device". Buco reale, non solo teorico - `JakeCore.shutdown()` racchiudeva ogni
+  `component.stop()` (scheduler, trigger_scheduler, system_advisor, desktop_context,
+  companion_server) e il salvataggio delle cache degli indici semantici in un
+  `except Exception: pass` SENZA ALCUN LOG: un componente che non si chiude bene (una connessione
+  companion non rilasciata, un hook desktop_context non rimosso) o un salvataggio di cache fallito
+  (disco pieno, permessi negati) sparivano senza lasciare traccia in nessun log - un utente che si
+  accorge che NEST "dimentica" la cache dopo un riavvio, o che una porta resta occupata dopo aver
+  chiuso Jake, non avrebbe avuto modo di scoprire perche'. Corretto: ogni fallimento viene ora
+  loggato con `self.logger.exception(...)` (nome del componente per i cinque `component.stop()`,
+  un messaggio dedicato per il salvataggio cache) PRIMA di continuare con gli altri passi - lo
+  shutdown non si ferma su un componente rotto, semplicemente non lo nasconde piu'. Non ancora
+  affrontato (il resto, piu' ampio, di F1.8.4): nessun drain limitato di un'azione ancora in corso
+  (un `TaskAgent.run()` a meta' non viene ne' atteso ne' interrotto dallo shutdown), nessun
+  checkpoint vero da cui riprendere, nessun rilascio esplicito di device audio (TTS/STT). Aggiunti
+  2 nuovi test in `tests/test_jake_core_pipeline.py::ShutdownTests` (arricchito anche `FakeLogger`
+  di test per registrare le chiamate a `.exception()`, prima un no-op silenzioso). Prova:
+  2.163/2.163 test, ruff/mypy/compileall verdi su tutti i file toccati.
 - `F1.8.3` (parziale, RUN_COMMAND) — 12/09/2026: "propagare cancellazione dal kill switch a...
   subprocess". Buco reale, riprodotto prima del fix: `kill_switch.is_active()` viene controllato
   solo TRA un passo e il successivo da `TaskAgent`/`PlanExecutor` (vedi `core/kill_switch.py`),
@@ -2388,14 +2407,14 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 Aggiornato 12/09/2026. `F1.2.6` (percorso interattivo/agente, ripreso da lavoro non committato di
 una sessione precedente), `F1.7.1` (ledger resistente a record parziali/arresto improvviso),
 `F1.8.3` (kill switch propagato a RUN_COMMAND), `F1.4.1` (scrittura atomica di
-config/settings.json) e `F1.7.5` (replay sicuro) sono stati completati e verificati in questa
-sessione, ciascuno con un buco reale riprodotto empiricamente prima del fix - `F1.8.3`
-addirittura con due buchi ULTERIORI trovati durante la verifica del fix stesso, `F1.4.1` lo stesso
-identico buco di `F1.7.1` ma con un impatto piu' grave, e `F1.7.5` un bypass completo
-dell'autorizzazione (un `DELETE_PATH` gia' "confermato" nel record veniva rieseguito da
-`tools/replay_session.py --replay` cancellando un file vero, senza alcun controllo) - vedi le
-rispettive voci in sezione F1.8/F1.4/F1.7. `master` e' pulito, 2.161/2.161 test,
-ruff/mypy/compileall verdi. `G1` resta aperto.
+config/settings.json), `F1.7.5` (replay sicuro) e `F1.8.4` (parziale, visibilita' dei fallimenti
+di shutdown) sono stati completati e verificati in questa sessione, ciascuno con un buco reale
+riprodotto empiricamente prima del fix - `F1.8.3` addirittura con due buchi ULTERIORI trovati
+durante la verifica del fix stesso, `F1.4.1` lo stesso identico buco di `F1.7.1` ma con un impatto
+piu' grave, e `F1.7.5` un bypass completo dell'autorizzazione (un `DELETE_PATH` gia' "confermato"
+nel record veniva rieseguito da `tools/replay_session.py --replay` cancellando un file vero, senza
+alcun controllo) - vedi le rispettive voci in sezione F1.8/F1.4/F1.7. `master` e' pulito,
+2.163/2.163 test, ruff/mypy/compileall verdi. `G1` resta aperto.
 
 L'utente aveva chiesto di fermarsi dopo la sessione precedente, poi ha esplicitamente chiesto di
 controllare le cose non committate e continuare da li' - il lavoro prosegue. Restano fuori
@@ -2411,6 +2430,6 @@ Candidati piccoli ancora aperti in F1: il resto di `F1.2.1` (percorso 7,
 `F1.4` (una vera classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7`
 (`F1.7.2` trace id condiviso con undo/notifica, `F1.7.3` retention differenziata, `F1.7.4`
 redazione strutturata per tipo di dato, `F1.7.8` modalita' privata end-to-end su ogni nuovo
-record), il resto di `F1.8` (`F1.8.1` coda azioni concorrenti, `F1.8.4` drain allo shutdown,
-`F1.8.5` deadlock timeout, `F1.8.6` client lenti sull'event bus, `F1.8.7` test di race su
-trigger/handoff/conferma/undo).
+record), il resto di `F1.8` (`F1.8.1` coda azioni concorrenti, il resto di `F1.8.4` - drain
+limitato di un'azione in corso, checkpoint vero, release device audio, `F1.8.5` deadlock timeout,
+`F1.8.6` client lenti sull'event bus, `F1.8.7` test di race su trigger/handoff/conferma/undo).

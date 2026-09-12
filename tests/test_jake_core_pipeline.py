@@ -194,6 +194,9 @@ class FakeKillSwitch:
 
 
 class FakeLogger:
+    def __init__(self):
+        self.exceptions = []
+
     def info(self, *a, **k):
         pass
 
@@ -201,7 +204,7 @@ class FakeLogger:
         pass
 
     def exception(self, *a, **k):
-        pass
+        self.exceptions.append(a)
 
 
 def _bare_core(**overrides) -> JakeCore:
@@ -694,6 +697,23 @@ class ShutdownTests(_JakeCoreTestCase):
         core.retriever = mock.MagicMock()
         core.shutdown()  # non deve sollevare
         self.assertEqual(core.trigger_scheduler.stopped, 1)
+
+    def test_a_failing_component_is_logged_not_silently_swallowed(self):
+        """F1.8.4: buco reale - un `except Exception: pass` senza alcun log rendeva un
+        componente che non si chiude bene invisibile a chiunque debba fare debug dopo."""
+        core = self._core()
+        core.scheduler.stop = mock.MagicMock(side_effect=RuntimeError("boom"))
+        core.retriever = mock.MagicMock()
+        core.shutdown()
+        self.assertEqual(len(core.logger.exceptions), 1)
+        self.assertIn("scheduler", core.logger.exceptions[0])
+
+    def test_a_failing_cache_save_is_logged_too(self):
+        core = self._core()
+        core.retriever = mock.MagicMock()
+        core.retriever.example_index.save_cache.side_effect = OSError("disco pieno")
+        core.shutdown()  # non deve sollevare
+        self.assertEqual(len(core.logger.exceptions), 1)
 
 
 if __name__ == "__main__":
