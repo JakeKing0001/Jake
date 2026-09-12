@@ -19,6 +19,8 @@ import webbrowser
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from core.action_ledger import error_category_of
+
 DEFAULT_ACTIONS_PATH = Path(__file__).resolve().parent.parent / "data" / "jake_actions.jsonl"
 DEFAULT_SESSIONS_PATH = Path(__file__).resolve().parent.parent / "data" / "jake_sessions.jsonl"
 DEFAULT_OUTPUT_PATH = Path(__file__).resolve().parent.parent / "data" / "dashboard.html"
@@ -82,6 +84,17 @@ def build_report(actions: list[dict], sessions: list[dict]) -> dict:
         "verificato" if a.get("verified") is True else "verifica fallita" if a.get("verified") is False else "non verificato"
         for a in visible
     )
+    # F1.7.6 ("mostrare... failure taxonomy"): stessa error_category_of() gia' usata da
+    # core/action_ledger.py per l'ActionReceipt (F1.1.4) - la dashboard legge invece
+    # data/jake_actions.jsonl (core/logger.log_action, F0: log di debug rotante, sistema diverso
+    # dal ledger append-only, vedi il docstring di action_ledger.py), ma il campo `result` e'
+    # scritto negli stessi due formati in entrambi i log (letto dal codice: log_action riceve lo
+    # stesso `result` gia' calcolato dai quattro chokepoint prima di scrivere sia qui sia nel
+    # ledger), quindi la stessa funzione pura si applica senza modifiche. "rollback rate" (l'altra
+    # meta' di F1.7.6) resta non mostrato: nessun evento distinto per un rollback esiste ancora in
+    # nessuno dei due log (vedi il docstring di action_ledger.py, "il rollback stesso non produce
+    # una ricevuta separata") - dichiarato onestamente, non calcolato a partire da un'approssimazione.
+    failure_category_counts = Counter(error_category_of(a.get("result", "")) for a in visible)
 
     recent_failures = [a for a in visible if a.get("result") != "success"][-30:][::-1]
 
@@ -91,6 +104,7 @@ def build_report(actions: list[dict], sessions: list[dict]) -> dict:
         "overall_p50_ms": round(_percentile(all_latencies, 50), 1) if all_latencies else None,
         "overall_p95_ms": round(_percentile(all_latencies, 95), 1) if all_latencies else None,
         "risk_counts": risk_counts, "verified_counts": verified_counts,
+        "failure_category_counts": failure_category_counts,
         "recent_failures": recent_failures, "recorded_sessions": len(sessions),
     }
 
@@ -120,6 +134,10 @@ def render_html(report: dict, actions_path: Path, sessions_path: Path) -> str:
     )
     verified_html = "\n".join(
         f"<tr><td>{esc(state)}</td><td>{count}</td></tr>" for state, count in report["verified_counts"].most_common()
+    )
+    failure_category_html = "\n".join(
+        f"<tr><td>{esc(category)}</td><td>{count}</td></tr>"
+        for category, count in report["failure_category_counts"].most_common()
     )
     failures_html = "\n".join(
         f"<tr><td>{esc(f.get('trace_id', ''))}</td><td>{esc(f.get('skill', ''))}</td>"
@@ -168,6 +186,10 @@ def render_html(report: dict, actions_path: Path, sessions_path: Path) -> str:
 
 <h2>Verifica dell'effetto</h2>
 <table><tr><th>Stato</th><th>N</th></tr>{verified_html}</table>
+
+<h2>Categoria di errore (F1.1.4)</h2>
+<p class="note">"rollback rate" (F1.7.6) non ancora disponibile: nessun evento distinto per un rollback esiste oggi nei log.</p>
+<table><tr><th>Categoria</th><th>N</th></tr>{failure_category_html}</table>
 
 <h2>Ultimi fallimenti</h2>
 <table><tr><th>trace_id</th><th>Skill</th><th>Risultato</th><th>Rischio</th></tr>{failures_html}</table>
