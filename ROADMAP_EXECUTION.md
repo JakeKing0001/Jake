@@ -862,6 +862,38 @@ Dipende da: F1.2.
 
 Criterio di uscita: nessun segreto in chiaro e ogni azione admin richiede un fattore non vocale.
 
+- Stato: `DOING`; `F1.4.8` chiuso parzialmente (vault corrotto/profilo diverso, non ancora
+  migrazione/backup end-to-end); il resto della fase non ha ancora una voce di evidenza in
+  questo documento (`core/secrets_vault.py`/DPAPI, `core/windows_hello.py` esistono gia' - vedi
+  l'audit storico in [ROADMAP.md](ROADMAP.md) fase F1 - ma non sono stati riletti contro
+  l'elenco piu' fine `F1.4.1`-`F1.4.7` di qui).
+- `F1.4.8` (parziale) — 12/09/2026: **buco reale trovato e corretto, non solo testato** -
+  `core/secrets_vault.py::unprotect()` sollevava un'eccezione non catturata
+  (`binascii.Error` per un base64 malformato, `pywintypes.error` per un blob DPAPI incompatibile)
+  quando un valore protetto non era piu' decifrabile. Dato che `core/config.py::Config.get()`
+  chiama `unprotect()` senza alcuna protezione e `JakeCore.__init__` chiama
+  `config.get("admin_passphrase")` per costruire `AuthGate` **prima ancora che Jake risponda al
+  primo comando**, un SINGOLO segreto illeggibile (vault corrotto, o cifrato su un profilo
+  Windows/una macchina diversa - DPAPI lega il blob all'account che lo ha creato) faceva
+  crashare l'AVVIO INTERO di Jake, non solo l'autenticazione. Riprodotto per davvero prima di
+  correggere (un valore `"dpapi:non-e-decifrabile!!!"` scritto direttamente nel file, senza
+  passare da `protect()`, sollevava davvero). Corretto: `unprotect()` restituisce ora `None`
+  quando il valore aveva il prefisso ma non e' decifrabile (eccezione ampia deliberata, stesso
+  principio di `core/execution_safety.py::rollback_effect` - nessun tipo garantito su tutte le
+  versioni di pywin32); `Config.get()` tratta `None` come "segreto mai impostato" (torna il
+  default) invece di propagare, e logga un avviso esplicito cosi' l'utente capisce perche' la
+  passphrase/il token ha smesso di funzionare invece di scoprirlo "stranamente". `_migrate_secrets()`
+  non tocca un valore gia' protetto anche se corrotto (migra solo cio' che e' in chiaro): il file
+  su disco resta quello che era, verificato da un test dedicato. Aggiunti 3 test in
+  `tests/test_secrets_vault.py::CorruptedVaultTests` (base64 malformato, base64 valido ma bytes
+  non-DPAPI, un blob DPAPI VERO con i bit capovolti dopo la cifratura - non solo un valore mai
+  stato valido) e 3 in `tests/test_config.py::CorruptedSecretTests`. Non ancora affrontato:
+  "profilo Windows differente" end-to-end (richiederebbe due account Windows reali per un test
+  automatico, non disponibile in questo ambiente - la parte del comportamento gia' coperta e'
+  "un blob che DPAPI rifiuta", che e' esattamente cosa succede su un profilo diverso, ma non e'
+  stato verificato con un secondo account Windows vero) ne' un test di migrazione/backup end-to-
+  end completo. Prova: 2.065/2.065 test, ruff/mypy/compileall verdi su tutti i file toccati.
+
 ### F1.5 — Prompt injection e dati non fidati
 
 Dipende da: F1.1 e F1.2.
