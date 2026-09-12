@@ -24,19 +24,29 @@ aggiornato.
 
 ## Nota sul percorso 3 (piano automatico)
 
-`PlanExecutor.execute(plan, policy_engine=None, ...)` tratta `policy_engine=None` come "nessun
-controllo" (`PolicyDecision.ALLOW` per ogni passo) - un default sicuro solo se OGNI chiamante
-reale passa davvero il proprio `policy_engine`. Oggi lo fanno tutti e tre
-(`JakeCore._try_plan`, `RunWorkflowSkill` dopo che `JakeCore.__init__` glielo assegna,
-`TriggerScheduler`), ma nulla nel tipo lo garantisce: un quarto chiamante futuro che se ne
-dimenticasse eseguirebbe silenziosamente senza policy. Stesso principio per
-`TaskAgent.policy_engine`/rollback (percorso 6): opzionale, collegato esplicitamente da
-`JakeCore.__init__` dopo aver creato `self.policy_engine`.
+**Chiuso parzialmente il 12/09/2026 (F1.2.1).** `PlanExecutor.execute(plan, policy_engine=None,
+...)` trattava `policy_engine=None` come "nessun controllo" (`PolicyDecision.ALLOW` per ogni
+passo) - un default sicuro solo perche' OGNI chiamante reale passava davvero il proprio
+`policy_engine`, non perche' fosse strutturalmente impedito non farlo. Ora `policy_engine=None`
+e' **FAIL-CLOSED**: ogni passo si ferma con `POLICY_BLOCKED` invece di eseguire (vedi
+`core/plan_executor.py::execute`, `tests/test_plan_executor.py::
+MissingPolicyEngineFailsClosedTests`). I tre chiamanti reali (`JakeCore._try_plan`,
+`RunWorkflowSkill` dopo che `JakeCore.__init__` glielo assegna, `TriggerScheduler`) passano gia'
+tutti un `policy_engine` vero, quindi il loro comportamento non cambia; cambia solo l'esito di
+un quarto chiamante futuro che se ne dimenticasse, da "esegue tutto senza policy" a "si ferma su
+ogni passo" - coerente con "minimo privilegio"/"negare per default" (`ROADMAP_EXECUTION.md`,
+F1.2.4). Stesso principio resta da applicare a `TaskAgent.policy_engine`/rollback (percorso 6):
+opzionale, collegato esplicitamente da `JakeCore.__init__` dopo aver creato
+`self.policy_engine`, non ancora fail-closed per costruzione.
 
 ## Cosa resta aperto
 
-- `F1.2.1`: rendere impossibile, non solo evitato per convenzione, chiamare `SkillRegistry.
-  execute()` senza una decisione di `PolicyEngine` gia' presa (percorso 7).
+- `F1.2.1` (parziale): il fail-open silenzioso del percorso 3 e' chiuso (vedi sopra). Resta
+  aperto rendere impossibile, non solo evitato per convenzione, chiamare `SkillRegistry.
+  execute()` senza una decisione di `PolicyEngine` gia' presa (percorso 7): oggi resta un
+  dispatcher a basso livello usato anche da centinaia di test di skill in isolamento e da
+  `tools/replay_session.py`, quindi renderlo fail-closed per costruzione richiede prima
+  distinguere "chiamata di test/tool fidata" da "chiamata di produzione", non ancora deciso.
 - `F1.2.5` (resto): retry (`execute_with_retry`) e sotto-azioni generate da workflow non ancora
   passati in rassegna con lo stesso livello di dettaglio del rollback.
 - Questo inventario copre "chi puo' eseguire", non ancora "chi costruisce un `ActionProposal`"

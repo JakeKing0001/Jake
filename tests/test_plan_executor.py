@@ -68,7 +68,7 @@ class IndependentVerificationTests(unittest.TestCase):
         missing_path = str(Path(tempfile.gettempdir()) / "jake_test_plan_executor_missing_7712.txt")
         plan = Plan(steps=[PlanStep(intent="CREATE_PATH", parameters={"path": missing_path})])
 
-        outcome = PlanExecutor(registry).execute(plan)
+        outcome = PlanExecutor(registry).execute(plan, policy_engine=PolicyEngine())
 
         self.assertEqual(outcome.stopped_step.result.error, "VERIFICATION_FAILED")
 
@@ -81,7 +81,9 @@ class StructuredLoggingTests(unittest.TestCase):
         plan = Plan(steps=[PlanStep(intent="CREATE_PATH", parameters={"path": target})])
 
         with unittest.mock.patch("core.plan_executor.log_action") as mock_log:
-            PlanExecutor(registry).execute(plan, trace_id="trace-plan-1", model="qwen2.5:7b")
+            PlanExecutor(registry).execute(
+                plan, policy_engine=PolicyEngine(), trace_id="trace-plan-1", model="qwen2.5:7b",
+            )
 
         mock_log.assert_called_once()
         _, kwargs = mock_log.call_args
@@ -96,7 +98,7 @@ class StructuredLoggingTests(unittest.TestCase):
         plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
 
         with unittest.mock.patch("core.plan_executor.log_action") as mock_log:
-            PlanExecutor(registry).execute(plan)
+            PlanExecutor(registry).execute(plan, policy_engine=PolicyEngine())
 
         self.assertIsNone(mock_log.call_args.kwargs["verified"])
 
@@ -110,7 +112,7 @@ class StructuredLoggingTests(unittest.TestCase):
         ])
 
         with unittest.mock.patch("core.plan_executor.log_action") as mock_log:
-            PlanExecutor(registry).execute(plan, trace_id="shared-plan-trace")
+            PlanExecutor(registry).execute(plan, policy_engine=PolicyEngine(), trace_id="shared-plan-trace")
 
         self.assertEqual(mock_log.call_count, 2)
         trace_ids_used = {call.args[0] for call in mock_log.call_args_list}
@@ -121,7 +123,7 @@ class StructuredLoggingTests(unittest.TestCase):
         plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
 
         with unittest.mock.patch("core.plan_executor.log_action") as mock_log:
-            PlanExecutor(registry).execute(plan, private=True)
+            PlanExecutor(registry).execute(plan, policy_engine=PolicyEngine(), private=True)
 
         self.assertTrue(mock_log.call_args.kwargs["private"])
 
@@ -149,7 +151,7 @@ class SessionRecorderWiringTests(unittest.TestCase):
         # log_action mascherato: non e' quello sotto test qui (vedi StructuredLoggingTests) e,
         # se non mascherato, scriverebbe davvero su data/jake_actions.jsonl del contributore.
         with unittest.mock.patch("core.plan_executor.log_action"):
-            executor.execute(plan, trace_id="trace-plan-fail")
+            executor.execute(plan, policy_engine=PolicyEngine(), trace_id="trace-plan-fail")
 
         recorder.record_failure.assert_called_once()
         args, kwargs = recorder.record_failure.call_args
@@ -166,7 +168,7 @@ class SessionRecorderWiringTests(unittest.TestCase):
         executor.session_recorder = recorder
 
         with unittest.mock.patch("core.plan_executor.log_action"):
-            executor.execute(plan)
+            executor.execute(plan, policy_engine=PolicyEngine())
 
         recorder.record_failure.assert_not_called()
 
@@ -195,7 +197,10 @@ class ActionLedgerWiringTests(unittest.TestCase):
         executor.action_ledger = ledger
 
         with unittest.mock.patch("core.plan_executor.log_action"):
-            executor.execute(plan, trace_id="trace-plan-ledger", requested_by="trigger:buonanotte")
+            executor.execute(
+                plan, policy_engine=PolicyEngine(), trace_id="trace-plan-ledger",
+                requested_by="trigger:buonanotte",
+            )
 
         ledger.record.assert_called_once()
         (receipt,), kwargs = ledger.record.call_args
@@ -212,7 +217,7 @@ class ActionLedgerWiringTests(unittest.TestCase):
         executor.action_ledger = ledger
 
         with unittest.mock.patch("core.plan_executor.log_action"):
-            executor.execute(plan)
+            executor.execute(plan, policy_engine=PolicyEngine())
 
         self.assertEqual(ledger.record.call_args.args[0].requested_by, "user")
 
@@ -248,7 +253,7 @@ class KillSwitchStopsThePlanTests(unittest.TestCase):
         executor = PlanExecutor(registry)
         executor.kill_switch = kill_switch
 
-        outcome = executor.execute(plan)
+        outcome = executor.execute(plan, policy_engine=PolicyEngine())
 
         # CREATE_PATH (passo 1) poi DELETE_PATH (il rollback che lo annulla): ADD_NOTE (passo 2)
         # non compare mai, il kill switch l'ha bloccato prima che l'esecutore ci arrivasse.
@@ -329,7 +334,7 @@ class AuthorizationSignalStrippingTests(unittest.TestCase):
 
         plan = Plan(steps=[PlanStep(intent="DELETE_PATH", parameters={"path": str(target), "confirmed": True})])
 
-        outcome = PlanExecutor(self._real_delete_registry()).execute(plan)
+        outcome = PlanExecutor(self._real_delete_registry()).execute(plan, policy_engine=PolicyEngine())
 
         self.assertFalse(outcome.success, "il passo doveva fermarsi in attesa di conferma, non eseguire")
         self.assertEqual(outcome.stopped_step.result.error, "CONFIRMATION_REQUIRED")
@@ -349,7 +354,7 @@ class AuthorizationSignalStrippingTests(unittest.TestCase):
             }),
         ])
 
-        outcome = PlanExecutor(self._real_delete_registry()).execute(plan)
+        outcome = PlanExecutor(self._real_delete_registry()).execute(plan, policy_engine=PolicyEngine())
 
         self.assertFalse(outcome.success)
         self.assertEqual(outcome.stopped_step.result.error, "CONFIRMATION_REQUIRED")
@@ -369,7 +374,7 @@ class AuthorizationSignalStrippingTests(unittest.TestCase):
         executor.action_ledger = ledger
 
         with unittest.mock.patch("core.plan_executor.log_action"):
-            executor.execute(plan)
+            executor.execute(plan, policy_engine=PolicyEngine())
 
         ledger.record.assert_called_once()
         (receipt,), _ = ledger.record.call_args
@@ -402,7 +407,7 @@ class DryRunTests(unittest.TestCase):
             PlanStep(intent="ADD_NOTE", parameters={"text": "prova2"}),
         ])
 
-        outcome = PlanExecutor(registry).execute(plan, dry_run=True)
+        outcome = PlanExecutor(registry).execute(plan, policy_engine=PolicyEngine(), dry_run=True)
 
         self.assertEqual(registry.calls, [], "nessuna skill deve essere eseguita davvero in dry-run")
         self.assertTrue(outcome.success)
@@ -443,7 +448,7 @@ class DryRunTests(unittest.TestCase):
         executor = PlanExecutor(registry)
         executor.action_ledger = ledger
 
-        executor.execute(plan, dry_run=True)
+        executor.execute(plan, policy_engine=PolicyEngine(), dry_run=True)
 
         ledger.record.assert_not_called()
 
@@ -468,9 +473,39 @@ class DryRunTests(unittest.TestCase):
         registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
         plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "prova"})])
 
-        PlanExecutor(registry).execute(plan)
+        PlanExecutor(registry).execute(plan, policy_engine=PolicyEngine())
 
         self.assertEqual(registry.calls, [("ADD_NOTE", {"text": "prova"})])
+
+
+class MissingPolicyEngineFailsClosedTests(unittest.TestCase):
+    """F1.2.1 (12/09/2026): un chiamante di execute() che ometta policy_engine oggi si ferma
+    su ogni passo con POLICY_BLOCKED, invece di eseguire senza alcun controllo. Prima di questa
+    correzione policy_engine=None significava ALLOW per qualunque intent (vedi
+    docs/action-execution-paths.md, "Nota sul percorso 3") - questo test avrebbe fallito con il
+    comportamento precedente: registry.calls non sarebbe stato vuoto, e l'errore non sarebbe
+    stato POLICY_BLOCKED. I tre chiamanti reali (JakeCore._try_plan, RunWorkflowSkill,
+    TriggerScheduler) passano gia' tutti un policy_engine vero e non sono quindi toccati da
+    questo cambiamento - vedi core/jake_core.py, skills/workflow.py, core/trigger_scheduler.py."""
+
+    def test_read_only_step_is_still_blocked_without_a_policy_engine(self):
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
+        plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "non deve arrivare qui"})])
+
+        outcome = PlanExecutor(registry).execute(plan)
+
+        self.assertFalse(outcome.success)
+        self.assertEqual(outcome.stopped_step.result.error, "POLICY_BLOCKED")
+        self.assertEqual(registry.calls, [], "nessuna skill deve eseguire senza un policy_engine")
+
+    def test_dry_run_is_also_blocked_without_a_policy_engine(self):
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
+        plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
+
+        outcome = PlanExecutor(registry).execute(plan, dry_run=True)
+
+        self.assertFalse(outcome.success)
+        self.assertEqual(outcome.stopped_step.result.error, "POLICY_BLOCKED")
 
 
 if __name__ == "__main__":
