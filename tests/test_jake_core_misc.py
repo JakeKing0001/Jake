@@ -10,6 +10,7 @@ from core.agent import AgentOutcome
 from core.command import Command
 from core.conversation_state import ConversationStateManager
 from core.jake_core import JakeCore
+from core.policy_engine import PolicyEngine
 from core.skill_result import SkillResult
 
 
@@ -83,7 +84,10 @@ def _bare_core(**overrides) -> JakeCore:
     core.event_bus = mock.MagicMock()
     core.desktop_context = overrides.get("desktop_context", mock.MagicMock())
     core.notification_center = mock.MagicMock()
-    core.policy_engine = overrides.get("policy_engine", mock.MagicMock(blocked_intents=set()))
+    # PolicyEngine vera (non un MagicMock): _execute_command chiama decide_interactive_with_reason()
+    # (F1.2.6), che restituisce una vera tupla (PolicyDecision, motivazione) - un MagicMock senza
+    # quel metodo configurato non e' iterabile in due valori e romperebbe l'unpacking.
+    core.policy_engine = overrides.get("policy_engine", PolicyEngine())
     core.action_ledger = mock.MagicMock()
     core.session_recorder = mock.MagicMock()
     core.private_mode = False
