@@ -1123,9 +1123,44 @@ Dipende da: F1.1.
 Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock o ledger incoerente.
 
 - Stato: `DOING`; `F1.8.2` chiuso per tutti i registri/store condivisi tra thread (ledger,
-  promemoria, todo, memoria a lungo termine); resto della fase (coda per azioni concorrenti,
-  drain allo shutdown, deadlock timeout, client lenti sull'event bus, test di race su
-  trigger/handoff/conferma/undo) non affrontato.
+  promemoria, todo, memoria a lungo termine); `F1.8.3` chiuso per RUN_COMMAND (il solo
+  subprocess bloccante abbastanza lungo da essere rilevante, vedi sotto); resto della fase (coda
+  per azioni concorrenti, drain allo shutdown, deadlock timeout, client lenti sull'event bus, test
+  di race su trigger/handoff/conferma/undo) non affrontato.
+- `F1.8.3` (parziale, RUN_COMMAND) — 12/09/2026: "propagare cancellazione dal kill switch a...
+  subprocess". Buco reale, riprodotto prima del fix: `kill_switch.is_active()` viene controllato
+  solo TRA un passo e il successivo da `TaskAgent`/`PlanExecutor` (vedi `core/kill_switch.py`),
+  ma `skills/run_command.py::RunCommandSkill.execute()` chiamava `subprocess.run(...,
+  timeout=30)`, una singola chiamata bloccante dentro UN SOLO passo - nessun punto tra i due mai
+  controllato durante quella chiamata. Riprodotto con un comando reale che dorme 3s: attivando il
+  kill switch dopo 0.3s, il comando continuava comunque fino alla fine (~3.08s), ignorando
+  completamente il kill switch. Corretto iniettando `self.kill_switch` nella skill DOPO la
+  creazione (stesso pattern gia' usato per `plan_executor.kill_switch`, vedi
+  `JakeCore.__init__`): quando presente, il comando gira su un `Popen` sondato ogni 0.2s via
+  `communicate(timeout=...)` invece di un `subprocess.run` bloccante; se il kill switch scatta
+  durante l'attesa, il processo viene terminato e la skill risponde `KILLED`. Nessun cambio
+  quando `kill_switch` e' `None` (default, ogni test/percorso che non lo inietta): stesso
+  `subprocess.run` bloccante di prima. **Due buchi reali in piu' trovati DURANTE la verifica del
+  fix stesso, non solo nel codice originale** - la prima versione del fix chiamava
+  `process.communicate()` dopo `process.kill()` per raccogliere l'output: restava bloccata per
+  l'intera durata del comando lo stesso, perche' `communicate()` aspetta che le pipe si chiudano
+  e un comando come `python -c "..."` gira come NIPOTE di `cmd.exe` (per `shell=True`), non
+  figlio diretto - `kill()` termina solo `cmd.exe`, il nipote orfano resta vivo e tiene le pipe
+  aperte. Sostituita con `process.wait()` (aspetta solo che `cmd.exe` termini, veloce) piu' una
+  chiusura esplicita delle pipe: ANCORA bloccata altrettanto a lungo, perche' `communicate(timeout=...)`
+  usato nel ciclo di polling avvia thread lettori in background che restano bloccati in `read()`
+  fino alla stessa chiusura reale delle pipe - chiudere lo stream dal thread principale contende
+  sullo stesso lock interno e blocca identicamente. Risolto abbandonando le pipe dopo un kill
+  invece di toccarle di nuovo (nessun output serve comunque quando il risultato e' `KILLED`/
+  `TIMEOUT`). Limite noto e dichiarato, non risolto qui: nessun kill dell'intero process tree
+  (richiederebbe un Job Object, `F1.6.3`, sandbox permanente per skill forgiate - deliberatamente
+  fuori scope). `F1.8.3` resta aperto per le altre tre superfici elencate dalla roadmap (modello,
+  skill diverse da RUN_COMMAND, automazione): nessun'altra skill ha oggi un subprocess bloccante
+  abbastanza lungo da rendere il controllo "solo tra un passo e il successivo" insufficiente
+  (verificato: le altre skill con subprocess usano timeout brevi o processi che ritornano subito).
+  Aggiunti 5 nuovi test in `tests/test_run_command_skill.py::KillSwitchCancellationTests`, tutti
+  contro processi VERI (nessun mock di subprocess). Prova: 2.144/2.144 test, ruff/mypy (per
+  `core/jake_core.py`, nel set selettivo)/compileall verdi su tutti i file toccati.
 - `F1.8.2` (parziale) — 12/09/2026: **buco reale trovato e corretto, riprodotto per davvero**
   (non solo ipotizzato) - `core/action_ledger.py::ActionLedger.record()` apriva il file con un
   `open()` grezzo a ogni chiamata, senza alcuna sincronizzazione tra thread. A differenza di
@@ -2294,10 +2329,11 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 ## 24. Prossima azione esatta
 
 Aggiornato 12/09/2026. `F1.2.6` (percorso interattivo/agente, ripreso da lavoro non committato di
-una sessione precedente) e `F1.7.1` (ledger resistente a record parziali/arresto improvviso) sono
-stati completati e verificati in questa sessione, ciascuno con un buco reale riprodotto
-empiricamente prima del fix (vedi le rispettive voci in sezione F1.2/F1.7). `master` e' pulito,
-2.139/2.139 test, ruff/mypy/compileall verdi. `G1` resta aperto.
+una sessione precedente), `F1.7.1` (ledger resistente a record parziali/arresto improvviso) e
+`F1.8.3` (kill switch propagato a RUN_COMMAND) sono stati completati e verificati in questa
+sessione, ciascuno con un buco reale riprodotto empiricamente prima del fix - `F1.8.3` addirittura
+con due buchi ULTERIORI trovati durante la verifica del fix stesso (vedi la voce in sezione F1.8).
+`master` e' pulito, 2.144/2.144 test, ruff/mypy/compileall verdi. `G1` resta aperto.
 
 L'utente aveva chiesto di fermarsi dopo la sessione precedente, poi ha esplicitamente chiesto di
 controllare le cose non committate e continuare da li' - il lavoro prosegue. Restano fuori
@@ -2312,5 +2348,6 @@ Candidati piccoli ancora aperti in F1: il resto di `F1.2.1` (percorso 7,
 `SkillRegistry.execute()`), `F1.2.2`-`F1.2.3` (capability/intersezione permessi), `F1.4.1`-`F1.4.7`
 (consolidamento SecretsVault, oltre a quanto gia' in `core/secrets_vault.py`), il resto di `F1.7`
 (`F1.7.2` trace id condiviso con undo/notifica, `F1.7.3` retention differenziata, `F1.7.4`
-redazione strutturata per tipo di dato, `F1.7.5`/`F1.7.8` replay sicuro), `F1.8.1`/`F1.8.3`-`F1.8.7`
-(coda azioni concorrenti, drain allo shutdown, deadlock timeout, test di race).
+redazione strutturata per tipo di dato, `F1.7.5`/`F1.7.8` replay sicuro), il resto di `F1.8`
+(`F1.8.1` coda azioni concorrenti, `F1.8.4` drain allo shutdown, `F1.8.5` deadlock timeout,
+`F1.8.6` client lenti sull'event bus, `F1.8.7` test di race su trigger/handoff/conferma/undo).
