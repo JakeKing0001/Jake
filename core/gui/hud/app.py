@@ -407,20 +407,25 @@ class JarvisApp:
         self.app.quit()
 
     def _cleanup(self) -> None:
+        # F1.8.4 (stesso principio gia' applicato a JakeCore.shutdown/TaskAgent.on_step in
+        # questa sessione): un fallimento qui spariva senza log - un utente che chiude Jake e
+        # nota l'hotkey ancora attivo, o `core.shutdown()` (gia' esso stesso robusto per singolo
+        # componente, ma non a prova di un fallimento nel proprio ciclo) che non ha salvato le
+        # cache, non avrebbe avuto modo di scoprire perche'.
         try:
             if self.session is not None:
                 self.session.stop()
             if self._voice_thread is not None:
                 self._voice_thread.wait(3000)
         except Exception:
-            pass
+            self.logger.exception("Errore fermando la sessione voce durante la chiusura del HUD")
         try:
             self.core.shutdown()
         except Exception:
-            pass
+            self.logger.exception("Errore in core.shutdown() durante la chiusura del HUD")
         try:
             import keyboard
             keyboard.unhook_all_hotkeys()
         except Exception:
-            pass
+            self.logger.exception("Errore rimuovendo gli hotkey globali durante la chiusura del HUD")
         self.tray.hide()
