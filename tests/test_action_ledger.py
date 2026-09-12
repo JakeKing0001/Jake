@@ -296,6 +296,55 @@ class RecordTests(ActionLedgerTestCase):
         self.assertEqual(self.ledger.read_all(), [])
 
 
+class TruncatedLastLineTests(ActionLedgerTestCase):
+    """F1.7.1 ("rendere ledger append-only resistente a record parziali e arresto improvviso"):
+    buco reale, non solo teorico. Prima di questo fix, record() apriva sempre il file in append e
+    scriveva la riga cosi' com'era, senza controllare se l'ultimo byte gia' su disco fosse un
+    newline. Un arresto improvviso a meta' di una write() precedente lascia un ultimo record
+    troncato SENZA newline finale: la prossima chiamata a record() si concatenava sulla stessa
+    riga fisica, producendo un'unica riga JSON non valida che read_all() scarta per intero -
+    perdendo non solo il record vecchio (gia' perso comunque) ma anche quello NUOVO, scritto con
+    successo subito dopo il riavvio."""
+
+    def _simulate_crash_mid_write(self, partial_json: str) -> None:
+        # Stessa cosa che un kill/crash del processo produce davvero: bytes scritti sul disco
+        # senza il newline finale che handle.write(line) avrebbe aggiunto se la write fosse
+        # arrivata in fondo.
+        self.ledger.record(self._receipt(action_id="before-crash"))
+        with open(self.path, "a", encoding="utf-8") as handle:
+            handle.write(partial_json)
+
+    def test_a_truncated_last_line_no_longer_swallows_the_next_real_record(self):
+        self._simulate_crash_mid_write('{"action_id": "mid-crash", "trace_id": "t2"')
+        self.ledger.record(self._receipt(action_id="after-restart"))
+
+        records = self.ledger.read_all()
+        ids = [r["action_id"] for r in records]
+        self.assertIn("before-crash", ids)
+        self.assertIn("after-restart", ids, "il record scritto dopo il riavvio non deve sparire")
+        self.assertEqual(len(records), 2, "il solo record troncato va perso, non quello successivo")
+
+    def test_the_truncated_line_itself_is_physically_isolated_on_its_own_line(self):
+        self._simulate_crash_mid_write('{"action_id": "mid-crash"')
+        self.ledger.record(self._receipt(action_id="after-restart"))
+
+        lines = self.path.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 3, "riga troncata + separatore = 2 righe fisiche distinte")
+        self.assertIn('"mid-crash"', lines[1])
+        self.assertIn('"after-restart"', lines[2])
+
+    def test_a_file_already_ending_in_newline_gets_no_extra_blank_line(self):
+        self.ledger.record(self._receipt(action_id="a1"))
+        self.ledger.record(self._receipt(action_id="a2"))
+        lines = self.path.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 2)
+
+    def test_recording_into_a_brand_new_file_adds_no_leading_separator(self):
+        self.ledger.record(self._receipt(action_id="a1"))
+        content = self.path.read_text(encoding="utf-8")
+        self.assertFalse(content.startswith("\n"))
+
+
 class ConcurrentWritesTests(ActionLedgerTestCase):
     """F1.8.2 ("serializzare azioni che toccano lo stesso resource key"): buco reale, non solo
     teorico - record() apriva il file con un open() grezzo a ogni chiamata, senza alcuna
