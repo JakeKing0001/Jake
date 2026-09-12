@@ -1007,11 +1007,33 @@ Dipende da: F1.2.
 Criterio di uscita: nessun segreto in chiaro e ogni azione admin richiede un fattore non vocale.
 
 - Stato: `DOING`; `F1.4.1` chiuso parzialmente (scrittura atomica di config/settings.json, non
-  ancora una classe `SecretsVault` vera - vedi sotto); `F1.4.8` chiuso parzialmente (vault
-  corrotto/profilo diverso, non ancora migrazione/backup end-to-end); il resto della fase non ha
-  ancora una voce di evidenza in questo documento (`core/secrets_vault.py`/DPAPI,
-  `core/windows_hello.py` esistono gia' - vedi l'audit storico in [ROADMAP.md](ROADMAP.md) fase
-  F1 - ma non sono stati riletti contro l'elenco piu' fine `F1.4.1`-`F1.4.7` di qui).
+  ancora una classe `SecretsVault` vera - vedi sotto); `F1.4.3` chiuso parzialmente
+  (irrobustito il confronto della passphrase esistente, non ancora l'audit completo del
+  fallback - vedi sotto); `F1.4.8` chiuso parzialmente (vault corrotto/profilo diverso, non
+  ancora migrazione/backup end-to-end); il resto della fase non ha ancora una voce di evidenza in
+  questo documento (`core/secrets_vault.py`/DPAPI, `core/windows_hello.py` esistono gia' - vedi
+  l'audit storico in [ROADMAP.md](ROADMAP.md) fase F1 - ma non sono stati riletti contro l'elenco
+  piu' fine `F1.4.1`-`F1.4.7` di qui).
+- `F1.4.3` (parziale, irrobustimento del fallback) — 12/09/2026: "usare Windows Hello per
+  admin/high-impact; mantenere fallback esplicito e auditato". Windows Hello (tentato per primo) e
+  la passphrase (fallback esplicito, gia' loggato via `authorization_of()`) esistevano gia' da
+  prima di questa sessione - qui si irrobustisce il fallback stesso, non lo si costruisce da zero.
+  Buco reale, non solo teorico: `AuthGate.check()` confrontava la passphrase con `==`, un
+  confronto stringa-per-stringa che si ferma al primo carattere diverso - un canale laterale
+  temporale che permetterebbe in teoria di indovinare la passphrase amministrativa un carattere
+  alla volta invece di doverla indovinare per intero. Lo STESSO identico principio (confronto a
+  tempo costante per un segreto condiviso) era gia' applicato correttamente altrove in questo
+  progetto - `core/companion_server.py::_is_authorized`, il token del companion server - ma non
+  qui, per la protezione piu' importante del sistema (il fattore ADMIN: spegnimento, comandi da
+  terminale, installazione di skill scritte da Jake stesso). Corretto con `hmac.compare_digest`.
+  Aggiunto un test che verifica il confronto passi DAVVERO da `hmac.compare_digest` (non solo che
+  il risultato sia giusto, che una `==` produrrebbe comunque). Non ancora affrontato: nessuna
+  prova a cronometro del canale laterale (come per l'analoga difesa gia' in produzione, una prova
+  di questo tipo sarebbe intrinsecamente instabile in CI - lo stesso motivo per cui
+  `tests/test_companion_server.py` non ne ha una), ne' un audit piu' ampio del resto del fallback
+  (rate limiting sui tentativi, lockout dopo N fallimenti - non richiesti esplicitamente da questo
+  punto della roadmap, non aggiunti qui per restare in un incremento verificabile). Prova:
+  2.188/2.188 test, ruff/mypy/compileall verdi su `core/auth_gate.py` e `tests/test_auth_gate.py`.
 - `F1.4.1` (parziale, scrittura atomica) — 12/09/2026: "consolidare DPAPI in un SecretsVault
   con versione e migrazione atomica". Buco reale, riprodotto prima del fix, PIU' grave del suo
   gemello gia' chiuso in `F1.7.1` per il ledger - `Config._write()` usava
@@ -2465,15 +2487,17 @@ una sessione precedente), `F1.7.1` (ledger resistente a record parziali/arresto 
 `F1.8.3` (kill switch propagato a RUN_COMMAND), `F1.4.1` (scrittura atomica di
 config/settings.json), `F1.7.5` (replay sicuro), `F1.8.4` (parziale, visibilita' dei fallimenti
 di shutdown), `F1.2.2` (parziale, prima capability vera - radici filesystem consentite per le
-quattro mutazioni sul percorso interattivo) e `F1.8.6` (verificato con una suite dedicata) sono
-stati completati e verificati in questa sessione. I primi sei erano buchi reali riprodotti
-empiricamente prima del fix (`F1.8.3` con due buchi ULTERIORI trovati durante la verifica del fix
-stesso, `F1.4.1` lo stesso identico buco di `F1.7.1` ma con un impatto piu' grave, `F1.7.5` un
-bypass completo dell'autorizzazione in `tools/replay_session.py --replay`); `F1.2.2` e' la prima
-funzionalita' NUOVA della sessione (non un fix), scelta come fetta verticale stretta del "kernel
-dei permessi"; `F1.8.6` e' una VERIFICA (il codice era gia' corretto per costruzione, mancava solo
-una prova a cronometro). `master` e' pulito, 2.187/2.187 test, ruff/mypy/compileall verdi. `G1`
-resta aperto.
+quattro mutazioni sul percorso interattivo), `F1.8.6` (verificato con una suite dedicata) e
+`F1.4.3` (parziale, confronto a tempo costante della passphrase admin) sono stati completati e
+verificati in questa sessione. La maggior parte erano buchi reali riprodotti empiricamente prima
+del fix (`F1.8.3` con due buchi ULTERIORI trovati durante la verifica del fix stesso, `F1.4.1` lo
+stesso identico buco di `F1.7.1` ma con un impatto piu' grave, `F1.7.5` un bypass completo
+dell'autorizzazione in `tools/replay_session.py --replay`, `F1.4.3` un canale laterale temporale
+sulla passphrase admin - `AuthGate.check()` usava `==` invece di `hmac.compare_digest`, gia'
+usato correttamente per lo stesso scopo altrove nel progetto); `F1.2.2` e' la prima funzionalita'
+NUOVA della sessione (non un fix), scelta come fetta verticale stretta del "kernel dei permessi";
+`F1.8.6` e' una VERIFICA (il codice era gia' corretto per costruzione, mancava solo una prova a
+cronometro). `master` e' pulito, 2.188/2.188 test, ruff/mypy/compileall verdi. `G1` resta aperto.
 
 L'utente aveva chiesto di fermarsi dopo la sessione precedente, poi ha esplicitamente chiesto di
 controllare le cose non committate e continuare da li' - il lavoro prosegue. Restano fuori

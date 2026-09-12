@@ -1,5 +1,6 @@
 """Test unitari per AuthGate (v5.5, Identity & Authentication)."""
 import unittest
+from unittest import mock
 
 from core.auth_gate import AuthGate
 
@@ -33,6 +34,17 @@ class AuthGateTests(unittest.TestCase):
         gate = AuthGate()
         self.assertFalse(gate.check(""))
         self.assertFalse(gate.check("qualsiasi cosa"))
+
+    def test_check_uses_a_constant_time_comparison_not_a_plain_equality(self):
+        """F1: check() confrontava la passphrase con '==', un canale laterale temporale per un
+        segreto - lo stesso identico principio gia' applicato correttamente altrove nel progetto
+        per un confronto di segreto (core/companion_server.py::_is_authorized). Verifica che il
+        confronto passi DAVVERO da hmac.compare_digest (non solo che il risultato sia giusto, che
+        una '==' produrrebbe comunque)."""
+        gate = AuthGate(passphrase="apri sesamo")
+        with mock.patch("core.auth_gate.hmac.compare_digest", return_value=True) as compare_digest:
+            gate.check("qualunque cosa")
+        compare_digest.assert_called_once_with("qualunque cosa", "apri sesamo")
 
 
 class WindowsHelloTests(unittest.TestCase):
