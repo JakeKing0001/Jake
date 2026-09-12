@@ -83,6 +83,16 @@ def _rollback_move_path(registry, data):
     registry.execute("MOVE_PATH", {"path": data["new_path"], "destination": original_dir, "confirmed": True})
 
 
+def _verify_process_terminated(data: dict) -> bool:
+    """F1.3.2 ("prove forti per... processi"): controlla per davvero che il pid non esista
+    piu', invece di fidarsi del successo dichiarato da KillProcessByPortSkill (che dalla
+    correzione in skills/dev_tools.py attende gia' lei stessa la morte del processo prima di
+    dichiarare successo - questo e' un secondo controllo indipendente, non l'unico)."""
+    import psutil
+
+    return not psutil.pid_exists(data["pid"])
+
+
 @dataclass(frozen=True)
 class RollbackAction:
     """L'inverso naturale di un intent gia' eseguito con successo, e l'intent che DAVVERO esegue
@@ -109,10 +119,12 @@ class IntentSafetyEntry:
     rollback: Optional[RollbackAction] = None
 
 
-# Solo le operazioni filesystem hanno oggi un effetto verificabile senza dipendenze aggiuntive
-# (per lo schermo/UI arrivera' con il Computer Use Engine, fase 3.7) e/o un inverso naturale: le
-# altre (aprire un'app, cercare, ricordare un'informazione, ...) non hanno ne' l'uno ne' l'altro
-# e restano fuori da questo registry (verify_effect/rollback_effect le trattano di conseguenza).
+# Le operazioni filesystem hanno un effetto verificabile senza dipendenze aggiuntive E un
+# inverso naturale (per lo schermo/UI arrivera' con il Computer Use Engine, fase 3.7).
+# KILL_PROCESS_BY_PORT (F1.3.2) ha solo il primo: un processo terminato non ha un "rollback"
+# sensato (non si puo' far ripartire lo stato esatto di prima). Le altre azioni (aprire un'app,
+# cercare, ricordare un'informazione, ...) non hanno ne' l'uno ne' l'altro e restano fuori da
+# questo registry (verify_effect/rollback_effect le trattano di conseguenza).
 INTENT_SAFETY_REGISTRY: dict[str, IntentSafetyEntry] = {
     "CREATE_PATH": IntentSafetyEntry(
         verifier=lambda data: Path(data["path"]).exists(),
@@ -125,6 +137,10 @@ INTENT_SAFETY_REGISTRY: dict[str, IntentSafetyEntry] = {
     "MOVE_PATH": IntentSafetyEntry(
         verifier=lambda data: Path(data["new_path"]).exists(),
         rollback=RollbackAction(_rollback_move_path, "MOVE_PATH"),
+    ),
+    "KILL_PROCESS_BY_PORT": IntentSafetyEntry(
+        verifier=_verify_process_terminated,
+        rollback=None,  # terminare un processo non ha un inverso naturale
     ),
     "DELETE_PATH": IntentSafetyEntry(
         verifier=lambda data: not Path(data["path"]).exists(),
