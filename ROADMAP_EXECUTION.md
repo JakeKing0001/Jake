@@ -1244,6 +1244,22 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
   parzialmente (visibilita' dei fallimenti di shutdown, non ancora drain/checkpoint veri);
   `F1.8.6` chiuso (verificato, vedi sotto); resto della fase (coda per azioni concorrenti,
   deadlock timeout, test di race su trigger/handoff/conferma/undo) non affrontato.
+- `F1.8.4` (parziale, continuazione - stessa visibilita' dei fallimenti, secondo punto) —
+  12/09/2026: stesso identico principio della voce precedente (fallimenti silenziosi durante uno
+  shutdown/una notifica non devono sparire senza log), trovato in un secondo punto:
+  `core/agent.py::TaskAgent.run()` chiamava `self.on_step(...)` (la notifica verso l'esterno che
+  aggiorna HUD/companion a ogni passo, vedi `JakeCore._on_agent_step`) dentro un
+  `except Exception: pass` - corretto che il passo dell'agente non debba MAI fermarsi per un hook
+  UI rotto, ma prima l'eccezione spariva senza lasciare traccia: un HUD bloccato su "sto
+  pensando..." per un bug nel proprio aggiornamento sarebbe stato indebuggabile. Corretto
+  aggiungendo `self.logger.exception(...)` prima di continuare, stesso principio gia' applicato a
+  `JakeCore.shutdown()`. Non un audit esaustivo di tutti gli `except Exception: pass` del
+  progetto (una ricerca mirata ne ha trovati altri ~9, nella maggior parte dei casi
+  deliberatamente "best effort non critico" - es. arricchire un messaggio d'errore con il body
+  HTTP, un refresh di cache best-effort dopo `forget_intent` - non toccati perche' fallire li' non
+  nasconde un bug rilevante, a differenza di una notifica UI o di uno shutdown). Aggiunti 2 nuovi
+  test in `tests/test_agent.py::OnStepCallbackFailureTests`. Prova: 2.190/2.190 test,
+  ruff/mypy/compileall verdi su `core/agent.py` e `tests/test_agent.py`.
 - `F1.8.6` — 12/09/2026: "impedire che un client lento blocchi event bus o altri client".
   Diverso dal resto di questa sezione: non un buco trovato e corretto, ma una VERIFICA - il
   codice di `core/event_bus.py::EventBus.publish()` sembrava gia' corretto per costruzione (coda
@@ -2487,17 +2503,18 @@ una sessione precedente), `F1.7.1` (ledger resistente a record parziali/arresto 
 `F1.8.3` (kill switch propagato a RUN_COMMAND), `F1.4.1` (scrittura atomica di
 config/settings.json), `F1.7.5` (replay sicuro), `F1.8.4` (parziale, visibilita' dei fallimenti
 di shutdown), `F1.2.2` (parziale, prima capability vera - radici filesystem consentite per le
-quattro mutazioni sul percorso interattivo), `F1.8.6` (verificato con una suite dedicata) e
-`F1.4.3` (parziale, confronto a tempo costante della passphrase admin) sono stati completati e
-verificati in questa sessione. La maggior parte erano buchi reali riprodotti empiricamente prima
-del fix (`F1.8.3` con due buchi ULTERIORI trovati durante la verifica del fix stesso, `F1.4.1` lo
-stesso identico buco di `F1.7.1` ma con un impatto piu' grave, `F1.7.5` un bypass completo
-dell'autorizzazione in `tools/replay_session.py --replay`, `F1.4.3` un canale laterale temporale
-sulla passphrase admin - `AuthGate.check()` usava `==` invece di `hmac.compare_digest`, gia'
-usato correttamente per lo stesso scopo altrove nel progetto); `F1.2.2` e' la prima funzionalita'
-NUOVA della sessione (non un fix), scelta come fetta verticale stretta del "kernel dei permessi";
-`F1.8.6` e' una VERIFICA (il codice era gia' corretto per costruzione, mancava solo una prova a
-cronometro). `master` e' pulito, 2.188/2.188 test, ruff/mypy/compileall verdi. `G1` resta aperto.
+quattro mutazioni sul percorso interattivo), `F1.8.6` (verificato con una suite dedicata), `F1.4.3` (parziale, confronto a tempo costante della
+passphrase admin) e una seconda voce di `F1.8.4` (notifica `on_step` dell'agente loggata come lo
+shutdown) sono stati completati e verificati in questa sessione. La maggior parte erano buchi
+reali riprodotti empiricamente prima del fix (`F1.8.3` con due buchi ULTERIORI trovati durante la
+verifica del fix stesso, `F1.4.1` lo stesso identico buco di `F1.7.1` ma con un impatto piu'
+grave, `F1.7.5` un bypass completo dell'autorizzazione in `tools/replay_session.py --replay`,
+`F1.4.3` un canale laterale temporale sulla passphrase admin - `AuthGate.check()` usava `==`
+invece di `hmac.compare_digest`, gia' usato correttamente per lo stesso scopo altrove nel
+progetto); `F1.2.2` e' la prima funzionalita' NUOVA della sessione (non un fix), scelta come
+fetta verticale stretta del "kernel dei permessi"; `F1.8.6` e' una VERIFICA (il codice era gia'
+corretto per costruzione, mancava solo una prova a cronometro). `master` e' pulito, 2.190/2.190
+test, ruff/mypy/compileall verdi. `G1` resta aperto.
 
 L'utente aveva chiesto di fermarsi dopo la sessione precedente, poi ha esplicitamente chiesto di
 controllare le cose non committate e continuare da li' - il lavoro prosegue. Restano fuori

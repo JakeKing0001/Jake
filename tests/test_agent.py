@@ -219,6 +219,52 @@ class KillSwitchStopsTheRunTests(unittest.TestCase):
         self.assertEqual(registry.calls, [])
 
 
+class OnStepCallbackFailureTests(unittest.TestCase):
+    """F1.8.4 (stesso principio gia' applicato a JakeCore.shutdown): on_step e' una notifica
+    verso l'esterno (HUD/companion, vedi JakeCore._on_agent_step) - se solleva, il passo
+    dell'agente deve comunque completarsi (una skill che aggiorna una UI rotta non deve mai
+    impedire l'azione vera), ma prima l'eccezione spariva senza lasciare traccia in nessun log."""
+
+    def test_a_broken_on_step_does_not_stop_the_step_from_executing(self):
+        tmp_dir = Path(tempfile.mkdtemp(prefix="jake_agent_onstep_"))
+        self.addCleanup(shutil.rmtree, tmp_dir, ignore_errors=True)
+        target = tmp_dir / "nuovo_file.txt"
+
+        registry = FakeRegistry()
+        client = ScriptedOllamaClient([
+            {"thought": "Creo il file", "action": {"intent": "CREATE_PATH", "parameters": {"path": str(target)}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto.", "ask_user": ""},
+        ])
+        agent = _agent(registry, client)
+        agent.on_step = unittest.mock.Mock(side_effect=RuntimeError("HUD rotto"))
+
+        outcome = agent.run("crea un file")
+
+        self.assertIn(("CREATE_PATH", {"path": str(target)}), registry.calls)
+        self.assertEqual(outcome.final_answer, "Fatto.")
+
+    def test_a_broken_on_step_is_logged_not_silently_swallowed(self):
+        tmp_dir = Path(tempfile.mkdtemp(prefix="jake_agent_onstep_log_"))
+        self.addCleanup(shutil.rmtree, tmp_dir, ignore_errors=True)
+        target = tmp_dir / "nuovo_file.txt"
+
+        registry = FakeRegistry()
+        client = ScriptedOllamaClient([
+            {"thought": "Creo il file", "action": {"intent": "CREATE_PATH", "parameters": {"path": str(target)}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto.", "ask_user": ""},
+        ])
+        logger = unittest.mock.Mock()
+        agent = _agent(registry, client)
+        agent.logger = logger
+        agent.on_step = unittest.mock.Mock(side_effect=RuntimeError("HUD rotto"))
+
+        agent.run("crea un file")
+
+        logger.exception.assert_called_once()
+
+
 class RollbackAfterFatalErrorTests(unittest.TestCase):
     def test_completed_reversible_step_is_undone_after_a_model_error(self):
         tmp_dir = Path(tempfile.mkdtemp(prefix="jake_agent_rollback_"))

@@ -384,7 +384,13 @@ class TaskAgent:
                     try:
                         self.on_step(step_index, thought or valid[intent].get("description", intent).split(".")[0])
                     except Exception:
-                        pass
+                        # F1.8.4 (stesso principio gia' applicato a JakeCore.shutdown): un
+                        # `on_step` rotto (es. un aggiornamento HUD che solleva) non deve MAI
+                        # fermare il passo dell'agente - ma prima non veniva nemmeno loggato,
+                        # rendendo un HUD bloccato su "sto pensando..." indebuggabile (nessuna
+                        # traccia di cosa fosse andato storto).
+                        if self.logger:
+                            self.logger.exception("Errore nella callback on_step dell'agente")
                 execution, attempts = execute_action_with_retry(self.executor, intent, parameters)
                 intent, parameters = execution.command.intent, execution.command.parameters or {}
                 result = execution.result
