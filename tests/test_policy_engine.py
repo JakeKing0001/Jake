@@ -187,5 +187,64 @@ class DecideAutomatedTests(unittest.TestCase):
         self.assertEqual(engine.decide_automated("GET_TIME"), PolicyDecision.ALLOW)
 
 
+class ExplainTests(unittest.TestCase):
+    """F1.2.7 ("policy simulator: mostra se e perche' un'azione sarebbe permessa"). explain()
+    non deve avere una logica propria: ogni caso qui ha un test gemello in
+    DecideInteractiveTests/DecideAutomatedTests che verifica lo stesso scenario tramite
+    decide_interactive()/decide_automated(), cosi' un domani in cui le due implementazioni
+    divergessero (esattamente il pattern di bug che il modulo documenta per RunWorkflowSkill)
+    verrebbe scoperto qui."""
+
+    def test_blocked_intent_reports_block_on_both_paths_with_a_reason(self):
+        engine = PolicyEngine(blocked_intents={"SOME_INTENT"})
+
+        explanation = engine.explain("SOME_INTENT")
+
+        self.assertEqual(explanation["intent"], "SOME_INTENT")
+        self.assertEqual(explanation["interactive"], {"decision": "block", "reason": "intent_in_blocked_intents"})
+        self.assertEqual(explanation["automated"], {"decision": "block", "reason": "intent_in_blocked_intents"})
+
+    def test_plain_intent_is_allowed_on_both_paths(self):
+        engine = PolicyEngine()
+
+        explanation = engine.explain("GET_TIME")
+
+        self.assertEqual(explanation["interactive"]["decision"], "allow")
+        self.assertEqual(explanation["automated"]["decision"], "allow")
+
+    def test_always_confirm_intent_without_confirmed_needs_confirm_on_both_paths(self):
+        engine = PolicyEngine(always_confirm_intents={"DELETE_TODO"})
+
+        explanation = engine.explain("DELETE_TODO")
+
+        self.assertEqual(explanation["interactive"], {"decision": "confirm", "reason": "intent_in_always_confirm_intents"})
+        self.assertEqual(explanation["automated"], {"decision": "confirm", "reason": "intent_in_always_confirm_intents"})
+
+    def test_always_confirm_intent_with_confirmed_parameter_only_allows_the_interactive_path(self):
+        """'confirmed' conta per il verdetto interattivo ma MAI per quello automatico - stesso
+        motivo di decide_automated(): nessun segnale di autorizzazione e' genuino in un piano
+        automatico (vedi strip_authorization_signals nel docstring del modulo)."""
+        engine = PolicyEngine(always_confirm_intents={"DELETE_TODO"})
+
+        explanation = engine.explain("DELETE_TODO", {"confirmed": True})
+
+        self.assertEqual(explanation["interactive"]["decision"], "allow")
+        self.assertEqual(explanation["automated"]["decision"], "confirm")
+
+    def test_require_auth_only_applies_to_the_interactive_path(self):
+        """REQUIRE_AUTH esiste solo per il percorso interattivo (un piano automatico non ha
+        nessuno pronto a fornire una passphrase in tempo reale) - vedi il docstring di
+        decide_automated(). Un intent in require_auth_intents finisce comunque anche in
+        always_confirm_intents nell'uso reale (core/risk.py::needs_central_confirmation include
+        ADMIN), quindi il percorso automatico si ferma comunque, ma con CONFIRM, non REQUIRE_AUTH."""
+        auth_gate = AuthGate(passphrase="segreta")
+        engine = PolicyEngine(auth_gate=auth_gate, require_auth_intents={"SYSTEM_POWER"})
+
+        explanation = engine.explain("SYSTEM_POWER")
+
+        self.assertEqual(explanation["interactive"]["decision"], "require_auth")
+        self.assertEqual(explanation["automated"]["decision"], "allow")
+
+
 if __name__ == "__main__":
     unittest.main()

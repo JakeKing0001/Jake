@@ -593,7 +593,8 @@ Dipende da: F1.1.
 Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa dal PolicyEngine.
 
 - Stato: `DOING`; `F1.2.5` chiuso solo per il rollback filesystem; `F1.2.1` chiuso parzialmente
-  (percorso 3, vedi sotto); `F1.2.4` chiuso per il percorso planner (vedi sotto); resto aperto.
+  (percorso 3, vedi sotto); `F1.2.4` chiuso per il percorso planner (vedi sotto); `F1.2.7` chiuso
+  (vedi sotto); resto aperto.
 - `F1.2.1` (parziale) — 12/09/2026: chiuso il buco concreto documentato in
   [docs/action-execution-paths.md](docs/action-execution-paths.md) ("Nota sul percorso 3"):
   `PlanExecutor.execute(plan, policy_engine=None, ...)` trattava l'assenza di policy_engine come
@@ -666,8 +667,24 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   (rollback): gia' coperto da `F1.2.5` sopra. Percorso 7 (`SkillRegistry.execute()`): nessun test
   di bypass possibile da scrivere finche' `F1.2.1` non gli aggiunge un controllo proprio - il gap
   resta documentato, non "testato" nel senso di verificarne la chiusura.
+- `F1.2.7` — 12/09/2026: aggiunto `PolicyEngine.explain(intent, parameters=None) -> dict`
+  ("policy simulator": mostra se e perche' un'azione sarebbe permessa, SENZA eseguire nulla).
+  Refattorizzata la logica di `decide_interactive`/`decide_automated` in due varianti private
+  `_decide_*_reasoned()` che restituiscono anche il motivo (`intent_in_blocked_intents`, ...):
+  `explain()` le chiama entrambe, `decide_interactive`/`decide_automated` restano identici
+  all'esterno (ne scartano solo il motivo) - UNA sola fonte della logica, non una copia
+  duplicata per il simulatore (esattamente il pattern di bug gia' documentato nel modulo per
+  RunWorkflowSkill: due strutture quasi identiche che divergono in silenzio). Restituisce
+  entrambi i verdetti (interattivo E automatico) perche' possono differire - es. `REQUIRE_AUTH`
+  esiste solo per il percorso interattivo, verificato da un test dedicato. Nessun cambio di
+  comportamento per `decide_interactive`/`decide_automated` (22/22 test esistenti verdi senza
+  modifiche); aggiunti 5 nuovi test in `tests/test_policy_engine.py::ExplainTests`, ciascuno
+  gemello di uno scenario gia' coperto per le due decisioni originali. Non ancora collegato a
+  un'interfaccia reale (HUD/companion/CLI): resta una funzione di libreria pronta per un futuro
+  pannello diagnostico, come dichiarato dalla roadmap stessa ("mostra se e perche'"). Prova:
+  2.007/2.007 test, ruff/mypy/compileall verdi.
 - Non ancora affrontato: il resto di `F1.2.1` (percorso 7, `SkillRegistry.execute()` resta un
-  dispatcher senza controllo di policy proprio - vedi sopra); `F1.2.2`-`F1.2.3`, `F1.2.6`-`F1.2.7`;
+  dispatcher senza controllo di policy proprio - vedi sopra); `F1.2.2`-`F1.2.3`, `F1.2.6`;
   il resto di `F1.2.5` (sotto-azioni di workflow non ancora passate in rassegna allo stesso modo -
   il retry e' invece coperto separatamente da `F1.3.6`, vedi sotto).
 
