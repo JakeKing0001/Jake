@@ -1219,9 +1219,28 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
 - Stato: `DOING`; `F1.8.2` chiuso per tutti i registri/store condivisi tra thread (ledger,
   promemoria, todo, memoria a lungo termine); `F1.8.3` chiuso per RUN_COMMAND (il solo
   subprocess bloccante abbastanza lungo da essere rilevante, vedi sotto); `F1.8.4` chiuso
-  parzialmente (visibilita' dei fallimenti di shutdown, non ancora drain/checkpoint veri); resto
-  della fase (coda per azioni concorrenti, deadlock timeout, client lenti sull'event bus, test
-  di race su trigger/handoff/conferma/undo) non affrontato.
+  parzialmente (visibilita' dei fallimenti di shutdown, non ancora drain/checkpoint veri);
+  `F1.8.6` chiuso (verificato, vedi sotto); resto della fase (coda per azioni concorrenti,
+  deadlock timeout, test di race su trigger/handoff/conferma/undo) non affrontato.
+- `F1.8.6` — 12/09/2026: "impedire che un client lento blocchi event bus o altri client".
+  Diverso dal resto di questa sezione: non un buco trovato e corretto, ma una VERIFICA - il
+  codice di `core/event_bus.py::EventBus.publish()` sembrava gia' corretto per costruzione (coda
+  `queue.Queue(maxsize=...)` per iscritto, `put_nowait`/`get_nowait`, mai un `put()` bloccante,
+  scarto del piu' vecchio su coda piena), ma nessuna suite dedicata esisteva per dimostrarlo con
+  un test vero (solo `tests/test_jake_core_event_bus.py`, che verifica come JakeCore lo USA, non
+  il comportamento di `EventBus` stesso in isolamento). Scritta una suite con una prova A
+  CRONOMETRO, non solo a codice letto: 2000 `publish()` verso un iscritto che non legge mai
+  restano sotto 1 secondo in totale (se `publish()` bloccasse anche solo con un timeout su quell'
+  iscritto, il tempo totale esploderebbe), e un secondo iscritto sano continua a ricevere tutti i
+  propri eventi, in ordine, senza ritardi, mentre il primo e' saturo - le code sono indipendenti
+  per costruzione, verificato non assunto. Un banco di prova per errore trovato SCRIVENDO il test
+  (non nel codice sotto test): la prima versione usava una coda troppo piccola (maxsize=5) anche
+  per l'iscritto "sano", che perdeva eventi per la propria lentezza di schedulazione del thread,
+  non per colpa del gemello bloccato - corretto isolando la variabile sotto test con una coda
+  ampiamente sopra la raffica pubblicata. Aggiunta anche una prova di concorrenza reale (publish/
+  subscribe/unsubscribe da piu' thread contemporaneamente, nessun crash, lista iscritti coerente
+  alla fine). Nuovo `tests/test_event_bus.py` (11 test). Prova: 2.187/2.187 test,
+  ruff/mypy/compileall verdi.
 - `F1.8.4` (parziale, visibilita') — 12/09/2026: "gestire shutdown con drain limitato, checkpoint
   e release dei device". Buco reale, non solo teorico - `JakeCore.shutdown()` racchiudeva ogni
   `component.stop()` (scheduler, trigger_scheduler, system_advisor, desktop_context,
@@ -2445,16 +2464,16 @@ Aggiornato 12/09/2026. `F1.2.6` (percorso interattivo/agente, ripreso da lavoro 
 una sessione precedente), `F1.7.1` (ledger resistente a record parziali/arresto improvviso),
 `F1.8.3` (kill switch propagato a RUN_COMMAND), `F1.4.1` (scrittura atomica di
 config/settings.json), `F1.7.5` (replay sicuro), `F1.8.4` (parziale, visibilita' dei fallimenti
-di shutdown) e `F1.2.2` (parziale, prima capability vera - radici filesystem consentite per le
-quattro mutazioni sul percorso interattivo) sono stati completati e verificati in questa sessione.
-I primi sei erano buchi reali riprodotti empiricamente prima del fix (`F1.8.3` con due buchi
-ULTERIORI trovati durante la verifica del fix stesso, `F1.4.1` lo stesso identico buco di `F1.7.1`
-ma con un impatto piu' grave, `F1.7.5` un bypass completo dell'autorizzazione in
-`tools/replay_session.py --replay`); `F1.2.2` e' invece la prima funzionalita' NUOVA della
-sessione (non un fix), scelta come fetta verticale stretta del "kernel dei permessi" invece di un
-tentativo generico su tutte e otto le capability elencate dalla roadmap - vedi le rispettive voci
-in sezione F1.8/F1.4/F1.7/F1.2. `master` e' pulito, 2.176/2.176 test, ruff/mypy/compileall verdi.
-`G1` resta aperto.
+di shutdown), `F1.2.2` (parziale, prima capability vera - radici filesystem consentite per le
+quattro mutazioni sul percorso interattivo) e `F1.8.6` (verificato con una suite dedicata) sono
+stati completati e verificati in questa sessione. I primi sei erano buchi reali riprodotti
+empiricamente prima del fix (`F1.8.3` con due buchi ULTERIORI trovati durante la verifica del fix
+stesso, `F1.4.1` lo stesso identico buco di `F1.7.1` ma con un impatto piu' grave, `F1.7.5` un
+bypass completo dell'autorizzazione in `tools/replay_session.py --replay`); `F1.2.2` e' la prima
+funzionalita' NUOVA della sessione (non un fix), scelta come fetta verticale stretta del "kernel
+dei permessi"; `F1.8.6` e' una VERIFICA (il codice era gia' corretto per costruzione, mancava solo
+una prova a cronometro). `master` e' pulito, 2.187/2.187 test, ruff/mypy/compileall verdi. `G1`
+resta aperto.
 
 L'utente aveva chiesto di fermarsi dopo la sessione precedente, poi ha esplicitamente chiesto di
 controllare le cose non committate e continuare da li' - il lavoro prosegue. Restano fuori
@@ -2474,7 +2493,5 @@ classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7` (`F1.7.
 condiviso con undo/notifica, `F1.7.3` retention differenziata, `F1.7.4` redazione strutturata per
 tipo di dato, `F1.7.8` modalita' privata end-to-end su ogni nuovo record), il resto di `F1.8`
 (`F1.8.1` coda azioni concorrenti, il resto di `F1.8.4` - drain limitato di un'azione in corso,
-checkpoint vero, release device audio, `F1.8.5` deadlock timeout, `F1.8.6` client lenti
-sull'event bus - gia' probabilmente a posto per costruzione con `queue.Queue` limitata e
-`put_nowait`, da verificare con test dedicati non ancora scritti, `F1.8.7` test di race su
+checkpoint vero, release device audio, `F1.8.5` deadlock timeout, `F1.8.7` test di race su
 trigger/handoff/conferma/undo).
