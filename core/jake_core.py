@@ -519,8 +519,14 @@ class JakeCore:
     # ---- pipeline ------------------------------------------------------------------------
 
     def _process(self, text: str) -> str:
-        if self.conversation_state.has_pending_action():
-            return self._handle_confirmation(text)
+        # F1.8.1: take_pending_action() invece di has_pending_action() + _handle_confirmation()
+        # che la rilegge da sola - due chiamate concorrenti (voce + companion server, che gira
+        # su thread separati per richiesta) potevano altrimenti vedere ENTRAMBE la stessa azione
+        # ancora in sospeso ed eseguirla due volte. Vedi il docstring di
+        # core/conversation_state.py per la riproduzione del buco.
+        pending_action = self.conversation_state.take_pending_action()
+        if pending_action is not None:
+            return self._handle_confirmation(text, pending_action)
 
         if intent_patterns.is_exit(text):
             return self.EXIT_SENTINEL
@@ -886,33 +892,37 @@ class JakeCore:
         self._remember_exchange(text, Command("PLAN", {"steps": len(plan.steps)}), response)
         return response
 
-    def _handle_confirmation(self, text: str) -> str:
-        action = self.conversation_state.get_pending_action()
+    def _handle_confirmation(self, text: str, action: dict | None = None) -> str:
+        # F1.8.1: `action` e' iniettabile (usato da _process(), che l'ha gia' consumata
+        # atomicamente con take_pending_action() - vedi sopra) per evitare una SECONDA lettura
+        # separata qui, che riaprirebbe la stessa finestra di gara. None (il default) preserva
+        # il comportamento per chi chiama questo metodo direttamente con un'azione gia'
+        # impostata altrove (es. i test): la prende da sola, stesso principio.
+        if action is None:
+            action = self.conversation_state.take_pending_action()
+        if action is None:
+            return self._process(text)
         # Una domanda di chiarimento dell'agente non e' un si'/no: qualunque risposta la
         # prosegue (anche "si"/"no" sono risposte legittime, es. "hai salvato le modifiche?").
         if action.get("reason") == "agent_question":
-            self.conversation_state.clear_pending_action()
             return self._continue_agent(action, text)
 
         # v5.4/5.5: un'azione ADMIN con l'autenticazione attiva aspetta la passphrase, non un
         # si'/no. Un solo tentativo per turno (come per le conferme normali, che si annullano
         # su qualunque risposta che non sia si'/no): niente tentativi ripetuti in loop.
         if action.get("reason") == "auth_required":
-            self.conversation_state.clear_pending_action()
             if self.auth_gate.check(text):
                 return self._finalize_pending_action(action, text)
             self._log_denied_action(action, result="denied_auth")
             return "Passphrase errata: azione annullata."
 
         if intent_patterns.is_positive_answer(text):
-            self.conversation_state.clear_pending_action()
             return self._finalize_pending_action(action, text)
         if intent_patterns.is_negative_answer(text):
-            self.conversation_state.clear_pending_action()
             self._log_denied_action(action, result="denied_confirmation")
             return "Va bene, annullato."
-        # Ne' si' ne' no: l'utente e' passato ad altro. Annulla l'azione in sospeso e vai avanti.
-        self.conversation_state.clear_pending_action()
+        # Ne' si' ne' no: l'utente e' passato ad altro. L'azione e' gia' stata consumata sopra
+        # (take_pending_action()/il default di questo metodo), quindi qui basta procedere.
         return self._process(text)
 
     def _log_denied_action(self, action: dict, *, result: str) -> None:
