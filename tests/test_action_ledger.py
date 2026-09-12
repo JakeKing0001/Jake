@@ -9,8 +9,12 @@ from pathlib import Path
 from core.action_ledger import (
     AUTHORIZATION_BLOCKED, AUTHORIZATION_CONFIRMED, AUTHORIZATION_DENIED, AUTHORIZATION_NONE,
     AUTHORIZATION_PASSPHRASE, AUTHORIZATION_PENDING, AUTHORIZATION_WINDOWS_HELLO,
-    VERIFICATION_FAILED, VERIFICATION_UNVERIFIED, VERIFICATION_VERIFIED, ActionLedger,
-    ActionReceipt, authorization_of, idempotency_key_of, new_action_id, verification_status_of,
+    ERROR_CATEGORY_DENIED, ERROR_CATEGORY_INVALID_INPUT, ERROR_CATEGORY_PENDING,
+    ERROR_CATEGORY_SUCCESS, ERROR_CATEGORY_TIMEOUT, ERROR_CATEGORY_TRANSIENT,
+    ERROR_CATEGORY_UNAVAILABLE, ERROR_CATEGORY_UNCATEGORIZED, ERROR_CATEGORY_USER_CANCELLED,
+    ERROR_CATEGORY_VERIFICATION_FAILED, VERIFICATION_FAILED, VERIFICATION_UNVERIFIED,
+    VERIFICATION_VERIFIED, ActionLedger, ActionReceipt, authorization_of, error_category_of,
+    idempotency_key_of, new_action_id, validate_action_receipt, verification_status_of,
 )
 
 
@@ -138,6 +142,77 @@ class VerificationStatusOfTests(unittest.TestCase):
 
     def test_false_means_verification_failed(self):
         self.assertEqual(verification_status_of(False), VERIFICATION_FAILED)
+
+
+class ErrorCategoryOfTests(unittest.TestCase):
+    """F1.1.4 ("definire tassonomia errori"): error_category_of() deve capire i formati REALI
+    usati dai quattro chokepoint che scrivono una ricevuta (vedi core/action_ledger.py,
+    _KNOWN_RESULT_CATEGORIES) - non solo una forma canonica ipotetica."""
+
+    def test_success_is_its_own_category(self):
+        self.assertEqual(error_category_of("success"), ERROR_CATEGORY_SUCCESS)
+
+    def test_confirmation_required_and_auth_required_are_pending(self):
+        self.assertEqual(error_category_of("confirmation_required"), ERROR_CATEGORY_PENDING)
+        self.assertEqual(error_category_of("auth_required"), ERROR_CATEGORY_PENDING)
+
+    def test_policy_and_auth_denials_are_denied(self):
+        for result in ("blocked_by_policy", "policy_blocked", "denied_auth", "denied_confirmation"):
+            self.assertEqual(error_category_of(result), ERROR_CATEGORY_DENIED, result)
+
+    def test_error_prefix_is_stripped_and_case_preserved_from_the_skill_is_ignored(self):
+        """PlanExecutor scrive 'error:VERIFICATION_FAILED' (maiuscolo, con prefisso), TaskAgent
+        a volte 'missing_parameters' (minuscolo, senza prefisso) per lo stesso genere di errore -
+        vedi il commento su _KNOWN_RESULT_CATEGORIES in core/action_ledger.py. Entrambi i formati
+        devono risolvere alla stessa categoria."""
+        self.assertEqual(error_category_of("error:VERIFICATION_FAILED"), ERROR_CATEGORY_VERIFICATION_FAILED)
+        self.assertEqual(error_category_of("missing_parameters"), ERROR_CATEGORY_INVALID_INPUT)
+        self.assertEqual(error_category_of("error:MISSING_PARAMETERS"), ERROR_CATEGORY_INVALID_INPUT)
+
+    def test_retryable_errors_are_transient(self):
+        """Le stesse due costanti di core/execution_safety.py::RETRYABLE_ERRORS."""
+        self.assertEqual(error_category_of("error:OPERATION_FAILED"), ERROR_CATEGORY_TRANSIENT)
+        self.assertEqual(error_category_of("error:NETWORK_UNAVAILABLE"), ERROR_CATEGORY_TRANSIENT)
+
+    def test_timeout_is_its_own_category(self):
+        self.assertEqual(error_category_of("error:TIMEOUT"), ERROR_CATEGORY_TIMEOUT)
+
+    def test_ollama_and_planner_unavailability_are_unavailable(self):
+        self.assertEqual(error_category_of("error:OLLAMA_UNAVAILABLE"), ERROR_CATEGORY_UNAVAILABLE)
+        self.assertEqual(error_category_of("error:PLANNER_ERROR"), ERROR_CATEGORY_UNAVAILABLE)
+
+    def test_killed_is_user_cancelled_not_a_system_error(self):
+        self.assertEqual(error_category_of("error:KILLED"), ERROR_CATEGORY_USER_CANCELLED)
+
+    def test_unknown_skill_specific_error_falls_back_to_uncategorized(self):
+        """Un codice bespoke di UNA skill (es. PATH_NOT_FOUND di delete_path.py), non ancora
+        migrato sulla tassonomia condivisa (F1.1.6/F1.1.7): dichiarato onestamente, non forzato
+        in una categoria a caso."""
+        self.assertEqual(error_category_of("error:PATH_NOT_FOUND"), ERROR_CATEGORY_UNCATEGORIZED)
+
+    def test_empty_result_falls_back_to_uncategorized(self):
+        self.assertEqual(error_category_of(""), ERROR_CATEGORY_UNCATEGORIZED)
+
+
+class ActionReceiptErrorCategoryValidationTests(unittest.TestCase):
+    def _receipt(self, **overrides) -> ActionReceipt:
+        defaults = {
+            "action_id": "a1", "trace_id": "t1", "ts": 123.0, "intent": "OPEN_APP", "requested_by": "user",
+            "risk_decision": "local_reversible", "authorization": "none", "result": "success",
+            "idempotency_key": "k1",
+        }
+        defaults.update(overrides)
+        return ActionReceipt(**defaults)
+
+    def test_default_error_category_is_uncategorized(self):
+        self.assertEqual(self._receipt().error_category, ERROR_CATEGORY_UNCATEGORIZED)
+
+    def test_valid_error_category_passes_validation(self):
+        validate_action_receipt(self._receipt(error_category=ERROR_CATEGORY_SUCCESS))
+
+    def test_unrecognized_error_category_is_rejected(self):
+        with self.assertRaises(ValueError):
+            validate_action_receipt(self._receipt(error_category="not_a_real_category"))
 
 
 class ActionLedgerTestCase(unittest.TestCase):

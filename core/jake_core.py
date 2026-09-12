@@ -2,7 +2,9 @@ import time
 
 from core import fallbacks
 from core import intent_patterns
-from core.action_ledger import ActionLedger, ActionReceipt, authorization_of, idempotency_key_of, new_action_id
+from core.action_ledger import (
+    ActionLedger, ActionReceipt, authorization_of, error_category_of, idempotency_key_of, new_action_id,
+)
 from core.agent import TaskAgent
 from core.auth_gate import AuthGate
 from core.autonomy_budget import AutonomyBudget
@@ -801,7 +803,7 @@ class JakeCore:
                 action_id=new_action_id(), trace_id=trace_id, ts=time.time(), intent=intent,
                 requested_by="user", risk_decision=risk, authorization=authorization_of(result, parameters),
                 result=result, idempotency_key=idempotency_key_of(intent, parameters),
-                duration_ms=duration_ms, model=self.model,
+                error_category=error_category_of(result), duration_ms=duration_ms, model=self.model,
             ),
             private=self.private_mode,
         )
@@ -890,6 +892,7 @@ class JakeCore:
                 requested_by="user", risk_decision=risk_of(intent).value,
                 authorization=authorization_of(result, parameters), result=result,
                 idempotency_key=idempotency_key_of(intent, parameters),
+                error_category=error_category_of(result),
             ),
             private=self.private_mode,
         )

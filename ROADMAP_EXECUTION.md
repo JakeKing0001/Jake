@@ -516,8 +516,32 @@ Dipende da: G0.
 
 Criterio di uscita: il 100% dei percorsi produce lo stesso `ActionReceipt` validato.
 
-- Stato: `DOING`; `F1.1.1`, `F1.1.3` (parzialmente) e `F1.1.8` conclusi con evidenza; `F1.1.2`,
-  `F1.1.4`, `F1.1.5`, `F1.1.6`, `F1.1.7` restano aperti.
+- Stato: `DOING`; `F1.1.1`, `F1.1.3` (parzialmente), `F1.1.4` e `F1.1.8` conclusi con evidenza;
+  `F1.1.2`, `F1.1.5`, `F1.1.6`, `F1.1.7` restano aperti.
+- `F1.1.4` — 12/09/2026: definita la tassonomia in `core/action_ledger.py`
+  (`ERROR_CATEGORY_*`: le nove categorie elencate sopra piu' due necessarie perche' non ogni
+  ricevuta e' un errore - `success` e `pending` - piu' un fallback onesto `uncategorized` per i
+  codici bespoke delle ~200 skill non ancora migrate). `error_category_of(result)` normalizza i
+  DUE formati diversi con cui i quattro chokepoint scrivono gia' `result` (letto dal codice, non
+  ipotizzato: `PlanExecutor` usa `"error:VERIFICATION_FAILED"` preservando il caso originale della
+  skill, `TaskAgent` a volte usa `"missing_parameters"` gia' minuscolo e senza prefisso) verso la
+  stessa categoria, mappando solo i codici gia' CENTRALIZZATI e condivisi tra piu' moduli
+  (`POLICY_BLOCKED`, `CONFIRMATION_REQUIRED`/`AUTH_REQUIRED`, `OPERATION_FAILED`/
+  `NETWORK_UNAVAILABLE` - le stesse due costanti di `execution_safety.RETRYABLE_ERRORS`,
+  `VERIFICATION_FAILED`, `KILLED`, `OLLAMA_UNAVAILABLE`, `TIMEOUT`, `MISSING_PARAMETERS`, ...);
+  un codice specifico di una singola skill (es. `PATH_NOT_FOUND`) ricade onestamente su
+  `uncategorized` invece di essere forzato in una categoria a caso. Aggiunto `error_category` a
+  `ActionReceipt` (default `uncategorized`, validato da `validate_action_receipt`) e collegato
+  a tutti e quattro i chokepoint reali (`JakeCore._log_action_outcome`/`_log_denied_action`,
+  `TaskAgent._log_step`, `PlanExecutor._log_step`) - stesso principio di `verification_status_of`
+  gia' usato per `verified` (F1.3.3): calcolato dal chiamante con una funzione pura, mai un
+  default implicito nella dataclass che rischi di nascondere un futuro punto che se ne
+  dimenticasse. Nessun cambio di comportamento per i test esistenti (130/130 verdi senza
+  modifiche); aggiunti 13 nuovi test (`tests/test_action_ledger.py::ErrorCategoryOfTests`/
+  `ActionReceiptErrorCategoryValidationTests`). Non ancora affrontato: la migrazione delle ~200
+  skill sulla tassonomia condivisa (`F1.1.6`/`F1.1.7`) e l'unificazione del formato di `result`
+  tra i quattro chokepoint (oggi tollerata da `error_category_of`, non risolta alla radice).
+  Prova: 1.995/1.995 test, ruff/mypy/compileall verdi su tutti i file toccati.
 - `F1.1.1` — 11/09/2026: inventario dei 7 percorsi di esecuzione in
   [docs/action-execution-paths.md](docs/action-execution-paths.md) (comando diretto, agente a
   passi, piano automatico/RUN_WORKFLOW/trigger, companion server, registrazione skill, rollback,

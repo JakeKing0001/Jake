@@ -102,6 +102,85 @@ VERIFICATION_FAILED = "verification_failed"
 _VERIFICATION_STATUSES = (VERIFICATION_VERIFIED, VERIFICATION_UNVERIFIED, VERIFICATION_FAILED)
 
 
+# F1.1.4 ("definire tassonomia errori"): le nove categorie elencate in ROADMAP_EXECUTION.md
+# per un ActionError, piu' due che il ledger deve comunque poter esprimere perche' NON ogni
+# ricevuta e' un errore ("success" per un'azione riuscita, "pending" per una che aspetta ancora
+# una risposta dell'utente) - senza le due extra, ogni ricevuta non fallita finirebbe nel
+# fallback "uncategorized" insieme ai veri errori non ancora mappati, rendendo il campo inutile
+# per distinguere "e' andata bene" da "e' fallita in un modo che non conosciamo ancora".
+ERROR_CATEGORY_SUCCESS = "success"
+ERROR_CATEGORY_PENDING = "pending"
+ERROR_CATEGORY_DENIED = "denied"
+ERROR_CATEGORY_INVALID_INPUT = "invalid_input"
+ERROR_CATEGORY_UNAVAILABLE = "unavailable"
+ERROR_CATEGORY_TRANSIENT = "transient"
+ERROR_CATEGORY_TIMEOUT = "timeout"
+ERROR_CATEGORY_PARTIAL_EFFECT = "partial_effect"
+ERROR_CATEGORY_VERIFICATION_FAILED = "verification_failed"
+ERROR_CATEGORY_CONFLICT = "conflict"
+ERROR_CATEGORY_USER_CANCELLED = "user_cancelled"
+# Nessuna delle ~200 skill produce ancora un codice di errore pensato per questa tassonomia
+# (F1.1.6/F1.1.7, migrazione skill-per-skill, restano lavoro successivo): un codice bespoke di
+# una singola skill (es. "PATH_NOT_FOUND", "PROTECTED_PATH") finisce onestamente qui, invece di
+# essere forzato in una delle categorie sopra solo per evitare questo valore.
+ERROR_CATEGORY_UNCATEGORIZED = "uncategorized"
+
+_ERROR_CATEGORIES = frozenset({
+    ERROR_CATEGORY_SUCCESS, ERROR_CATEGORY_PENDING, ERROR_CATEGORY_DENIED,
+    ERROR_CATEGORY_INVALID_INPUT, ERROR_CATEGORY_UNAVAILABLE, ERROR_CATEGORY_TRANSIENT,
+    ERROR_CATEGORY_TIMEOUT, ERROR_CATEGORY_PARTIAL_EFFECT, ERROR_CATEGORY_VERIFICATION_FAILED,
+    ERROR_CATEGORY_CONFLICT, ERROR_CATEGORY_USER_CANCELLED, ERROR_CATEGORY_UNCATEGORIZED,
+})
+
+# Da codice/esito grezzo (maiuscolo, MINUSCOLO, con o senza il prefisso "error:") alla categoria:
+# i quattro chokepoint che scrivono una ricevuta (JakeCore._log_action_outcome/_log_denied_action,
+# TaskAgent._log_step, PlanExecutor._log_step) NON condividono lo stesso formato per `result`
+# (letto direttamente dal codice, non ipotizzato: PlanExecutor usa "error:VERIFICATION_FAILED"
+# preservando il caso originale della skill, TaskAgent a volte usa "missing_parameters" gia' in
+# minuscolo e senza prefisso, JakeCore usa "blocked_by_policy"/"skill_not_found" - unificare quel
+# formato e' un cambiamento piu' ampio, rimandato) - error_category_of() normalizza entrambi
+# invece di richiedere ai chiamanti di farlo.
+_KNOWN_RESULT_CATEGORIES: dict[str, str] = {
+    "SUCCESS": ERROR_CATEGORY_SUCCESS,
+    "CONFIRMATION_REQUIRED": ERROR_CATEGORY_PENDING,
+    "AUTH_REQUIRED": ERROR_CATEGORY_PENDING,
+    "BLOCKED_BY_POLICY": ERROR_CATEGORY_DENIED,
+    "POLICY_BLOCKED": ERROR_CATEGORY_DENIED,
+    "DENIED_AUTH": ERROR_CATEGORY_DENIED,
+    "DENIED_CONFIRMATION": ERROR_CATEGORY_DENIED,
+    "MISSING_PARAMETERS": ERROR_CATEGORY_INVALID_INPUT,
+    "SKILL_NOT_FOUND": ERROR_CATEGORY_INVALID_INPUT,
+    "UNKNOWN_INTENT": ERROR_CATEGORY_INVALID_INPUT,
+    "INVALID_PLAN_RESPONSE": ERROR_CATEGORY_INVALID_INPUT,
+    "NO_RESULT": ERROR_CATEGORY_INVALID_INPUT,
+    "OLLAMA_UNAVAILABLE": ERROR_CATEGORY_UNAVAILABLE,
+    "PLANNER_ERROR": ERROR_CATEGORY_UNAVAILABLE,
+    # Le stesse due costanti gia' condivise da core/execution_safety.py::RETRYABLE_ERRORS: un
+    # errore che TaskAgent/PlanExecutor ritentano gia' automaticamente prima di arrendersi.
+    "OPERATION_FAILED": ERROR_CATEGORY_TRANSIENT,
+    "NETWORK_UNAVAILABLE": ERROR_CATEGORY_TRANSIENT,
+    "TIMEOUT": ERROR_CATEGORY_TIMEOUT,
+    "VERIFICATION_FAILED": ERROR_CATEGORY_VERIFICATION_FAILED,
+    # Il kill switch e' un comando esplicito dell'utente ("ferma tutto"), non un errore del
+    # sistema: un passo interrotto da li' e' un annullamento voluto, non un fallimento da capire.
+    "KILLED": ERROR_CATEGORY_USER_CANCELLED,
+}
+
+
+def error_category_of(result: str) -> str:
+    """F1.1.4: categorizza un `result` gia' calcolato dai quattro chokepoint in una delle
+    categorie della tassonomia sopra, tollerando i due formati diversi in uso oggi (vedi il
+    commento su _KNOWN_RESULT_CATEGORIES). Un `result` con prefisso "error:" (es.
+    "error:MISSING_PARAMETERS") viene spogliato del prefisso prima del confronto. Un codice non
+    ancora mappato (quasi sempre un errore specifico di UNA skill, non ancora migrata sulla
+    tassonomia condivisa - F1.1.6/F1.1.7) ricade su ERROR_CATEGORY_UNCATEGORIZED invece di
+    sollevare un errore o di essere forzato in una categoria sbagliata solo per evitarlo."""
+    normalized = (result or "").strip()
+    if normalized.lower().startswith("error:"):
+        normalized = normalized[len("error:"):]
+    return _KNOWN_RESULT_CATEGORIES.get(normalized.upper(), ERROR_CATEGORY_UNCATEGORIZED)
+
+
 def verification_status_of(verified: Optional[bool]) -> str:
     """Converte il tri-stato bool|None gia' calcolato da TaskAgent/PlanExecutor (vedi
     core/execution_safety.py::verify_effect) nella stringa esplicita da salvare nel ledger:
@@ -134,6 +213,12 @@ class ActionReceipt:
     # campo (il percorso a comando singolo non verifica ancora l'effetto): il default lo rende
     # comunque esplicito nel ledger invece di ometterlo.
     verified: str = VERIFICATION_UNVERIFIED
+    # F1.1.4: default ERROR_CATEGORY_UNCATEGORIZED invece di ricalcolarlo da `result` qui dentro -
+    # stesso principio di `authorization`/`verified`, gia' calcolati dal CHIAMANTE (authorization_of/
+    # verification_status_of) invece che dalla dataclass stessa, cosi' una ricevuta costruita da un
+    # test o da codice futuro senza passare per error_category_of() resta esplicita (uncategorized)
+    # invece di sembrare "success" per caso.
+    error_category: str = ERROR_CATEGORY_UNCATEGORIZED
     duration_ms: Optional[float] = None
     model: Optional[str] = None
     schema_version: int = ACTION_RECEIPT_SCHEMA_VERSION
@@ -165,6 +250,11 @@ def validate_action_receipt(receipt: ActionReceipt) -> None:
         raise ValueError(
             f"ActionReceipt.verified={receipt.verified!r} non e' uno stato valido "
             f"({', '.join(_VERIFICATION_STATUSES)})"
+        )
+    if receipt.error_category not in _ERROR_CATEGORIES:
+        raise ValueError(
+            f"ActionReceipt.error_category={receipt.error_category!r} non e' una categoria valida "
+            f"({', '.join(sorted(_ERROR_CATEGORIES))})"
         )
     if receipt.schema_version != ACTION_RECEIPT_SCHEMA_VERSION:
         raise ValueError(
