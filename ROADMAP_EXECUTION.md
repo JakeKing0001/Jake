@@ -1241,7 +1241,7 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
 - Stato: `DOING`; `F1.8.1` chiuso parzialmente (la forma piu' grave del buco - doppia esecuzione
   della stessa azione in sospeso - chiusa, non l'intera ownership di sessione, vedi sotto);
   `F1.8.2` chiuso per tutti i registri/store condivisi tra thread (ledger, promemoria, todo,
-  memoria a lungo termine, centro notifiche); `F1.8.3` chiuso per RUN_COMMAND (il solo subprocess bloccante
+  memoria a lungo termine, centro notifiche, elenco skill registrate); `F1.8.3` chiuso per RUN_COMMAND (il solo subprocess bloccante
   abbastanza lungo da essere rilevante, vedi sotto); `F1.8.4` chiuso parzialmente (visibilita'
   dei fallimenti di shutdown, non ancora drain/checkpoint veri); `F1.8.6` chiuso (verificato,
   vedi sotto); resto della fase (deadlock timeout, test di race su trigger/handoff/undo) non
@@ -1469,6 +1469,26 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
   notifiche in RAM) - il resto di F1.8 (coda per azioni concorrenti, drain allo shutdown,
   deadlock timeout, test di race su trigger/handoff/undo) resta comunque da fare. Prova:
   2.200/2.200 test, ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.8.2` (continuazione, sesta struttura: `SkillRegistry.skills`) — 12/09/2026: causa
+  leggermente diversa dalle precedenti - non una scrittura senza lock, ma un'ITERAZIONE senza
+  snapshot. `SkillRegistry.list_capabilities()` iterava `self.skills` (un dict popolato una volta
+  in `__init__`, poi mutato a runtime da `register_skill()` - il punto d'ingresso di plugin/Skill
+  Forge, raggiungibile da un comando voce/companion) con
+  `for intent, skill in self.skills.items():` DIRETTO sul dict live. Un ciclo `for` su un dict e'
+  un punto di cambio thread naturale a ogni singola iterazione (a differenza di un'operazione
+  atomica in un'unica chiamata C): se `register_skill()` cambia la dimensione del dict mentre
+  `list_capabilities()` e' a meta' del proprio ciclo (es. durante il retrieval semantico di un
+  intent per un'altra richiesta concorrente), Python solleva
+  `RuntimeError: dictionary changed size during iteration`, facendo fallire l'INTERA richiesta in
+  corso con un errore imprevisto invece di un dato perso silenziosamente - un guasto piu' rumoroso
+  dei precedenti in questa sessione, ma comunque un fallimento reale e riproducibile. Riprodotto
+  con `sys.setswitchinterval()` abbassato per forzare la sovrapposizione. Corretto iterando su
+  `list(self.skills.items())`, uno snapshot preso in un'unica chiamata atomica invece del dict
+  live - nessun lock necessario qui: la lettura non deve restare coerente con scritture future,
+  solo non essere interrotta a meta' da una che avviene mentre gia' itera. Aggiunto
+  `tests/test_skill_registry.py::ConcurrentListCapabilitiesTests` (stessa tecnica di riproduzione
+  forzata, verificato che fallisce - 50/50 iterazioni sollevavano - contro il codice precedente).
+  Prova: 2.201/2.201 test, ruff/mypy/compileall verdi su tutti i file toccati.
 
 ### Gate G1 — Nucleo fidato
 
@@ -2571,37 +2591,31 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 12/09/2026. `F1.2.6` (percorso interattivo/agente, ripreso da lavoro non committato di
-una sessione precedente), `F1.7.1` (ledger resistente a record parziali/arresto improvviso),
-`F1.8.3` (kill switch propagato a RUN_COMMAND), `F1.4.1` (scrittura atomica di
-config/settings.json), `F1.7.5` (replay sicuro), `F1.8.4` (parziale, visibilita' dei fallimenti
-di shutdown), `F1.2.2` (parziale, prima capability vera - radici filesystem consentite per le
-quattro mutazioni sul percorso interattivo), `F1.8.6` (verificato con una suite dedicata), `F1.4.3` (parziale, confronto a tempo costante della
-passphrase admin), due voci aggiuntive di `F1.8.4` (notifica `on_step` dell'agente e chiusura
-del HUD loggate come lo shutdown di `JakeCore`), `F1.8.1` (parziale, doppia esecuzione di
-un'azione in sospeso confermata da due canali concorrenti) e un quinto store di `F1.8.2` (il
-centro notifiche, con oltre il 98% di notifiche perse sotto carico concorrente prima del fix)
-sono stati completati e verificati in questa sessione. La maggior parte erano buchi reali
-riprodotti empiricamente prima del fix (`F1.8.3` con due buchi ULTERIORI trovati durante la
-verifica del fix stesso, `F1.4.1` lo stesso identico buco di `F1.7.1` ma con un impatto piu'
-grave, `F1.7.5` un bypass completo dell'autorizzazione in `tools/replay_session.py --replay`,
-`F1.4.3` un canale laterale temporale sulla passphrase admin, `F1.8.1` una doppia esecuzione
-reale - `JakeCore.answer()` e' condiviso tra il loop voce e il `ThreadingHTTPServer` del
-companion server, `F1.8.2` una perdita quasi totale di notifiche concorrenti in
-`NotificationCenter.set_mode()`); `F1.2.2` e' la prima funzionalita' NUOVA della sessione (non un
-fix), scelta come fetta verticale stretta del "kernel dei permessi"; `F1.8.6` e' una VERIFICA (il
-codice era gia' corretto per costruzione, mancava solo una prova a cronometro). `master` e'
-pulito, 2.200/2.200 test, ruff/mypy/compileall verdi. `G1` resta aperto.
+Aggiornato 12/09/2026. Sessione lunga con 14 incrementi completati e verificati (PR #28-#41),
+quasi tutti buchi reali riprodotti empiricamente prima del fix, non ipotizzati leggendo il
+codice - vedi le singole voci datate 12/09/2026 nelle rispettive sezioni F1.2/F1.4/F1.7/F1.8 per
+i dettagli completi di ciascuno. In sintesi: `F1.2.6` (percorso interattivo/agente, ripreso da
+lavoro non committato), `F1.7.1` (ledger resistente a record parziali), `F1.8.3` (kill switch
+propagato a RUN_COMMAND, con due buchi ulteriori trovati verificando il fix), `F1.4.1` (scrittura
+atomica di config/settings.json), `F1.7.5` (replay sicuro - bypass completo dell'autorizzazione),
+`F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step` dell'agente, chiusura
+HUD), `F1.2.2` (prima capability vera - radici filesystem, l'unica funzionalita' NUOVA della
+sessione, non un fix), `F1.8.6` (verifica, non un fix - il codice era gia' corretto), `F1.4.3`
+(canale laterale temporale sulla passphrase admin), `F1.8.1` (doppia esecuzione di un'azione in
+sospeso da due canali concorrenti), `F1.8.2` (due strutture in piu' trovate senza sincronizzazione
+- centro notifiche con oltre il 98% di notifiche perse, e `SkillRegistry.list_capabilities()` con
+un crash riproducibile). `master` e' pulito, 2.201/2.201 test, ruff/mypy/compileall verdi. `G1`
+resta aperto.
 
-L'utente aveva chiesto di fermarsi dopo la sessione precedente, poi ha esplicitamente chiesto di
-controllare le cose non committate e continuare da li' - il lavoro prosegue. Restano fuori
-discussione, senza un nuovo via libera esplicito, i due lavori grandi gia' proposti e rifiutati:
-`F1.6` (sandbox permanente per le skill forgiate - Job Object/AppContainer) e `F1.1.7`
-(migrazione delle ~200 skill da `SkillResult` ad `ActionProposal`/`ActionError`). Ritmo per chi
-riprende: un incremento alla volta, ciascuno con test reali (non solo letti a tavolino - diversi
-buchi in questa roadmap sono stati trovati SOLO eseguendo davvero il codice), riprova empirica
-quando possibile (riprodurre il buco con il codice vecchio prima di dichiararlo risolto),
+Restano fuori discussione, senza un nuovo via libera esplicito, i due lavori grandi gia' proposti
+e rifiutati: `F1.6` (sandbox permanente per le skill forgiate - Job Object/AppContainer) e
+`F1.1.7` (migrazione delle ~200 skill da `SkillResult` ad `ActionProposal`/`ActionError`). Ritmo
+per chi riprende: un incremento alla volta, ciascuno con test reali (non solo letti a tavolino),
+riprova empirica quando possibile (riprodurre il buco con il codice vecchio prima di dichiararlo
+risolto, idealmente con una tecnica di forzatura reale come `sys.setswitchinterval()` abbassato o
+una `threading.Barrier` - molti buchi di questa sessione non si manifestavano affatto senza),
 aggiornamento di questo file, e commit/PR separati invece di un unico commit enorme.
+
 Candidati piccoli ancora aperti in F1: il resto di `F1.2.1` (percorso 7,
 `SkillRegistry.execute()`), il resto di `F1.2.2` (le altre sette capability - app/contatto/
 dominio web/device/HA/rete/durata; estendere le radici filesystem al percorso automatico e agli
@@ -2613,4 +2627,7 @@ tipo di dato, `F1.7.8` modalita' privata end-to-end su ogni nuovo record), il re
 (il resto di `F1.8.1` - identita' di canale/sessione vera per due conferme concorrenti distinte,
 coda generale per azioni concorrenti non legate a una conferma; il resto di `F1.8.4` - drain
 limitato di un'azione in corso, checkpoint vero, release device audio; `F1.8.5` deadlock timeout;
-`F1.8.7` test di race su trigger/handoff/undo).
+`F1.8.7` test di race su trigger/handoff/undo). Vale la pena anche un altro giro di ricerca
+mirata di race condition non ancora trovate in strutture condivise tra thread non ancora
+esaminate (es. `core/learning_manager.py`, `core/example_store.py`), visto quante ne sono emerse
+in questa sola sessione con la stessa tecnica.
