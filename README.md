@@ -58,6 +58,10 @@ Le dimensioni dei modelli sopra sono misurate direttamente (`ollama list`/`ollam
 
 Dopo una risposta puoi continuare a parlare per qualche secondo senza ripetere «Jake» (finestra di follow-up). Le domande di conferma («confermi?») accettano il sì/no direttamente.
 
+Prima di eseguire un'azione confermata, Jake ricontrolla la policy corrente: un blocco
+intervenuto dopo la domanda annulla l'esecuzione. Il sì prova il consenso, non l'identità;
+se l'azione richiede autenticazione, serve la passphrase valida o Windows Hello.
+
 ## Come ragiona sui compiti composti
 
 Una richiesta come «trova il file tesi.pdf e dimmi cosa contiene» non è una singola azione: Jake la affida a un agente che lavora a passi (`core/agent.py`), non a un piano scritto in anticipo. Cerca il file, guarda il risultato VERO (il percorso trovato), lo passa al passo successivo (leggerlo), e solo allora risponde. Se un passo manca di un dato che solo tu conosci (quale contatto, quale cartella), si ferma e te lo chiede invece di indovinare; se rispondi, riprende da dove si era fermato.
