@@ -19,7 +19,19 @@ Due fattori indipendenti, non uno sostituto dell'altro:
 Deliberatamente OPT-IN: se non e' mai stata configurata una passphrase ne' Windows Hello,
 enabled e' False e le azioni ADMIN restano protette solo dalla conferma si'/no gia' esistente
 (v3.2), esattamente come prima di questa fase - nessuna regressione per chi non ha mai attivato
-nulla."""
+nulla.
+
+F1: check() confrontava la passphrase con `==`, un confronto stringa-per-stringa che si ferma al
+primo carattere diverso - un canale laterale temporale che permetterebbe in teoria di indovinare
+la passphrase un carattere alla volta misurando quanto impiega ogni tentativo a fallire, invece di
+doverla indovinare per intero. Lo stesso identico principio era gia' applicato correttamente
+altrove in questo progetto per un confronto di segreto (`core/companion_server.py::
+_is_authorized`, token del companion server), ma non qui, per la passphrase amministrativa - la
+protezione piu' importante del sistema (ADMIN: spegnimento, comandi da terminale, installazione di
+skill scritte da Jake stesso). Corretto con `hmac.compare_digest`, a tempo costante rispetto al
+CONTENUTO confrontato (non alla lunghezza, che resta osservabile per costruzione - vedi il
+docstring di `hmac.compare_digest`)."""
+import hmac
 
 
 class AuthGate:
@@ -38,10 +50,12 @@ class AuthGate:
 
     def check(self, attempt: str) -> bool:
         """Vero se 'attempt' corrisponde alla passphrase configurata. Sempre falso se non e'
-        stata configurata: non c'e' nulla con cui corrispondere."""
+        stata configurata: non c'e' nulla con cui corrispondere. hmac.compare_digest invece di
+        '==' (vedi il docstring del modulo): un confronto a tempo costante rispetto al contenuto,
+        non solo alla lunghezza dei due lati."""
         if not self.passphrase:
             return False
-        return (attempt or "").strip() == self.passphrase
+        return hmac.compare_digest((attempt or "").strip(), self.passphrase)
 
     def verify_with_windows_hello(self, reason: str) -> bool:
         """Mostra il prompt nativo di Windows Hello (se attivo) e restituisce se ha verificato
