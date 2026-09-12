@@ -111,7 +111,13 @@ class ListProcessesSkill:
 class CloseAppSkill:
     """Chiude un'applicazione. Prima in modo gentile (v3.0: WM_CLOSE alle sue finestre, come
     cliccare la X, cosi' il programma puo' chiedere di salvare); solo se non ha finestre
-    visibili termina i processi, e in quel caso chiede conferma (azione irreversibile)."""
+    visibili termina i processi, e in quel caso chiede conferma (azione irreversibile).
+
+    F1.3.2 ("prove forti per... processi"): stesso buco reale gia' trovato e corretto in
+    skills/dev_tools.py::KillProcessByPortSkill - il ramo "termina il processo" dichiarava
+    success=True subito dopo process.terminate(), senza aspettare che fosse davvero morto."""
+
+    TERMINATE_WAIT_SECONDS = 3
 
     metadata = {
         "intent": "CLOSE_APP",
@@ -152,17 +158,27 @@ class CloseAppSkill:
                 error="CONFIRMATION_REQUIRED",
             )
 
+        import psutil
+
         closed = []
+        pids = []
         for process in matching:
             try:
                 process.terminate()
-                closed.append(process.info["name"])
             except Exception:
                 continue
+            try:
+                process.wait(timeout=self.TERMINATE_WAIT_SECONDS)
+            except psutil.NoSuchProcess:
+                pass  # gia' terminato per conto suo tra la richiesta e l'attesa: comunque chiuso
+            except psutil.TimeoutExpired:
+                continue  # non e' morto in tempo: non lo si conta come chiuso davvero
+            closed.append(process.info["name"])
+            pids.append(process.pid)
 
         if not closed:
             return SkillResult(success=False, data={"name": name_filter}, error="OPERATION_FAILED")
-        return SkillResult(success=True, data={"name": name_filter, "closed": closed})
+        return SkillResult(success=True, data={"name": name_filter, "closed": closed, "pids": pids})
 
     @staticmethod
     def _close_windows_by_title(name: str) -> list[str]:
