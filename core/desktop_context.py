@@ -2,6 +2,8 @@ import threading
 from collections import deque
 from datetime import datetime
 
+from core.logger import get_logger
+
 # Anteprima appunti troncata (v3.5, World Context Engine): abbastanza per far capire al modello
 # "di cosa sta parlando" un "riassumi questo"/"traduci questo" detto senza specificare cosa,
 # ma non tanto da gonfiare ogni prompt con un blocco di testo intero copiato per altri motivi.
@@ -14,7 +16,7 @@ class DesktopContextTracker:
     aperte e un'anteprima degli appunti). Letture leggere a intervalli, mai continue (niente
     OCR/screenshot qui: troppo costoso e invasivo per girare sempre in background)."""
 
-    def __init__(self, poll_seconds: float = 3.0, history_size: int = 10):
+    def __init__(self, poll_seconds: float = 3.0, history_size: int = 10, stop_timeout_seconds: float = 2.0):
         self.poll_seconds = poll_seconds
         self._history: deque[dict] = deque(maxlen=history_size)
         self._current_title: str | None = None
@@ -23,6 +25,9 @@ class DesktopContextTracker:
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
+        self._logger = get_logger()
+        # F1.8.5: configurabile solo per i test - il comportamento di produzione resta invariato.
+        self._stop_timeout_seconds = stop_timeout_seconds
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -32,9 +37,18 @@ class DesktopContextTracker:
         self._thread.start()
 
     def stop(self) -> None:
+        # F1.8.5 ("aggiungere deadlock timeout e diagnosi"): vedi core/scheduler.py::
+        # ReminderScheduler.stop() per il buco reale riprodotto e il ragionamento completo -
+        # stesso schema qui.
         self._stop_event.set()
         if self._thread is not None:
-            self._thread.join(timeout=2)
+            self._thread.join(timeout=self._stop_timeout_seconds)
+            if self._thread.is_alive():
+                self._logger.warning(
+                    "DesktopContextTracker non si e' fermato entro il timeout: il thread "
+                    "precedente e' ancora in esecuzione (probabilmente bloccato in una lettura "
+                    "lenta di finestra/appunti)."
+                )
 
     def _run(self) -> None:
         while not self._stop_event.is_set():

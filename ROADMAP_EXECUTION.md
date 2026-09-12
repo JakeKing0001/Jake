@@ -1324,11 +1324,13 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
 - Stato: `DOING`; `F1.8.1` chiuso parzialmente (la forma piu' grave del buco - doppia esecuzione
   della stessa azione in sospeso - chiusa, non l'intera ownership di sessione, vedi sotto);
   `F1.8.2` chiuso per tutti i registri/store condivisi tra thread (ledger, promemoria, todo,
-  memoria a lungo termine, centro notifiche, elenco skill registrate, archivio esempi frase->intent); `F1.8.3` chiuso per RUN_COMMAND (il solo subprocess bloccante
-  abbastanza lungo da essere rilevante, vedi sotto); `F1.8.4` chiuso parzialmente (visibilita'
-  dei fallimenti di shutdown, non ancora drain/checkpoint veri); `F1.8.6` chiuso (verificato,
-  vedi sotto); resto della fase (deadlock timeout, test di race su trigger/handoff/undo) non
-  affrontato.
+  memoria a lungo termine, centro notifiche, elenco skill registrate, archivio esempi
+  frase->intent); `F1.8.3` chiuso per RUN_COMMAND (il solo subprocess bloccante abbastanza lungo
+  da essere rilevante, vedi sotto); `F1.8.4` chiuso parzialmente (visibilita' dei fallimenti di
+  shutdown, non ancora drain/checkpoint veri); `F1.8.5` chiuso parzialmente (diagnosi di un
+  thread che non si ferma in tempo per i quattro scheduler in background, non ancora deadlock su
+  lock applicativi, vedi sotto); `F1.8.6` chiuso (verificato, vedi sotto); resto della fase (test
+  di race su trigger/handoff/undo) non affrontato.
 - `F1.8.1` (parziale, doppia esecuzione via conferma concorrente) — 12/09/2026: "definire
   ownership della sessione... e una coda per azioni concorrenti". Buco reale, riprodotto per
   davvero prima del fix - `JakeCore.answer()` e' l'UNICO ingresso condiviso sia dal loop voce
@@ -1592,6 +1594,32 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
   `tests/test_nlu.py::ExampleStoreConcurrentAccessTests` (stessa tecnica di riproduzione forzata,
   verificato che fallisce - 75/200 esempi sopravvivevano - contro il codice precedente). Prova:
   2.202/2.202 test, ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.8.5` (parziale, thread bloccati nei quattro scheduler in background) — 13/09/2026:
+  "aggiungere deadlock timeout e diagnosi". Buco reale, riprodotto per davvero prima del fix - i
+  quattro scheduler in background (`ReminderScheduler`, `TriggerScheduler`, `SystemAdvisor`,
+  `DesktopContextTracker`) fermano il proprio thread con `self._thread.join(timeout=2)`: se il
+  ciclo era bloccato (una query lenta, un callback che non ritorna) oltre quei 2 secondi, `join()`
+  tornava comunque, SILENZIOSAMENTE, senza dire che il thread era ANCORA vivo. Chi chiama `stop()`
+  (`JakeCore.shutdown()`, gia' reso rumoroso sui propri fallimenti in questa sessione - F1.8.4)
+  non aveva modo di scoprire che uno scheduler non si era davvero fermato: nessuna eccezione,
+  nessun log, solo un thread abbandonato (non duplicato pero' - `start()` controlla gia'
+  `is_alive()`, quindi un riavvio non ne crea un secondo, ma nemmeno segnala che il vecchio e'
+  ancora li'). Riprodotto per davvero con una dipendenza mockata che dorme piu' a lungo del
+  timeout: `stop()` tornava dopo esattamente 2s con `_thread.is_alive() == True` e nessuna
+  traccia in nessun log. Corretto controllando `is_alive()` DOPO il `join()` in tutti e quattro:
+  se il thread e' ancora vivo, un `logger.warning(...)` lo dice esplicitamente invece di
+  restare in silenzio (`DesktopContextTracker` non aveva nemmeno un proprio logger - aggiunto).
+  Il timeout di 2s (`stop_timeout_seconds`, nuovo parametro opzionale sui quattro costruttori,
+  default invariato) e' stato reso configurabile SOLO per permettere ai test di verificare lo
+  scenario senza dover davvero aspettare 2 secondi reali per prova - il comportamento di
+  produzione non cambia per chi non lo passa. Aggiunti 5 nuovi test (uno per scheduler, piu' uno
+  di controllo che verifica che un thread che si ferma normalmente NON produca un avviso), incluso
+  un nuovo `tests/test_scheduler.py` (nessuna suite esisteva ancora per `ReminderScheduler`).
+  Non ancora affrontato: "diagnosi" per un DEADLOCK vero e proprio su un lock applicativo (es. due
+  thread che si aspettano a vicenda sui lock introdotti quest'anno per `F1.8.2`) - qui si tratta
+  di un thread lento/bloccato su un'operazione esterna (I/O, una chiamata di sistema), non di uno
+  stallo tra due lock del progetto; nessun caso del genere e' stato trovato o riprodotto. Prova:
+  2.225/2.225 test, ruff/mypy/compileall verdi su tutti i file toccati.
 
 ### Gate G1 — Nucleo fidato
 
@@ -2694,28 +2722,29 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 19 incrementi completati e verificati (PR #28-#46), la
+Aggiornato 13/09/2026. Sessione lunga con 20 incrementi completati e verificati (PR #28-#47), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
 12-13/09/2026 nelle rispettive sezioni F1.2/F1.4/F1.7/F1.8 per i dettagli completi di ciascuno. I
 piu' rilevanti: `F1.8.1` (doppia esecuzione di un'azione DESTRUCTIVE/ADMIN in sospeso da due
-canali concorrenti - voce + companion server), `F1.8.2` (tre strutture condivise tra thread
+canali concorrenti - voce + companion server), `F1.8.2` (QUATTRO strutture condivise tra thread
 senza sincronizzazione: centro notifiche con oltre il 98% di notifiche perse, crash riproducibile
-in `SkillRegistry.list_capabilities()`, `ExampleStore` con oltre il 60% di esempi imparati
-persi), `F1.7.5` (bypass completo dell'autorizzazione in `tools/replay_session.py --replay`),
+in `SkillRegistry.list_capabilities()`, `ExampleStore` con oltre il 60% di esempi imparati persi),
+`F1.7.5` (bypass completo dell'autorizzazione in `tools/replay_session.py --replay`),
 `F1.4.1`/`F1.7.1` (scritture non atomiche - config e ledger - che un crash a meta' avrebbe potuto
-corrompere), `F1.4.3` (canale laterale temporale sulla passphrase admin). Le due funzionalita'
-nuove: `F1.2.2` (prima capability vera - radici filesystem consentite) e `F1.7.4` (redazione
-strutturata per tipo di dato - percorso/URL/email invece del generico "<str:N caratteri>"). Il
-resto: `F1.2.6` (percorso interattivo/agente, ripreso da lavoro non committato), `F1.8.3` (kill
-switch propagato a RUN_COMMAND, con due buchi ulteriori trovati verificando il fix), `F1.8.4`
-(tre punti di visibilita' sui fallimenti: shutdown, `on_step` dell'agente, chiusura HUD),
-`F1.8.6` (verifica, non un fix), `F1.7.2` (parziale - la notifica di un'automazione ora porta lo
-stesso trace_id delle ricevute che l'ha prodotta), `F1.7.8` (CHIUSO - verifica end-to-end che la
-modalita' privata non scrive nulla in nessuno dei tre chokepoint - diretto, agente, automatico -
-nemmeno i campi nuovi di questa sessione). `master` e' pulito, 2.220/2.220 test,
-ruff/mypy/compileall verdi. `G1` resta aperto.
+corrompere), `F1.4.3` (canale laterale temporale sulla passphrase admin), `F1.8.5` (i quattro
+scheduler in background non segnalavano MAI se il proprio thread restava bloccato oltre il
+timeout di arresto). Le due funzionalita' nuove: `F1.2.2` (prima capability vera - radici
+filesystem consentite) e `F1.7.4` (redazione strutturata per tipo di dato - percorso/URL/email
+invece del generico "<str:N caratteri>"). Il resto: `F1.2.6` (percorso interattivo/agente,
+ripreso da lavoro non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi
+ulteriori trovati verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti:
+shutdown, `on_step` dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.2`
+(parziale - la notifica di un'automazione ora porta lo stesso trace_id delle ricevute che l'ha
+prodotta), `F1.7.8` (CHIUSO - verifica end-to-end che la modalita' privata non scrive nulla in
+nessuno dei tre chokepoint). `master` e' pulito, 2.225/2.225 test, ruff/mypy/compileall verdi.
+`G1` resta aperto.
 
 Restano fuori discussione, senza un nuovo via libera esplicito, i due lavori grandi gia' proposti
 e rifiutati: `F1.6` (sandbox permanente per le skill forgiate - Job Object/AppContainer) e
@@ -2735,11 +2764,11 @@ classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7` (il res
 undo, mai wired a una ricevuta propria; `F1.7.3` retention differenziata; il resto di `F1.7.4` -
 altri tipi di dato, classificazione per nome del parametro non solo contenuto - `F1.7.8` e'
 chiuso), il resto di `F1.8` (il resto di `F1.8.1` - identita' di canale/sessione vera per due
-conferme concorrenti
-distinte, coda generale per
-azioni concorrenti non legate a una conferma; il resto di `F1.8.4` - drain limitato di un'azione
-in corso, checkpoint vero, release device audio; `F1.8.5` deadlock timeout; `F1.8.7` test di
-race su trigger/handoff/undo). Vale la pena anche un altro giro di ricerca mirata di race
+conferme concorrenti distinte, coda generale per azioni concorrenti non legate a una conferma;
+il resto di `F1.8.4` - drain limitato di un'azione in corso, checkpoint vero, release device
+audio; il resto di `F1.8.5` - diagnosi di un deadlock vero su un lock applicativo, non solo un
+thread esterno lento; `F1.8.7` test di race su trigger/handoff/undo). Vale la pena anche un
+altro giro di ricerca mirata di race
 condition non ancora trovate in strutture condivise tra thread non ancora esaminate (es.
 `core/learning_manager.py` - trovato un `_pending` a slot singolo con lo stesso pattern, ma
 l'effetto peggiore e' un doppio apprendimento innocuo, non una perdita/corruzione - deciso di non

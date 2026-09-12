@@ -3,6 +3,7 @@ aperte e anteprima appunti raccolte in background. Chiama direttamente i metodi 
 polling (stesso stile di tests/test_system_advisor.py) invece di far girare il thread reale, con
 mock.patch sulle chiamate di sistema (win32gui/win32clipboard) cosi' i test non toccano il
 desktop vero e non dipendono da cosa e' aperto sulla macchina in quel momento."""
+import time
 import unittest
 from unittest import mock
 
@@ -76,6 +77,25 @@ class ContextSummaryTests(unittest.TestCase):
     def test_empty_tracker_yields_empty_summary(self):
         tracker = DesktopContextTracker()
         self.assertEqual(tracker.context_summary(), "")
+
+
+class StopTimeoutTests(unittest.TestCase):
+    """F1.8.5 ("aggiungere deadlock timeout e diagnosi"): buco reale, riprodotto per davvero -
+    se _run() era bloccato oltre i 2s di timeout di stop(), join() tornava comunque,
+    silenziosamente, senza dire che il thread era ANCORA vivo."""
+
+    def test_stop_logs_a_warning_when_the_thread_does_not_stop_in_time(self):
+        tracker = DesktopContextTracker(poll_seconds=100, stop_timeout_seconds=0.05)
+        tracker._logger = mock.Mock()
+        with mock.patch.object(tracker, "_poll_active_window", side_effect=lambda: time.sleep(0.5)):
+            tracker.start()
+            self.addCleanup(lambda: tracker._thread.join(timeout=5))
+            time.sleep(0.05)  # lascia partire _run() e bloccarsi dentro _poll_active_window()
+
+            tracker.stop()
+
+        self.assertTrue(tracker._thread.is_alive(), "il thread deve essere ancora bloccato a questo punto")
+        tracker._logger.warning.assert_called_once()
 
 
 if __name__ == "__main__":

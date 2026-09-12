@@ -29,12 +29,14 @@ DOWNLOADS_MAX_SCANNED = 2000
 class SystemAdvisor:
     def __init__(
         self, on_advisory=None, interval_seconds: float = 300, enabled: bool = True, todo_manager=None,
-        downloads_dir: Path | None = None, memory_manager=None,
+        downloads_dir: Path | None = None, memory_manager=None, stop_timeout_seconds: float = 2.0,
     ):
         self.on_advisory = on_advisory
         self.interval_seconds = interval_seconds
         self.enabled = enabled
         self.todo_manager = todo_manager
+        # F1.8.5: configurabile solo per i test - il comportamento di produzione resta invariato.
+        self._stop_timeout_seconds = stop_timeout_seconds
         # F6: iniettabile per i test (mai la vera cartella Download dell'utente in un test
         # automatico), default alla cartella Download reale altrimenti.
         self.downloads_dir = Path(downloads_dir) if downloads_dir else Path.home() / "Downloads"
@@ -59,9 +61,17 @@ class SystemAdvisor:
         self._thread.start()
 
     def stop(self) -> None:
+        # F1.8.5 ("aggiungere deadlock timeout e diagnosi"): vedi core/scheduler.py::
+        # ReminderScheduler.stop() per il buco reale riprodotto e il ragionamento completo -
+        # stesso schema qui.
         self._stop_event.set()
         if self._thread is not None:
-            self._thread.join(timeout=2)
+            self._thread.join(timeout=self._stop_timeout_seconds)
+            if self._thread.is_alive():
+                self._logger.warning(
+                    "SystemAdvisor non si e' fermato entro il timeout: il thread precedente e' "
+                    "ancora in esecuzione (probabilmente bloccato in uno dei controlli proattivi)."
+                )
 
     def _run(self) -> None:
         while not self._stop_event.is_set():

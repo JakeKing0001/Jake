@@ -27,6 +27,7 @@ class TriggerScheduler:
         policy_engine=None,
         interval_seconds: float = 30,
         autonomy_budget: AutonomyBudget | None = None,
+        stop_timeout_seconds: float = 2.0,
     ):
         self.trigger_manager = trigger_manager
         self.workflow_manager = workflow_manager
@@ -45,6 +46,8 @@ class TriggerScheduler:
         # un'istanza locale con i default - mai disattivato del tutto, a differenza di
         # blocked_intents/always_confirm_intents che possono restare None.
         self.autonomy_budget = autonomy_budget or AutonomyBudget()
+        # F1.8.5: configurabile solo per i test - il comportamento di produzione resta invariato.
+        self._stop_timeout_seconds = stop_timeout_seconds
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._logger = get_logger()
@@ -60,9 +63,18 @@ class TriggerScheduler:
         self._thread.start()
 
     def stop(self) -> None:
+        # F1.8.5 ("aggiungere deadlock timeout e diagnosi"): vedi core/scheduler.py::
+        # ReminderScheduler.stop() per il buco reale riprodotto e il ragionamento completo -
+        # stesso schema qui.
         self._stop_event.set()
         if self._thread is not None:
-            self._thread.join(timeout=2)
+            self._thread.join(timeout=self._stop_timeout_seconds)
+            if self._thread.is_alive():
+                self._logger.warning(
+                    "TriggerScheduler non si e' fermato entro il timeout: il thread precedente "
+                    "e' ancora in esecuzione (probabilmente bloccato in un'automazione o un "
+                    "controllo lento)."
+                )
 
     def _run(self) -> None:
         while not self._stop_event.is_set():
