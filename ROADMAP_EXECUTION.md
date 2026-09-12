@@ -793,8 +793,8 @@ Dipende da: F1.1 e F1.2.
 Criterio di uscita: tutte le azioni external/destructive/admin hanno prova; l'80% delle azioni
 reversibili dispone di undo testato.
 
-- Stato: `DOING`; `F1.3.1`, `F1.3.3` e `F1.3.6` chiusi, resto aperto (`F1.3.2` per ora solo
-  filesystem, non ancora processi/finestre/browser/casa).
+- Stato: `DOING`; `F1.3.1`, `F1.3.3` e `F1.3.6` chiusi, `F1.3.2` esteso ai processi (un solo
+  intent, non ancora finestre/browser/casa), resto aperto.
 - `F1.3.1` — 11/09/2026: `core/execution_safety.py` aveva tre strutture parallele da tenere
   sincronizzate a mano - `VERIFIABLE_INTENTS` (insieme), l'if/elif di `verify_effect`,
   `ROLLBACK_HANDLERS` + `ROLLBACK_COMPENSATING_INTENT` (due dizionari) - esattamente il pattern
@@ -846,6 +846,30 @@ reversibili dispone di undo testato.
   il rischio di un EFFETTO DOPPIO causato dal retry automatico stesso, un problema piu' stretto e
   senza ambiguita' di policy. Prova: 2.002/2.002 test, ruff/mypy/compileall verdi su tutti i file
   toccati.
+- `F1.3.2` (esteso ai processi) — 12/09/2026: **buco reale trovato e corretto, non solo un
+  verificatore aggiunto a un codice gia' corretto** - `skills/dev_tools.py::
+  KillProcessByPortSkill` dichiarava `success=True` subito dopo aver chiamato
+  `psutil.Process.terminate()`, senza aspettare che il processo fosse DAVVERO morto:
+  `terminate()` invia solo la richiesta di terminazione, non garantisce che sia gia' avvenuta
+  quando la chiamata ritorna. Corretto aggiungendo `process.wait(timeout=3)` dopo `terminate()`:
+  se il processo non muore in tempo, la skill riporta onestamente `OPERATION_FAILED` invece di
+  affermare un effetto mai confermato; se muore da solo proprio nella finestra tra le due
+  chiamate (`psutil.NoSuchProcess`), resta comunque un successo (l'effetto voluto e' avvenuto).
+  Aggiunto `data["pid"]` al risultato (assente prima), che permette un secondo controllo
+  indipendente: nuova voce `KILL_PROCESS_BY_PORT` in `INTENT_SAFETY_REGISTRY`
+  (`core/execution_safety.py`) con `_verify_process_terminated()` (`not psutil.pid_exists(pid)`),
+  senza rollback (terminare un processo non ha un inverso naturale, come `DELETE_PATH`). Effetto
+  collaterale positivo, non un accorgimento a parte: essendo ora nel registry,
+  `is_safe_to_auto_retry()` (F1.3.6) lo considera automaticamente sicuro da ritentare - corretto,
+  perche' ritentare una terminazione su un processo gia' morto degrada in modo pulito a
+  `NOT_FOUND`, non in un doppio effetto. Nessuna suite esisteva per l'intero modulo
+  `KillProcessByPortSkill`: aggiunto `tests/test_kill_process_by_port_skill.py` (8 test), inclusi
+  due contro un PROCESSO VERO generato dal test stesso (non un doppio) - uno dimostra che quando
+  `execute()` ritorna il processo e' gia' morto per davvero (`psutil.pid_exists` restituisce
+  `False`), l'altro che un processo che rifiuta/non fa in tempo a morire produce un fallimento
+  onesto, non un successo mai verificato. Non ancora affrontato: finestre/browser/casa (il resto
+  di F1.3.2) restano senza prova indipendente. Prova: 2.091/2.091 test, ruff/mypy (per
+  `core/execution_safety.py`, nel set selettivo)/compileall verdi su tutti i file toccati.
 
 ### F1.4 — Identità, autenticazione e segreti
 
