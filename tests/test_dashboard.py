@@ -69,6 +69,21 @@ class BuildReportTests(unittest.TestCase):
         self.assertEqual(report["skill_rows"], [])
         self.assertIsNone(report["overall_p50_ms"])
 
+    def test_failure_category_counts_use_the_shared_taxonomy(self):
+        """F1.7.6 ("failure taxonomy"): stessa error_category_of() dell'action ledger (F1.1.4),
+        applicata al campo `result` gia' scritto da core/logger.log_action nello stesso formato."""
+        actions = [
+            {"skill": "ADD_NOTE", "result": "success"},
+            {"skill": "CREATE_PATH", "result": "error:VERIFICATION_FAILED"},
+            {"skill": "ADD_NOTE", "result": "error:OPERATION_FAILED"},
+            {"skill": "OPEN_APP", "result": "error:PATH_NOT_FOUND"},  # codice bespoke, non mappato
+        ]
+        report = build_report(actions, sessions=[])
+        self.assertEqual(report["failure_category_counts"]["success"], 1)
+        self.assertEqual(report["failure_category_counts"]["verification_failed"], 1)
+        self.assertEqual(report["failure_category_counts"]["transient"], 1)
+        self.assertEqual(report["failure_category_counts"]["uncategorized"], 1)
+
 
 class RenderHtmlTests(unittest.TestCase):
     def test_produces_valid_looking_self_contained_html(self):
@@ -96,6 +111,16 @@ class RenderHtmlTests(unittest.TestCase):
 
         self.assertNotIn("<script>alert(1)</script>", output)
         self.assertIn("&lt;script&gt;", output)
+
+    def test_failure_category_section_is_rendered(self):
+        report = build_report(
+            [{"skill": "ADD_NOTE", "result": "error:OPERATION_FAILED", "duration_ms": 5}], sessions=[],
+        )
+        from pathlib import Path
+        output = render_html(report, Path("x"), Path("y"))
+
+        self.assertIn("Categoria di errore", output)
+        self.assertIn("transient", output)
 
 
 if __name__ == "__main__":

@@ -819,6 +819,25 @@ Dipende da: F1.1 e F1.3.
 
 Criterio di uscita: una failure end-to-end è ricostruibile senza esporre contenuti privati.
 
+- Stato: `DOING`; `F1.7.6` chiuso parzialmente (failure taxonomy, non ancora rollback rate),
+  resto aperto.
+- `F1.7.6` (parziale) — 12/09/2026: `tools/dashboard.py` (F0, gia' mostrava p50/p95 per skill e
+  overall e verification rate) mostra ora anche la "failure taxonomy": una nuova sezione
+  "Categoria di errore" che applica la STESSA `error_category_of()` gia' introdotta per l'action
+  ledger (F1.1.4) al campo `result` di `data/jake_actions.jsonl` - stesso formato in entrambi i
+  log (verificato leggendo il codice: `core/logger.log_action` riceve il `result` gia' calcolato
+  dagli stessi quattro chokepoint prima di scriverlo sia li' sia nel ledger), quindi la stessa
+  funzione pura si riusa senza adattamenti. "rollback rate" resta esplicitamente NON mostrato:
+  ne' `core/logger.log_action` ne' `core/action_ledger.py` producono oggi un evento distinto per
+  un rollback (vedi il docstring di `action_ledger.py`, "il rollback stesso non produce una
+  ricevuta separata" - F1.7.2 dovrebbe risolvere questo prima), quindi calcolarlo produrrebbe un
+  numero inventato invece di una metrica vera - dichiarato onestamente nella dashboard stessa
+  invece di stimarlo. Aggiunti 2 nuovi test in `tests/test_dashboard.py`. Prova: 2.009/2.009
+  test, ruff/compileall verdi; `mypy tools/dashboard.py` ha 8 errori di tipizzazione preesistenti
+  e indipendenti da questa modifica (verificato confrontando col file prima della modifica,
+  stesso numero di errori) - il file non fa parte del set coperto da "mypy selettivo" in CI,
+  dichiarato qui invece di essere ignorato silenziosamente.
+
 ### F1.8 — Concorrenza, code e arresto
 
 Dipende da: F1.1.
