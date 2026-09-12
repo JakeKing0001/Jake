@@ -653,8 +653,8 @@ Dipende da: F1.1.
 Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa dal PolicyEngine.
 
 - Stato: `DOING`; `F1.2.5` chiuso solo per il rollback filesystem; `F1.2.1` chiuso parzialmente
-  (percorso 3, vedi sotto); `F1.2.4` chiuso per il percorso planner (vedi sotto); `F1.2.7` chiuso
-  (vedi sotto); resto aperto.
+  (percorso 3, vedi sotto); `F1.2.4` chiuso per il percorso planner (vedi sotto); `F1.2.6`
+  (parziale, solo PlanExecutor) e `F1.2.7` chiusi (vedi sotto); resto aperto.
 - `F1.2.1` (parziale) — 12/09/2026: chiuso il buco concreto documentato in
   [docs/action-execution-paths.md](docs/action-execution-paths.md) ("Nota sul percorso 3"):
   `PlanExecutor.execute(plan, policy_engine=None, ...)` trattava l'assenza di policy_engine come
@@ -743,10 +743,38 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   un'interfaccia reale (HUD/companion/CLI): resta una funzione di libreria pronta per un futuro
   pannello diagnostico, come dichiarato dalla roadmap stessa ("mostra se e perche'"). Prova:
   2.007/2.007 test, ruff/mypy/compileall verdi.
+- `F1.2.6` (parziale) — 12/09/2026: "salvare la motivazione della decisione nel ledger senza
+  salvare segreti". Estratte in `core/policy_engine.py` le quattro costanti gia' usate
+  (letteralmente, come stringhe) dentro `_decide_*_reasoned()` (F1.2.7) - `POLICY_REASON_BLOCKED`/
+  `_REQUIRE_AUTH`/`_CONFIRM`/`_ALLOWED` - piu' `POLICY_REASONS`, il vocabolario CHIUSO che le
+  raccoglie. E' proprio la chiusura del vocabolario a rendere "senza segreti" vero per
+  costruzione, non per convenzione: la motivazione non e' mai testo libero costruito da
+  `intent`/`parameters` (che potrebbero contenere un token o un percorso privato), sempre una di
+  quattro costanti fisse. Aggiunti i metodi pubblici `decide_interactive_with_reason`/
+  `decide_automated_with_reason` (wrapper su `_decide_*_reasoned`, senza calcolare anche il
+  verdetto dell'altro percorso come farebbe `explain()` - inutile per chi deve solo loggare).
+  Aggiunto `ActionReceipt.policy_reason: Optional[str] = None`, validato da
+  `validate_action_receipt` contro `POLICY_REASONS` quando presente. Collegato SOLO a
+  `PlanExecutor._log_step` (il percorso automatico: `decide_automated_with_reason` sostituisce
+  `decide_automated` nel ciclo di `execute()`, la motivazione della decisione fluisce fino alla
+  ricevuta per ogni passo bloccato/da confermare/consentito - verificato con un `ActionLedger`
+  vero su file temporaneo, non solo in memoria). `JakeCore._resolve_and_execute` (il percorso
+  interattivo) NON e' stato toccato in questo passo: la motivazione li' richiederebbe threadare
+  un valore in piu' attraverso il ritorno di `_resolve_and_execute` (oggi una tupla a 3, usata da
+  3 chiamanti reali) fino al punto - diverso - che costruisce la ricevuta
+  (`_log_action_outcome`), una modifica di plumbing piu' ampia rimandata deliberatamente per
+  restare in un incremento verificabile. Un passo interrotto dal kill switch non ha
+  `policy_reason` (resta `None`/assente dal JSON): non e' una decisione di policy, non deve
+  sembrare che lo sia. Nessun cambio di comportamento (28/28 test di `test_plan_executor`
+  invariati verdi); aggiunti 4+3+4 nuovi test rispettivamente in `tests/test_plan_executor.py::
+  PolicyReasonInTheLedgerTests`, `tests/test_policy_engine.py::DecideWithReasonTests`,
+  `tests/test_action_ledger.py::ActionReceiptPolicyReasonValidationTests`. Prova: 2.059/2.059
+  test, ruff/mypy/compileall verdi su tutti i file toccati.
 - Non ancora affrontato: il resto di `F1.2.1` (percorso 7, `SkillRegistry.execute()` resta un
-  dispatcher senza controllo di policy proprio - vedi sopra); `F1.2.2`-`F1.2.3`, `F1.2.6`;
-  il resto di `F1.2.5` (sotto-azioni di workflow non ancora passate in rassegna allo stesso modo -
-  il retry e' invece coperto separatamente da `F1.3.6`, vedi sotto).
+  dispatcher senza controllo di policy proprio - vedi sopra); `F1.2.2`-`F1.2.3`; il resto di
+  `F1.2.5` (sotto-azioni di workflow non ancora passate in rassegna allo stesso modo - il retry
+  e' invece coperto separatamente da `F1.3.6`, vedi sotto); il resto di `F1.2.6` (il percorso
+  interattivo di `JakeCore`, vedi sopra).
 
 ### F1.3 — Verifica degli effetti e undo
 

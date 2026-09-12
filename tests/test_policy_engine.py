@@ -246,5 +246,47 @@ class ExplainTests(unittest.TestCase):
         self.assertEqual(explanation["automated"]["decision"], "allow")
 
 
+class DecideWithReasonTests(unittest.TestCase):
+    """F1.2.6 ("salvare la motivazione della decisione nel ledger"): decide_interactive_with_
+    reason()/decide_automated_with_reason() sono le varianti PUBBLICHE usate da PlanExecutor per
+    salvare la motivazione senza ricalcolare anche il verdetto dell'altro percorso (a differenza
+    di explain(), pensato per un simulatore, non per il logging in produzione) - stessa logica
+    di decide_interactive()/decide_automated(), solo con la motivazione in piu'."""
+
+    def test_decide_automated_with_reason_matches_decide_automated_plus_the_right_reason(self):
+        engine = PolicyEngine(blocked_intents={"X"})
+
+        decision, reason = engine.decide_automated_with_reason("X")
+
+        self.assertEqual(decision, engine.decide_automated("X"))
+        self.assertEqual(reason, "intent_in_blocked_intents")
+
+    def test_decide_interactive_with_reason_matches_decide_interactive_plus_the_right_reason(self):
+        engine = PolicyEngine(always_confirm_intents={"DELETE_TODO"})
+
+        decision, reason = engine.decide_interactive_with_reason("DELETE_TODO", {})
+
+        self.assertEqual(decision, engine.decide_interactive("DELETE_TODO", {}))
+        self.assertEqual(reason, "intent_in_always_confirm_intents")
+
+    def test_every_reason_constant_is_one_of_the_four_closed_values(self):
+        """POLICY_REASONS e' un vocabolario chiuso (F1.2.6): nessuna motivazione reale puo'
+        uscirne, ne' per il percorso interattivo ne' per quello automatico."""
+        from core.policy_engine import POLICY_REASONS
+
+        scenarios = [
+            PolicyEngine(blocked_intents={"X"}),
+            PolicyEngine(always_confirm_intents={"X"}),
+            PolicyEngine(auth_gate=AuthGate(passphrase="s"), require_auth_intents={"X"}),
+            PolicyEngine(),
+        ]
+        for engine in scenarios:
+            with self.subTest(engine=engine.__dict__):
+                _, interactive_reason = engine.decide_interactive_with_reason("X", {})
+                _, automated_reason = engine.decide_automated_with_reason("X")
+                self.assertIn(interactive_reason, POLICY_REASONS)
+                self.assertIn(automated_reason, POLICY_REASONS)
+
+
 if __name__ == "__main__":
     unittest.main()

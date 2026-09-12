@@ -232,6 +232,14 @@ class ActionReceipt:
     # test o da codice futuro senza passare per error_category_of() resta esplicita (uncategorized)
     # invece di sembrare "success" per caso.
     error_category: str = ERROR_CATEGORY_UNCATEGORIZED
+    # F1.2.6 ("salvare la motivazione della decisione nel ledger senza salvare segreti"):
+    # None quando nessun policy_engine era disponibile nel punto che ha scritto la ricevuta
+    # (oggi solo PlanExecutor._log_step lo passa - vedi core/policy_engine.py::POLICY_REASONS,
+    # un vocabolario CHIUSO di quattro costanti, mai testo libero costruito da parametri: e'
+    # questo che rende impossibile, non solo evitato per convenzione, che un segreto (un token,
+    # un percorso privato) finisca qui dentro). Il percorso interattivo (JakeCore) non lo
+    # popola ancora - resta lavoro successivo, dichiarato in ROADMAP_EXECUTION.md.
+    policy_reason: Optional[str] = None
     duration_ms: Optional[float] = None
     model: Optional[str] = None
     schema_version: int = ACTION_RECEIPT_SCHEMA_VERSION
@@ -269,6 +277,14 @@ def validate_action_receipt(receipt: ActionReceipt) -> None:
             f"ActionReceipt.error_category={receipt.error_category!r} non e' una categoria valida "
             f"({', '.join(sorted(ERROR_CATEGORIES))})"
         )
+    if receipt.policy_reason is not None:
+        from core.policy_engine import POLICY_REASONS  # import locale: evita un ciclo a livello di modulo
+
+        if receipt.policy_reason not in POLICY_REASONS:
+            raise ValueError(
+                f"ActionReceipt.policy_reason={receipt.policy_reason!r} non e' una motivazione valida "
+                f"({', '.join(sorted(POLICY_REASONS))})"
+            )
     if receipt.schema_version != ACTION_RECEIPT_SCHEMA_VERSION:
         raise ValueError(
             f"ActionReceipt.schema_version={receipt.schema_version!r} non supportata "

@@ -105,7 +105,7 @@ class ChokepointsProduceConformingReceiptsTests(unittest.TestCase):
         with unittest.mock.patch("core.plan_executor.log_action"):
             executor._log_step(
                 "trace-4", False, "test-model", "trigger:buonanotte", time.monotonic(), "ADD_NOTE",
-                {"text": "x"}, result="success", verified=True,
+                {"text": "x"}, result="success", verified=True, policy_reason="no_restriction_matched",
             )
         (receipt,), _ = executor.action_ledger.record.call_args
         validate_action_receipt(receipt)
