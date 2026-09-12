@@ -88,5 +88,22 @@ class Config:
         self._write()
 
     def _write(self) -> None:
+        # F1.4.1 ("consolidare... con... migrazione atomica"): buco reale, riprodotto prima del
+        # fix - write_text() apre il file in scrittura (troncandolo) e scrive l'intero JSON in
+        # una sola chiamata; un arresto improvviso a meta' (kill, crash, mancanza di corrente,
+        # lo stesso scenario gia' riprodotto per il ledger in F1.7.1) lascia settings.json
+        # TRONCATO A META'. A differenza del ledger (append-only: si perde solo l'ultima riga),
+        # qui _load() incontra un json.JSONDecodeError sul file intero e torna {} - **perdendo
+        # OGNI valore**, non solo l'ultimo scritto: admin_passphrase, home_assistant_token, il
+        # modello scelto, tutto. Riprodotto per davvero: un troncamento a meta' del file dopo tre
+        # set() ha fatto sparire tutti e tre i valori al riavvio. Corretto scrivendo prima su un
+        # file temporaneo nella STESSA directory (stesso filesystem, condizione richiesta perche'
+        # os.replace() sia atomico) e poi rinominandolo sopra il file finale con os.replace(): o
+        # il file vecchio completo resta intatto, o il nuovo file completo prende il suo posto -
+        # mai uno stato a meta'. Non risolto qui, dichiarato: se il processo muore tra la scrittura
+        # del temporaneo e os.replace(), il file .tmp resta orfano su disco (innocuo: il file
+        # reale non e' mai stato toccato), non viene ripulito automaticamente.
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self._values, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp_path = self.path.with_name(self.path.name + ".tmp")
+        tmp_path.write_text(json.dumps(self._values, indent=2, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp_path, self.path)

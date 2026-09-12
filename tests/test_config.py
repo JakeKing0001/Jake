@@ -32,6 +32,54 @@ class NonSecretValuesTests(ConfigTestCase):
         self.assertFalse(config.get("system_advisor_enabled", True))
 
 
+class AtomicWriteTests(ConfigTestCase):
+    """F1.4.1 ("consolidare... con... migrazione atomica"): buco reale, riprodotto prima del
+    fix - _write() usava Path.write_text(), che tronca il file e scrive tutto in una sola
+    chiamata. Un arresto improvviso a meta' (stesso scenario di F1.7.1 per il ledger) lasciava
+    settings.json troncato; a differenza del ledger (append-only, si perde solo l'ultima riga),
+    qui _load() incontrava un JSONDecodeError sul file INTERO e tornava {} - perdendo OGNI
+    valore, non solo l'ultimo scritto (admin_passphrase, home_assistant_token, il modello
+    scelto...). Riprodotto con un troncamento vero del file dopo tre set() reali: tutti e tre i
+    valori sparivano al riavvio prima di questo fix."""
+
+    def test_set_writes_through_a_temp_file_and_replaces_atomically(self):
+        config = Config(path=self.path)
+        config.set("ollama_model", "qwen2.5:7b")
+        tmp_path = self.path.with_name(self.path.name + ".tmp")
+        self.assertFalse(tmp_path.exists(), "nessun file temporaneo deve restare dopo una scrittura riuscita")
+        self.assertTrue(self.path.exists())
+
+    def test_a_truncated_temp_file_from_an_interrupted_write_does_not_lose_the_real_config(self):
+        config = Config(path=self.path)
+        config.set("admin_passphrase", "segreto-importante")
+        config.set("home_assistant_token", "token-importante")
+        config.set("ollama_model", "llama3")
+
+        # Simula un arresto improvviso a meta' della scrittura del file TEMPORANEO (il caso
+        # peggiore possibile con il fix: il file reale non viene MAI toccato prima di
+        # os.replace(), quindi un crash qui lascia solo un .tmp orfano e innocuo).
+        tmp_path = self.path.with_name(self.path.name + ".tmp")
+        tmp_path.write_text('{"admin_passphrase": "dpapi:tronc', encoding="utf-8")
+
+        reloaded = Config(path=self.path)
+        self.assertEqual(reloaded.get("ollama_model"), "llama3")
+        self.assertEqual(reloaded.get("admin_passphrase"), "segreto-importante")
+        self.assertEqual(reloaded.get("home_assistant_token"), "token-importante")
+
+    def test_a_real_mid_write_crash_on_the_old_unsafe_pattern_would_have_lost_everything(self):
+        """Prova di regressione diretta contro il vecchio comportamento (non solo una prova
+        indiretta del nuovo): un file scritto per intero e poi troncato a meta' - esattamente
+        cosa produceva la vecchia Path.write_text() interrotta - torna un dict vuoto da _load(),
+        dimostrando perche' l'atomicita' era necessaria."""
+        config = Config(path=self.path)
+        config.set("ollama_model", "llama3")
+        content = self.path.read_text(encoding="utf-8")
+        self.path.write_text(content[: len(content) // 2], encoding="utf-8")
+
+        reloaded = Config(path=self.path)
+        self.assertIsNone(reloaded.get("ollama_model"))
+
+
 class SecretEncryptionAtRestTests(ConfigTestCase):
     def test_set_stores_an_encrypted_value_on_disk(self):
         config = Config(path=self.path)
