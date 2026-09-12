@@ -185,6 +185,27 @@ class StructuredLoggingTests(unittest.TestCase):
         trace_ids_used = {call.args[0] for call in mock_log.call_args_list}
         self.assertEqual(trace_ids_used, {"shared-plan-trace"})
 
+    def test_outcome_carries_the_given_trace_id(self):
+        """F1.7.2 ("collegare... notifica con lo stesso trace id"): buco reale - execute() gia'
+        correla ogni passo alla stessa ricevuta nel ledger tramite trace_id, ma l'outcome
+        restituito al chiamante non lo portava mai con se'. Senza questo, TriggerScheduler non
+        aveva modo di passare il trace_id dell'esecuzione alla notifica finale
+        (JakeCore._default_on_trigger_fired)."""
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
+        plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
+
+        outcome = PlanExecutor(registry).execute(plan, policy_engine=PolicyEngine(), trace_id="trace-outcome-1")
+
+        self.assertEqual(outcome.trace_id, "trace-outcome-1")
+
+    def test_outcome_carries_a_generated_trace_id_when_none_is_given(self):
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
+        plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
+
+        outcome = PlanExecutor(registry).execute(plan, policy_engine=PolicyEngine())
+
+        self.assertTrue(outcome.trace_id)
+
     def test_private_flag_is_forwarded(self):
         registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
         plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])

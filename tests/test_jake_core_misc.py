@@ -230,6 +230,18 @@ class DefaultNotificationCallbacksTests(unittest.TestCase):
         self.assertIn("buonanotte", args[1])
         self.assertIn("riepilogo", args[1])
 
+    def test_trigger_fired_forwards_the_outcomes_trace_id(self):
+        """F1.7.2 ("collegare... notifica con lo stesso trace id"): senza questo, una notifica
+        'Ho eseguito X' non aveva nessun modo di essere ricollegata alle ricevute nel ledger che
+        quella stessa esecuzione ha gia' prodotto - vedi PlanOutcome.trace_id."""
+        core = _bare_core()
+        outcome = mock.MagicMock(completed=[], success=True, stopped_step=None, trace_id="abc123")
+        with mock.patch("core.jake_core.format_plan_outcome", return_value="riepilogo"):
+            with mock.patch.object(core, "notify", return_value="notificato") as notify:
+                with mock.patch("builtins.print"):
+                    core._default_on_trigger_fired({"name": "buonanotte"}, outcome, 2)
+        self.assertEqual(notify.call_args.kwargs.get("trace_id"), "abc123")
+
 
 class AgentContextTests(unittest.TestCase):
     def test_combines_desktop_and_entity_context(self):

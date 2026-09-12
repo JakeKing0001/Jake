@@ -54,6 +54,29 @@ class NotifyEventTests(unittest.TestCase):
         self.assertIsNone(message)
         self.assertTrue(subscriber.empty())
 
+    def test_a_trace_id_is_included_in_the_payload_when_given(self):
+        """F1.7.2 ("collegare... notifica con lo stesso trace id"): un'automazione ha gia' un
+        trace_id reale (PlanOutcome.trace_id) che correla ai passi gia' registrati nel ledger -
+        deve arrivare fino all'evento HUD, non sparire."""
+        core = _bare_core(mode=NotificationMode.NORMAL)
+        subscriber = core.event_bus.subscribe()
+
+        core.notify("trigger", "Ho eseguito automaticamente 'buonanotte'", trace_id="abc123")
+
+        event = subscriber.get_nowait()
+        self.assertEqual(event.payload["trace_id"], "abc123")
+
+    def test_no_trace_id_key_when_not_given(self):
+        """Il comportamento esistente (nessun trace_id, es. un promemoria o un avviso senza
+        un'esecuzione da correlare) non deve cambiare: nessuna chiave 'trace_id' inventata."""
+        core = _bare_core(mode=NotificationMode.NORMAL)
+        subscriber = core.event_bus.subscribe()
+
+        core.notify("advisory", "batteria scarica")
+
+        event = subscriber.get_nowait()
+        self.assertNotIn("trace_id", event.payload)
+
 
 if __name__ == "__main__":
     unittest.main()

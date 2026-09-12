@@ -1131,8 +1131,38 @@ Dipende da: F1.1 e F1.3.
 
 Criterio di uscita: una failure end-to-end è ricostruibile senza esporre contenuti privati.
 
-- Stato: `DOING`; `F1.7.1` chiuso; `F1.7.5` chiuso; `F1.7.6` chiuso parzialmente (failure
-  taxonomy, non ancora rollback rate), `F1.7.7` chiuso; resto aperto.
+- Stato: `DOING`; `F1.7.1` chiuso; `F1.7.2` chiuso parzialmente (solo la notifica di
+  un'automazione, vedi sotto); `F1.7.5` chiuso; `F1.7.6` chiuso parzialmente (failure taxonomy,
+  non ancora rollback rate), `F1.7.7` chiuso; resto aperto.
+- `F1.7.2` (parziale, notifica di un'automazione) — 13/09/2026: "collegare command, sub-step,
+  verifica, undo e notifica con lo stesso trace id". Buco reale, non ipotizzato -
+  `PlanExecutor.execute()` correla gia' ogni singolo passo alla stessa ricevuta nel ledger
+  tramite `trace_id` (vedi `_log_step`), ma l'oggetto `PlanOutcome` restituito al chiamante non
+  lo portava mai con se': nessun campo per leggerlo indietro. Per un piano lanciato da un comando
+  diretto (`JakeCore._try_plan`) questo non si notava - l'intera richiesta resta nello stesso
+  turno di conversazione, gia' correlato altrove - ma per `TriggerScheduler`, che fa partire un
+  piano DA SOLO in background senza alcun turno a cui agganciarsi, la notifica finale ("Ho
+  eseguito automaticamente 'X'") non aveva NESSUN modo di essere ricollegata alle ricevute nel
+  ledger che quella stessa esecuzione aveva gia' prodotto - un utente (o un futuro strumento
+  diagnostico) che vede la notifica non puo' risalire a "cosa e' successo passo per passo,
+  esattamente". Corretto aggiungendo `PlanOutcome.trace_id` (popolato con lo stesso valore gia'
+  usato per `_log_step`, generato o passato che sia) e propagandolo da
+  `TriggerScheduler._fire()` (che gia' riceve `outcome` nel callback `on_trigger`, nessun cambio
+  di firma necessario li') fino a `JakeCore._default_on_trigger_fired`, che lo passa a
+  `notify(..., trace_id=...)` - nuovo parametro opzionale, incluso nel payload dell'`HudEvent`
+  di tipo `NOTIFICATION` solo quando presente (nessuna chiave inventata per le notifiche che non
+  ne hanno uno, es. un promemoria, che non produce mai una ricevuta da correlare). Deliberatamente
+  NON esteso al percorso di notifica messa in coda (`NotificationCenter._queued`/`set_mode()`):
+  una notifica rimandata riemerge oggi solo dentro il risultato testuale del comando
+  `SET_NOTIFICATION_MODE`, mai come un secondo `HudEvent` - non c'e' un evento successivo a cui
+  riattaccare il trace_id, dichiarato apertamente invece di forzare un cambio piu' ampio
+  dell'API di `NotificationCenter` appena stabilizzata (F1.8.2). Aggiunti 2 nuovi test in
+  `tests/test_plan_executor.py::StructuredLoggingTests`, 1 in
+  `tests/test_jake_core_misc.py::DefaultNotificationCallbacksTests`, 2 in
+  `tests/test_jake_core_event_bus.py::NotifyEventTests`. Prova: 2.207/2.207 test,
+  ruff/mypy/compileall verdi su tutti i file toccati. Non ancora affrontato: il resto di F1.7.2
+  (undo, gia' dichiarato non wired in `F1.7.6`/il docstring di `action_ledger.py` - "il rollback
+  stesso non produce una ricevuta separata").
 - `F1.7.5` — 12/09/2026: "rendere replay sicuro: dry-run predefinito, scope temporaneo e conferma
   per effetti". Buco reale, riprodotto prima del fix - **un bypass completo dell'intera
   architettura di autorizzazione costruita in questa sessione, in uno strumento di debug**.
@@ -2611,7 +2641,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 15 incrementi completati e verificati (PR #28-#42),
+Aggiornato 13/09/2026. Sessione lunga con 16 incrementi completati e verificati (PR #28-#43),
 quasi tutti buchi reali riprodotti empiricamente prima del fix, non ipotizzati leggendo il
 codice - vedi le singole voci datate 12-13/09/2026 nelle rispettive sezioni F1.2/F1.4/F1.7/F1.8
 per i dettagli completi di ciascuno. In sintesi: `F1.2.6` (percorso interattivo/agente, ripreso
@@ -2624,8 +2654,10 @@ sessione, non un fix), `F1.8.6` (verifica, non un fix - il codice era gia' corre
 (canale laterale temporale sulla passphrase admin), `F1.8.1` (doppia esecuzione di un'azione in
 sospeso da due canali concorrenti), `F1.8.2` (TRE strutture in piu' trovate senza sincronizzazione
 - centro notifiche con oltre il 98% di notifiche perse, `SkillRegistry.list_capabilities()` con
-un crash riproducibile, `ExampleStore` con oltre il 60% di esempi imparati persi). `master` e'
-pulito, 2.202/2.202 test, ruff/mypy/compileall verdi. `G1` resta aperto.
+un crash riproducibile, `ExampleStore` con oltre il 60% di esempi imparati persi), `F1.7.2`
+(parziale - la notifica di un'automazione ora porta lo stesso trace_id delle ricevute che
+l'ha prodotta, `PlanOutcome` non lo portava mai prima). `master` e' pulito, 2.207/2.207 test,
+ruff/mypy/compileall verdi. `G1` resta aperto.
 
 Restano fuori discussione, senza un nuovo via libera esplicito, i due lavori grandi gia' proposti
 e rifiutati: `F1.6` (sandbox permanente per le skill forgiate - Job Object/AppContainer) e
@@ -2641,9 +2673,10 @@ Candidati piccoli ancora aperti in F1: il resto di `F1.2.1` (percorso 7,
 dominio web/device/HA/rete/durata; estendere le radici filesystem al percorso automatico e agli
 intent di sola lettura), `F1.2.3` (intersezione permessi utente/dispositivo/agente/skill/
 sessione - oggi solo un allowlist utente, nessuna intersezione), il resto di `F1.4` (una vera
-classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7` (`F1.7.2` trace id
-condiviso con undo/notifica, `F1.7.3` retention differenziata, `F1.7.4` redazione strutturata per
-tipo di dato, `F1.7.8` modalita' privata end-to-end su ogni nuovo record), il resto di `F1.8`
+classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7` (il resto di `F1.7.2` -
+undo, mai wired a una ricevuta propria; `F1.7.3` retention differenziata; `F1.7.4` redazione
+strutturata per tipo di dato; `F1.7.8` modalita' privata end-to-end su ogni nuovo record), il
+resto di `F1.8`
 (il resto di `F1.8.1` - identita' di canale/sessione vera per due conferme concorrenti distinte,
 coda generale per azioni concorrenti non legate a una conferma; il resto di `F1.8.4` - drain
 limitato di un'azione in corso, checkpoint vero, release device audio; `F1.8.5` deadlock timeout;
