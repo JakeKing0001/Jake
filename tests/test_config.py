@@ -97,6 +97,42 @@ class MigrationOfPlaintextSecretsTests(ConfigTestCase):
         self.assertEqual(raw["ollama_model"], "qwen2.5:7b")
 
 
+class CorruptedSecretTests(ConfigTestCase):
+    """F1.4.8 ("testare... vault corrotto, profilo Windows differente e backup"): buco reale
+    trovato e corretto - Config.get() propagava l'eccezione di secrets_vault.unprotect() per un
+    valore protetto ma non piu' decifrabile, invece di trattarlo come "mai impostato". Dato che
+    JakeCore.__init__ chiama config.get("admin_passphrase") per costruire AuthGate, questo
+    faceva crashare l'avvio INTERO di Jake per un singolo segreto illeggibile - non solo
+    l'autenticazione. Riprodotto per davvero (`_write_raw` scrive un "dpapi:" corrotto
+    direttamente sul file, bypassando protect() - simula un file ripristinato da un backup su
+    un'altra macchina o corrotto)."""
+
+    def test_get_on_a_corrupted_secret_returns_the_default_instead_of_raising(self):
+        self._write_raw({"admin_passphrase": "dpapi:non-e-decifrabile!!!"})
+
+        config = Config(path=self.path)
+
+        self.assertIsNone(config.get("admin_passphrase"))
+
+    def test_get_on_a_corrupted_secret_respects_a_custom_default(self):
+        self._write_raw({"admin_passphrase": "dpapi:non-e-decifrabile!!!"})
+
+        config = Config(path=self.path)
+
+        self.assertEqual(config.get("admin_passphrase", "ripiego"), "ripiego")
+
+    def test_migrate_secrets_does_not_touch_an_already_corrupted_value(self):
+        """_migrate_secrets() cifra solo cio' che NON e' ancora protetto: un valore gia' con il
+        prefisso "dpapi:" (anche se corrotto) non deve essere ri-cifrato ne' altrimenti
+        modificato - solo get() lo tratta come assente, il file su disco resta quello che era."""
+        self._write_raw({"admin_passphrase": "dpapi:non-e-decifrabile!!!"})
+
+        Config(path=self.path)
+
+        raw = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(raw["admin_passphrase"], "dpapi:non-e-decifrabile!!!")
+
+
 class EnvironmentVariableOverrideTests(ConfigTestCase):
     def test_env_var_overrides_stored_secret_and_stays_plaintext(self):
         """Le variabili d'ambiente JAKE_<CHIAVE> restano intenzionalmente in chiaro (vedi il
