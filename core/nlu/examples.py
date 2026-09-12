@@ -7,9 +7,24 @@ Due sorgenti:
 
 Gli esempi alimentano il recupero semantico del classificatore (few-shot + potatura delle
 capacita') e la corsia veloce a corrispondenza esatta, che evita del tutto la chiamata al
-modello per le frasi gia' viste."""
+modello per le frasi gia' viste.
+
+F1.8.2 (stesso principio gia' applicato a diverse altre strutture condivise tra thread in questa
+sessione): buco reale, riprodotto per davvero prima del fix - `ExampleStore` e' condivisa PER
+RIFERIMENTO tra tutto cio' che passa da `JakeCore._process()` (comando insegnato, apprendimento
+automatico di un comando riuscito), raggiungibile sia dal loop voce (thread principale) sia dal
+`ThreadingHTTPServer` del companion server (ogni richiesta sul proprio thread, vedi F1.8.1). Le
+mutazioni (`add_learned`/`remove_learned`/`remove_learned_by_intent`/`load`) erano una sequenza
+di piu' passi non atomica (filtra la lista, aggiungi/rimuovi, ricostruisci l'indice, salva su
+disco) senza alcuna sincronizzazione - due thread che imparano esempi diversi contemporaneamente
+potevano perdere l'uno l'apprendimento dell'altro (l'ultima riassegnazione di `self._learned`
+vince, basata su uno snapshot ormai vecchio). Riprodotto con `sys.setswitchinterval()` abbassato:
+10 thread x 20 `add_learned()` concorrenti hanno lasciato solo 68 esempi su 200 attesi, sia in
+memoria sia sul file salvato su disco. Corretto con un `threading.Lock()` per istanza attorno al
+corpo di ognuno dei quattro metodi che mutano lo stato."""
 import json
 import re
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -51,6 +66,7 @@ class ExampleStore:
         self._builtin: list[Example] = []
         self._learned: list[Example] = []
         self._by_key: dict[str, Example] = {}
+        self._lock = threading.Lock()
         self.load()
 
     # ---- caricamento -------------------------------------------------------------------
@@ -77,9 +93,10 @@ class ExampleStore:
         return examples
 
     def load(self) -> None:
-        self._builtin = self._read_jsonl(self.builtin_path, "builtin")
-        self._learned = self._read_jsonl(self.learned_path, "taught")
-        self._rebuild_index()
+        with self._lock:
+            self._builtin = self._read_jsonl(self.builtin_path, "builtin")
+            self._learned = self._read_jsonl(self.learned_path, "taught")
+            self._rebuild_index()
 
     def _rebuild_index(self) -> None:
         self._by_key = {}
@@ -119,34 +136,37 @@ class ExampleStore:
     def add_learned(self, text: str, intent: str, parameters: dict | None = None, source: str = "taught") -> Example:
         key = normalize_key(text)
         parameters = dict(parameters or {})
-        self._learned = [example for example in self._learned if example.key != key]
-        example = Example(text=key, intent=intent, parameters=parameters, source=source)
-        self._learned.append(example)
-        # Gli esempi automatici sono i meno affidabili: se si accumulano troppo, si scartano
-        # i piu' vecchi (quelli insegnati o corretti esplicitamente restano sempre).
-        auto = [e for e in self._learned if e.source == "auto"]
-        if len(auto) > self.MAX_AUTO_EXAMPLES:
-            to_drop = {id(e) for e in auto[: len(auto) - self.MAX_AUTO_EXAMPLES]}
-            self._learned = [e for e in self._learned if id(e) not in to_drop]
-        self._rebuild_index()
-        self._save_learned()
-        return example
+        with self._lock:
+            self._learned = [example for example in self._learned if example.key != key]
+            example = Example(text=key, intent=intent, parameters=parameters, source=source)
+            self._learned.append(example)
+            # Gli esempi automatici sono i meno affidabili: se si accumulano troppo, si scartano
+            # i piu' vecchi (quelli insegnati o corretti esplicitamente restano sempre).
+            auto = [e for e in self._learned if e.source == "auto"]
+            if len(auto) > self.MAX_AUTO_EXAMPLES:
+                to_drop = {id(e) for e in auto[: len(auto) - self.MAX_AUTO_EXAMPLES]}
+                self._learned = [e for e in self._learned if id(e) not in to_drop]
+            self._rebuild_index()
+            self._save_learned()
+            return example
 
     def remove_learned(self, text: str) -> bool:
         key = normalize_key(text)
-        before = len(self._learned)
-        self._learned = [example for example in self._learned if example.key != key]
-        if len(self._learned) == before:
-            return False
-        self._rebuild_index()
-        self._save_learned()
-        return True
-
-    def remove_learned_by_intent(self, intent: str) -> int:
-        before = len(self._learned)
-        self._learned = [example for example in self._learned if example.intent != intent]
-        removed = before - len(self._learned)
-        if removed:
+        with self._lock:
+            before = len(self._learned)
+            self._learned = [example for example in self._learned if example.key != key]
+            if len(self._learned) == before:
+                return False
             self._rebuild_index()
             self._save_learned()
-        return removed
+            return True
+
+    def remove_learned_by_intent(self, intent: str) -> int:
+        with self._lock:
+            before = len(self._learned)
+            self._learned = [example for example in self._learned if example.intent != intent]
+            removed = before - len(self._learned)
+            if removed:
+                self._rebuild_index()
+                self._save_learned()
+            return removed

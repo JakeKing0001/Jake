@@ -1241,7 +1241,7 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
 - Stato: `DOING`; `F1.8.1` chiuso parzialmente (la forma piu' grave del buco - doppia esecuzione
   della stessa azione in sospeso - chiusa, non l'intera ownership di sessione, vedi sotto);
   `F1.8.2` chiuso per tutti i registri/store condivisi tra thread (ledger, promemoria, todo,
-  memoria a lungo termine, centro notifiche, elenco skill registrate); `F1.8.3` chiuso per RUN_COMMAND (il solo subprocess bloccante
+  memoria a lungo termine, centro notifiche, elenco skill registrate, archivio esempi frase->intent); `F1.8.3` chiuso per RUN_COMMAND (il solo subprocess bloccante
   abbastanza lungo da essere rilevante, vedi sotto); `F1.8.4` chiuso parzialmente (visibilita'
   dei fallimenti di shutdown, non ancora drain/checkpoint veri); `F1.8.6` chiuso (verificato,
   vedi sotto); resto della fase (deadlock timeout, test di race su trigger/handoff/undo) non
@@ -1489,6 +1489,26 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
   `tests/test_skill_registry.py::ConcurrentListCapabilitiesTests` (stessa tecnica di riproduzione
   forzata, verificato che fallisce - 50/50 iterazioni sollevavano - contro il codice precedente).
   Prova: 2.201/2.201 test, ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.8.2` (continuazione, settima struttura: `ExampleStore`) — 13/09/2026: stesso pattern delle
+  prime cinque strutture (scrittura senza lock, non un'iterazione), causa e severita' identiche
+  al centro notifiche. `core/nlu/examples.py::ExampleStore` e' condivisa PER RIFERIMENTO tra
+  tutto cio' che passa da `JakeCore._process()` (comando insegnato, apprendimento automatico di
+  un comando riuscito), raggiungibile sia dal loop voce sia dal `ThreadingHTTPServer` del
+  companion server (vedi F1.8.1). Le mutazioni (`add_learned`/`remove_learned`/
+  `remove_learned_by_intent`/`load`) erano una sequenza di piu' passi non atomica (filtra la
+  lista, aggiungi/rimuovi, ricostruisci l'indice, salva su disco) senza alcuna sincronizzazione -
+  due thread che imparano esempi diversi contemporaneamente potevano perdere l'uno
+  l'apprendimento dell'altro. Riprodotto con `sys.setswitchinterval()` abbassato: 10 thread x 20
+  `add_learned()` concorrenti hanno lasciato solo 68 esempi su 200 attesi, sia in memoria sia sul
+  file salvato su disco. Corretto con un `threading.Lock()` per istanza attorno al corpo di
+  ognuno dei quattro metodi che mutano lo stato. Non risolto qui, dichiarato: `_save_learned()`
+  scrive con `Path.write_text()` non atomico (stesso identico buco, causa diversa - un crash a
+  meta' scrittura, non concorrenza - gia' corretto per `config/settings.json` in `F1.4.1` e per
+  il ledger in `F1.7.1`; qui il lock elimina il rischio di INTERLEAVING concorrente ma non quello
+  di un crash a meta' della singola scrittura, lasciato esplicitamente aperto). Aggiunto
+  `tests/test_nlu.py::ExampleStoreConcurrentAccessTests` (stessa tecnica di riproduzione forzata,
+  verificato che fallisce - 75/200 esempi sopravvivevano - contro il codice precedente). Prova:
+  2.202/2.202 test, ruff/mypy/compileall verdi su tutti i file toccati.
 
 ### Gate G1 — Nucleo fidato
 
@@ -2591,21 +2611,21 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 12/09/2026. Sessione lunga con 14 incrementi completati e verificati (PR #28-#41),
+Aggiornato 13/09/2026. Sessione lunga con 15 incrementi completati e verificati (PR #28-#42),
 quasi tutti buchi reali riprodotti empiricamente prima del fix, non ipotizzati leggendo il
-codice - vedi le singole voci datate 12/09/2026 nelle rispettive sezioni F1.2/F1.4/F1.7/F1.8 per
-i dettagli completi di ciascuno. In sintesi: `F1.2.6` (percorso interattivo/agente, ripreso da
-lavoro non committato), `F1.7.1` (ledger resistente a record parziali), `F1.8.3` (kill switch
+codice - vedi le singole voci datate 12-13/09/2026 nelle rispettive sezioni F1.2/F1.4/F1.7/F1.8
+per i dettagli completi di ciascuno. In sintesi: `F1.2.6` (percorso interattivo/agente, ripreso
+da lavoro non committato), `F1.7.1` (ledger resistente a record parziali), `F1.8.3` (kill switch
 propagato a RUN_COMMAND, con due buchi ulteriori trovati verificando il fix), `F1.4.1` (scrittura
 atomica di config/settings.json), `F1.7.5` (replay sicuro - bypass completo dell'autorizzazione),
 `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step` dell'agente, chiusura
 HUD), `F1.2.2` (prima capability vera - radici filesystem, l'unica funzionalita' NUOVA della
 sessione, non un fix), `F1.8.6` (verifica, non un fix - il codice era gia' corretto), `F1.4.3`
 (canale laterale temporale sulla passphrase admin), `F1.8.1` (doppia esecuzione di un'azione in
-sospeso da due canali concorrenti), `F1.8.2` (due strutture in piu' trovate senza sincronizzazione
-- centro notifiche con oltre il 98% di notifiche perse, e `SkillRegistry.list_capabilities()` con
-un crash riproducibile). `master` e' pulito, 2.201/2.201 test, ruff/mypy/compileall verdi. `G1`
-resta aperto.
+sospeso da due canali concorrenti), `F1.8.2` (TRE strutture in piu' trovate senza sincronizzazione
+- centro notifiche con oltre il 98% di notifiche perse, `SkillRegistry.list_capabilities()` con
+un crash riproducibile, `ExampleStore` con oltre il 60% di esempi imparati persi). `master` e'
+pulito, 2.202/2.202 test, ruff/mypy/compileall verdi. `G1` resta aperto.
 
 Restano fuori discussione, senza un nuovo via libera esplicito, i due lavori grandi gia' proposti
 e rifiutati: `F1.6` (sandbox permanente per le skill forgiate - Job Object/AppContainer) e
@@ -2629,5 +2649,6 @@ coda generale per azioni concorrenti non legate a una conferma; il resto di `F1.
 limitato di un'azione in corso, checkpoint vero, release device audio; `F1.8.5` deadlock timeout;
 `F1.8.7` test di race su trigger/handoff/undo). Vale la pena anche un altro giro di ricerca
 mirata di race condition non ancora trovate in strutture condivise tra thread non ancora
-esaminate (es. `core/learning_manager.py`, `core/example_store.py`), visto quante ne sono emerse
-in questa sola sessione con la stessa tecnica.
+esaminate (es. `core/learning_manager.py`, `core/desktop_context.py` gia' ha un lock proprio da
+verificare comunque con un test dedicato), visto quante ne sono emerse in questa sola sessione
+con la stessa tecnica (`sys.setswitchinterval()` abbassato per forzare la sovrapposizione reale).
