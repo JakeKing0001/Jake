@@ -125,7 +125,9 @@ ERROR_CATEGORY_USER_CANCELLED = "user_cancelled"
 # essere forzato in una delle categorie sopra solo per evitare questo valore.
 ERROR_CATEGORY_UNCATEGORIZED = "uncategorized"
 
-_ERROR_CATEGORIES = frozenset({
+# Pubblico (non _ERROR_CATEGORIES): core/action_contracts.py::validate_action_error (F1.1.2) lo
+# riusa per non duplicare l'elenco delle categorie valide in un secondo posto.
+ERROR_CATEGORIES = frozenset({
     ERROR_CATEGORY_SUCCESS, ERROR_CATEGORY_PENDING, ERROR_CATEGORY_DENIED,
     ERROR_CATEGORY_INVALID_INPUT, ERROR_CATEGORY_UNAVAILABLE, ERROR_CATEGORY_TRANSIENT,
     ERROR_CATEGORY_TIMEOUT, ERROR_CATEGORY_PARTIAL_EFFECT, ERROR_CATEGORY_VERIFICATION_FAILED,
@@ -167,6 +169,20 @@ _KNOWN_RESULT_CATEGORIES: dict[str, str] = {
 }
 
 
+def normalize_result_code(result: str) -> str:
+    """Spoglia un `result` gia' calcolato dai quattro chokepoint del prefisso "error:" (se
+    presente) e lo porta in MAIUSCOLO, per confrontarlo con un codice canonico indipendentemente
+    da quale dei due formati in uso oggi lo abbia scritto (vedi il commento su
+    _KNOWN_RESULT_CATEGORIES). Estratta da error_category_of() perche' anche
+    core/action_contracts.py::ActionError.from_result() (F1.1.2) ha bisogno dello stesso codice
+    normalizzato, non solo della categoria - una sola funzione invece di due copie della stessa
+    normalizzazione."""
+    normalized = (result or "").strip()
+    if normalized.lower().startswith("error:"):
+        normalized = normalized[len("error:"):]
+    return normalized.upper()
+
+
 def error_category_of(result: str) -> str:
     """F1.1.4: categorizza un `result` gia' calcolato dai quattro chokepoint in una delle
     categorie della tassonomia sopra, tollerando i due formati diversi in uso oggi (vedi il
@@ -175,10 +191,7 @@ def error_category_of(result: str) -> str:
     ancora mappato (quasi sempre un errore specifico di UNA skill, non ancora migrata sulla
     tassonomia condivisa - F1.1.6/F1.1.7) ricade su ERROR_CATEGORY_UNCATEGORIZED invece di
     sollevare un errore o di essere forzato in una categoria sbagliata solo per evitarlo."""
-    normalized = (result or "").strip()
-    if normalized.lower().startswith("error:"):
-        normalized = normalized[len("error:"):]
-    return _KNOWN_RESULT_CATEGORIES.get(normalized.upper(), ERROR_CATEGORY_UNCATEGORIZED)
+    return _KNOWN_RESULT_CATEGORIES.get(normalize_result_code(result), ERROR_CATEGORY_UNCATEGORIZED)
 
 
 def verification_status_of(verified: Optional[bool]) -> str:
@@ -251,10 +264,10 @@ def validate_action_receipt(receipt: ActionReceipt) -> None:
             f"ActionReceipt.verified={receipt.verified!r} non e' uno stato valido "
             f"({', '.join(_VERIFICATION_STATUSES)})"
         )
-    if receipt.error_category not in _ERROR_CATEGORIES:
+    if receipt.error_category not in ERROR_CATEGORIES:
         raise ValueError(
             f"ActionReceipt.error_category={receipt.error_category!r} non e' una categoria valida "
-            f"({', '.join(sorted(_ERROR_CATEGORIES))})"
+            f"({', '.join(sorted(ERROR_CATEGORIES))})"
         )
     if receipt.schema_version != ACTION_RECEIPT_SCHEMA_VERSION:
         raise ValueError(
