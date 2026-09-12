@@ -10,6 +10,9 @@ un core.policy_engine.PolicyEngine vero (F1: la separazione formale planner/poli
 completata in questa sessione), non piu' tre insiemi (blocked_intents/always_confirm_intents/
 require_auth_intents) impostati direttamente su core."""
 import unittest
+import tempfile
+from pathlib import Path
+from unittest import mock
 
 from core.action_ledger import ActionLedger
 from core.auth_gate import AuthGate
@@ -351,6 +354,23 @@ class WindowsHelloAuthTests(unittest.TestCase):
         self.assertEqual(calls, [])
         self.assertEqual(result.error, "AUTH_REQUIRED")
 
+    def test_policy_revoked_while_windows_hello_is_open_prevents_execution(self):
+        skill = FakeSkill()
+        core = _bare_core(
+            FakeRegistry({"SET_POWER_PLAN": skill}), always_confirm_intents=set(),
+            auth_gate=AuthGate(windows_hello_enabled=True), require_auth_intents={"SET_POWER_PLAN"},
+        )
+
+        def verify_and_revoke(reason):
+            core.policy_engine.blocked_intents.add("SET_POWER_PLAN")
+            return True
+
+        core.auth_gate._windows_hello_verify = verify_and_revoke
+        _, result, _ = core._resolve_and_execute(Command("SET_POWER_PLAN", {"plan": "balanced"}))
+
+        self.assertEqual(skill.calls, [])
+        self.assertEqual(result.error, "POLICY_BLOCKED")
+
 
 class FakeLearning:
     def observe(self, *args, **kwargs):
@@ -361,6 +381,7 @@ def _bare_core_for_confirmation(skill_registry, auth_gate) -> JakeCore:
     core = JakeCore.__new__(JakeCore)
     core.skill_registry = skill_registry
     core.auth_gate = auth_gate
+    core.policy_engine = PolicyEngine(auth_gate=auth_gate)
     core.conversation_state = ConversationStateManager()
     core.learning = FakeLearning()
     core.last_route = None
@@ -492,6 +513,100 @@ class HandleConfirmationDenialTests(unittest.TestCase):
         self.assertEqual(receipt.authorization, "denied")
         self.assertEqual(receipt.result, "denied_confirmation")
         self.assertFalse(kwargs["private"])
+
+
+class PendingActionPolicyTests(unittest.TestCase):
+    """F1.2.5: il consenso non congela i permessi e una busta non prova l'identita'."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.skill = FakeSkill()
+        self.registry = FakeRegistry({"SET_POWER_PLAN": self.skill, "DELETE_PATH": self.skill})
+        self.core = _bare_core_for_confirmation(self.registry, AuthGate(passphrase="fixture passphrase"))
+        self.core.action_ledger = ActionLedger(Path(tmp.name) / "ledger.jsonl")
+        patcher = mock.patch("core.jake_core.log_action")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _pending(self, intent="DELETE_PATH", reason="confirmation_required", **parameters):
+        self.core.conversation_state.set_pending_action({
+            "intent": intent, "parameters": parameters, "reason": reason,
+            "text": "richiesta fixture", "trace_id": "original-trace",
+        })
+
+    def test_policy_revoked_after_prompt_blocks_confirmed_execution_and_records_denial(self):
+        self._pending(path="fixture.txt", confirmed=True)
+        self.core.policy_engine.blocked_intents.add("DELETE_PATH")
+
+        self.core._handle_confirmation("si")
+
+        self.assertEqual(self.skill.calls, [])
+        self.assertFalse(self.core.conversation_state.has_pending_action())
+        (receipt,) = self.core.action_ledger.read_all()
+        self.assertEqual(receipt["trace_id"], "original-trace")
+        self.assertEqual(receipt["authorization"], "blocked")
+        self.assertEqual(receipt["error_category"], "denied")
+
+    def test_new_auth_requirement_after_prompt_waits_for_real_authentication(self):
+        self._pending("SET_POWER_PLAN", plan="balanced", confirmed=True)
+        self.core.policy_engine.require_auth_intents.add("SET_POWER_PLAN")
+
+        self.core._handle_confirmation("si")
+
+        self.assertEqual(self.skill.calls, [])
+        pending = self.core.conversation_state.get_pending_action()
+        self.assertEqual(pending["reason"], "auth_required")
+        self.assertEqual(pending["trace_id"], "original-trace")
+        self.assertEqual(self.core.action_ledger.read_all()[0]["authorization"], "pending")
+
+    def test_confirmation_envelope_cannot_smuggle_authentication(self):
+        self.core.policy_engine.require_auth_intents.add("SET_POWER_PLAN")
+        self._pending(
+            "SET_POWER_PLAN", plan="balanced", confirmed=True,
+            authenticated=True, authenticated_via="windows_hello",
+        )
+
+        self.core._handle_confirmation("si")
+
+        self.assertEqual(self.skill.calls, [])
+        self.assertEqual(self.core.conversation_state.get_pending_action()["reason"], "auth_required")
+
+    def test_valid_passphrase_grants_both_identity_and_consent_with_trusted_provenance(self):
+        self.core.policy_engine.require_auth_intents.add("SET_POWER_PLAN")
+        self.core.policy_engine.always_confirm_intents.add("SET_POWER_PLAN")
+        self._pending(
+            "SET_POWER_PLAN", reason="auth_required", plan="balanced",
+            authenticated_via="windows_hello", authenticated=True,
+        )
+
+        self.core._handle_confirmation("fixture passphrase")
+
+        self.assertEqual(self.skill.calls, [{
+            "plan": "balanced", "confirmed": True,
+            "authenticated": True, "authenticated_via": "passphrase",
+        }])
+        self.assertFalse(self.core.conversation_state.has_pending_action())
+        (receipt,) = self.core.action_ledger.read_all()
+        self.assertEqual(receipt["authorization"], "passphrase")
+
+    def test_resumption_keeps_the_approved_target_without_rewrite_or_fallback(self):
+        self._pending(path="fixture.txt")
+        with mock.patch("core.jake_core.fallbacks.pre_execution_rewrite") as rewrite:
+            self.core._handle_confirmation("si")
+
+        rewrite.assert_not_called()
+        self.assertEqual(self.skill.calls, [{"path": "fixture.txt", "confirmed": True}])
+
+    def test_private_mode_does_not_persist_revoked_action(self):
+        self.core.private_mode = True
+        self._pending(path="fixture.txt", confirmed=True)
+        self.core.policy_engine.blocked_intents.add("DELETE_PATH")
+
+        self.core._handle_confirmation("si")
+
+        self.assertEqual(self.skill.calls, [])
+        self.assertEqual(self.core.action_ledger.read_all(), [])
 
 
 class FakeLoggerCapturingWarnings:

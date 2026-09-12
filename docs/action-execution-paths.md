@@ -5,7 +5,7 @@ Questo documento risponde al primo passo di F1.1 — Action Contract 2.0
 un intent puo' arrivare a eseguire davvero, cosa decide se puo' farlo, e dove ne resta prova nel
 ledger (`core/action_ledger.py::ActionReceipt`, vedi `tests/test_action_contract.py`).
 
-Verificato leggendo il codice, non la prosa della roadmap (11/09/2026). `tests/
+Verificato leggendo il codice, non la prosa della roadmap (12/09/2026). `tests/
 test_action_paths_inventory.py` controlla che i simboli citati esistano ancora: un rinominamento
 o una rimozione fa fallire il test invece di lasciare questo documento silenziosamente non
 aggiornato.
@@ -14,13 +14,30 @@ aggiornato.
 
 | # | Percorso | Punto d'ingresso | Passa da PolicyEngine? | Ricevuta nel ledger |
 |---|---|---|---|---|
-| 1 | Comando diretto dell'utente | `JakeCore._resolve_and_execute` (`core/jake_core.py`) | Si', `decide_interactive` | `JakeCore._log_action_outcome`/`_log_denied_action` |
+| 1 | Comando diretto dell'utente e ripresa del consenso | `JakeCore._resolve_and_execute` / `_finalize_pending_action` (`core/jake_core.py`) | Si', `_authorize_command` usa `decide_interactive` anche dopo il consenso | `JakeCore._log_action_outcome`/`_log_denied_action` |
 | 2 | Agente a passi (general/coding/research) | `TaskAgent.run` (`core/agent.py`), tramite l'`executor` iniettato = `JakeCore._resolve_and_execute` | Si', stesso gate del percorso 1 (nessuna logica propria) | `TaskAgent._log_step` |
 | 3 | Piano automatico (ripiego del planner, `RUN_WORKFLOW`, trigger) | `PlanExecutor.execute` (`core/plan_executor.py`), chiamato da `JakeCore._try_plan`, `skills/workflow.py::RunWorkflowSkill`, `core/trigger_scheduler.py::TriggerScheduler` | Si', `decide_automated`, purche' il chiamante passi `policy_engine` (vedi nota sotto) | `PlanExecutor._log_step` |
 | 4 | Companion server (rete locale) | `core/companion_server.py::_Handler._handle_command` | Si', delega a `command_handler` = `JakeCore.answer`, nessuna logica di esecuzione propria | Stessa del percorso 1/2 (qualunque cosa `answer()` risolva) |
 | 5 | Registrazione skill (plugin loader, Skill Forge) | `core/plugin_loader.py`, `core/skill_forge.py` → `SkillRegistry.register_skill` | N/A: registra soltanto, non esegue | N/A |
 | 6 | Rollback di un passo gia' riuscito | `core/execution_safety.py::rollback_effect`, chiamato da `TaskAgent._rollback` e `PlanExecutor._rollback` | Parziale: rifiuta solo se l'intent compensatorio e' in `blocked_intents` (F1.2.5, 11/09/2026); non passa da `decide_automated`/`decide_interactive` per intero, ne' da `CONFIRM`/`REQUIRE_AUTH` (nessun utente pronto a rispondere durante un rollback automatico) | Nessuna propria: il rollback stesso non produce un `ActionReceipt` separato, solo l'esecuzione del passo originale che l'ha innescato |
 | 7 | Dispatch grezzo | `SkillRegistry.execute` (`core/skill_registry.py`) | **No**: dispatcher senza alcun controllo di policy proprio. Sicuro solo perche' oggi tutti i chiamanti reali (percorsi 1-3, rollback) lo invocano dopo una decisione gia' presa altrove - non e' pero' impedito strutturalmente che un futuro chiamante lo invochi direttamente, saltando ogni gate (`F1.2.1`, ancora aperto) | Nessuna: non e' un chokepoint del ledger |
+
+## Ripresa del consenso (percorsi 1, 2 e 4)
+
+`JakeCore._finalize_pending_action` rivaluta la policy vigente tramite `_authorize_command`,
+lo stesso gate usato da `_resolve_and_execute`. Non applica rewrite o fallback: esegue solo il
+bersaglio approvato. I marcatori `confirmed`/`authenticated`/`authenticated_via` della busta
+vengono rimossi; il consenso deriva dalla risposta positiva e l'autenticazione dalla passphrase
+controllata da `_handle_confirmation` o da una verifica Windows Hello effettiva. Un nuovo blocco
+impedisce l'esecuzione, una nuova richiesta di autenticazione riapre l'attesa, senza perdere il
+`trace_id`. Anche dopo il prompt Windows Hello viene ricontrollata la policy. Un blocco dopo
+il consenso produce una ricevuta `authorization=blocked`; in modalita' privata non viene scritta.
+
+Prove: `PendingActionPolicyTests` e `WindowsHelloAuthTests` in
+`tests/test_jake_core_permissions.py`, `PendingPolicyIntegrationTests` in
+`tests/test_jake_core_pipeline.py` (file temporaneo reale, ripresa agente, autenticazione e
+conferma a due stadi). Restano aperti ownership della sessione e race tra valutazione ed effetto
+(`F1.8.1`/`F1.8.7`): questa rivalutazione non e' una transazione globale.
 
 ## Nota sul percorso 3 (piano automatico)
 
@@ -47,10 +64,10 @@ opzionale, collegato esplicitamente da `JakeCore.__init__` dopo aver creato
   dispatcher a basso livello usato anche da centinaia di test di skill in isolamento e da
   `tools/replay_session.py`, quindi renderlo fail-closed per costruzione richiede prima
   distinguere "chiamata di test/tool fidata" da "chiamata di produzione", non ancora deciso.
-- `F1.2.5` (resto): retry (`execute_with_retry`) e sotto-azioni generate da workflow non ancora
-  passati in rassegna con lo stesso livello di dettaglio del rollback.
+- `F1.2.5` (resto): sotto-azioni generate da workflow e autorizzazione completa dei rollback
+  ancora aperte. Il retry ha la protezione conservativa di `F1.3.6`, non capability per risorsa.
 - Questo inventario copre "chi puo' eseguire", non ancora "chi costruisce un `ActionProposal`"
-  (`F1.1.2`, `F1.1.6`, `F1.1.7`): oggi nessuna skill costruisce il contratto target, tutte
-  restituiscono `SkillResult` (vedi `core/skill_result.py`) e la ricevuta viene sintetizzata
+  (`F1.1.2`, `F1.1.6`, `F1.1.7`): `_authorize_command` costruisce/valida `ActionProposal`,
+  mentre le skill restituiscono ancora `SkillResult` (vedi `core/skill_result.py`). La ricevuta viene sintetizzata
   solo ai 4 chokepoint della tabella sopra (righe 1-3, gia' coperti da
   `tests/test_action_contract.py`).
