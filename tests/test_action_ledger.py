@@ -8,8 +8,9 @@ from pathlib import Path
 
 from core.action_ledger import (
     AUTHORIZATION_BLOCKED, AUTHORIZATION_CONFIRMED, AUTHORIZATION_DENIED, AUTHORIZATION_NONE,
-    AUTHORIZATION_PASSPHRASE, AUTHORIZATION_PENDING, AUTHORIZATION_WINDOWS_HELLO, ActionLedger,
-    ActionReceipt, authorization_of, idempotency_key_of, new_action_id,
+    AUTHORIZATION_PASSPHRASE, AUTHORIZATION_PENDING, AUTHORIZATION_WINDOWS_HELLO,
+    VERIFICATION_FAILED, VERIFICATION_UNVERIFIED, VERIFICATION_VERIFIED, ActionLedger,
+    ActionReceipt, authorization_of, idempotency_key_of, new_action_id, verification_status_of,
 )
 
 
@@ -109,10 +110,34 @@ class ActionReceiptTests(unittest.TestCase):
         )
         import json
         record = json.loads(receipt.to_json())
-        self.assertNotIn("verified", record)
         self.assertNotIn("duration_ms", record)
         self.assertNotIn("model", record)
         self.assertEqual(record["action_id"], "a1")
+
+    def test_verified_defaults_to_unverified_and_is_never_omitted(self):
+        """F1.3.3: prima di questa correzione verified era Optional[bool] = None e to_json()
+        ometteva il campo quando None - una ricevuta "mai verificata" finiva nel ledger identica
+        a una scritta da uno schema piu' vecchio senza questo campo. Ora e' sempre presente."""
+        receipt = ActionReceipt(
+            action_id="a1", trace_id="t1", ts=123.0, intent="OPEN_APP", requested_by="user",
+            risk_decision="local_reversible", authorization="none", result="success",
+            idempotency_key="k1",
+        )
+        self.assertEqual(receipt.verified, VERIFICATION_UNVERIFIED)
+        import json
+        record = json.loads(receipt.to_json())
+        self.assertEqual(record["verified"], VERIFICATION_UNVERIFIED)
+
+
+class VerificationStatusOfTests(unittest.TestCase):
+    def test_none_means_unverified(self):
+        self.assertEqual(verification_status_of(None), VERIFICATION_UNVERIFIED)
+
+    def test_true_means_verified(self):
+        self.assertEqual(verification_status_of(True), VERIFICATION_VERIFIED)
+
+    def test_false_means_verification_failed(self):
+        self.assertEqual(verification_status_of(False), VERIFICATION_FAILED)
 
 
 class ActionLedgerTestCase(unittest.TestCase):
