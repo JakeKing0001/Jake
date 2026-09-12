@@ -47,6 +47,13 @@ class ValidateActionReceiptTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_action_receipt(_valid_receipt(schema_version=ACTION_RECEIPT_SCHEMA_VERSION + 1))
 
+    def test_default_verified_status_passes(self):
+        validate_action_receipt(_valid_receipt())
+
+    def test_unrecognized_verified_status_is_rejected(self):
+        with self.assertRaises(ValueError):
+            validate_action_receipt(_valid_receipt(verified="yes"))
+
 
 def _bare_jake_core() -> JakeCore:
     core = JakeCore.__new__(JakeCore)
