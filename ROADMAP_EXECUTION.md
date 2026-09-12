@@ -654,8 +654,8 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
 
 - Stato: `DOING`; `F1.2.5` parziale per rollback filesystem e ripresa del consenso (questa
   ultima verificata localmente, in attesa di CI); `F1.2.1` chiuso parzialmente
-  (percorso 3, vedi sotto); `F1.2.4` chiuso per il percorso planner (vedi sotto); `F1.2.6`
-  (parziale, solo PlanExecutor) e `F1.2.7` chiusi (vedi sotto); resto aperto.
+  (percorso 3, vedi sotto); `F1.2.4` chiuso per il percorso planner (vedi sotto); `F1.2.6` e
+  `F1.2.7` chiusi (vedi sotto); resto aperto.
 - `F1.2.1` (parziale) — 12/09/2026: chiuso il buco concreto documentato in
   [docs/action-execution-paths.md](docs/action-execution-paths.md) ("Nota sul percorso 3"):
   `PlanExecutor.execute(plan, policy_engine=None, ...)` trattava l'assenza di policy_engine come
@@ -794,11 +794,51 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   PolicyReasonInTheLedgerTests`, `tests/test_policy_engine.py::DecideWithReasonTests`,
   `tests/test_action_ledger.py::ActionReceiptPolicyReasonValidationTests`. Prova: 2.059/2.059
   test, ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.2.6` (chiusura, percorso interattivo/agente) — 12/09/2026: completa la parte lasciata
+  esplicitamente aperta sopra. Un commit precedente (`7a51546`, "rivaluta policy e prove dopo il
+  consenso", F1.2.5) aveva gia' introdotto la ri-valutazione della policy dopo un consenso
+  dell'utente; il lavoro per PORTARE la motivazione fino al ledger anche su questo percorso era
+  rimasto SUL DISCO ma non committato quando la sessione precedente e' terminata (vedi la nota
+  di handoff in fondo a questo file, sezione 24, "prossima azione") - **ripreso, completato e
+  verificato da zero in questa sessione, non semplicemente committato cosi' com'era**. Introdotto
+  `core/execution_safety.py::ActionExecution` (bersaglio effettivo, risultato, nota e motivazione
+  in un solo oggetto, sostituendo la tupla a 3 restituita da `_resolve_and_execute`) e
+  `execute_action_with_retry()` (variante di `execute_with_retry` che conserva `ActionExecution`
+  tra i tentativi, invece del solo `SkillResult`) - `execute_with_retry` resta come wrapper sottile
+  per compatibilita' con chi vuole solo il risultato. `JakeCore._authorize_command`/
+  `_resolve_and_execute` restituiscono ora la motivazione insieme a comando/risultato;
+  `_execute_command`, `_finalize_pending_action` e `_handle_confirmation` la propagano fino a
+  `_log_action_outcome`/`_log_denied_action`, con la STESSA validazione contro `POLICY_REASONS`
+  gia' usata per `PlanExecutor` (F1.2.6, sopra) - un `policy_reason` letto da un'azione in sospeso
+  persistita (es. da una versione precedente, o manomessa) che non e' una delle costanti valide
+  viene scartato (`None`), non propagato ciecamente. `TaskAgent` (`core/agent.py`) segue lo stesso
+  schema: `AgentStep.policy_reason`, `_log_step` lo accetta e lo scrive nel ledger.
+  **Buco reale trovato mentre si verificava, non solo un refactor gia' corretto**: il codice
+  ereditato cambiava il tipo restituito da `_resolve_and_execute` da una tupla a 3 elementi a
+  `ActionExecution`, ma **23 test esistenti** in `tests/test_jake_core_permissions.py`
+  continuavano a fare `resolved, result, note = core._resolve_and_execute(...)` o
+  `...[1]` per prendere solo il risultato - un `TypeError` immediato ("cannot unpack non-iterable
+  ActionExecution object"), non un fallimento silenzioso, ma la suite non era MAI stata rieseguita
+  dopo la modifica prima di questa sessione. Aggiornati tutti e 20 i punti di chiamata (18 unpack
+  a 3 valori, 2 indicizzazioni `[1]}`) per usare `execution.command`/`.result`/`.note` invece della
+  tupla. Un secondo buco distinto: `tests/test_jake_core_misc.py::ApplyCorrectionTests` costruiva
+  `core.policy_engine` come un `MagicMock` generico - chiamare
+  `decide_interactive_with_reason(...)` (ora invocato da `_execute_command` per il controllo
+  `blocked_intents`, non piu' un confronto diretto sull'insieme) restituiva un altro `MagicMock`
+  non configurato, che fallisce a spacchettarsi in due valori ("not enough values to unpack").
+  Corretto sostituendo il `MagicMock` con una `PolicyEngine()` vera (insiemi vuoti, nessun
+  auth_gate) - lo stesso comportamento permissivo di prima, ma un oggetto reale invece di un
+  doppio che non implementa il metodo nuovo. Nuovo `tests/test_jake_core_policy_ledger.py` (26
+  test, gia' presente non tracciato insieme al resto), che copre revoca a meta' flusso, Windows
+  Hello, fallback su un intent diverso, retry, le tre specializzazioni dell'agente, e un test di
+  sicurezza esplicito (`test_untrusted_envelope_cannot_inject_a_secret_as_policy_reason`) che
+  verifica che una busta di conferma non fidata non possa iniettare un valore arbitrario come
+  motivazione nel ledger. Prova (rieseguita per intero dopo le correzioni, non solo sui file
+  toccati): 2.135/2.135 test, ruff/mypy/compileall verdi.
 - Non ancora affrontato: il resto di `F1.2.1` (percorso 7, `SkillRegistry.execute()` resta un
   dispatcher senza controllo di policy proprio - vedi sopra); `F1.2.2`-`F1.2.3`; il resto di
   `F1.2.5` (sotto-azioni di workflow non ancora passate in rassegna allo stesso modo - il retry
-  e' invece coperto separatamente da `F1.3.6`, vedi sotto); il resto di `F1.2.6` (il percorso
-  interattivo di `JakeCore`, vedi sopra).
+  e' invece coperto separatamente da `F1.3.6`, vedi sotto).
 
 ### F1.3 — Verifica degli effetti e undo
 
@@ -2231,23 +2271,25 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 12/09/2026 dopo ricognizione di architettura, pipeline, contratti, lifecycle, test e
-stato remoto. `master` era pulito e sincronizzato su `0a004ba`; il
-[run CI 34704932252](https://github.com/JakeKing0001/Jake/actions/runs/34704932252) e' verde.
-La branch protection richiede Python 3.11, Python 3.12 e HUD nativo, con `strict=true` ed
-enforcement per gli admin. Il vecchio blocco Tcl/sync/protezione non e' piu' corrente: G0 resta
-superato, come gia' documentato al suo gate. Le DLL Qt6 sono presenti accanto al binario locale
-`hud/native/build/JakeHud.exe` e il deploy post-build e' configurato in CMake; questo controllo
-non certifica il comportamento visivo dell'HUD.
+Aggiornato 12/09/2026. Il lavoro descritto qui sotto come "in corso, non committato" al momento
+dell'ultimo aggiornamento e' stato ripreso, COMPLETATO e verificato da zero (non semplicemente
+committato cosi' com'era): vedi `F1.2.6` in sezione F1.2 per i dettagli, incluso un buco reale
+trovato durante la ripresa (23 + 3 test rotti dal cambio di tipo di ritorno di
+`_resolve_and_execute`, mai rieseguiti prima di allora). `master` e' pulito, 2.135/2.135 test,
+ruff/mypy/compileall verdi. `G1` resta aperto.
 
-L'incremento locale corrente e' `F1.2.5`, ripresa del consenso: 2.107/2.107 test e quality gate
-verdi, evidenza nella sezione F1.2. Resta `VERIFY` per la CI del nuovo commit. La baseline e il
-run completo dopo il fix mostrano anche i warning preesistenti del test harness
-(`ResourceWarning` subprocess e disconnessione HTTP `WinError 10053`), senza test falliti:
-non sono stati risolti o nascosti da questo incremento.
-
-Prossima azione: sincronizzare il commit locale e verificare i tre check sulla sua SHA, senza
-riusare il verde di `0a004ba` per codice diverso. Poi proseguire con `F1.2.6`, motivazione
-di policy nei percorsi interattivi e agente, includendo diniego, fallback e Windows Hello.
-Codex non esegue push ne' cambia impostazioni GitHub: secondo il ritmo della sezione 20,
-non iniziare il prossimo ID prima della nuova CI verde. G1 resta aperto.
+L'utente ha chiesto esplicitamente di FERMARSI qui per ora, dopo una lunga sessione di incrementi
+piccoli e verificabili su F1: non iniziare autonomamente uno dei due lavori grandi gia' proposti
+e rifiutati per ora (`F1.6`, sandbox permanente per le skill forgiate - Job Object/AppContainer;
+`F1.1.7`, migrazione delle ~200 skill da `SkillResult` ad `ActionProposal`/`ActionError`) senza
+un nuovo via libera esplicito. Se una sessione futura riprende da qui, il ritmo preferito
+dall'utente resta: un incremento alla volta, ciascuno con test reali (non solo letti a tavolino -
+diversi buchi in questa roadmap sono stati trovati SOLO eseguendo davvero il codice), riprova
+empirica quando possibile (riprodurre il buco con il codice vecchio prima di dichiararlo
+risolto), aggiornamento di questo file, e commit/PR separati invece di un unico commit enorme.
+Candidati piccoli ancora aperti in F1 quando si riprende: il resto di `F1.2.1` (percorso 7,
+`SkillRegistry.execute()`), `F1.2.2`-`F1.2.3` (capability/intersezione permessi), `F1.4.1`-`F1.4.7`
+(consolidamento SecretsVault, oltre a quanto gia' in `core/secrets_vault.py`), `F1.7.1`-`F1.7.5`/
+`F1.7.8` (ledger resistente a scritture parziali, retention, redazione strutturata, replay
+sicuro), `F1.8.1`/`F1.8.3`-`F1.8.7` (coda azioni concorrenti, drain allo shutdown, deadlock
+timeout, test di race).

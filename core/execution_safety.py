@@ -9,15 +9,37 @@ senza nessuno dei tre: un OPERATION_FAILED transitorio bruciava un passo di ragi
 di essere ritentato, e un errore a meta' compito lasciava sul disco gli effetti collaterali gia'
 fatti senza nessun tentativo di annullarli. Estratta qui cosi' i due esecutori condividono la
 stessa logica invece di poterla far divergere in silenzio, come sarebbe successo copiandola."""
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Optional
 
+from core.command import Command
+from core.policy_engine import POLICY_REASONS
 from core.risk import RiskLevel, risk_of
 from core.skill_result import SkillResult
 
 RETRYABLE_ERRORS = {"OPERATION_FAILED", "NETWORK_UNAVAILABLE"}
 MAX_ATTEMPTS = 2
+
+
+@dataclass(frozen=True)
+class ActionExecution:
+    """Esito per-azione: bersaglio effettivo e motivazione fuori dai dati della skill (F1.2.6).
+
+    None significa che nessuna decisione di policy e' disponibile, non ALLOW implicito.
+    Non e' un token di autorizzazione e non rende sicuro il dispatcher grezzo.
+    """
+
+    command: Command
+    result: SkillResult | None
+    note: str | None = None
+    policy_reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.policy_reason is not None and (
+            not isinstance(self.policy_reason, str) or self.policy_reason not in POLICY_REASONS
+        ):
+            raise ValueError("ActionExecution.policy_reason non valida")
 
 
 def is_safe_to_auto_retry(intent: str) -> bool:
@@ -49,24 +71,39 @@ def execute_with_retry(execute_fn, intent: str, parameters: dict) -> tuple[Skill
     callable qualsiasi (SkillRegistry.execute, o il ripiego piu' ricco di JakeCore.
     _resolve_and_execute): questa funzione non sa e non le importa cosa faccia davvero, decide
     solo in base al risultato e all'intent. Restituisce (risultato, tentativi fatti)."""
+    execution, attempts = execute_action_with_retry(execute_fn, intent, parameters)
+    assert execution.result is not None  # normalizzato da execute_action_with_retry
+    return execution.result, attempts
+
+
+def execute_action_with_retry(
+    execute_fn: Callable[[str, dict], SkillResult | ActionExecution | None], intent: str, parameters: dict,
+) -> tuple[ActionExecution, int]:
+    """Stessa rete di retry, conservando il contesto dell'ULTIMO tentativo (F1.2.6).
+
+    Un executor legacy restituisce SkillResult: nessuna motivazione viene inventata.
+    Se il core riscrive l'intent, si conserva il bersaglio vero anche per audit/verifica.
+    """
     attempts = 0
-    result: SkillResult | None = None
+    execution = ActionExecution(Command(intent, parameters), None)
     max_attempts = MAX_ATTEMPTS if is_safe_to_auto_retry(intent) else 1
     while attempts < max_attempts:
         attempts += 1
-        result = execute_fn(intent, parameters)
+        returned = execute_fn(intent, parameters)
+        execution = returned if isinstance(returned, ActionExecution) else ActionExecution(Command(intent, parameters), returned)
+        result = execution.result
         if result is None:
-            result = SkillResult(success=False, data={}, error="UNKNOWN_INTENT")
+            execution = replace(execution, result=SkillResult(success=False, data={}, error="UNKNOWN_INTENT"))
             break
-        if result.success or result.error not in RETRYABLE_ERRORS:
+        if result.success or result.error not in RETRYABLE_ERRORS or not is_safe_to_auto_retry(execution.command.intent):
             break
     # max_attempts >= 1 garantisce che il ciclo giri almeno una volta, quindi result non e' mai
     # None qui davvero - ma un ripiego esplicito (invece di fidarsi solo di quell'invariante)
     # evita che un futuro MAX_ATTEMPTS = 0 restituisca None a un chiamante che si aspetta sempre
     # un vero SkillResult.
-    if result is None:
-        result = SkillResult(success=False, data={}, error="UNKNOWN_INTENT")
-    return result, attempts
+    if execution.result is None:
+        execution = replace(execution, result=SkillResult(success=False, data={}, error="UNKNOWN_INTENT"))
+    return execution, attempts
 
 
 def _rollback_create_path(registry, data):
