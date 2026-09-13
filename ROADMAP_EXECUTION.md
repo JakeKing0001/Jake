@@ -1625,12 +1625,12 @@ Criterio di uscita: un plugin ostile non legge file, rete o processi non dichiar
 
 - Stato: `DOING`; `F1.6.1`/`F1.6.2` chiusi, `F1.6.3` chiuso parzialmente (memoria e tempo CPU, non
   ancora limite sul numero di processi ne' un vero timeout wall-clock imposto dal Job Object
-  stesso); `F1.6.4`-`F1.6.8` restano aperti. **Attenzione, importante**: l'infrastruttura sotto e'
-  costruita e verificata per davvero, ma NON e' ancora collegata a nulla - `SkillForge`/
-  `SkillRegistry` continuano a eseguire una skill forgiata IN PROCESSO, esattamente come prima di
-  questo incremento. Questo pezzo da solo non cambia il comportamento REALE di Jake per un
-  utente: e' la fondamenta (dimostrata con test reali, non solo scritta) su cui il collegamento
-  vero (un incremento a se', dichiaratamente non affrontato qui) potra' appoggiarsi.
+  stesso); `F1.6.4`-`F1.6.8` restano aperti (`F1.6.7`, serializzazione input/output, e' vero per
+  costruzione con il protocollo a righe JSON - un processo separato non puo' condividere oggetti
+  Python live con Jake - ma senza ancora un test avversariale dedicato che lo dimostri). **Il
+  collegamento vero e' ora fatto**: `SkillRegistry.execute()` instrada davvero una skill forgiata
+  verso il worker sandboxato invece di eseguirla in processo (vedi sotto) - non piu' solo
+  un'infrastruttura inerte.
 - `F1.6.1`/`F1.6.2`/`F1.6.3` (fondamenta: worker persistente sandboxato) — 13/09/2026: via libera
   esplicito dell'utente su un lavoro grande finora rifiutato senza un nuovo via libera. Un Job
   Object (o un AppContainer) si applica a un PROCESSO, non a una singola chiamata di funzione
@@ -1702,6 +1702,48 @@ Criterio di uscita: un plugin ostile non legge file, rete o processi non dichiar
   ancora verificato con un test dedicato); `F1.6.8` (quarantena di un plugin che viola i limiti,
   oggi si limita a fallire quella singola chiamata). Prova: 2.397/2.397 test,
   ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.6` (collegamento vero: `SkillForge`/`SkillRegistry` instradano davvero verso il worker) —
+  14/09/2026: chiude il gap dichiarato apertamente nell'incremento precedente ("nessun
+  collegamento... una skill forgiata continua a girare in processo"). `SkillRegistry` ora
+  distingue un intent forgiato da uno built-in: `register_skill(intent, skill, plugin_path=None)`
+  accetta un nuovo parametro opzionale, popolato SOLO per skill che vengono da un file di plugin
+  (mai dalle skill built-in, caricate con `self.skills.update(...)` diretto in `__init__`, mai
+  passando da `register_skill()`). Nuovo `core/plugin_loader.py::_PluginPathTrackingRegistry`: un
+  proxy visto da un plugin durante `register()` che inoltra `register_skill()` alla vera
+  `SkillRegistry` aggiungendo `plugin_path` - il contratto che ogni plugin/skill forgiata gia'
+  rispetta (`register(registry): registry.register_skill(intent, skill)`, due soli argomenti)
+  resta INVARIATO, nessun plugin esistente o generato dalla Skill Forge deve sapere che questo
+  proxy esiste. `SkillRegistry.execute()` ora instrada un intent forgiato verso
+  `SandboxedSkillWorker.invoke()` invece di chiamare `skill.execute(parameters)` in processo -
+  l'istanza in processo della skill (registrata comunque, per `list_capabilities()`/
+  `get_skill()`/altre letture di metadata) non viene mai piu' eseguita per un intent forgiato,
+  solo introspezionata. Il worker si avvia PIGRAMENTE (solo alla prima invocazione di una skill
+  forgiata: Jake non paga il costo di un processo in piu' se non ha mai installato nulla dalla
+  Forge) e viene INVALIDATO (fermato, dimenticato) quando arriva un nuovo intent forgiato dopo che
+  il worker esiste gia' - il worker carica i plugin una volta sola all'avvio, quindi
+  un'installazione a caldo successiva (l'esatto scenario di `SkillForge.install()`) richiede un
+  riavvio per essere vista, altrimenti la skill appena installata non sarebbe mai servibile.
+  `JakeCore.shutdown()` ferma esplicitamente il worker (`SkillRegistry.stop_sandbox_worker()`,
+  no-op se nessuna skill forgiata e' mai stata invocata) - non e' un processo figlio che Windows
+  chiuderebbe da solo alla chiusura di Jake. Verificato con un intent forgiato reale confrontando
+  `os.getpid()` dentro la skill (deve differire da quello del processo di test, prova che
+  l'esecuzione sia DAVVERO avvenuta in un processo separato, non solo dichiarata), non solo
+  leggendo il codice. Aggiunti 6 nuovi test: 4 in
+  `tests/test_skill_registry.py::ForgedSkillSandboxWiringTests` (esecuzione in processo separato,
+  un intent bloccato da policy non avvia mai il worker, `stop_sandbox_worker()` sicuro se mai
+  avviato, un nuovo intent forgiato invalida un worker gia' vivo), 1 in
+  `tests/test_plugin_loader.py` (`plugin_path` arriva davvero a `register_skill()` attraverso il
+  proxy), 1 in `tests/test_jake_core_pipeline.py::ShutdownTests` (il worker si ferma per davvero
+  allo shutdown). Corrette 3 classi `FakeRegistry`/registry "spogli" (`SkillRegistry.__new__`) in
+  `tests/test_skill_registry.py`/`tests/test_plugin_loader.py`/`tests/test_jake_core_pipeline.py`
+  che non avevano i nuovi attributi/il nuovo parametro - scoperte da un'esecuzione della suite
+  completa, non ipotizzate in anticipo. Non ancora affrontato: `F1.6.4`-`F1.6.6`/`F1.6.8`
+  (AppContainer, manifest di directory, negazione rete, quarantena) restano tutti aperti; cosa
+  succede a una skill forgiata che dipende da stato condiviso di Jake non serializzabile in JSON
+  (memoria, rubrica, NEST) resta senza una risposta esplicita - oggi non risulta che nessuna skill
+  forgiata lo faccia (nessuna dipendenza iniettata al costruttore, solo `execute(parameters)`),
+  ma non c'e' ancora un controllo che lo VIETI esplicitamente se qualcuno ci provasse. Prova:
+  2.402/2.402 test, ruff/mypy/compileall verdi su tutti i file toccati.
 
 ### F1.7 — Ledger, replay e osservabilità
 
@@ -3520,7 +3562,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 44 incrementi completati e verificati (PR #28-#71), la
+Aggiornato 14/09/2026. Sessione lunga con 45 incrementi completati e verificati (PR #28-#72), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -3642,15 +3684,18 @@ chiamata dentro il processo di Jake, quindi contenere l'esecuzione ONGOING di un
 richiede eseguirla altrove - decisione esplicita dell'utente di un worker PERSISTENTE invece di
 un processo usa-e-getta per chiamata; nuovo `core/forge_worker.py`/`core/sandboxed_skill_worker.py`,
 Low Integrity + Job Object via pipe create a mano, verificato con prove empiriche isolate PRIMA
-di scrivere l'implementazione e poi con test reali che spawnano processi veri - MA non ancora
-collegato a `SkillForge`/`SkillRegistry`, dichiarato apertamente: una skill forgiata continua a
-girare in processo esattamente come prima). Il resto:
+di scrivere l'implementazione e poi con test reali che spawnano processi veri), e `F1.6`
+collegamento vero - chiusura (`SkillRegistry.execute()` instrada davvero un intent forgiato verso
+il worker invece di eseguirlo in processo, verificato confrontando `os.getpid()` dentro la skill
+- deve differire da quello del processo di test, prova che l'esecuzione sia DAVVERO avvenuta
+altrove; il worker si avvia pigramente e si invalida da solo quando una nuova skill forgiata
+arriva dopo che gia' esiste, `JakeCore.shutdown()` lo ferma esplicitamente). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.397/2.397 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.402/2.402 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
 invariati, nessuno dei due coperto da "mypy selettivo" in CI - 78 file nella lista selettiva,
 `core/identity.py`/`core/forge_worker.py`/`core/sandboxed_skill_worker.py` aggiunti). `G1` resta
@@ -3669,16 +3714,17 @@ deterministico invece di probabilistico - orchestrando l'esatto intreccio con du
 `TriggerManager.mark_fired()`. Un risultato negativo con la sola tecnica standard non e' prova
 sufficiente di sicurezza su finestre strette.
 
-**Aggiornamento 13/09/2026**: l'utente ha dato il via libera esplicito su ENTRAMBI i lavori
+**Aggiornamento 13-14/09/2026**: l'utente ha dato il via libera esplicito su ENTRAMBI i lavori
 grandi sopra, dopo un'investigazione di scoping dedicata (vedi F1.1.7 e F1.6 nelle rispettive
-sezioni). Entrambi hanno ora un primo pezzo chiuso: `F1.1.7` i due chokepoint restanti,
-`F1.6` un worker persistente sandboxato (`core/forge_worker.py`/`core/sandboxed_skill_worker.py`,
-Low Integrity + Job Object, verificato con test reali che spawnano processi veri) - **ma NON
-ancora collegato a `SkillForge`/`SkillRegistry`**: una skill forgiata installata oggi continua a
-girare in processo, esattamente come prima. Il collegamento vero (route `SkillRegistry.execute()`
-verso il worker per le skill forgiate, decidere cosa fare di una skill che dipende da stato
-condiviso di Jake non serializzabile in JSON, gestire l'avvio/arresto del worker nel ciclo di vita
-di `JakeCore`) resta un incremento a se', dichiaratamente non affrontato qui. Ritmo per chi riprende: un incremento alla volta, ciascuno con test reali (non solo letti a tavolino),
+sezioni). `F1.1.7` ha un primo pezzo chiuso (i due chokepoint restanti). `F1.6` e' andato oltre
+le fondamenta: il worker persistente sandboxato (`core/forge_worker.py`/`core/sandboxed_skill_
+worker.py`, Low Integrity + Job Object) e' ora anche COLLEGATO per davvero -
+`SkillRegistry.execute()` instrada un intent forgiato verso il worker invece di eseguirlo in
+processo, verificato con un confronto di `os.getpid()` che dimostra l'esecuzione avvenuta in un
+processo separato, non solo dichiarata. Restano aperti: `F1.6.4`-`F1.6.6`/`F1.6.8`
+(AppContainer, manifest di directory montabili, negazione rete, quarantena su violazione), e la
+domanda esplicita su cosa fare di una skill forgiata che dipendesse da stato condiviso di Jake
+non serializzabile in JSON (oggi nessuna lo fa, ma non c'e' ancora un controllo che lo vieti). Ritmo per chi riprende: un incremento alla volta, ciascuno con test reali (non solo letti a tavolino),
 riprova empirica quando possibile (riprodurre il buco con il codice vecchio prima di dichiararlo
 risolto, idealmente con una tecnica di forzatura reale come `sys.setswitchinterval()` abbassato o
 una `threading.Barrier` - molti buchi di questa sessione non si manifestavano affatto senza),
