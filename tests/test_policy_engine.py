@@ -563,5 +563,80 @@ class DeviceCapabilityTests(unittest.TestCase):
         self.assertEqual(result["automated"]["reason"], "intent_in_device_blocked_intents")
 
 
+class WebDomainCapabilityTests(unittest.TestCase):
+    """F1.2.2 (seconda capability: dominio web). Solo OPEN_URL rispetta allowed_web_domains oggi -
+    vedi il docstring del modulo per il perche' CHECK_WEBSITE_STATUS ne resta fuori."""
+
+    def test_no_configured_domains_means_no_restriction_at_all(self):
+        """Comportamento invariato per chi non configura nulla (default vuoto)."""
+        engine = PolicyEngine()
+        decision = engine.decide_interactive("OPEN_URL", {"url": "https://esempio-qualsiasi.com"})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_a_url_on_an_allowed_domain_is_permitted(self):
+        engine = PolicyEngine(allowed_web_domains={"wikipedia.org"})
+        decision = engine.decide_interactive("OPEN_URL", {"url": "https://wikipedia.org/wiki/Python"})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_a_subdomain_of_an_allowed_domain_is_permitted(self):
+        engine = PolicyEngine(allowed_web_domains={"wikipedia.org"})
+        decision = engine.decide_interactive("OPEN_URL", {"url": "https://it.wikipedia.org/wiki/Python"})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_a_url_outside_every_allowed_domain_is_blocked(self):
+        engine = PolicyEngine(allowed_web_domains={"wikipedia.org"})
+        decision, reason = engine.decide_interactive_with_reason("OPEN_URL", {"url": "https://esempio-vietato.com"})
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+        self.assertEqual(reason, "domain_outside_allowed_web_domains")
+
+    def test_a_url_without_a_scheme_is_still_checked(self):
+        """OpenUrlSkill aggiunge https:// da sola se l'utente non lo dice - lo stesso trattamento
+        vale qui, altrimenti "esempio-vietato.com" (senza schema) aggirerebbe il controllo."""
+        engine = PolicyEngine(allowed_web_domains={"wikipedia.org"})
+        decision = engine.decide_interactive("OPEN_URL", {"url": "esempio-vietato.com"})
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+
+    def test_a_similarly_prefixed_domain_is_not_confused_for_a_subdomain(self):
+        """"wikipedia.org" non deve corrispondere per errore a "not-wikipedia.org" solo perche'
+        condividono un suffisso di stringa - deve esserci un confine di dominio vero."""
+        engine = PolicyEngine(allowed_web_domains={"wikipedia.org"})
+        decision = engine.decide_interactive("OPEN_URL", {"url": "https://not-wikipedia.org"})
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+
+    def test_check_website_status_is_deliberately_not_covered(self):
+        """CHECK_WEBSITE_STATUS e' RiskLevel.READ_ONLY (verifica solo se un sito risponde), non
+        apre nulla - un rischio diverso da OPEN_URL, fuori scope per questa capability."""
+        engine = PolicyEngine(allowed_web_domains={"wikipedia.org"})
+        decision = engine.decide_interactive("CHECK_WEBSITE_STATUS", {"url": "https://esempio-vietato.com"})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_capability_denial_is_checked_before_confirmation_would_otherwise_apply(self):
+        engine = PolicyEngine(allowed_web_domains={"wikipedia.org"}, always_confirm_intents={"OPEN_URL"})
+        decision = engine.decide_interactive(
+            "OPEN_URL", {"url": "https://esempio-vietato.com", "confirmed": True},
+        )
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+
+    def test_a_blocked_intent_still_wins_over_the_capability_check(self):
+        engine = PolicyEngine(blocked_intents={"OPEN_URL"}, allowed_web_domains={"wikipedia.org"})
+        decision, reason = engine.decide_interactive_with_reason("OPEN_URL", {"url": "https://wikipedia.org"})
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+        self.assertEqual(reason, "intent_in_blocked_intents")
+
+    def test_decide_automated_enforces_web_domains_when_parameters_are_passed(self):
+        engine = PolicyEngine(allowed_web_domains={"wikipedia.org"})
+        decision, reason = engine.decide_automated_with_reason("OPEN_URL", {"url": "https://esempio-vietato.com"})
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+        self.assertEqual(reason, "domain_outside_allowed_web_domains")
+
+    def test_explain_reports_the_web_capability_denial_on_both_verdicts(self):
+        engine = PolicyEngine(allowed_web_domains={"wikipedia.org"})
+        result = engine.explain("OPEN_URL", {"url": "https://esempio-vietato.com"})
+        self.assertEqual(result["interactive"]["decision"], "block")
+        self.assertEqual(result["interactive"]["reason"], "domain_outside_allowed_web_domains")
+        self.assertEqual(result["automated"]["decision"], "block")
+        self.assertEqual(result["automated"]["reason"], "domain_outside_allowed_web_domains")
+
+
 if __name__ == "__main__":
     unittest.main()
