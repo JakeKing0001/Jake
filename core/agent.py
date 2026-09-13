@@ -23,7 +23,7 @@ from core.identity import current_windows_user
 from core.kill_switch import KillSwitch
 from core.logger import log_action, new_trace_id
 from core.ollama_client import OllamaClient, OllamaError
-from core.request_context import current_device_id
+from core.request_context import current_device_id, reset_current_agent_name, set_current_agent_name
 from core.risk import risk_of
 from core.schema_validation import validate_confirm_envelope
 from core.session_recorder import SessionRecorder
@@ -411,7 +411,14 @@ class TaskAgent:
                         # traccia di cosa fosse andato storto).
                         if self.logger:
                             self.logger.exception("Errore nella callback on_step dell'agente")
-                execution, attempts = execute_action_with_retry(self.executor, intent, parameters)
+                # F1.2.3 (capability per AGENTE): il contextvar e' impostato SOLO intorno a questa
+                # chiamata (non per l'intera durata di run(), vedi core/request_context.py) -
+                # l'unico punto in cui questo passo puo' davvero eseguire un intent.
+                agent_name_token = set_current_agent_name(self.agent_name)
+                try:
+                    execution, attempts = execute_action_with_retry(self.executor, intent, parameters)
+                finally:
+                    reset_current_agent_name(agent_name_token)
                 intent, parameters = execution.command.intent, execution.command.parameters or {}
                 result = execution.result
                 verified = None

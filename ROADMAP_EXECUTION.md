@@ -724,8 +724,8 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   CONTROL_SMART_DEVICE, rete su PING_HOST/TRACE_ROUTE/CHECK_WEBSITE_STATUS (le ultime tre su
   stringa grezza, non risolta - limite dichiarato) - vedi sotto; resta aperta solo "durata"); `F1.2.4`
   chiuso per il percorso planner (vedi sotto); `F1.2.6` e `F1.2.7` chiusi (vedi sotto); `F1.2.3`
-  chiuso parzialmente (prima capability - dispositivo - vedi sotto; l'intersezione con
-  agente/skill/sessione resta aperta).
+  chiuso parzialmente (prima capability - dispositivo - e ora anche la seconda - agente - vedi
+  sotto; l'intersezione con skill/sessione resta aperta).
 - `F1.2.2` (parziale, prima capability: radici filesystem) — 12/09/2026: "definire capability per
   filesystem root, app, contatto, dominio web, device, servizio Home Assistant, rete e durata" -
   la prima delle otto, scelta perche' e' l'unica gia' collegabile senza dover prima costruire
@@ -1120,6 +1120,33 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   `explain()`). Deliberatamente non affrontato: l'intersezione con agente/skill/sessione (le altre
   tre dimensioni di F1.2.3) e le altre capability elencate in ROADMAP.md (app/contatto/dominio
   web/HA/rete/durata). Prova: 2.272/2.272 test, ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.2.3` (seconda capability: agente) — 14/09/2026: la seconda delle quattro dimensioni
+  dell'intersezione ("utente, dispositivo, agente, skill e sessione") - `agent_blocked_intents`,
+  simmetrico a `device_blocked_intents` sopra ma per `TaskAgent.agent_name` ("general"/"coding"/
+  "research", vedi `core/agent.py`) invece che per dispositivo companion. A differenza del canale
+  companion (identita' che arriva gia' propagata da un'HTTP request), qui non esisteva ancora
+  NESSUNA identita' da leggere: aggiunto un nuovo contextvar `core.request_context.
+  current_agent_name()` (stesso meccanismo/stesse garanzie di isolamento per thread di
+  `current_device_id()`, inclusi gli stessi test di isolamento concorrente), impostato da
+  `TaskAgent.run()` SOLO nella finestra stretta intorno alla chiamata all'executor (l'unico punto
+  in cui un passo puo' davvero eseguire un intent) invece che per l'intera durata di `run()` -
+  minimizzare la finestra evita che un futuro codice intermedio legga per errore un'identita' che
+  non gli compete. Stesso ordine di controllo delle altre capability per intersezione (subito dopo
+  `device_blocked_intents`/`windows_user_blocked_intents`, prima delle capability sintattiche e di
+  `CONFIRM`), stessa motivazione dedicata (`POLICY_REASON_AGENT_BLOCKED`, "intent_in_agent_
+  blocked_intents"). Limite dichiarato: copre solo i tre agenti a passi (general/coding/research),
+  non il percorso diretto ne' l'automazione (`PlanExecutor`, un attore diverso) - entrambi vedono
+  sempre `current_agent_name() is None`, un valore che questo dizionario non ha modo utile di
+  restringere (nessuna chiave `None` sensata in `config.json`). Configurabile da `config.json`
+  (`agent_blocked_intents`). Aggiunti 8 nuovi test in `tests/test_policy_engine.py::
+  AgentCapabilityTests` (stesso schema di `DeviceCapabilityTests`), 7 in `tests/test_request_
+  context.py` (default/set/reset/isolamento per thread, stesso schema di quelli gia' esistenti per
+  `current_device_id`), e 2 in `tests/test_agent.py::AgentNameContextPropagationTests` che
+  verificano la propagazione VERA (non solo la logica di blocco in isolamento): un executor
+  personalizzato osserva `current_agent_name()` durante la chiamata (con `agent_name="coding"`,
+  non il default "general" - a dimostrare che il valore osservato e' davvero quello dell'agente in
+  esecuzione, non una costante), e il contextvar torna a `None` subito dopo il passo. Prova:
+  2.436/2.436 test, ruff/mypy/compileall verdi su tutti i file toccati.
 - `F1.2.4` — 12/09/2026: `core/planner_provider.py::_build_output_schema()` chiedeva a Ollama
   passi con `"parameters": {"type": "object"}` SENZA alcuna restrizione sulle chiavi - la causa
   originale del bug corretto in F1.2.5 (un passo poteva arrivare gia' con `"confirmed": true`
@@ -3648,7 +3675,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 14/09/2026. Sessione lunga con 48 incrementi completati e verificati (PR #28-#75), la
+Aggiornato 14/09/2026. Sessione lunga con 49 incrementi completati e verificati (PR #28-#76), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -3781,7 +3808,7 @@ non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ul
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.421/2.421 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.436/2.436 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
 invariati, nessuno dei due coperto da "mypy selettivo" in CI - 78 file nella lista selettiva,
 `core/identity.py`/`core/forge_worker.py`/`core/sandboxed_skill_worker.py` aggiunti). `G1` resta
@@ -3828,8 +3855,8 @@ ancora chiaro a quale intent/parametro mappi con precisione; le altre sei - file
 dominio web/app/contatto/device Home Assistant/rete - sono ora complete, con i rispettivi gap noti
 gia' dichiarati - FIND_FILE senza `path` esplicito, LIST_SMART_DEVICES escluso, app/contatto/
 device/rete su stringa grezza non risolta),
-`F1.2.3` (resto: prima capability per dispositivo chiusa - `device_blocked_intents` - ma
-l'intersezione con agente/skill/sessione resta aperta), il resto di `F1.3.2` (processi e finestre
+`F1.2.3` (resto: prima e seconda capability chiuse - `device_blocked_intents`/
+`agent_blocked_intents` - ma l'intersezione con skill/sessione resta aperta), il resto di `F1.3.2` (processi e finestre
 sono ora coperti - CLOSE_WINDOW ha anche un verificatore indipendente, CLOSE_APP resta corretto
 solo a livello di skill per la complessita' della sua busta dati; browser/casa restano aperti,
 "casa" bloccata su una decisione di dipendenza - iniettare un client Home Assistant in

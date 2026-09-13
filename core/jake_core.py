@@ -256,6 +256,12 @@ class JakeCore:
             # invece che per canale companion, utile solo se piu' account Windows condividono
             # questa installazione di Jake.
             windows_user_blocked_intents=config.get("windows_user_blocked_intents", {}) or {},
+            # F1.2.3 (intersezione, seconda capability per AGENTE): {agent_name: [intent, ...]}
+            # in config.json, vuoto per default - stesso principio di device_blocked_intents, ma
+            # per TaskAgent.agent_name ("general"/"coding"/"research") invece che per canale
+            # companion. Copre solo i tre agenti a passi, non il percorso diretto ne'
+            # l'automazione (vedi il docstring di core/policy_engine.py per il limite dichiarato).
+            agent_blocked_intents=config.get("agent_blocked_intents", {}) or {},
         )
         # F1.2.5: collegato DOPO la creazione (self.agent/coding_agent/research_agent esistono
         # gia', self.policy_engine no, quando i tre TaskAgent vengono costruiti sopra) - senza

@@ -103,7 +103,21 @@ per un host/IP consentito che copre anche i suoi sottodomini (un IP non ha sotto
 un IP il confronto si riduce comunque a un'uguaglianza esatta - nessun comportamento sorprendente).
 Opt-in, vuoto per default, stesso schema di tutte le capability sopra.
 
-Durata (l'ultima capability elencata in ROADMAP.md) e l'intersezione con agente/skill/sessione
+F1.2.3 (intersezione, seconda capability - per AGENTE): `agent_blocked_intents` e' simmetrico a
+`device_blocked_intents` sopra ma per `TaskAgent.agent_name` ("general"/"coding"/"research", vedi
+core/agent.py) invece che per dispositivo companion - un dizionario opt-in `{agent_name: {intent,
+...}}`, vuoto per default. Utile per restringere cosa puo' fare un agente SPECIALIZZATO senza
+toccare gli altri due o un comando diretto: es. impedire a "coding" di spegnere il PC
+(`SYSTEM_POWER`) senza impedirlo al resto di Jake. Il contextvar (`core.request_context.
+current_agent_name()`) e' impostato da `TaskAgent.run()` SOLO durante l'esecuzione di un intent
+tramite l'executor, mai per l'intera durata di `run()` - un comando diretto (nessun `TaskAgent`
+coinvolto) e un'automazione (`PlanExecutor`, un attore diverso) vedono entrambi `None`, che questo
+dizionario NON puo' restringere (nessuna chiave `None` ha senso qui, a differenza di
+`device_blocked_intents` dove `None` e' la voce locale legittima) - limite dichiarato: questa
+capability copre solo i tre agenti a passi, non l'automazione ne' il percorso diretto, che restano
+governati dalle altre capability/dai blocchi globali.
+
+Durata (l'ultima capability elencata in ROADMAP.md) e l'intersezione con skill/sessione
 restano completamente aperte."""
 import os
 from enum import Enum
@@ -111,7 +125,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from core.identity import current_windows_user
-from core.request_context import current_device_id
+from core.request_context import current_agent_name, current_device_id
 
 
 class PolicyDecision(str, Enum):
@@ -183,12 +197,16 @@ POLICY_REASON_WINDOWS_USER_BLOCKED = "intent_in_windows_user_blocked_intents"
 # F1.2.2 (sesta capability: rete): stesso principio di app/contatto/device sopra - un host/url
 # fuori da allowed_network_hosts, non l'intent bloccato in assoluto.
 POLICY_REASON_NETWORK_CAPABILITY_DENIED = "host_outside_allowed_network_hosts"
+# F1.2.3 (intersezione, seconda capability per AGENTE): stesso principio di
+# POLICY_REASON_DEVICE_BLOCKED sopra, ma per core.request_context.current_agent_name() invece che
+# per dispositivo companion.
+POLICY_REASON_AGENT_BLOCKED = "intent_in_agent_blocked_intents"
 POLICY_REASONS = frozenset({
     POLICY_REASON_BLOCKED, POLICY_REASON_REQUIRE_AUTH, POLICY_REASON_CONFIRM, POLICY_REASON_ALLOWED,
     POLICY_REASON_CAPABILITY_DENIED, POLICY_REASON_DEVICE_BLOCKED, POLICY_REASON_WEB_CAPABILITY_DENIED,
     POLICY_REASON_APP_CAPABILITY_DENIED, POLICY_REASON_CONTACT_CAPABILITY_DENIED,
     POLICY_REASON_SMART_DEVICE_CAPABILITY_DENIED, POLICY_REASON_WINDOWS_USER_BLOCKED,
-    POLICY_REASON_NETWORK_CAPABILITY_DENIED,
+    POLICY_REASON_NETWORK_CAPABILITY_DENIED, POLICY_REASON_AGENT_BLOCKED,
 })
 
 # F1.2.2: le quattro mutazioni sono le stesse gia' raggruppate in core/execution_safety.py::
@@ -315,7 +333,7 @@ class PolicyEngine:
         device_blocked_intents: dict[str | None, set] | None = None, allowed_web_domains: set | list | None = None,
         allowed_apps: set | list | None = None, allowed_contacts: set | list | None = None,
         allowed_smart_devices: set | list | None = None, windows_user_blocked_intents: dict[str, set] | None = None,
-        allowed_network_hosts: set | list | None = None,
+        allowed_network_hosts: set | list | None = None, agent_blocked_intents: dict[str | None, set] | None = None,
     ):
         self.auth_gate = auth_gate
         self.blocked_intents = set(blocked_intents or set())
@@ -343,6 +361,12 @@ class PolicyEngine:
         # companion, dimensioni ortogonali (vedi il docstring del modulo).
         self.windows_user_blocked_intents = {
             user: set(intents) for user, intents in (windows_user_blocked_intents or {}).items()
+        }
+        # F1.2.3 (intersezione, seconda capability per AGENTE): {agent_name: {intent, ...}} -
+        # stesso principio di device_blocked_intents, ma per core.request_context.
+        # current_agent_name() invece che per dispositivo companion.
+        self.agent_blocked_intents = {
+            agent_name: set(intents) for agent_name, intents in (agent_blocked_intents or {}).items()
         }
         # F1.2.2 (seconda capability: dominio web): vuoto/None (default) = nessuna restrizione,
         # stesso principio di allowed_filesystem_roots. Minuscolo qui una volta sola (non a ogni
@@ -434,6 +458,8 @@ class PolicyEngine:
             return PolicyDecision.BLOCK, POLICY_REASON_DEVICE_BLOCKED
         if self._windows_user_blocks(intent):
             return PolicyDecision.BLOCK, POLICY_REASON_WINDOWS_USER_BLOCKED
+        if self._agent_blocks(intent):
+            return PolicyDecision.BLOCK, POLICY_REASON_AGENT_BLOCKED
         if intent in FILESYSTEM_CAPABILITY_INTENTS and not self._filesystem_capability_allows(parameters):
             return PolicyDecision.BLOCK, POLICY_REASON_CAPABILITY_DENIED
         if intent in WEB_CAPABILITY_INTENTS and not self._web_capability_allows(parameters):
@@ -473,6 +499,8 @@ class PolicyEngine:
             return PolicyDecision.BLOCK, POLICY_REASON_DEVICE_BLOCKED
         if self._windows_user_blocks(intent):
             return PolicyDecision.BLOCK, POLICY_REASON_WINDOWS_USER_BLOCKED
+        if self._agent_blocks(intent):
+            return PolicyDecision.BLOCK, POLICY_REASON_AGENT_BLOCKED
         if intent in FILESYSTEM_CAPABILITY_INTENTS and not self._filesystem_capability_allows(parameters or {}):
             return PolicyDecision.BLOCK, POLICY_REASON_CAPABILITY_DENIED
         if intent in WEB_CAPABILITY_INTENTS and not self._web_capability_allows(parameters or {}):
@@ -502,6 +530,15 @@ class PolicyEngine:
         bloccati. Un dizionario vuoto/senza voce per questo account (comportamento di default)
         non blocca mai nulla."""
         return intent in self.windows_user_blocked_intents.get(current_windows_user(), set())
+
+    def _agent_blocks(self, intent: str) -> bool:
+        """F1.2.3 (intersezione, seconda capability): vero se l'agente a passi in esecuzione su
+        QUESTO thread in questo momento (core.request_context.current_agent_name(), None se
+        nessun TaskAgent e' coinvolto - comando diretto o automazione) ha questo intent nel
+        proprio elenco di intent bloccati. Un dizionario vuoto/senza voce per questo agente
+        (comportamento di default) non blocca mai nulla; `None` non e' MAI una voce utile da
+        configurare (nessun agente specifico da restringere), vedi il docstring del modulo."""
+        return intent in self.agent_blocked_intents.get(current_agent_name(), set())
 
     def _filesystem_capability_allows(self, parameters: dict) -> bool:
         """True se nessuna radice e' configurata (default, nessuna restrizione) oppure se OGNI

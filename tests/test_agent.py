@@ -730,6 +730,55 @@ class SpecializedAgentConfigurationTests(unittest.TestCase):
         self.assertTrue(prompt.startswith("Sei Jake, un agente che controlla un PC Windows"))
 
 
+class AgentNameContextPropagationTests(unittest.TestCase):
+    """F1.2.3 (intersezione, seconda capability - per AGENTE): PolicyEngine/AgentCapabilityTests
+    (tests/test_policy_engine.py) verificano la logica di blocco in isolamento; qui si verifica
+    che TaskAgent.run() imposti DAVVERO core.request_context.current_agent_name() intorno alla
+    chiamata all'executor - non solo letto a codice - e lo ripristini subito dopo, per ogni
+    agent_name (non solo "general", il default)."""
+
+    def test_the_executor_sees_this_agents_name_during_the_call(self):
+        from core.request_context import current_agent_name
+
+        observed = []
+
+        def executor(intent, parameters):
+            observed.append(current_agent_name())
+            return SkillResult(success=True, data={})
+
+        registry = FakeRegistry()
+        client = ScriptedOllamaClient([
+            {"thought": "", "action": {"intent": "ADD_NOTE", "parameters": {"text": "prova"}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto.", "ask_user": ""},
+        ])
+        agent = TaskAgent(
+            registry, FakeRetriever(["ADD_NOTE"]), client, model_provider=lambda: "fake-model",
+            format_result=lambda intent, result: str(result.data), executor=executor,
+            policy_engine=PolicyEngine(), agent_name="coding",
+        )
+
+        agent.run("aggiungi un appunto")
+
+        self.assertEqual(observed, ["coding"])
+
+    def test_current_agent_name_reverts_to_none_after_the_step(self):
+        from core.request_context import current_agent_name
+
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
+        client = ScriptedOllamaClient([
+            {"thought": "", "action": {"intent": "ADD_NOTE", "parameters": {"text": "prova"}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto.", "ask_user": ""},
+        ])
+        agent = _agent(registry, client)
+        agent.agent_name = "research"
+
+        self.assertIsNone(current_agent_name())
+        agent.run("aggiungi un appunto")
+        self.assertIsNone(current_agent_name())
+
+
 class CapabilityTokenEnforcementTests(unittest.TestCase):
     """F1: NEVER_FOR_AGENT/fixed_tools sono, di fatto, il capability token per agente di Jake
     (vedi ROADMAP.md) - ma finora vivevano senza un test dedicato che li blocchi esplicitamente,
