@@ -72,7 +72,15 @@ ampio, non una fetta stretta; il controllo sulla stringa grezza resta comunque u
 difesa reale contro un uso diretto/letterale (un dispositivo companion che dice esattamente "apri
 Impostazioni" o "manda un whatsapp a Marco Rossi").
 
-Servizio Home Assistant/rete/durata (le altre capability elencate in ROADMAP.md) e l'intersezione
+F1.2.2 (quinta capability: device Home Assistant) - `allowed_smart_devices` restringe
+`CONTROL_SMART_DEVICE` (accende/spegne/alterna una luce, presa, interruttore) allo stesso
+principio di app/contatto sopra: `ControlSmartDeviceSkill` cerca il dispositivo per somiglianza
+tra le entita' Home Assistant DENTRO la skill, dopo che `PolicyEngine` ha gia' deciso - stesso
+limite dichiarato, controllo sulla stringa grezza del parametro `name`, non sull'entita' risolta.
+`LIST_SMART_DEVICES` (sola lettura, elenca senza agire) ne resta fuori, stesso schema gia' seguito
+per le altre capability (prima l'azione con un effetto reale, poi eventualmente le letture).
+
+Rete/durata (le altre capability elencate in ROADMAP.md) e l'intersezione
 con agente/skill/sessione restano completamente aperte."""
 import os
 from enum import Enum
@@ -141,10 +149,13 @@ POLICY_REASON_WEB_CAPABILITY_DENIED = "domain_outside_allowed_web_domains"
 # ha fermato l'azione, coerente con lo stile gia' usato per filesystem/dominio web.
 POLICY_REASON_APP_CAPABILITY_DENIED = "app_outside_allowed_apps"
 POLICY_REASON_CONTACT_CAPABILITY_DENIED = "contact_outside_allowed_contacts"
+# F1.2.2 (quinta capability: device Home Assistant): stesso principio di app/contatto sopra.
+POLICY_REASON_SMART_DEVICE_CAPABILITY_DENIED = "smart_device_outside_allowed_smart_devices"
 POLICY_REASONS = frozenset({
     POLICY_REASON_BLOCKED, POLICY_REASON_REQUIRE_AUTH, POLICY_REASON_CONFIRM, POLICY_REASON_ALLOWED,
     POLICY_REASON_CAPABILITY_DENIED, POLICY_REASON_DEVICE_BLOCKED, POLICY_REASON_WEB_CAPABILITY_DENIED,
     POLICY_REASON_APP_CAPABILITY_DENIED, POLICY_REASON_CONTACT_CAPABILITY_DENIED,
+    POLICY_REASON_SMART_DEVICE_CAPABILITY_DENIED,
 })
 
 # F1.2.2: le quattro mutazioni sono le stesse gia' raggruppate in core/execution_safety.py::
@@ -196,6 +207,13 @@ _APP_NAME_PARAMETER_KEYS = ("app",)
 # grezza, non il contatto risolto dalla rubrica.
 CONTACT_CAPABILITY_INTENTS = frozenset({"SEND_WHATSAPP", "SEND_EMAIL"})
 _CONTACT_PARAMETER_KEYS = ("contact", "to")
+
+# F1.2.2 (quinta capability: device Home Assistant) - solo CONTROL_SMART_DEVICE (accende/spegne/
+# alterna), non LIST_SMART_DEVICES (sola lettura, elenca senza agire) - stesso schema gia' seguito
+# per le altre capability. Stesso limite di APP_CAPABILITY_INTENTS: stringa grezza del parametro
+# "name", non l'entita' Home Assistant risolta per somiglianza da ControlSmartDeviceSkill.
+SMART_DEVICE_CAPABILITY_INTENTS = frozenset({"CONTROL_SMART_DEVICE"})
+_SMART_DEVICE_NAME_PARAMETER_KEYS = ("name",)
 
 
 def _normalized_text(value: str) -> str:
@@ -254,6 +272,7 @@ class PolicyEngine:
         require_auth_intents: set | None = None, allowed_filesystem_roots: set | list | None = None,
         device_blocked_intents: dict[str | None, set] | None = None, allowed_web_domains: set | list | None = None,
         allowed_apps: set | list | None = None, allowed_contacts: set | list | None = None,
+        allowed_smart_devices: set | list | None = None,
     ):
         self.auth_gate = auth_gate
         self.blocked_intents = set(blocked_intents or set())
@@ -287,6 +306,8 @@ class PolicyEngine:
         # config.json corrisponde a "blocco note" detto dall'utente.
         self._allowed_apps = {_normalized_text(app) for app in (allowed_apps or [])}
         self._allowed_contacts = {_normalized_text(contact) for contact in (allowed_contacts or [])}
+        # F1.2.2 (quinta capability: device Home Assistant): stesso principio di app/contatto.
+        self._allowed_smart_devices = {_normalized_text(device) for device in (allowed_smart_devices or [])}
 
     def register_intent(self, intent: str) -> None:
         """Sincronizza UN intent con la policy corrente, secondo la sua classificazione del
@@ -366,6 +387,8 @@ class PolicyEngine:
             return PolicyDecision.BLOCK, POLICY_REASON_APP_CAPABILITY_DENIED
         if intent in CONTACT_CAPABILITY_INTENTS and not self._contact_capability_allows(parameters):
             return PolicyDecision.BLOCK, POLICY_REASON_CONTACT_CAPABILITY_DENIED
+        if intent in SMART_DEVICE_CAPABILITY_INTENTS and not self._smart_device_capability_allows(parameters):
+            return PolicyDecision.BLOCK, POLICY_REASON_SMART_DEVICE_CAPABILITY_DENIED
         if (
             self.auth_gate is not None
             and getattr(self.auth_gate, "enabled", False)
@@ -399,6 +422,8 @@ class PolicyEngine:
             return PolicyDecision.BLOCK, POLICY_REASON_APP_CAPABILITY_DENIED
         if intent in CONTACT_CAPABILITY_INTENTS and not self._contact_capability_allows(parameters or {}):
             return PolicyDecision.BLOCK, POLICY_REASON_CONTACT_CAPABILITY_DENIED
+        if intent in SMART_DEVICE_CAPABILITY_INTENTS and not self._smart_device_capability_allows(parameters or {}):
+            return PolicyDecision.BLOCK, POLICY_REASON_SMART_DEVICE_CAPABILITY_DENIED
         if intent in self.always_confirm_intents:
             return PolicyDecision.CONFIRM, POLICY_REASON_CONFIRM
         return PolicyDecision.ALLOW, POLICY_REASON_ALLOWED
@@ -473,6 +498,21 @@ class PolicyEngine:
             if not value or not isinstance(value, str):
                 continue
             if _normalized_text(value) not in self._allowed_contacts:
+                return False
+        return True
+
+    def _smart_device_capability_allows(self, parameters: dict) -> bool:
+        """True se nessun dispositivo e' configurato (default, nessuna restrizione) oppure se il
+        dispositivo (`_SMART_DEVICE_NAME_PARAMETER_KEYS`: "name") e' uno di quelli consentiti -
+        confronto testuale esatto, NON la risoluzione per somiglianza di ControlSmartDeviceSkill
+        (vedi il docstring del modulo per il limite dichiarato)."""
+        if not self._allowed_smart_devices:
+            return True
+        for key in _SMART_DEVICE_NAME_PARAMETER_KEYS:
+            value = parameters.get(key)
+            if not value or not isinstance(value, str):
+                continue
+            if _normalized_text(value) not in self._allowed_smart_devices:
                 return False
         return True
 
