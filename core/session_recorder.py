@@ -38,6 +38,16 @@ _WINDOWS_DRIVE_RE = re.compile(r"^[a-zA-Z]:[\\/]")
 _UNC_RE = re.compile(r"^\\\\")
 _EXTENSION_RE = re.compile(r"\.([A-Za-z0-9]{1,6})$")
 
+# F1.7.4 (terza fetta, "altri tipi di dato per contenuto"): stesso principio conservativo di
+# sopra, applicato a indirizzo IP e numero di telefono - il terzo tipo gia' citato nel gap,
+# "identificatore di dispositivo", e' rimasto deliberatamente FUORI: a differenza di IP/telefono
+# non ha un formato standard riconoscibile (un ID Home Assistant puo' essere un UUID, un hex
+# arbitrario, o "dominio.oggetto" - troppo ambiguo per un'euristica per contenuto senza rischiare
+# falsi positivi su testo libero qualsiasi).
+_IPV4_RE = re.compile(r"^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$")
+_PHONE_RE = re.compile(r"^\+?[\d\s\-()]{6,20}$")
+_PHONE_COUNTRY_CODE_RE = re.compile(r"^\+(\d{1,3})")
+
 # F1.7.4 ("classificazione per nome del parametro, non solo per contenuto"): il resto di questo
 # modulo classifica per FORMA del valore, ma un valore sensibile non ha sempre una forma
 # riconoscibile - CHECK_PASSWORD_STRENGTH (skills/security_utils.py) prende un parametro
@@ -71,14 +81,57 @@ def _looks_like_path(value: str) -> bool:
     return "/" in value and bool(_EXTENSION_RE.search(value))
 
 
+def _looks_like_ipv4(value: str) -> bool:
+    match = _IPV4_RE.match(value)
+    if not match:
+        return False
+    # Rifiuta "999.999.999.999": quattro gruppi di cifre separati da "." non bastano da soli, ogni
+    # ottetto deve stare nel range valido di un indirizzo IPv4 vero.
+    return all(0 <= int(octet) <= 255 for octet in match.groups())
+
+
+def _looks_like_ipv6(value: str) -> bool:
+    # Convalida la struttura (non solo "solo cifre esadecimali e due punti"): un orario scritto
+    # come "14:30:00" e' fatto anche lui di sole cifre/":" ma non e' un IPv6 valido - un indirizzo
+    # non compresso ha SEMPRE esattamente 8 gruppi, uno compresso con "::" ne ha meno di 8 (la
+    # "::" ne rappresenta uno o piu' a zero) e mai piu' di una "::" nello stesso indirizzo.
+    if value.count("::") > 1:
+        return False
+    if "::" in value:
+        head, _, tail = value.partition("::")
+        groups = [g for g in head.split(":") if g] + [g for g in tail.split(":") if g]
+        if len(groups) >= 8:
+            return False
+    else:
+        groups = value.split(":")
+        if len(groups) != 8:
+            return False
+    return bool(groups) and all(re.fullmatch(r"[0-9a-fA-F]{1,4}", g) for g in groups)
+
+
+def _looks_like_phone_number(value: str) -> bool:
+    # Una sequenza di sole cifre e' troppo ambigua (PIN, codice OTP, ID) per essere classificata
+    # come telefono solo per la lunghezza: richiede un prefisso "+" o un separatore di
+    # formattazione tipico (spazio/trattino/parentesi), oltre a un numero di cifre plausibile per
+    # un numero reale (7-15, lo standard internazionale E.164).
+    if not _PHONE_RE.match(value):
+        return False
+    if not (value.startswith("+") or any(ch in value for ch in " -()")):
+        return False
+    digits = re.sub(r"\D", "", value)
+    return 7 <= len(digits) <= 15
+
+
 def redact_value(value):
     """Sostituisce ogni stringa con un segnaposto che rivela la FORMA del valore senza il
     contenuto vero (ricorsivamente dentro dict/list). Il segnaposto generico "<str:N caratteri>"
-    resta il default; email/URL/percorsi riconosciuti diventano rispettivamente "<email:N
-    caratteri, dominio=...>"/"<url:N caratteri, dominio=...>"/"<path:N caratteri,
-    estensione=...>" - il dominio o l'estensione soli raramente identificano una persona, ma
-    aiutano a capire il fallimento (es. "il bug capita solo con i PDF") senza scrivere su disco
-    l'indirizzo, l'URL completo (che puo' contenere un token in query string) o il percorso vero.
+    resta il default; email/URL/percorsi/IP/telefoni riconosciuti diventano rispettivamente
+    "<email:N caratteri, dominio=...>"/"<url:N caratteri, dominio=...>"/"<path:N caratteri,
+    estensione=...>"/"<ip:N caratteri, versione=v4|v6>"/"<telefono:N caratteri[, prefisso=+..]>" -
+    il dominio, l'estensione, la versione IP o il prefisso internazionale soli raramente
+    identificano una persona, ma aiutano a capire il fallimento (es. "il bug capita solo con i
+    PDF", o solo con indirizzi IPv6) senza scrivere su disco l'indirizzo, l'URL completo (che puo'
+    contenere un token in query string), il percorso o il numero di telefono veri.
     Pubblica (non piu' `_redact`) perche' anche `tools/diagnostic_bundle.py` (F1.7.7) ha bisogno
     della stessa identica redazione per i parametri che finiscono in un bundle diagnostico - una
     sola funzione, non una seconda copia con una convenzione leggermente diversa.
@@ -96,6 +149,15 @@ def redact_value(value):
         url_match = _URL_RE.match(value)
         if url_match:
             return f"<url:{length} caratteri, dominio={url_match.group(1).lower()}>"
+        if _looks_like_ipv4(value):
+            return f"<ip:{length} caratteri, versione=v4>"
+        if _looks_like_ipv6(value):
+            return f"<ip:{length} caratteri, versione=v6>"
+        if _looks_like_phone_number(value):
+            country_match = _PHONE_COUNTRY_CODE_RE.match(value)
+            if country_match:
+                return f"<telefono:{length} caratteri, prefisso=+{country_match.group(1)}>"
+            return f"<telefono:{length} caratteri>"
         if _looks_like_path(value):
             ext_match = _EXTENSION_RE.search(value)
             if ext_match:
