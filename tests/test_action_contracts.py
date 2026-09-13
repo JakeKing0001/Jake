@@ -193,7 +193,7 @@ class ActionErrorTests(unittest.TestCase):
         self.assertFalse(error.retryable)
 
     def test_unmapped_skill_specific_code_falls_back_to_uncategorized(self):
-        error = ActionError.from_result("error:PATH_NOT_FOUND")
+        error = ActionError.from_result("error:UN_CODICE_MAI_VISTO_XYZ")
         self.assertEqual(error.category, ERROR_CATEGORY_UNCATEGORIZED)
 
     def test_message_is_optional(self):
