@@ -84,6 +84,7 @@ files = [
     "core/forge_worker.py",
     "core/sandboxed_skill_worker.py",
     "core/secrets_vault.py",
+    "core/taint.py",
     "core/temporal_parser.py",
     "core/win_dpi.py",
     "core/windows_hello.py",

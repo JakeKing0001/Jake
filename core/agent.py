@@ -28,6 +28,7 @@ from core.risk import risk_of
 from core.schema_validation import validate_confirm_envelope
 from core.session_recorder import SessionRecorder
 from core.skill_result import SkillResult
+from core.taint import wrap_external_content
 
 # Strumenti sempre offerti all'agente, oltre a quelli pertinenti alla richiesta: sono i
 # "sensi" e le "mani" di base con cui si risolve quasi ogni compito composto.
@@ -312,6 +313,10 @@ class TaskAgent:
                     text += " | dati: " + json.dumps(useful, ensure_ascii=False)
                 except (TypeError, ValueError):
                     pass
+            # F1.5.1 (etichettare il contenuto esterno, vedi core/taint.py): un marcatore
+            # STRUTTURALE in aggiunta all'avviso in prosa gia' esistente sopra - solo per un
+            # passo riuscito (un fallimento non produce testo scritto da qualcun altro).
+            text = wrap_external_content(intent, text)
         if len(text) > self.OBSERVATION_MAX_CHARS:
             text = text[: self.OBSERVATION_MAX_CHARS] + "…"
         return text
