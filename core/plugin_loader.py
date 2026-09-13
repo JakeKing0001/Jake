@@ -3,6 +3,26 @@ import logging
 from pathlib import Path
 
 
+class _PluginPathTrackingRegistry:
+    """Proxy visto da un plugin durante register() (F1.6): inoltra register_skill() alla vera
+    SkillRegistry aggiungendo `plugin_path`, cosi' il worker sandboxato (core/sandboxed_skill_
+    worker.py) sa quali intent devono eseguire li' invece che in processo. Il contratto
+    `register(registry): registry.register_skill(intent, skill)` che ogni plugin/skill forgiata
+    gia' rispetta (due soli argomenti, mai un terzo) resta INVARIATO - nessun plugin esistente o
+    generato dalla Skill Forge deve sapere che questo proxy esiste. `__getattr__` inoltra
+    qualunque altro metodo (has_skill/get_skill) se mai un plugin li chiamasse."""
+
+    def __init__(self, real_registry, plugin_path: str):
+        self._real_registry = real_registry
+        self._plugin_path = plugin_path
+
+    def register_skill(self, intent, skill) -> None:
+        self._real_registry.register_skill(intent, skill, plugin_path=self._plugin_path)
+
+    def __getattr__(self, name):
+        return getattr(self._real_registry, name)
+
+
 def load_plugin_file(registry, plugin_file: Path, logger: logging.Logger | None = None) -> bool:
     """Carica un singolo plugin (v3.0: usato anche dalla fucina per attivare a caldo una skill
     appena generata). True se register() e' stata eseguita senza errori."""
@@ -24,7 +44,7 @@ def load_plugin_file(registry, plugin_file: Path, logger: logging.Logger | None 
                 logger.warning("Plugin %s ignorato: manca una funzione register(registry).", plugin_file.name)
             return False
 
-        register(registry)
+        register(_PluginPathTrackingRegistry(registry, str(plugin_file)))
         return True
     except Exception:
         if logger:

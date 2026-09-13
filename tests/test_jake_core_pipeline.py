@@ -51,6 +51,7 @@ class FakeSkill:
 class FakeRegistry:
     def __init__(self, skills: dict = None):
         self._skills = skills or {}
+        self.sandbox_worker_stopped = 0
 
     def get_skill(self, intent):
         return self._skills.get(intent)
@@ -61,6 +62,9 @@ class FakeRegistry:
     def execute(self, intent, parameters=None, policy_engine=None):
         skill = self.get_skill(intent)
         return None if skill is None else skill.execute(parameters)
+
+    def stop_sandbox_worker(self) -> None:
+        self.sandbox_worker_stopped += 1  # F1.6: nessun worker vero in questo doppio
 
 
 class FakeNormalizer:
@@ -778,6 +782,7 @@ class ShutdownTests(_JakeCoreTestCase):
         self.assertEqual(core.trigger_scheduler.stopped, 1)
         core.retriever.example_index.save_cache.assert_called_once()
         core.retriever.capability_index.save_cache.assert_called_once()
+        self.assertEqual(core.skill_registry.sandbox_worker_stopped, 1, "F1.6: il worker sandboxato per le skill forgiate deve fermarsi allo shutdown")
 
     def test_a_failing_component_does_not_prevent_the_rest_from_stopping(self):
         core = self._core()

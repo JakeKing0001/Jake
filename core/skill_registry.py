@@ -23,8 +23,10 @@ from core.reminder_manager import ReminderManager
 from core.todo_manager import TodoManager
 from core.risk import risk_of
 from core.logger import get_logger
+from core.sandboxed_skill_worker import SandboxedSkillWorker
 from core.skill_result import SkillResult
 from copy import deepcopy
+from pathlib import Path
 
 
 class SkillRegistry:
@@ -88,13 +90,26 @@ class SkillRegistry:
         self.skills.update(build_research_skills(self.config, web_search_skill, search_files_skill))
         self.skills.update(build_communication_skills(self.ollama_client, model, self.contact_book))
 
+        # F1.6 (collegamento del worker sandboxato alle skill forgiate): {intent: percorso del
+        # file plugin} per OGNI intent registrato tramite un plugin (Skill Forge o plugins/ di
+        # terze parti) - vedi register_skill()/core/plugin_loader.py. Le skill built-in non ci
+        # finiscono mai (self.skills.update(...) sopra non passa mai da register_skill()).
+        self._forged_intents: dict[str, str] = {}
+        # Worker persistente (core/sandboxed_skill_worker.py), avviato PIGRAMENTE solo alla prima
+        # invocazione di una skill forgiata - Jake non paga il costo di avvio di un processo in
+        # piu' se non ha mai installato nessuna skill forgiata. Invalidato (rimesso a None) da
+        # register_skill() quando arriva un NUOVO intent forgiato dopo che il worker esiste gia':
+        # il worker carica i plugin UNA VOLTA all'avvio, quindi un elenco di plugin cambiato dopo
+        # richiede un riavvio per essere visto.
+        self._sandbox_worker: SandboxedSkillWorker | None = None
+
     def get_skill(self, intent: str):
         return self.skills.get(intent, None)
 
     def has_skill(self, intent: str) -> bool:
         return intent in self.skills
 
-    def register_skill(self, intent: str, skill) -> None:
+    def register_skill(self, intent: str, skill, plugin_path: str | None = None) -> None:
         """Registra una skill aggiuntiva a runtime: il punto di estensione per plugin di terze
         parti e per la Skill Forge (core/skill_forge.py), senza dover modificare l'elenco
         hardcoded in __init__. La skill deve esporre un attributo 'metadata' (intent/
@@ -113,7 +128,19 @@ class SkillRegistry:
         eseguito sarebbe stato tutt'altro. Non blocca la sostituzione (un plugin che rimpiazza
         di proposito una skill built-in e' un uso legittimo del punto di estensione, e la Skill
         Forge gia' rifiuta da sola un intent duplicato prima di generare codice - vedi
-        SkillForge._validate): la registra comunque, ma lo rende visibile invece di silenzioso."""
+        SkillForge._validate): la registra comunque, ma lo rende visibile invece di silenzioso.
+
+        F1.6: `plugin_path` (passato da core/plugin_loader.py per OGNI skill che viene da un
+        file di plugin, mai dalle skill built-in sopra) marca l'intent come da eseguire nel
+        worker sandboxato (core/sandboxed_skill_worker.py) invece che in processo - vedi
+        execute() sotto. Un worker gia' avviato viene invalidato (fermato, dimenticato) qui:
+        carica i plugin una volta sola all'avvio, quindi un nuovo intent forgiato arrivato dopo
+        (un'installazione a caldo dalla Skill Forge) richiede un riavvio per essere servito."""
+        if plugin_path is not None:
+            self._forged_intents[intent] = plugin_path
+            if self._sandbox_worker is not None:
+                self._sandbox_worker.stop()
+                self._sandbox_worker = None
         existing = self.skills.get(intent)
         if existing is not None and existing is not skill:
             self.logger.warning(
@@ -205,4 +232,41 @@ class SkillRegistry:
                         parameters = dict(parameters)
                         parameters[name] = resolved
 
+        # F1.6: una skill forgiata (o di un plugin di terze parti) esegue nel worker sandboxato
+        # invece che qui in processo - vedi register_skill() per come un intent finisce in
+        # _forged_intents, e il docstring del modulo core/sandboxed_skill_worker.py per il
+        # perche' (un Job Object/l'integrita' Low si applicano a un PROCESSO, non a una singola
+        # chiamata dentro il processo di Jake).
+        if intent in self._forged_intents:
+            return self._execute_forged(intent, parameters or {})
+
         return skill.execute(parameters)
+
+    def _execute_forged(self, intent: str, parameters: dict) -> SkillResult:
+        worker = self._get_or_start_sandbox_worker()
+        if worker is None:
+            return SkillResult(success=False, data={}, error="SANDBOX_WORKER_UNAVAILABLE")
+        return worker.invoke(intent, parameters)
+
+    def _get_or_start_sandbox_worker(self) -> SandboxedSkillWorker | None:
+        if self._sandbox_worker is not None and self._sandbox_worker.is_alive():
+            return self._sandbox_worker
+        project_root = str(Path(__file__).resolve().parent.parent)
+        worker = SandboxedSkillWorker(
+            project_root=project_root, plugin_paths=sorted(set(self._forged_intents.values())),
+            logger=self.logger,
+        )
+        try:
+            worker.start()
+        except Exception:
+            self.logger.exception("Impossibile avviare il worker sandboxato per le skill forgiate")
+            return None
+        self._sandbox_worker = worker
+        return worker
+
+    def stop_sandbox_worker(self) -> None:
+        """Chiamato da JakeCore.shutdown(): nessun worker da fermare se nessuna skill forgiata
+        e' mai stata invocata (self._sandbox_worker resta None per costruzione in quel caso)."""
+        if self._sandbox_worker is not None:
+            self._sandbox_worker.stop()
+            self._sandbox_worker = None

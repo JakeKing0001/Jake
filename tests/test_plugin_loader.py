@@ -15,9 +15,12 @@ from core.skill_registry import SkillRegistry
 class FakeRegistry:
     def __init__(self):
         self.registered = {}
+        self.registered_plugin_paths = {}
 
-    def register_skill(self, intent, skill):
+    def register_skill(self, intent, skill, plugin_path=None):
         self.registered[intent] = skill
+        if plugin_path is not None:
+            self.registered_plugin_paths[intent] = plugin_path
 
 
 class FakeLoggerCapturing:
@@ -102,6 +105,25 @@ class LoadPluginFileTests(PluginLoaderTestCase):
         loaded = load_plugin_file(registry, plugin)  # nessun logger passato
 
         self.assertFalse(loaded)
+
+    def test_the_plugin_file_path_is_forwarded_to_register_skill(self):
+        """F1.6 (collegamento del worker sandboxato): load_plugin_file() avvolge la registry in
+        un proxy che passa plugin_path a register_skill() - il plugin stesso continua a chiamare
+        registry.register_skill(intent, skill) con la stessa firma di sempre, senza saperlo."""
+        plugin = self._write_plugin("valido2.py", (
+            "class Skill:\n"
+            "    metadata = {'intent': 'FAKE_INTENT_2', 'description': '', 'parameters': {}}\n"
+            "    def execute(self, parameters=None):\n"
+            "        return None\n"
+            "\n"
+            "def register(registry):\n"
+            "    registry.register_skill('FAKE_INTENT_2', Skill())\n"
+        ))
+        registry = FakeRegistry()
+
+        load_plugin_file(registry, plugin)
+
+        self.assertEqual(registry.registered_plugin_paths["FAKE_INTENT_2"], str(plugin))
 
 
 class LoadPluginsTests(PluginLoaderTestCase):
@@ -189,6 +211,8 @@ class UnclassifiedPluginIntentIsStillGatedTests(PluginLoaderTestCase):
         registry = SkillRegistry.__new__(SkillRegistry)
         registry.skills = {}
         registry.logger = None
+        registry._forged_intents = {}
+        registry._sandbox_worker = None
 
         loaded = load_plugins(registry, plugins_dir=self.tmp_dir)
         self.assertEqual(loaded, ["plugin_sconosciuto"])

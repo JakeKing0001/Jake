@@ -6,9 +6,12 @@ costruisce anche MemoryManager/NestClient/EmbeddingProvider/VisionProvider/Plann
 la nota in tests/__init__.py): usa SkillRegistry.__new__ per un oggetto "spoglio" con solo gli
 attributi che register_skill() legge (skills, logger), stesso approccio gia' usato per JakeCore
 in tests/test_jake_core_permissions.py."""
+import os
 import sys
+import tempfile
 import threading
 import unittest
+from pathlib import Path
 
 from core.policy_engine import PolicyEngine
 from core.skill_registry import SkillRegistry
@@ -34,6 +37,8 @@ def _bare_registry(skills: dict = None) -> SkillRegistry:
     registry = SkillRegistry.__new__(SkillRegistry)
     registry.skills = dict(skills or {})
     registry.logger = FakeLoggerCapturingWarnings()
+    registry._forged_intents = {}  # F1.6: letto da execute()/register_skill()
+    registry._sandbox_worker = None
     return registry
 
 
@@ -174,6 +179,78 @@ class PolicyGateTests(unittest.TestCase):
 
         self.assertIsNone(registry.execute("NON_ESISTE", {}))
         self.assertIsNone(registry.execute("NON_ESISTE", {}, policy_engine=PolicyEngine()))
+
+
+class ForgedSkillSandboxWiringTests(unittest.TestCase):
+    """F1.6 (collegamento del worker sandboxato alle skill forgiate): un intent registrato con
+    plugin_path= esegue DAVVERO nel worker sandboxato (core/sandboxed_skill_worker.py), non in
+    processo - verificato confrontando os.getpid() dentro la skill (il worker e' un processo
+    SEPARATO, deve riportare un pid diverso da quello di questo stesso processo di test) invece
+    di fidarsi solo della lettura del codice."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.registry = _bare_registry()
+        self.addCleanup(self.registry.stop_sandbox_worker)
+
+    def _write_pid_reporting_plugin(self, intent: str) -> str:
+        path = Path(self._tmpdir.name) / f"{intent.lower()}.py"
+        path.write_text(
+            "import os\n"
+            "from core.skill_result import SkillResult\n"
+            "class Skill:\n"
+            f"    metadata = {{'intent': '{intent}', 'description': '', 'parameters': {{}}}}\n"
+            "    def execute(self, parameters=None):\n"
+            "        return SkillResult(success=True, data={'pid': os.getpid()})\n"
+            "def register(registry):\n"
+            f"    registry.register_skill('{intent}', Skill())\n",
+            encoding="utf-8",
+        )
+        return str(path)
+
+    def test_a_forged_intent_executes_in_a_separate_process_not_this_one(self):
+        plugin_path = self._write_pid_reporting_plugin("PID_TEST")
+        self.registry.register_skill("PID_TEST", FakeSkill(), plugin_path=plugin_path)
+
+        result = self.registry.execute("PID_TEST", {}, policy_engine=PolicyEngine())
+
+        self.assertTrue(result.success, result.error)
+        self.assertNotEqual(result.data["pid"], os.getpid())
+
+    def test_a_policy_block_on_a_forged_intent_never_reaches_the_worker(self):
+        """L'ordine conta: blocked_intents si controlla PRIMA del routing verso il worker, stesso
+        principio fail-closed gia' verificato per le skill in processo."""
+        plugin_path = self._write_pid_reporting_plugin("BLOCKED_FORGED")
+        self.registry.register_skill("BLOCKED_FORGED", FakeSkill(), plugin_path=plugin_path)
+
+        result = self.registry.execute(
+            "BLOCKED_FORGED", {}, policy_engine=PolicyEngine(blocked_intents={"BLOCKED_FORGED"}),
+        )
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "POLICY_BLOCKED")
+        self.assertIsNone(self.registry._sandbox_worker, "un intent bloccato non deve mai avviare il worker")
+
+    def test_stop_sandbox_worker_is_safe_when_no_forged_skill_was_ever_invoked(self):
+        self.registry.stop_sandbox_worker()  # non deve sollevare nulla
+
+    def test_registering_a_new_forged_intent_invalidates_an_already_running_worker(self):
+        """Il worker carica i plugin UNA VOLTA all'avvio: una nuova installazione a caldo (Skill
+        Forge) dopo che il worker gia' esiste deve farlo ripartire, non restare con l'elenco
+        vecchio - altrimenti la skill appena installata non sarebbe mai servibile."""
+        first_plugin = self._write_pid_reporting_plugin("FIRST_FORGED")
+        self.registry.register_skill("FIRST_FORGED", FakeSkill(), plugin_path=first_plugin)
+        self.registry.execute("FIRST_FORGED", {}, policy_engine=PolicyEngine())  # avvia il worker
+        self.assertIsNotNone(self.registry._sandbox_worker)
+
+        second_plugin = self._write_pid_reporting_plugin("SECOND_FORGED")
+        self.registry.register_skill("SECOND_FORGED", FakeSkill(), plugin_path=second_plugin)
+
+        self.assertIsNone(self.registry._sandbox_worker, "un nuovo intent forgiato deve invalidare il worker gia' avviato")
+
+        result = self.registry.execute("SECOND_FORGED", {}, policy_engine=PolicyEngine())
+        self.assertTrue(result.success, result.error)
 
 
 if __name__ == "__main__":
