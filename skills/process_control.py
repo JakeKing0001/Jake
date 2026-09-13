@@ -115,7 +115,13 @@ class CloseAppSkill:
 
     F1.3.2 ("prove forti per... processi"): stesso buco reale gia' trovato e corretto in
     skills/dev_tools.py::KillProcessByPortSkill - il ramo "termina il processo" dichiarava
-    success=True subito dopo process.terminate(), senza aspettare che fosse davvero morto."""
+    success=True subito dopo process.terminate(), senza aspettare che fosse davvero morto.
+
+    F1.3.2 ("...finestre"): lo STESSO buco esisteva anche nel ramo "chiusura gentile" sotto -
+    _close_windows()/_close_windows_by_title() inviavano WM_CLOSE e contavano una finestra come
+    "chiusa" per il solo fatto che PostMessage non avesse sollevato un'eccezione, senza mai
+    verificare che fosse davvero sparita (vedi skills/window_control.py::
+    _wait_until_window_closed, condivisa con CloseWindowSkill)."""
 
     TERMINATE_WAIT_SECONDS = 3
 
@@ -144,7 +150,10 @@ class CloseAppSkill:
             return SkillResult(success=False, data={"name": name_filter}, error="NOT_FOUND")
 
         if not parameters.get("confirmed"):
-            closed_titles = self._close_windows(matching) or self._close_windows_by_title(name_filter)
+            closed_titles = (
+                self._close_windows(matching, self.TERMINATE_WAIT_SECONDS)
+                or self._close_windows_by_title(name_filter, self.TERMINATE_WAIT_SECONDS)
+            )
             if closed_titles:
                 return SkillResult(success=True, data={"name": name_filter, "closed": closed_titles, "graceful": True})
             names = ", ".join(sorted({p.info["name"] for p in matching}))
@@ -181,16 +190,23 @@ class CloseAppSkill:
         return SkillResult(success=True, data={"name": name_filter, "closed": closed, "pids": pids})
 
     @staticmethod
-    def _close_windows_by_title(name: str) -> list[str]:
+    def _close_windows_by_title(name: str, wait_seconds: float) -> list[str]:
         """Le app di Store (Calcolatrice, Foto...) hanno la finestra in ApplicationFrameHost,
-        non nel loro processo: si riconoscono dal titolo."""
+        non nel loro processo: si riconoscono dal titolo.
+
+        F1.3.2: restituisce solo i titoli delle finestre VERIFICATE chiuse entro wait_seconds
+        (vedi skills/window_control.py::_wait_until_window_closed), non semplicemente quelle a
+        cui e' stato inviato WM_CLOSE senza errori - un invio riuscito non garantisce che la
+        finestra sia davvero sparita."""
         try:
             import win32con
             import win32gui
         except ImportError:
             return []
+        from skills.window_control import _wait_until_window_closed
+
         needle = name.lower()
-        closed = []
+        candidates = []  # (hwnd, title)
 
         def callback(hwnd, _):
             if not win32gui.IsWindowVisible(hwnd):
@@ -199,26 +215,30 @@ class CloseAppSkill:
             if title and needle in title.lower() and not title.lower().startswith("jake"):
                 try:
                     win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
-                    closed.append(title)
+                    candidates.append((hwnd, title))
                 except Exception:
                     pass
 
         win32gui.EnumWindows(callback, None)
-        return closed
+        return [title for hwnd, title in candidates if _wait_until_window_closed(win32gui, hwnd, wait_seconds)]
 
     @staticmethod
-    def _close_windows(processes) -> list[str]:
+    def _close_windows(processes, wait_seconds: float) -> list[str]:
+        """F1.3.2: stessa verifica di _close_windows_by_title sopra, per le finestre trovate
+        tramite i pid dei processi corrispondenti invece che per titolo."""
         try:
             import win32con
             import win32gui
         except ImportError:
             return []
+        from skills.window_control import _wait_until_window_closed
+
         pids = {process.info["pid"] for process in processes}
-        closed = []
+        candidates = []  # (hwnd, title)
         for hwnd, title, _pid in _windows_of_pids(pids):
             try:
                 win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
-                closed.append(title)
+                candidates.append((hwnd, title))
             except Exception:
                 continue
-        return closed
+        return [title for hwnd, title in candidates if _wait_until_window_closed(win32gui, hwnd, wait_seconds)]

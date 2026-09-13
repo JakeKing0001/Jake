@@ -306,7 +306,8 @@ class IntentSafetyRegistryConsistencyTests(unittest.TestCase):
         expected = {intent for intent, entry in INTENT_SAFETY_REGISTRY.items() if entry.verifier is not None}
         self.assertEqual(set(VERIFIABLE_INTENTS), expected)
         self.assertEqual(
-            VERIFIABLE_INTENTS, {"CREATE_PATH", "RENAME_PATH", "MOVE_PATH", "DELETE_PATH", "KILL_PROCESS_BY_PORT"},
+            VERIFIABLE_INTENTS,
+            {"CREATE_PATH", "RENAME_PATH", "MOVE_PATH", "DELETE_PATH", "KILL_PROCESS_BY_PORT", "CLOSE_WINDOW"},
         )
 
     def test_every_verifiable_intent_verifier_is_actually_callable(self):
@@ -315,6 +316,25 @@ class IntentSafetyRegistryConsistencyTests(unittest.TestCase):
         for intent in VERIFIABLE_INTENTS:
             with self.subTest(intent=intent):
                 self.assertTrue(callable(INTENT_SAFETY_REGISTRY[intent].verifier))
+
+
+class CloseWindowVerificationTests(unittest.TestCase):
+    """F1.3.2 ("prove forti per... finestre"): verifica indipendente che una finestra chiusa da
+    CloseWindowSkill sia davvero sparita - stesso principio gia' applicato a
+    _verify_process_terminated per KILL_PROCESS_BY_PORT, un secondo controllo indipendente dalla
+    parola della skill stessa."""
+
+    def test_a_hwnd_that_no_longer_exists_verifies_as_closed(self):
+        win32gui = unittest.mock.MagicMock()
+        win32gui.IsWindow.return_value = False
+        with unittest.mock.patch.dict("sys.modules", {"win32gui": win32gui}):
+            self.assertTrue(verify_effect("CLOSE_WINDOW", {"hwnd": 1}))
+
+    def test_a_hwnd_that_still_exists_verifies_as_not_closed(self):
+        win32gui = unittest.mock.MagicMock()
+        win32gui.IsWindow.return_value = True
+        with unittest.mock.patch.dict("sys.modules", {"win32gui": win32gui}):
+            self.assertFalse(verify_effect("CLOSE_WINDOW", {"hwnd": 1}))
 
 
 class IsSafeToAutoRetryTests(unittest.TestCase):
