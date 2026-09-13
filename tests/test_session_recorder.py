@@ -79,6 +79,55 @@ class StructuredRedactionByTypeTests(unittest.TestCase):
         self.assertEqual(redact_value(value), f"<str:{len(value)} caratteri>")
 
 
+class RedactionByParameterNameTests(unittest.TestCase):
+    """F1.7.4 ("classificazione per nome del parametro, non solo per contenuto"): un valore
+    sensibile non ha sempre una forma riconoscibile (una password di solito non somiglia a un
+    percorso/URL/email) - vedi skills/security_utils.py::CheckPasswordStrengthSkill, il primo
+    parametro "password" reale del progetto. Buco reale: prima di questo, un fallimento di
+    CHECK_PASSWORD_STRENGTH con la registrazione sessioni attiva avrebbe scritto su disco la
+    LUNGHEZZA ESATTA della password dell'utente (il segnaposto generico "<str:N caratteri>"), o
+    perfino il valore vero in chiaro se fosse stato un numero invece di una stringa (bool/int/
+    float passavano invariati, senza nessuna redazione)."""
+
+    def test_a_parameter_named_password_is_fully_redacted_not_just_length(self):
+        redacted = redact_value({"password": "unaPasswordSegreta123!"})
+        self.assertEqual(redacted, {"password": "<redatto: parametro sensibile per nome, valore mai scritto>"})
+
+    def test_a_sensitive_non_string_value_is_also_redacted_not_passed_through(self):
+        """Senza il controllo per nome, un PIN numerico sarebbe passato invariato: il ramo
+        bool/int/float di redact_value() non fa nessuna redazione da solo."""
+        redacted = redact_value({"pin": 246810})
+        self.assertEqual(redacted, {"pin": "<redatto: parametro sensibile per nome, valore mai scritto>"})
+
+    def test_the_check_matches_a_fragment_not_only_an_exact_key(self):
+        """"admin_password"/"wifi_password" non sono nomi esatti previsti, ma contengono
+        "password" - devono essere protetti allo stesso modo, non lasciati al segnaposto
+        generico solo perche' la chiave non e' scritta identica."""
+        redacted = redact_value({"admin_password": "segreta", "wifi_password": "segreta2"})
+        self.assertEqual(redacted, {
+            "admin_password": "<redatto: parametro sensibile per nome, valore mai scritto>",
+            "wifi_password": "<redatto: parametro sensibile per nome, valore mai scritto>",
+        })
+
+    def test_the_check_is_case_insensitive(self):
+        redacted = redact_value({"PASSWORD": "segreta"})
+        self.assertEqual(redacted, {"PASSWORD": "<redatto: parametro sensibile per nome, valore mai scritto>"})
+
+    def test_an_unrelated_parameter_name_is_not_affected(self):
+        value = "un appunto qualsiasi"
+        redacted = redact_value({"note": value})
+        self.assertEqual(redacted, {"note": f"<str:{len(value)} caratteri>"})
+
+    def test_sensitive_key_is_redacted_even_nested_inside_a_dict(self):
+        redacted = redact_value({"details": {"token": "abc123", "note": "va bene"}})
+        self.assertEqual(redacted, {
+            "details": {
+                "token": "<redatto: parametro sensibile per nome, valore mai scritto>",
+                "note": "<str:7 caratteri>",
+            },
+        })
+
+
 class SessionRecorderTestCase(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()

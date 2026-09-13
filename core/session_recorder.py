@@ -38,6 +38,29 @@ _WINDOWS_DRIVE_RE = re.compile(r"^[a-zA-Z]:[\\/]")
 _UNC_RE = re.compile(r"^\\\\")
 _EXTENSION_RE = re.compile(r"\.([A-Za-z0-9]{1,6})$")
 
+# F1.7.4 ("classificazione per nome del parametro, non solo per contenuto"): il resto di questo
+# modulo classifica per FORMA del valore, ma un valore sensibile non ha sempre una forma
+# riconoscibile - CHECK_PASSWORD_STRENGTH (skills/security_utils.py) prende un parametro
+# "password" che di solito non somiglia a un percorso/URL/email, quindi finiva nel segnaposto
+# generico "<str:N caratteri>": innocuo per un appunto, ma per una password la LUNGHEZZA ESATTA e'
+# gia' un'informazione che non dovrebbe uscire su disco (restringe lo spazio di ricerca di un
+# eventuale attacco a forza bruta). Peggio ancora se il valore non e' una stringa (es. un PIN
+# numerico): redact_value() lasciava passare bool/int/float invariati, scrivendo il valore VERO in
+# chiaro. Controllo per SOSTANTIVO del nome del parametro (non una singola chiave esatta come
+# core/config.py::SECRET_KEYS, che riguarda le credenziali di Config, non i parametri di una
+# skill): un elenco esplicito e deliberatamente enumerato, coerente con lo stile conservativo del
+# resto del modulo - un nome nuovo non ancora previsto qui semplicemente non viene protetto
+# (falso negativo, come per i pattern di contenuto sopra), non il contrario.
+_SENSITIVE_PARAMETER_NAME_FRAGMENTS = (
+    "password", "passphrase", "secret", "token", "pin", "otp", "api_key", "apikey", "credential",
+)
+_SENSITIVE_PARAMETER_PLACEHOLDER = "<redatto: parametro sensibile per nome, valore mai scritto>"
+
+
+def _is_sensitive_parameter_name(key: str) -> bool:
+    normalized = key.lower()
+    return any(fragment in normalized for fragment in _SENSITIVE_PARAMETER_NAME_FRAGMENTS)
+
 
 def _looks_like_path(value: str) -> bool:
     # Un backslash e' un segnale forte da solo (raro in una frase scritta a mano); "/" da solo
@@ -58,7 +81,13 @@ def redact_value(value):
     l'indirizzo, l'URL completo (che puo' contenere un token in query string) o il percorso vero.
     Pubblica (non piu' `_redact`) perche' anche `tools/diagnostic_bundle.py` (F1.7.7) ha bisogno
     della stessa identica redazione per i parametri che finiscono in un bundle diagnostico - una
-    sola funzione, non una seconda copia con una convenzione leggermente diversa."""
+    sola funzione, non una seconda copia con una convenzione leggermente diversa.
+
+    F1.7.4: dentro un dict, un valore il cui nome di CHIAVE e' riconosciuto come sensibile (vedi
+    `_SENSITIVE_PARAMETER_NAME_FRAGMENTS`) diventa sempre `_SENSITIVE_PARAMETER_PLACEHOLDER`,
+    qualunque sia il suo tipo o la sua forma - nessuna lunghezza, nessun dominio/estensione,
+    nessun valore vero, nemmeno per un bool/int/float che altrimenti passerebbe INVARIATO (vedi
+    sotto)."""
     if isinstance(value, str):
         length = len(value)
         email_match = _EMAIL_RE.match(value)
@@ -74,7 +103,10 @@ def redact_value(value):
             return f"<path:{length} caratteri>"
         return f"<str:{length} caratteri>"
     if isinstance(value, dict):
-        return {key: redact_value(item) for key, item in value.items()}
+        return {
+            key: _SENSITIVE_PARAMETER_PLACEHOLDER if _is_sensitive_parameter_name(key) else redact_value(item)
+            for key, item in value.items()
+        }
     if isinstance(value, list):
         return [redact_value(item) for item in value]
     return value  # bool/int/float/None: raramente identificano una persona da soli
