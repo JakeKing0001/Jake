@@ -657,8 +657,9 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   (percorsi 3 e 6, vedi sotto; resta aperto solo il percorso 7); `F1.2.2` chiuso parzialmente (prima capability vera - radici
   filesystem, ora su ENTRAMBI i percorsi interattivo e automatico e su sette intent - le quattro
   mutazioni piu' le tre letture FIND_FILE/GET_FILE_INFO/READ_FILE_TEXT - vedi sotto); `F1.2.4`
-  chiuso per il percorso planner (vedi sotto); `F1.2.6` e `F1.2.7` chiusi (vedi sotto); `F1.2.3`/resto
-  aperto.
+  chiuso per il percorso planner (vedi sotto); `F1.2.6` e `F1.2.7` chiusi (vedi sotto); `F1.2.3`
+  fondamenta poste (identita' del dispositivo companion propagata fino al ledger, vedi sotto -
+  nessuna decisione di policy ancora basata su di essa)/resto aperto.
 - `F1.2.2` (parziale, prima capability: radici filesystem) — 12/09/2026: "definire capability per
   filesystem root, app, contatto, dominio web, device, servizio Home Assistant, rete e durata" -
   la prima delle otto, scelta perche' e' l'unica gia' collegabile senza dover prima costruire
@@ -785,6 +786,45 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   mancanza di policy_engine, non per il motivo che il test intendeva verificare). Aggiornato anche
   `docs/action-execution-paths.md` (nuova sezione "Nota sul percorso 6"). Prova: 2.242/2.242 test,
   ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.2.3`/`F1.8.1` (fondamenta: identita' del dispositivo companion) — 13/09/2026: decisione
+  esplicita dell'utente su come identificare un canale/dispositivo (AskUserQuestion: "Identita'
+  per token companion" - propagare il device_id gia' esistente in `DeviceRegistry` come identita'
+  end-to-end, companion_server -> JakeCore.answer -> PolicyEngine/ledger; la voce locale resta un
+  canale implicito separato). Non ancora una funzionalita' completa - ne' F1.2.3 (intersezione
+  permessi per dispositivo) ne' F1.8.1 (identita' di canale per conferme concorrenti distinte)
+  possono esistere senza prima sapere QUALE dispositivo ha fatto una richiesta, quindi questo e'
+  il primo passo comune a entrambi: dare al sistema quella conoscenza, senza ancora usarla per
+  nessuna decisione. Nuovo `core/request_context.py`: un `contextvars.ContextVar` (non un
+  attributo di istanza su `JakeCore`, che sarebbe una race condition tra due richieste companion
+  concorrenti da dispositivi diversi - `ThreadingHTTPServer` gestisce ogni richiesta sul proprio
+  thread, esattamente la classe di buco gia' trovata e corretta piu' volte in questa sessione per
+  altro stato condiviso, F1.8.1/F1.8.7) propaga il device_id per l'intera catena di chiamate
+  SINCRONA su un thread, senza aggiungere un parametro a ~10 firme intermedie (`answer`,
+  `_process`, `_handle_confirmation`, `_finalize_pending_action`, `_resolve_and_execute`,
+  `_run_agent`, `_try_plan`...) solo per farlo arrivare ai quattro chokepoint che scrivono
+  davvero una `ActionReceipt`. Isolamento tra thread verificato EMPIRICAMENTE prima di scegliere
+  questo approccio (uno script standalone con `threading.Barrier`, poi
+  `tests/test_request_context.py::ThreadIsolationTests`), non solo assunto dalla documentazione di
+  `contextvars`: un thread nuovo parte sempre dal default, mai dal valore di un altro thread in
+  corso. `core/companion_server.py::_Handler._handle_command` imposta il contesto (device_id
+  opzionale nel body, lo stesso gia' usato per `/claim`) per la durata della chiamata a
+  `command_handler`, con reset in un `finally`. Nuovo campo opzionale `ActionReceipt.device_id`
+  (None per voce/automazioni in background, mai obbligatorio - stesso principio additivo di
+  `policy_reason`/`duration_ms`/`model`, nessun bump di `ACTION_RECEIPT_SCHEMA_VERSION`), popolato
+  ai quattro chokepoint (`JakeCore._log_action_outcome`/`_log_denied_action`,
+  `TaskAgent._log_step`, `PlanExecutor._log_step`) con una riga ciascuno
+  (`device_id=current_device_id()`) invece di ricevere il valore come parametro. Aggiunti 15 nuovi
+  test: `tests/test_request_context.py` (isolamento tra thread, reset, default), 3 in
+  `tests/test_companion_server.py` (propagazione end-to-end via HTTP, nessuna perdita tra due
+  richieste concorrenti reali da dispositivi diversi), 4 in
+  `tests/test_jake_core_policy_ledger.py` (i tre chokepoint di JakeCore/agente), 1 in
+  `tests/test_plan_executor.py`, 1 in `tests/test_action_ledger.py` (round-trip di
+  serializzazione). Deliberatamente NON affrontato qui: nessuna decisione di `PolicyEngine` usa
+  ancora `current_device_id()` (nessuna capability per-dispositivo, F1.2.3 resta aperta per il
+  resto), `ConversationStateManager` ha ancora un solo slot di azione in sospeso globale, non uno
+  per dispositivo (F1.8.1 resta aperta per il resto) - vedi la nuova sezione in
+  `docs/action-execution-paths.md` ("Identita' del dispositivo mittente"). Prova: 2.257/2.257
+  test, ruff/mypy/compileall verdi su tutti i file toccati.
 - `F1.2.4` — 12/09/2026: `core/planner_provider.py::_build_output_schema()` chiedeva a Ollama
   passi con `"parameters": {"type": "object"}` SENZA alcuna restrizione sulle chiavi - la causa
   originale del bug corretto in F1.2.5 (un passo poteva arrivare gia' con `"confirmed": true`
@@ -2872,7 +2912,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 26 incrementi completati e verificati (PR #28-#53), la
+Aggiornato 13/09/2026. Sessione lunga con 27 incrementi completati e verificati (PR #28-#54), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -2896,19 +2936,22 @@ terza fetta (la capability filesystem lasciava comunque Jake libero di LEGGERE q
 fuori dal recinto - solo le mutazioni erano coperte, ora anche FIND_FILE/GET_FILE_INFO/
 READ_FILE_TEXT), `F1.2.1` percorso 6 (`rollback_effect()` con `policy_engine=None` eseguiva un
 rollback senza controllare `blocked_intents` - non gia' sfruttabile in produzione, che collega
-sempre un `policy_engine` vero, ma un default fail-open pericoloso per chiunque altro). Le tre
+sempre un `policy_engine` vero, ma un default fail-open pericoloso per chiunque altro). Le quattro
 funzionalita' nuove: `F1.2.2` prima fetta (prima capability vera - radici filesystem
 consentite), `F1.7.4` prima fetta (redazione strutturata per tipo di dato - percorso/URL/email invece del
-generico "<str:N caratteri>") e `F1.7.4` seconda fetta (redazione per NOME del parametro - un
+generico "<str:N caratteri>"), `F1.7.4` seconda fetta (redazione per NOME del parametro - un
 parametro `password`/`pin`/`token`/etc ora ottiene sempre un placeholder fisso senza lunghezza ne'
-valore, chiudendo anche il caso di un valore non-stringa che prima passava invariato). Il resto:
+valore, chiudendo anche il caso di un valore non-stringa che prima passava invariato), e
+`F1.2.3`/`F1.8.1` fondamenta (identita' del dispositivo companion propagata per thread via
+`contextvars` fino ai quattro chokepoint del ledger - decisione esplicita dell'utente su come
+identificare un canale, ancora senza alcuna decisione di policy basata su di essa). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.2` (parziale - la notifica di
 un'automazione ora porta lo stesso trace_id delle ricevute che l'ha prodotta), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.242/2.242 test, ruff/mypy/compileall verdi. `G1` resta aperto.
+`master` e' pulito, 2.257/2.257 test, ruff/mypy/compileall verdi. `G1` resta aperto.
 
 Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
 sessione (`sys.setswitchinterval()` abbassato + `threading.Barrier`, senza altro aiuto) NON
@@ -2936,13 +2979,16 @@ Candidati piccoli ancora aperti in F1: il resto di `F1.2.1` (percorso 7,
 `SkillRegistry.execute()`), il resto di `F1.2.2` (le altre sette capability - app/contatto/
 dominio web/device/HA/rete/durata; la capability filesystem stessa e' ora completa su entrambi i
 percorsi e su mutazioni+letture, resta solo il gap noto di FIND_FILE senza `path` esplicito),
-`F1.2.3` (intersezione permessi utente/dispositivo/agente/skill/
-sessione - oggi solo un allowlist utente, nessuna intersezione), il resto di `F1.4` (una vera
+`F1.2.3` (intersezione permessi utente/dispositivo/agente/skill/sessione - fondamenta poste,
+`current_device_id()` ora disponibile ovunque, ma `PolicyEngine` non lo usa ancora per nessuna
+capability o intersezione), il resto di `F1.4` (una vera
 classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7` (il resto di `F1.7.2` -
 undo, mai wired a una ricevuta propria; `F1.7.3` retention differenziata; il resto di `F1.7.4` -
 altri tipi di dato per contenuto (telefono, IP, id dispositivo) - la classificazione per nome del
-parametro e' ora chiusa; `F1.7.8` e' chiuso), il resto di `F1.8` (il resto di `F1.8.1` - identita' di canale/sessione vera per due
-conferme concorrenti distinte, coda generale per azioni concorrenti non legate a una conferma;
+parametro e' ora chiusa; `F1.7.8` e' chiuso), il resto di `F1.8` (il resto di `F1.8.1` - fondamenta
+poste (vedi F1.2.3 sopra), ma `ConversationStateManager` ha ancora un solo slot di azione in
+sospeso globale, non uno per dispositivo: due dispositivi con una propria conferma pendente nello
+stesso istante si sovrascrivono ancora a vicenda; coda generale per azioni concorrenti non legate a una conferma;
 il resto di `F1.8.4` - drain limitato di un'azione in corso, checkpoint vero, release device
 audio; il resto di `F1.8.5` - diagnosi di un deadlock vero su un lock applicativo, non solo un
 thread esterno lento; il resto di `F1.8.7` - undo, non ancora testabile per race finche' non

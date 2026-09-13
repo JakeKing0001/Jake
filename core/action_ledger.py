@@ -246,6 +246,14 @@ class ActionReceipt:
     policy_reason: Optional[str] = None
     duration_ms: Optional[float] = None
     model: Optional[str] = None
+    # F1.2.3/F1.8.1 (fondamenta): il device_id del dispositivo companion che ha originato la
+    # richiesta (vedi core/request_context.py), None per un comando vocale locale o
+    # un'automazione in background - nessuno dei due passa mai da un dispositivo companion.
+    # Campo puramente informativo qui: non ancora usato da PolicyEngine per nessuna decisione
+    # (l'intersezione di permessi per dispositivo resta aperta, F1.2.3) - questo e' solo il primo
+    # passo, dare visibilita' nel ledger a QUALE dispositivo ha chiesto un'azione, prima ancora di
+    # poter scrivere una policy che lo usi.
+    device_id: Optional[str] = None
     schema_version: int = ACTION_RECEIPT_SCHEMA_VERSION
 
     def to_json(self) -> str:

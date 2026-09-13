@@ -128,7 +128,21 @@ class ActionReceiptTests(unittest.TestCase):
         record = json.loads(receipt.to_json())
         self.assertNotIn("duration_ms", record)
         self.assertNotIn("model", record)
+        self.assertNotIn("device_id", record)
         self.assertEqual(record["action_id"], "a1")
+
+    def test_device_id_round_trips_through_to_json(self):
+        """F1.2.3/F1.8.1 (fondamenta): il device_id del dispositivo companion mittente (vedi
+        core/request_context.py) e' un campo puramente informativo del ledger, come
+        policy_reason/duration_ms/model - additivo, mai obbligatorio."""
+        receipt = ActionReceipt(
+            action_id="a1", trace_id="t1", ts=123.0, intent="OPEN_APP", requested_by="user",
+            risk_decision="local_reversible", authorization="none", result="success",
+            idempotency_key="k1", device_id="phone1",
+        )
+        import json
+        record = json.loads(receipt.to_json())
+        self.assertEqual(record["device_id"], "phone1")
 
     def test_verified_defaults_to_unverified_and_is_never_omitted(self):
         """F1.3.3: prima di questa correzione verified era Optional[bool] = None e to_json()
