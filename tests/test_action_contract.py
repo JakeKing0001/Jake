@@ -122,10 +122,11 @@ class ChokepointsProduceConformingReceiptsTests(unittest.TestCase):
                 return unittest.mock.Mock(success=True)
 
         ledger = unittest.mock.Mock()
-        rollback_effect(
-            FakeRegistry(), "CREATE_PATH", {"path": "x"}, policy_engine=PolicyEngine(),
-            action_ledger=ledger, trace_id="trace-5", requested_by="agent:general",
-        )
+        with unittest.mock.patch("core.execution_safety.log_action"):
+            rollback_effect(
+                FakeRegistry(), "CREATE_PATH", {"path": "x"}, policy_engine=PolicyEngine(),
+                action_ledger=ledger, trace_id="trace-5", requested_by="agent:general",
+            )
         (receipt,), _ = ledger.record.call_args
         validate_action_receipt(receipt)
 

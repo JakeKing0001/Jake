@@ -16,6 +16,7 @@ from typing import Callable, Optional
 
 from core.action_ledger import ActionReceipt, authorization_of, idempotency_key_of, new_action_id
 from core.command import Command
+from core.logger import log_action
 from core.policy_engine import POLICY_REASONS
 from core.request_context import current_device_id
 from core.risk import RiskLevel, risk_of
@@ -237,6 +238,13 @@ def rollback_effect(
     tentato (nessun inverso noto, o bloccato da `blocked_intents`) resta senza ricevuta, come
     prima: quel caso non e' un'esecuzione, non c'e' nulla di nuovo da correlare.
 
+    F1.7.6 ("mostrare... rollback rate"): un rollback tentato scrive ora anche in
+    `data/jake_actions.jsonl` (`core/logger.log_action`, letto da `tools/dashboard.py`), stesso
+    schema gia' seguito dagli altri quattro chokepoint. `result` e' sempre `"rollback_success"`/
+    `"rollback_failed"` (mai il generico `"success"` di un'azione qualsiasi): la dashboard puo'
+    cosi' calcolare un vero "rollback rate" contando i risultati con prefisso `"rollback_"`,
+    invece di doverli confondere con un'esecuzione normale dello stesso intent.
+
     F1.2.5: policy_engine (core/policy_engine.py::PolicyEngine) e' opzionale per compatibilita'
     con i chiamanti che non ne hanno ancora uno da passare, ma quando c'e' un blocked_intents
     che include l'intent compensatorio, il rollback NON parte: prima di questa correzione i tre
@@ -269,12 +277,23 @@ def rollback_effect(
     except Exception:
         succeeded = False
     if action_ledger is not None and trace_id is not None:
-        result = "success" if succeeded else "rollback_failed"
+        result = "rollback_success" if succeeded else "rollback_failed"
+        risk_decision = risk_of(compensating_intent).value
+        # F1.7.6 ("mostrare... rollback rate"): stesso schema gia' seguito dai quattro chokepoint
+        # esistenti (JakeCore/TaskAgent/PlanExecutor) - un rollback scrive ora anche in
+        # data/jake_actions.jsonl (core/logger.log_action, letto da tools/dashboard.py), non solo
+        # nel ledger append-only. `result` inizia sempre con "rollback_" (mai il generico
+        # "success" usato per un'azione normale): la dashboard puo' cosi' distinguere un vero
+        # rollback da un'esecuzione qualsiasi con lo stesso intent, invece di doverli confondere.
+        log_action(
+            trace_id, private=private, model=None, skill=compensating_intent,
+            risk_decision=risk_decision, result=result,
+        )
         action_ledger.record(
             ActionReceipt(
                 action_id=new_action_id(), trace_id=trace_id, ts=time.time(), intent=compensating_intent,
                 requested_by=f"rollback:{requested_by}" if requested_by else "rollback",
-                risk_decision=risk_of(compensating_intent).value,
+                risk_decision=risk_decision,
                 authorization=authorization_of(result, None), result=result,
                 idempotency_key=idempotency_key_of(compensating_intent, data),
                 device_id=current_device_id(),

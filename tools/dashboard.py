@@ -49,13 +49,23 @@ def _percentile(values: list[float], p: float) -> float:
     return ordered[index]
 
 
+def _is_success(result) -> bool:
+    # F1.7.6 ("rollback rate"): "rollback_success" e' un successo quanto "success" - la skill
+    # compensatoria ha eseguito correttamente - solo su un intent diverso da quello richiesto
+    # dall'utente. Trattarlo come un fallimento qui gonfierebbe "fallimenti"/error rate per skill
+    # con un rollback riuscito, che e' esattamente l'esito CORRETTO di un errore altrove, non un
+    # errore suo. "rollback_failed" resta invece un vero fallimento (il generico != "success" lo
+    # gestisce gia' correttamente, nessuna eccezione necessaria per quello).
+    return result == "success" or result == "rollback_success"
+
+
 def build_report(actions: list[dict], sessions: list[dict]) -> dict:
     total = len(actions)
     private_count = sum(1 for a in actions if a.get("private"))
     visible = [a for a in actions if not a.get("private")]
 
     outcomes = Counter(a.get("result", "?") for a in visible)
-    successes = sum(count for outcome, count in outcomes.items() if outcome == "success")
+    successes = sum(count for outcome, count in outcomes.items() if _is_success(outcome))
     failures = total - private_count - successes
 
     by_skill = defaultdict(lambda: {"count": 0, "errors": 0, "latencies": []})
@@ -63,7 +73,7 @@ def build_report(actions: list[dict], sessions: list[dict]) -> dict:
         skill = a.get("skill", "?")
         entry = by_skill[skill]
         entry["count"] += 1
-        if a.get("result") != "success":
+        if not _is_success(a.get("result")):
             entry["errors"] += 1
         if a.get("duration_ms") is not None:
             entry["latencies"].append(a["duration_ms"])
@@ -90,13 +100,21 @@ def build_report(actions: list[dict], sessions: list[dict]) -> dict:
     # dal ledger append-only, vedi il docstring di action_ledger.py), ma il campo `result` e'
     # scritto negli stessi due formati in entrambi i log (letto dal codice: log_action riceve lo
     # stesso `result` gia' calcolato dai quattro chokepoint prima di scrivere sia qui sia nel
-    # ledger), quindi la stessa funzione pura si applica senza modifiche. "rollback rate" (l'altra
-    # meta' di F1.7.6) resta non mostrato: nessun evento distinto per un rollback esiste ancora in
-    # nessuno dei due log (vedi il docstring di action_ledger.py, "il rollback stesso non produce
-    # una ricevuta separata") - dichiarato onestamente, non calcolato a partire da un'approssimazione.
+    # ledger), quindi la stessa funzione pura si applica senza modifiche.
     failure_category_counts = Counter(error_category_of(a.get("result", "")) for a in visible)
 
-    recent_failures = [a for a in visible if a.get("result") != "success"][-30:][::-1]
+    # F1.7.6 ("mostrare... rollback rate"): l'altra meta' di questa voce, chiusa ora che
+    # core/execution_safety.py::rollback_effect() (F1.7.2) scrive un evento distinto - `result`
+    # inizia sempre con "rollback_" ("rollback_success"/"rollback_failed"), mai il generico
+    # "success" di un'azione qualsiasi con lo stesso intent, quindi contabile senza ambiguita'.
+    # Percentuale sul totale delle azioni VISIBILI (non sui soli rollback riusciti, ne' sul totale
+    # incluse quelle private): "quale frazione di tutto cio' che e' successo era un tentativo di
+    # annullare qualcos'altro", la stessa domanda che p50/p95/verification rate fanno per le loro
+    # rispettive dimensioni.
+    rollback_events = [a for a in visible if str(a.get("result", "")).startswith("rollback_")]
+    rollback_successes = sum(1 for a in rollback_events if a.get("result") == "rollback_success")
+
+    recent_failures = [a for a in visible if not _is_success(a.get("result"))][-30:][::-1]
 
     return {
         "total": total, "private_count": private_count, "successes": successes, "failures": failures,
@@ -105,6 +123,8 @@ def build_report(actions: list[dict], sessions: list[dict]) -> dict:
         "overall_p95_ms": round(_percentile(all_latencies, 95), 1) if all_latencies else None,
         "risk_counts": risk_counts, "verified_counts": verified_counts,
         "failure_category_counts": failure_category_counts,
+        "rollback_count": len(rollback_events), "rollback_successes": rollback_successes,
+        "rollback_rate": len(rollback_events) / len(visible) if visible else 0,
         "recent_failures": recent_failures, "recorded_sessions": len(sessions),
     }
 
@@ -171,6 +191,7 @@ def render_html(report: dict, actions_path: Path, sessions_path: Path) -> str:
   <div class="stat"><div class="n">{report['overall_p50_ms'] if report['overall_p50_ms'] is not None else '-'} ms</div><div class="l">latenza p50</div></div>
   <div class="stat"><div class="n">{report['overall_p95_ms'] if report['overall_p95_ms'] is not None else '-'} ms</div><div class="l">latenza p95</div></div>
   <div class="stat"><div class="n">{report['recorded_sessions']}</div><div class="l">sessioni fallite registrate ({esc(str(sessions_path))})</div></div>
+  <div class="stat"><div class="n">{report['rollback_count']}</div><div class="l">rollback (di cui {report['rollback_successes']} riusciti) - {report['rollback_rate']:.1%} delle azioni</div></div>
 </div>
 
 <h2>Per skill</h2>
@@ -188,7 +209,6 @@ def render_html(report: dict, actions_path: Path, sessions_path: Path) -> str:
 <table><tr><th>Stato</th><th>N</th></tr>{verified_html}</table>
 
 <h2>Categoria di errore (F1.1.4)</h2>
-<p class="note">"rollback rate" (F1.7.6) non ancora disponibile: nessun evento distinto per un rollback esiste oggi nei log.</p>
 <table><tr><th>Categoria</th><th>N</th></tr>{failure_category_html}</table>
 
 <h2>Ultimi fallimenti</h2>
