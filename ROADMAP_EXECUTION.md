@@ -1191,9 +1191,9 @@ Dipende da: F1.1 e F1.2.
 Criterio di uscita: tutte le azioni external/destructive/admin hanno prova; l'80% delle azioni
 reversibili dispone di undo testato.
 
-- Stato: `DOING`; `F1.3.1`, `F1.3.3` e `F1.3.6` chiusi, `F1.3.2` esteso a processi E finestre
-  (CLOSE_WINDOW/CLOSE_APP, vedi sotto - non ancora browser/casa, quest'ultima bloccata su una
-  decisione di dipendenza per un client Home Assistant iniettabile), resto aperto.
+- Stato: `DOING`; `F1.3.1`, `F1.3.3`, `F1.3.6` e `F1.3.8` chiusi, `F1.3.2` esteso a processi E
+  finestre (CLOSE_WINDOW/CLOSE_APP, vedi sotto - non ancora browser/casa, quest'ultima bloccata su
+  una decisione di dipendenza per un client Home Assistant iniettabile), resto aperto.
 - `F1.3.1` — 11/09/2026: `core/execution_safety.py` aveva tre strutture parallele da tenere
   sincronizzate a mano - `VERIFIABLE_INTENTS` (insieme), l'if/elif di `verify_effect`,
   `ROLLBACK_HANDLERS` + `ROLLBACK_COMPENSATING_INTENT` (due dizionari) - esattamente il pattern
@@ -1324,6 +1324,39 @@ reversibili dispone di undo testato.
   test, ruff/mypy/compileall verdi su tutti i file toccati (mypy: `core/execution_safety.py`
   resta nella lista "selettiva" e pulito; i file `skills/*.py` toccati non erano gia' nella lista
   - non nuovi errori introdotti, verificato individualmente, ma nemmeno mai stati coperti).
+- `F1.3.8` — 13/09/2026: "esporre undo e prove a HUD/companion tramite eventi versionati".
+  Funzionalita' nuova, non un fix - un rollback (`rollback_effect`) o una verifica indipendente
+  dell'effetto (F1.3.3, `verify_effect`) erano visibili SOLO nel ledger
+  (`data/jake_ledger.jsonl`): un HUD o un'app companion non aveva modo di saperlo in tempo reale,
+  solo rileggendolo dopo. Deliberatamente NON iniettato un `event_bus` in `TaskAgent`/
+  `PlanExecutor` (la dipendenza architetturale inizialmente temuta necessaria) - `AgentOutcome`/
+  `PlanOutcome` gia' portano tutto il necessario (`steps`/`completed`/`stopped_step`/
+  `rolled_back`) fino a `JakeCore`, che gia' possiede `self.event_bus`: bastava pubblicare LI',
+  dopo che l'esecuzione e' finita, riusando dati gia' calcolati invece di aggiungere una nuova
+  dipendenza a due classi che oggi non ne hanno bisogno per nient'altro. Due nuovi `EventType`
+  (`UNDO`, `VERIFICATION` - un'aggiunta additiva, nessun bump di `PROTOCOL_VERSION`, coerente con
+  `DEVICE_HANDOFF` aggiunto in v5.9 allo stesso modo). Prima pero' mancava il dato stesso da
+  esporre: `verified` (il tri-stato bool|None gia' calcolato per la ricevuta nel ledger via
+  `verification_status_of()`) non usciva mai da `TaskAgent.run()`/`PlanExecutor.execute()` -
+  aggiunto un nuovo campo `AgentStep.verified`/`StepOutcome.verified` (stringa o `None`,
+  popolato con lo stesso convertitore gia' usato per il ledger, ma `None` - non `"unverified"` -
+  quando l'intent non ha proprio un verificatore indipendente: altrimenti OGNI passo, anche
+  ADD_NOTE/GET_TIME senza alcuna prova possibile, pubblicherebbe un evento VERIFICATION, rumore
+  senza significato invece di una prova vera). Nuovo `JakeCore._publish_effect_proof_events()`
+  (pubblicazione condivisa) e `_publish_plan_outcome_effect_proof_events()` (estrazione condivisa
+  da un `PlanOutcome`, usata sia da `_try_plan` sia da `_default_on_trigger_fired` - il percorso
+  automatico di TriggerScheduler, quello che beneficia di piu': nessun turno di conversazione a
+  cui l'utente sia gia' collegato). Il percorso agente (`_run_agent`) usa la stessa pubblicazione
+  condivisa con l'estrazione diretta da `AgentOutcome.steps`/`.rolled_back`. Nessun evento quando
+  non c'e' nulla da riportare (nessun intent verificabile nel turno, nessun rollback) - non
+  aggiunge rumore al caso comune. Aggiunti 10 nuovi test: 1 in
+  `tests/test_hud_protocol.py` (round-trip dei due nuovi tipi), 4 in
+  `tests/test_jake_core_event_bus.py::EffectProofEventTests` (pubblicazione diretta, estrazione
+  da un `PlanOutcome` vero con passi completati/fermati/annullati), 2 in
+  `tests/test_agent.py::VerifiedFieldOnAgentStepTests`, 2 in
+  `tests/test_plan_executor.py::IndependentVerificationTests`, 1 in
+  `tests/test_jake_core_misc.py::DefaultNotificationCallbacksTests` (percorso trigger end-to-end).
+  Prova: 2.367/2.367 test, ruff/mypy/compileall verdi su tutti i file toccati.
 
 ### F1.4 — Identità, autenticazione e segreti
 
@@ -3310,7 +3343,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 39 incrementi completati e verificati (PR #28-#66), la
+Aggiornato 13/09/2026. Sessione lunga con 40 incrementi completati e verificati (PR #28-#67), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -3403,13 +3436,18 @@ esteso alle finestre (buco reale, stesso pattern gia' trovato due volte per i pr
 WINDOW/il ramo "gentile" di CLOSE_APP dichiaravano l'effetto avvenuto subito dopo
 `win32gui.PostMessage(WM_CLOSE)`, fire-and-forget, senza aspettare che la finestra fosse DAVVERO
 sparita; nuovo helper condiviso `_wait_until_window_closed`, CLOSE_WINDOW ha anche un
-verificatore indipendente in `INTENT_SAFETY_REGISTRY`). Il resto:
+verificatore indipendente in `INTENT_SAFETY_REGISTRY`), e `F1.3.8` chiusura - eventi UNDO/
+VERIFICATION per HUD/companion (funzionalita' nuova: deliberatamente NON iniettato un
+`event_bus` in `TaskAgent`/`PlanExecutor` come inizialmente temuto - `AgentOutcome`/`PlanOutcome`
+gia' portano tutto il necessario fino a `JakeCore`, che gia' possiede `self.event_bus`; nuovo
+campo `AgentStep.verified`/`StepOutcome.verified`, `None` - non `"unverified"` - quando l'intent
+non ha un verificatore indipendente, per non pubblicare rumore su ogni passo). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.357/2.357 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.367/2.367 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
 invariati, nessuno dei due coperto da "mypy selettivo" in CI). `G1` resta aperto.
 

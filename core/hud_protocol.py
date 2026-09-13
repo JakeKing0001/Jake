@@ -36,6 +36,14 @@ class EventType(str, Enum):
     DICTATION = "DICTATION"
     PAUSED = "PAUSED"
     DEVICE_HANDOFF = "DEVICE_HANDOFF"  # v5.9, Ambient Computing: un altro dispositivo e' ora attivo
+    # F1.3.8 ("esporre undo e prove a HUD/companion tramite eventi versionati"): prima di questi
+    # due, un rollback (core/execution_safety.py::rollback_effect) o una verifica indipendente
+    # dell'effetto (F1.3.3, verify_effect) erano visibili SOLO nel ledger (data/jake_ledger.jsonl)
+    # - un HUD o un'app companion non aveva modo di saperlo in tempo reale, solo rileggendo il
+    # ledger dopo. Payload di UNDO: {"intent": str}; di VERIFICATION: {"intent": str, "verified":
+    # str} (uno dei tre valori di core/action_ledger.py::VERIFICATION_VERIFIED/UNVERIFIED/FAILED).
+    UNDO = "UNDO"
+    VERIFICATION = "VERIFICATION"
 
 
 # Traduce gli stati gia' in uso da WakeWordSession/SessionHooks.set_state (stringhe libere,

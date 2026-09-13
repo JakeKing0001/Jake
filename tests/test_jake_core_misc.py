@@ -9,6 +9,8 @@ from unittest import mock
 from core.agent import AgentOutcome
 from core.command import Command
 from core.conversation_state import ConversationStateManager
+from core.event_bus import EventBus
+from core.hud_protocol import EventType
 from core.jake_core import JakeCore
 from core.policy_engine import PolicyEngine
 from core.skill_result import SkillResult
@@ -241,6 +243,37 @@ class DefaultNotificationCallbacksTests(unittest.TestCase):
                 with mock.patch("builtins.print"):
                     core._default_on_trigger_fired({"name": "buonanotte"}, outcome, 2)
         self.assertEqual(notify.call_args.kwargs.get("trace_id"), "abc123")
+
+    def test_trigger_fired_publishes_undo_and_verification_events(self):
+        """F1.3.8 ("esporre undo e prove a HUD/companion..."): il percorso automatico e' quello
+        che ne beneficia di piu' - nessun turno di conversazione a cui l'utente sia gia'
+        collegato, l'unico modo di scoprire cosa e' successo era rileggere il ledger."""
+        from core.plan_executor import PlanOutcome, PlanStep, StepOutcome
+        from core.skill_result import SkillResult
+
+        core = _bare_core()
+        core.event_bus = EventBus()
+        subscriber = core.event_bus.subscribe()
+        outcome = PlanOutcome(
+            completed=[StepOutcome(
+                step=PlanStep(intent="CREATE_PATH", parameters={}),
+                result=SkillResult(success=True, data={}), attempts=1, verified="verified",
+            )],
+            rolled_back=[StepOutcome(
+                step=PlanStep(intent="DELETE_PATH", parameters={}),
+                result=SkillResult(success=True, data={}), attempts=1,
+            )],
+            trace_id="abc123",
+        )
+        with mock.patch("core.jake_core.format_plan_outcome", return_value="riepilogo"):
+            with mock.patch.object(core, "notify", return_value="notificato"):
+                with mock.patch("builtins.print"):
+                    core._default_on_trigger_fired({"name": "buonanotte"}, outcome, 2)
+        events = []
+        while not subscriber.empty():
+            events.append(subscriber.get_nowait())
+        self.assertIn(EventType.UNDO, [e.type for e in events])
+        self.assertIn(EventType.VERIFICATION, [e.type for e in events])
 
 
 class AgentContextTests(unittest.TestCase):

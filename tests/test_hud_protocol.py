@@ -19,6 +19,15 @@ class HudEventSerializationTests(unittest.TestCase):
         event = HudEvent(type=EventType.NOTIFICATION, payload={})
         self.assertIn('"type": "NOTIFICATION"', event.to_json())
 
+    def test_undo_and_verification_events_round_trip_too(self):
+        """F1.3.8 ("esporre undo e prove a HUD/companion tramite eventi versionati"): i due tipi
+        aggiunti per questo passo seguono lo stesso protocollo di tutti gli altri, nessun
+        trattamento speciale."""
+        undo = HudEvent(type=EventType.UNDO, payload={"intent": "CREATE_PATH"})
+        verification = HudEvent(type=EventType.VERIFICATION, payload={"intent": "CREATE_PATH", "verified": "verified"})
+        self.assertEqual(HudEvent.from_json(undo.to_json()).type, EventType.UNDO)
+        self.assertEqual(HudEvent.from_json(verification.to_json()).payload, verification.payload)
+
     def test_to_json_carries_the_shared_protocol_version(self):
         payload = json.loads(HudEvent(type=EventType.IDLE).to_json())
         self.assertEqual(payload["schema_version"], PROTOCOL_VERSION)

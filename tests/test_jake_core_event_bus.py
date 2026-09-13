@@ -78,5 +78,79 @@ class NotifyEventTests(unittest.TestCase):
         self.assertNotIn("trace_id", event.payload)
 
 
+class EffectProofEventTests(unittest.TestCase):
+    """F1.3.8 ("esporre undo e prove a HUD/companion tramite eventi versionati"): prima di
+    questo, un rollback o una verifica indipendente dell'effetto erano visibili SOLO nel ledger -
+    un HUD/companion non aveva modo di saperlo in tempo reale."""
+
+    def test_a_rolled_back_intent_publishes_an_undo_event(self):
+        core = _bare_core()
+        subscriber = core.event_bus.subscribe()
+
+        core._publish_effect_proof_events([], ["CREATE_PATH"])
+
+        event = subscriber.get_nowait()
+        self.assertEqual(event.type, EventType.UNDO)
+        self.assertEqual(event.payload, {"intent": "CREATE_PATH"})
+
+    def test_a_verified_step_publishes_a_verification_event(self):
+        core = _bare_core()
+        subscriber = core.event_bus.subscribe()
+
+        core._publish_effect_proof_events([("CREATE_PATH", "verified")], [])
+
+        event = subscriber.get_nowait()
+        self.assertEqual(event.type, EventType.VERIFICATION)
+        self.assertEqual(event.payload, {"intent": "CREATE_PATH", "verified": "verified"})
+
+    def test_nothing_to_report_publishes_no_event(self):
+        """Il caso comune (nessun intent verificabile in questo turno, nessun rollback) non deve
+        aggiungere rumore sul bus."""
+        core = _bare_core()
+        subscriber = core.event_bus.subscribe()
+
+        core._publish_effect_proof_events([], [])
+
+        self.assertTrue(subscriber.empty())
+
+    def test_plan_outcome_extraction_covers_completed_stopped_and_rolled_back_steps(self):
+        """_publish_plan_outcome_effect_proof_events() estrae da un PlanOutcome vero (non solo
+        dalle due liste gia' pronte sopra) - completed, stopped_step (se presente) e
+        rolled_back, ciascuno con la propria forma StepOutcome.step.intent/StepOutcome.verified."""
+        from core.plan_executor import PlanOutcome, PlanStep, StepOutcome
+        from core.skill_result import SkillResult
+
+        outcome = PlanOutcome(
+            completed=[StepOutcome(
+                step=PlanStep(intent="CREATE_PATH", parameters={}),
+                result=SkillResult(success=True, data={}), attempts=1, verified="verified",
+            )],
+            stopped_step=StepOutcome(
+                step=PlanStep(intent="RENAME_PATH", parameters={}),
+                result=SkillResult(success=False, data={}, error="VERIFICATION_FAILED"), attempts=1,
+                verified="verification_failed",
+            ),
+            rolled_back=[StepOutcome(
+                step=PlanStep(intent="DELETE_PATH", parameters={}),
+                result=SkillResult(success=True, data={}), attempts=1,
+            )],
+        )
+        core = _bare_core()
+        subscriber = core.event_bus.subscribe()
+
+        core._publish_plan_outcome_effect_proof_events(outcome)
+
+        events = []
+        while not subscriber.empty():
+            events.append(subscriber.get_nowait())
+        undo_events = [e for e in events if e.type == EventType.UNDO]
+        verification_events = [e for e in events if e.type == EventType.VERIFICATION]
+        self.assertEqual(undo_events[0].payload, {"intent": "DELETE_PATH"})
+        self.assertEqual(
+            {(e.payload["intent"], e.payload["verified"]) for e in verification_events},
+            {("CREATE_PATH", "verified"), ("RENAME_PATH", "verification_failed")},
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -181,6 +181,40 @@ class IndependentVerificationTests(unittest.TestCase):
 
         self.assertFalse(outcome.steps[0].result.success)
         self.assertEqual(outcome.steps[0].result.error, "VERIFICATION_FAILED")
+        self.assertEqual(outcome.steps[0].verified, "verification_failed", "F1.3.8: esposto sul passo, non solo nel result.error")
+
+
+class VerifiedFieldOnAgentStepTests(unittest.TestCase):
+    """F1.3.8 ("esporre... prove a HUD/companion"): AgentStep.verified porta lo stesso tri-stato
+    gia' calcolato per il ledger, cosi' JakeCore puo' pubblicarlo su un evento senza dover
+    rileggere il ledger dopo."""
+
+    def test_a_genuinely_verified_effect_is_exposed_on_the_step(self):
+        tmp_dir = Path(tempfile.mkdtemp(prefix="jake_agent_verified_field_"))
+        self.addCleanup(shutil.rmtree, tmp_dir, ignore_errors=True)
+        target = tmp_dir / "nuovo.txt"
+        registry = FakeRegistry()
+        client = ScriptedOllamaClient([
+            {"thought": "Creo il file", "action": {"intent": "CREATE_PATH", "parameters": {"path": str(target)}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto.", "ask_user": ""},
+        ])
+        outcome = _agent(registry, client).run("crea un file")
+
+        self.assertEqual(outcome.steps[0].verified, "verified")
+
+    def test_an_intent_without_an_independent_verifier_leaves_the_field_none(self):
+        """ADD_NOTE non ha un controllo indipendente: nessuna 'prova' da esporre, non un
+        generico 'unverified' che suggerirebbe un controllo mai avvenuto per davvero."""
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
+        client = ScriptedOllamaClient([
+            {"thought": "Aggiungo la nota", "action": {"intent": "ADD_NOTE", "parameters": {"text": "x"}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto.", "ask_user": ""},
+        ])
+        outcome = _agent(registry, client).run("aggiungi una nota")
+
+        self.assertIsNone(outcome.steps[0].verified)
 
 
 class KillSwitchStopsTheRunTests(unittest.TestCase):

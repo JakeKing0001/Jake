@@ -22,6 +22,11 @@ class StepOutcome:
     result: SkillResult
     attempts: int
     rolled_back: bool = False
+    # F1.3.8 ("esporre... prove a HUD/companion"): stesso tri-stato gia' calcolato per il ledger
+    # (verification_status_of()), None quando l'intent non ha un verificatore indipendente -
+    # stessa semantica di AgentStep.verified (core/agent.py), vedi li' per il perche' non usa
+    # sempre uno dei tre valori espliciti come fa invece ActionReceipt.verified.
+    verified: str | None = None
 
 
 @dataclass
@@ -197,6 +202,9 @@ class PlanExecutor:
                     step_outcome.result = SkillResult(
                         success=False, data=step_outcome.result.data, error="VERIFICATION_FAILED"
                     )
+            # F1.3.8: stesso principio di core/agent.py::AgentStep.verified - None quando
+            # l'intent non ha un verificatore indipendente (niente da esporre alla HUD).
+            step_outcome.verified = verification_status_of(verified) if verified is not None else None
 
             if step_outcome.result.success:
                 outcome.completed.append(step_outcome)
