@@ -233,6 +233,10 @@ class JakeCore:
             # limita cosa puo' fare QUEL dispositivo companion, senza toccare la voce locale o
             # altri dispositivi.
             device_blocked_intents=config.get("device_blocked_intents", {}) or {},
+            # F1.2.2 (seconda capability: dominio web): vuoto per default - un utente avanzato
+            # puo' limitare OPEN_URL a domini espliciti in config.json, come gia' fa con
+            # allowed_filesystem_roots.
+            allowed_web_domains=config.get("allowed_web_domains", []) or [],
         )
         # F1.2.5: collegato DOPO la creazione (self.agent/coding_agent/research_agent esistono
         # gia', self.policy_engine no, quando i tre TaskAgent vengono costruiti sopra) - senza

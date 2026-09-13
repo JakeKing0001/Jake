@@ -47,12 +47,20 @@ della capability filesystem e di CONFIRM: un intent bloccato per QUESTO disposit
 dispositivo companion ospite senza `DELETE_PATH`) si ferma sempre, anche se lo stesso intent
 sarebbe permesso dalla voce locale o da un altro dispositivo. Simmetrico a `blocked_intents`
 (globale) ma per canale, usando lo stesso `core.request_context.current_device_id()` gia'
-propagato per il ledger (F1.2.3/F1.8.1, fondamenta). App/contatto/dominio web/servizio Home
-Assistant/rete/durata (le altre capability elencate in ROADMAP.md) e l'intersezione con
-agente/skill/sessione restano completamente aperte."""
+propagato per il ledger (F1.2.3/F1.8.1, fondamenta).
+
+F1.2.2 (seconda capability: dominio web): `allowed_web_domains` restringe `OPEN_URL` (la sola
+azione che apre davvero un indirizzo, vedi `WEB_CAPABILITY_INTENTS`) a un elenco di domini
+consentiti - opt-in, vuoto per default, stesso principio di `allowed_filesystem_roots`. Un
+dominio permesso copre anche i suoi sottodomini (`example.com` permette `foo.example.com`),
+simmetrico a come una radice filesystem permette i suoi discendenti.
+
+App/contatto/servizio Home Assistant/rete/durata (le altre capability elencate in ROADMAP.md) e
+l'intersezione con agente/skill/sessione restano completamente aperte."""
 import os
 from enum import Enum
 from pathlib import Path
+from urllib.parse import urlparse
 
 from core.request_context import current_device_id
 
@@ -104,9 +112,15 @@ POLICY_REASON_CAPABILITY_DENIED = "path_outside_allowed_filesystem_roots"
 # non e' mai bloccato in assoluto. Un motivo distinto nel ledger dice onestamente "questo
 # dispositivo non puo' farlo" invece di far sembrare l'intent bloccato per chiunque.
 POLICY_REASON_DEVICE_BLOCKED = "intent_in_device_blocked_intents"
+# F1.2.2 (seconda capability: dominio web): un dominio fuori da allowed_web_domains - una
+# motivazione DIVERSA da POLICY_REASON_CAPABILITY_DENIED (il cui valore stringa e' specifico del
+# filesystem, "path_outside_allowed_filesystem_roots" - riusarla per un dominio negato sarebbe
+# fuorviante in un audit del ledger) per lo stesso principio: lo STESSO intent puo' essere
+# permesso o negato a seconda del parametro, non dell'intent da solo.
+POLICY_REASON_WEB_CAPABILITY_DENIED = "domain_outside_allowed_web_domains"
 POLICY_REASONS = frozenset({
     POLICY_REASON_BLOCKED, POLICY_REASON_REQUIRE_AUTH, POLICY_REASON_CONFIRM, POLICY_REASON_ALLOWED,
-    POLICY_REASON_CAPABILITY_DENIED, POLICY_REASON_DEVICE_BLOCKED,
+    POLICY_REASON_CAPABILITY_DENIED, POLICY_REASON_DEVICE_BLOCKED, POLICY_REASON_WEB_CAPABILITY_DENIED,
 })
 
 # F1.2.2: le quattro mutazioni sono le stesse gia' raggruppate in core/execution_safety.py::
@@ -135,6 +149,15 @@ FILESYSTEM_CAPABILITY_INTENTS = frozenset({
 # capability anche partendo da un percorso permesso.
 _FILESYSTEM_PATH_PARAMETER_KEYS = ("path", "destination")
 
+# F1.2.2 (seconda capability: dominio web): solo OPEN_URL (RiskLevel.LOCAL_REVERSIBLE, vedi
+# core/risk.py) - la sola azione che porta davvero Jake ad APRIRE un indirizzo, quindi l'unica per
+# cui un "recinto" di domini consentiti ha senso. CHECK_WEBSITE_STATUS ha anch'esso un parametro
+# `url` ma e' RiskLevel.READ_ONLY (verifica solo se un sito risponde, non apre nulla): lasciato
+# fuori deliberatamente, un gap noto - stesso schema gia' seguito per FIND_FILE/GET_FILE_INFO/
+# READ_FILE_TEXT in F1.2.2 (prima le mutazioni, poi le letture come fetta separata).
+WEB_CAPABILITY_INTENTS = frozenset({"OPEN_URL"})
+_WEB_URL_PARAMETER_KEYS = ("url",)
+
 
 def _normalized_for_comparison(path: Path) -> str:
     # os.path.normcase abbassa il case su Windows (NTFS e' case-insensitive per default) e non
@@ -151,6 +174,29 @@ def _is_within_root(path: Path, root: Path) -> bool:
     return path_str == root_str or path_str.startswith(root_str + os.sep)
 
 
+def _domain_of(url: str) -> str | None:
+    """Estrae l'host da un url, senza porta e gia' minuscolo (urlparse().hostname lo normalizza
+    da solo). Aggiunge "https://" se l'url non ha schema, stesso trattamento di
+    skills/open_url.py::OpenUrlSkill.execute() - cosi' "example.com" (senza schema, come lo manda
+    spesso l'utente) si risolve nello stesso host di "https://example.com". None se non si riesce
+    a estrarre un host (url vuoto/malformato): un url che non risolve a nessun dominio non viene
+    approvato per difetto, stesso principio "nega per default" gia' applicato altrove in F1.2."""
+    if not url:
+        return None
+    candidate = url if url.lower().startswith(("http://", "https://")) else f"https://{url}"
+    try:
+        return urlparse(candidate).hostname
+    except ValueError:
+        return None
+
+
+def _domain_matches(domain: str, allowed: str) -> bool:
+    """True se `domain` e' esattamente `allowed` o uno dei suoi sottodomini - simmetrico a
+    _is_within_root per i domini invece che per i percorsi (un dominio permesso "copre" i suoi
+    sottodomini, come una radice filesystem copre i suoi discendenti)."""
+    return domain == allowed or domain.endswith("." + allowed)
+
+
 class PolicyEngine:
     """Un'istanza per JakeCore, condivisa PER RIFERIMENTO (non copiata) con tutto cio' che deve
     decidere se un intent puo' eseguire: JakeCore stesso, PlanExecutor (tramite `execute()`),
@@ -160,7 +206,7 @@ class PolicyEngine:
     def __init__(
         self, auth_gate=None, blocked_intents: set | None = None, always_confirm_intents: set | None = None,
         require_auth_intents: set | None = None, allowed_filesystem_roots: set | list | None = None,
-        device_blocked_intents: dict[str | None, set] | None = None,
+        device_blocked_intents: dict[str | None, set] | None = None, allowed_web_domains: set | list | None = None,
     ):
         self.auth_gate = auth_gate
         self.blocked_intents = set(blocked_intents or set())
@@ -183,6 +229,11 @@ class PolicyEngine:
         self.device_blocked_intents = {
             device_id: set(intents) for device_id, intents in (device_blocked_intents or {}).items()
         }
+        # F1.2.2 (seconda capability: dominio web): vuoto/None (default) = nessuna restrizione,
+        # stesso principio di allowed_filesystem_roots. Minuscolo qui una volta sola (non a ogni
+        # controllo): i domini sono gia' case-insensitive per definizione (DNS), coerente con
+        # _domain_of() che restituisce sempre un hostname minuscolo.
+        self._allowed_web_domains = {domain.lower() for domain in (allowed_web_domains or [])}
 
     def register_intent(self, intent: str) -> None:
         """Sincronizza UN intent con la policy corrente, secondo la sua classificazione del
@@ -256,6 +307,8 @@ class PolicyEngine:
             return PolicyDecision.BLOCK, POLICY_REASON_DEVICE_BLOCKED
         if intent in FILESYSTEM_CAPABILITY_INTENTS and not self._filesystem_capability_allows(parameters):
             return PolicyDecision.BLOCK, POLICY_REASON_CAPABILITY_DENIED
+        if intent in WEB_CAPABILITY_INTENTS and not self._web_capability_allows(parameters):
+            return PolicyDecision.BLOCK, POLICY_REASON_WEB_CAPABILITY_DENIED
         if (
             self.auth_gate is not None
             and getattr(self.auth_gate, "enabled", False)
@@ -283,6 +336,8 @@ class PolicyEngine:
             return PolicyDecision.BLOCK, POLICY_REASON_DEVICE_BLOCKED
         if intent in FILESYSTEM_CAPABILITY_INTENTS and not self._filesystem_capability_allows(parameters or {}):
             return PolicyDecision.BLOCK, POLICY_REASON_CAPABILITY_DENIED
+        if intent in WEB_CAPABILITY_INTENTS and not self._web_capability_allows(parameters or {}):
+            return PolicyDecision.BLOCK, POLICY_REASON_WEB_CAPABILITY_DENIED
         if intent in self.always_confirm_intents:
             return PolicyDecision.CONFIRM, POLICY_REASON_CONFIRM
         return PolicyDecision.ALLOW, POLICY_REASON_ALLOWED
@@ -311,6 +366,22 @@ class PolicyEngine:
             except (OSError, ValueError):
                 return False
             if not any(_is_within_root(resolved, root) for root in self._allowed_filesystem_roots):
+                return False
+        return True
+
+    def _web_capability_allows(self, parameters: dict) -> bool:
+        """True se nessun dominio e' configurato (default, nessuna restrizione) oppure se il
+        dominio dell'url (`_WEB_URL_PARAMETER_KEYS`) e' uno dei domini consentiti o un loro
+        sottodominio. Un url senza dominio riconoscibile non viene approvato per difetto, stesso
+        principio "nega per default" di _filesystem_capability_allows()."""
+        if not self._allowed_web_domains:
+            return True
+        for key in _WEB_URL_PARAMETER_KEYS:
+            value = parameters.get(key)
+            if not value or not isinstance(value, str):
+                continue
+            domain = _domain_of(value)
+            if not domain or not any(_domain_matches(domain, allowed) for allowed in self._allowed_web_domains):
                 return False
         return True
 
