@@ -19,10 +19,23 @@ dalla documentazione, prima di scegliere questo approccio.
 None (il default, e il comportamento di chi non chiama mai `set_current_device_id`) significa
 "nessun dispositivo companion noto per questa richiesta" - il caso normale per il loop voce
 locale, che resta un canale implicito separato (nessuna modifica li'), e per le automazioni
-lanciate da TriggerScheduler sul proprio thread in background."""
+lanciate da TriggerScheduler sul proprio thread in background.
+
+F1.2.3 (intersezione, capability per AGENTE): stesso identico principio/meccanismo, ma per
+`TaskAgent.agent_name` ("general"/"coding"/"research", vedi core/agent.py) invece che per
+dispositivo companion - `TaskAgent.run()` imposta il contextvar SOLO intorno alla chiamata
+all'executor (l'unico punto in cui un passo dell'agente puo' davvero eseguire un intent), non per
+l'intera durata di `run()`: il resto del metodo (chiamare il modello, decidere il prossimo passo)
+non ha bisogno di sapere quale agente sta girando, e restringere la finestra al minimo evita che
+un futuro codice intermedio legga per errore un valore che non gli compete. `None` (il default)
+significa "nessun agente a passi in corso su questo thread" - il caso normale per un comando
+diretto (JakeCore._resolve_and_execute chiamato senza passare da TaskAgent) o un'automazione
+(PlanExecutor, un attore diverso, deliberatamente non coperto da questa dimensione - vedi il
+docstring di core/policy_engine.py per il limite dichiarato)."""
 import contextvars
 
 _current_device_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("current_device_id", default=None)
+_current_agent_name: contextvars.ContextVar[str | None] = contextvars.ContextVar("current_agent_name", default=None)
 
 
 def current_device_id() -> str | None:
@@ -42,3 +55,20 @@ def set_current_device_id(device_id: str | None) -> contextvars.Token:
 
 def reset_current_device_id(token: contextvars.Token) -> None:
     _current_device_id.reset(token)
+
+
+def current_agent_name() -> str | None:
+    """Il `TaskAgent.agent_name` che sta eseguendo un intent su QUESTO thread in questo momento
+    (solo durante la chiamata all'executor dentro TaskAgent.run(), vedi core/agent.py), o None se
+    nessun agente a passi e' in corso (comando diretto, o un'automazione via PlanExecutor)."""
+    return _current_agent_name.get()
+
+
+def set_current_agent_name(agent_name: str | None) -> contextvars.Token:
+    """Imposta il nome dell'agente per il resto dell'esecuzione su QUESTO thread. Restituisce un
+    Token da passare a reset_current_agent_name() per ripristinare il valore precedente."""
+    return _current_agent_name.set(agent_name)
+
+
+def reset_current_agent_name(token: contextvars.Token) -> None:
+    _current_agent_name.reset(token)

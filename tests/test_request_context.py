@@ -7,7 +7,10 @@ gia' trovata e corretta piu' volte in questa sessione per altro stato condiviso 
 import threading
 import unittest
 
-from core.request_context import current_device_id, reset_current_device_id, set_current_device_id
+from core.request_context import (
+    current_agent_name, current_device_id, reset_current_agent_name, reset_current_device_id,
+    set_current_agent_name, set_current_device_id,
+)
 
 
 class DefaultTests(unittest.TestCase):
@@ -87,6 +90,65 @@ class ThreadIsolationTests(unittest.TestCase):
             self.assertIsNone(seen["value"])
         finally:
             reset_current_device_id(token)
+
+
+class AgentNameDefaultTests(unittest.TestCase):
+    """F1.2.3 (intersezione, capability per AGENTE): stesso identico contratto di
+    current_device_id sopra, ma per TaskAgent.agent_name."""
+
+    def test_default_is_none_when_never_set(self):
+        self.assertIsNone(current_agent_name())
+
+
+class AgentNameSetAndResetTests(unittest.TestCase):
+    def test_set_makes_the_value_visible_on_this_thread(self):
+        token = set_current_agent_name("coding")
+        try:
+            self.assertEqual(current_agent_name(), "coding")
+        finally:
+            reset_current_agent_name(token)
+
+    def test_reset_restores_the_previous_value(self):
+        outer_token = set_current_agent_name("general")
+        inner_token = set_current_agent_name("research")
+        reset_current_agent_name(inner_token)
+        try:
+            self.assertEqual(current_agent_name(), "general")
+        finally:
+            reset_current_agent_name(outer_token)
+
+    def test_reset_restores_none_when_nothing_was_set_before(self):
+        token = set_current_agent_name("coding")
+        reset_current_agent_name(token)
+        self.assertIsNone(current_agent_name())
+
+
+class AgentNameThreadIsolationTests(unittest.TestCase):
+    def test_concurrent_threads_never_see_each_others_agent_name(self):
+        observed = {}
+        barrier = threading.Barrier(2)
+
+        def _run_agent(name, agent_name, delay_before_read):
+            token = set_current_agent_name(agent_name)
+            try:
+                barrier.wait()
+                if delay_before_read:
+                    import time
+                    time.sleep(0.02)
+                observed[name] = current_agent_name()
+            finally:
+                reset_current_agent_name(token)
+
+        threads = [
+            threading.Thread(target=_run_agent, args=("coding_thread", "coding", True)),
+            threading.Thread(target=_run_agent, args=("research_thread", "research", False)),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(observed, {"coding_thread": "coding", "research_thread": "research"})
 
 
 if __name__ == "__main__":
