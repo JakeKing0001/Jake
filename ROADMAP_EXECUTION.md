@@ -1303,14 +1303,16 @@ Dipende da: F1.2.
 
 Criterio di uscita: nessun segreto in chiaro e ogni azione admin richiede un fattore non vocale.
 
-- Stato: `DOING`; `F1.4.1` chiuso parzialmente (scrittura atomica di config/settings.json, non
-  ancora una classe `SecretsVault` vera - vedi sotto); `F1.4.3` chiuso parzialmente
+- Stato: `DOING`; `F1.4.1` **chiuso** (classe `SecretsVault` vera con versione esplicita nel blob
+  e migrazione atomica anche per un segreto GIA' cifrato in formato legacy, non solo uno ancora in
+  chiaro - vedi sotto); `F1.4.3` chiuso parzialmente
   (irrobustito il confronto della passphrase esistente, non ancora l'audit completo del
   fallback - vedi sotto); `F1.4.8` chiuso parzialmente (vault corrotto/profilo diverso, non
-  ancora migrazione/backup end-to-end); il resto della fase non ha ancora una voce di evidenza in
-  questo documento (`core/secrets_vault.py`/DPAPI, `core/windows_hello.py` esistono gia' - vedi
-  l'audit storico in [ROADMAP.md](ROADMAP.md) fase F1 - ma non sono stati riletti contro l'elenco
-  piu' fine `F1.4.1`-`F1.4.7` di qui).
+  ancora migrazione/backup end-to-end); il resto della fase (`F1.4.2`, `F1.4.4`-`F1.4.7`) resta
+  aperto - identita' distinte per dispositivo/speaker profile, passkey/WebAuthn, pairing QR,
+  rotazione token, anti-spoofing vocale: ciascuno un pezzo di prodotto a se', non una fetta
+  stretta come `F1.4.1` (`core/windows_hello.py` esiste gia' - vedi l'audit storico in
+  [ROADMAP.md](ROADMAP.md) fase F1 - ma non e' stato riletto contro l'elenco piu' fine di qui).
 - `F1.4.3` (parziale, irrobustimento del fallback) — 12/09/2026: "usare Windows Hello per
   admin/high-impact; mantenere fallback esplicito e auditato". Windows Hello (tentato per primo) e
   la passphrase (fallback esplicito, gia' loggato via `authorization_of()`) esistevano gia' da
@@ -1356,6 +1358,49 @@ Criterio di uscita: nessun segreto in chiaro e ogni azione admin richiede un fat
   protect/unprotect`, senza versione ne' un oggetto proprio) - il resto di `F1.4.1` e tutto
   `F1.4.2`-`F1.4.7` restano aperti. Prova: 2.147/2.147 test, ruff/mypy/compileall verdi su
   `core/config.py` e `tests/test_config.py`.
+- `F1.4.1` (chiusura - classe `SecretsVault` versionata) — 13/09/2026: colma esattamente il gap
+  lasciato aperto sopra. Funzionalita' nuova, non un fix - `core/secrets_vault.py` era solo tre
+  funzioni libere senza stato (`is_protected`/`protect`/`unprotect`), il blob cifrato non portava
+  alcun tag di versione: un formato futuro diverso (un algoritmo diverso, una codifica diversa)
+  non avrebbe avuto modo di distinguersi da quello attuale, ne' di coesistere con blob vecchi gia'
+  su disco. Aggiunta la classe `SecretsVault` richiesta dalla roadmap: `protect()` produce ora
+  `"dpapi:<versione>:<base64>"` invece del vecchio `"dpapi:<base64>"` senza versione esplicita,
+  mentre `unprotect()` continua a leggere ENTRAMBI i formati (l'alfabeto base64 non contiene mai
+  ":", quindi riconoscere se il segmento dopo il prefisso e' un tag di versione o dati cifrati
+  nudi e' inequivocabile) - un blob gia' salvato da un'installazione precedente a questa
+  correzione resta decifrabile per sempre, non diventa illeggibile solo perche' il codice e'
+  cambiato. Un blob con una versione NON supportata (scritto da una futura versione di Jake
+  ancora sconosciuta a questo codice) restituisce `None` invece di tentare comunque la
+  decifratura - nega per default, stesso principio gia' applicato altrove in F1.
+
+  Seconda meta' del gap, "migrazione atomica": `Config._migrate_secrets()` cifrava gia' un valore
+  ancora in chiaro (F1, prima di questa sessione), ma un segreto GIA' protetto nel formato legacy
+  (senza tag di versione) non veniva mai ricifrato nel formato corrente - restava per sempre nel
+  formato vecchio anche dopo l'aggiornamento. Nuovo metodo `SecretsVault.needs_migration()`
+  (vero per un blob protetto ma non nella versione corrente di questa istanza) usato da
+  `_migrate_secrets()` per decifrare e ricifrare sul posto, con la STESSA scrittura atomica gia'
+  in F1.4.1 (`_write()` via file temporaneo + `os.replace()`) - un valore che non si riesce a
+  decifrare (`needs_migration()` vero ma `unprotect()` restituisce `None`: vault corrotto o
+  profilo Windows diverso) non viene MAI riscritto, verificato che il test gia' esistente
+  `test_migrate_secrets_does_not_touch_an_already_corrupted_value` continuasse a passare senza
+  modifiche. `core/config.py::Config` ora tiene un'istanza `self._vault = SecretsVault()` e la usa
+  direttamente in `get()`/`set()`/`_migrate_secrets()`, al posto delle funzioni libere importate
+  prima - la "consolidazione in una classe" richiesta dalla roadmap si riflette anche nel
+  principale chiamante, non solo nel modulo. Le funzioni libere `is_protected`/`protect`/
+  `unprotect` restano per compatibilita' con chi le importa gia' cosi' (delegano a un'istanza di
+  default dello stesso `SecretsVault`, nessuna logica duplicata). Aggiunti 7 nuovi test in
+  `tests/test_secrets_vault.py::VersionedFormatTests`/`NeedsMigrationTests` (blob versionato
+  prodotto correttamente, blob legacy senza tag ancora decifrabile, versione futura non
+  supportata rifiutata, needs_migration vero/falso nei tre casi rilevanti) e 3 in
+  `tests/test_config.py::MigrationOfLegacyEncryptedSecretsTests` (un segreto GIA' cifrato in
+  formato legacy viene riscritto nel formato versionato al primo avvio, resta leggibile dopo,
+  nessuna doppia scrittura per uno gia' aggiornato). Aggiornato un test esistente
+  (`test_a_real_blob_with_flipped_bytes_does_not_raise`) che assumeva il vecchio formato senza
+  versione per estrarre il payload da corrompere. Non ancora affrontato: `F1.4.2`-`F1.4.7`
+  restano aperti - ciascuno un pezzo di prodotto a se' (identita' per dispositivo/speaker
+  profile, passkey/WebAuthn, pairing QR, rotazione token, anti-spoofing vocale), non una fetta
+  stretta come questa. Prova: 2.350/2.350 test, ruff/mypy/compileall verdi su tutti i file
+  toccati.
 - `F1.4.8` (parziale) — 12/09/2026: **buco reale trovato e corretto, non solo testato** -
   `core/secrets_vault.py::unprotect()` sollevava un'eccezione non catturata
   (`binascii.Error` per un base64 malformato, `pywintypes.error` per un blob DPAPI incompatibile)
@@ -3228,7 +3273,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 37 incrementi completati e verificati (PR #28-#64), la
+Aggiornato 13/09/2026. Sessione lunga con 38 incrementi completati e verificati (PR #28-#65), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -3311,13 +3356,18 @@ correzione molto piu' ampio del previsto: due call site di `JakeCore`, tre handl
 interni, `PlanExecutor._execute_step`, il ripiego di default di `TaskAgent`,
 `tools/replay_session.py`, e ~18 classi `FakeRegistry` di test in 9 file diversi aggiornate per
 accettare il nuovo parametro senza sollevare `TypeError` - con questo, tutti e tre i "percorso N"
-dichiarati aperti in F1.2.1 sono chiusi). Il resto:
+dichiarati aperti in F1.2.1 sono chiusi), e `F1.4.1` chiusura - classe `SecretsVault` versionata
+(funzionalita' nuova: il blob cifrato porta ora un tag di versione esplicito
+`"dpapi:<versione>:<base64>"`, `unprotect()` legge ancora il vecchio formato senza versione per
+sempre, un nuovo `needs_migration()` fa ricifrare sul posto - con la stessa scrittura atomica gia'
+in F1.4.1 - anche un segreto GIA' cifrato in formato legacy, non solo uno ancora in chiaro; `Config`
+ora tiene e usa un'istanza `SecretsVault` invece delle funzioni libere di prima). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.341/2.341 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.350/2.350 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
 invariati, nessuno dei due coperto da "mypy selettivo" in CI). `G1` resta aperto.
 
@@ -3351,8 +3401,10 @@ dominio web/app/contatto/device Home Assistant - sono ora complete, con i rispet
 dichiarati - FIND_FILE senza `path` esplicito, CHECK_WEBSITE_STATUS/LIST_SMART_DEVICES esclusi,
 app/contatto/device su stringa grezza non risolta),
 `F1.2.3` (resto: prima capability per dispositivo chiusa - `device_blocked_intents` - ma
-l'intersezione con agente/skill/sessione resta aperta), il resto di `F1.4` (una vera
-classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7` (`F1.7.2`, `F1.7.3` e
+l'intersezione con agente/skill/sessione resta aperta), il resto di `F1.4` (`F1.4.1` e' ora
+CHIUSO - la classe `SecretsVault` versionata esiste; restano `F1.4.2`-`F1.4.7`, ciascuno un pezzo
+di prodotto a se' - identita' per dispositivo/speaker profile, passkey/WebAuthn, pairing QR,
+rotazione token, anti-spoofing vocale - non fette strette come `F1.4.1`), il resto di `F1.7` (`F1.7.2`, `F1.7.3` e
 `F1.7.6` sono ora CHIUSI (o chiusi quanto possibile senza una decisione di rimozione attiva) -
 l'undo scrive una ricevuta propria correlata per trace_id, la dashboard mostra un vero rollback
 rate, e le tre categorie di retention sono verificate/coperte (log operativo e memoria gia'
