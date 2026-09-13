@@ -14,6 +14,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from core.action_ledger import ActionLedger
 from core.execution_safety import rollback_effect, verify_effect
 from core.policy_engine import PolicyEngine
 from core.skill_result import SkillResult
@@ -185,6 +186,102 @@ class RollbackEdgeCaseTests(unittest.TestCase):
 
         self.assertFalse(rolled_back)
         self.assertTrue(target.exists(), "senza un policy_engine il rollback non deve eseguire nulla")
+
+
+class RollbackReceiptTests(unittest.TestCase):
+    """F1.7.2 ("collegare command, sub-step, verifica, undo e notifica con lo stesso trace id"):
+    buco reale - un rollback riuscito non produceva MAI una propria ActionReceipt, quindi il
+    ledger non mostrava da nessuna parte che un'azione era stata annullata. Usa un ActionLedger
+    VERO (file temporaneo reale), non un Mock: la garanzia che conta e' cosa finisce davvero
+    scritto su disco, non solo che record() sia stato chiamato."""
+
+    def setUp(self):
+        self.tmp_dir = Path(tempfile.mkdtemp(prefix="jake_execution_safety_rollback_receipt_"))
+        self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
+        self.ledger = ActionLedger(path=self.tmp_dir / "ledger.jsonl")
+        self.registry = RealSkillRegistry()
+
+    def test_a_successful_rollback_writes_a_receipt_with_the_same_trace_id(self):
+        target = self.tmp_dir / "nuovo.txt"
+        create_result = self.registry.execute("CREATE_PATH", {"path": str(target)})
+        self.assertTrue(create_result.success)
+
+        rolled_back = rollback_effect(
+            self.registry, "CREATE_PATH", create_result.data, policy_engine=PolicyEngine(),
+            action_ledger=self.ledger, trace_id="t1", requested_by="agent:general",
+        )
+
+        self.assertTrue(rolled_back)
+        [receipt] = self.ledger.read_all()
+        self.assertEqual(receipt["trace_id"], "t1")
+        self.assertEqual(receipt["intent"], "DELETE_PATH", "l'intent compensatorio che ha eseguito davvero")
+        self.assertEqual(receipt["requested_by"], "rollback:agent:general")
+        self.assertEqual(receipt["result"], "success")
+
+    def test_no_receipt_when_action_ledger_is_not_passed(self):
+        """Comportamento invariato per chi non passa action_ledger/trace_id (default None)."""
+        target = self.tmp_dir / "nuovo.txt"
+        create_result = self.registry.execute("CREATE_PATH", {"path": str(target)})
+
+        rolled_back = rollback_effect(self.registry, "CREATE_PATH", create_result.data, policy_engine=PolicyEngine())
+
+        self.assertTrue(rolled_back)
+        self.assertEqual(self.ledger.read_all(), [])
+
+    def test_no_receipt_when_no_rollback_was_attempted(self):
+        """Un rollback bloccato dalla policy non e' un'esecuzione: niente da correlare."""
+        target = self.tmp_dir / "nuovo.txt"
+        create_result = self.registry.execute("CREATE_PATH", {"path": str(target)})
+
+        rolled_back = rollback_effect(
+            self.registry, "CREATE_PATH", create_result.data,
+            policy_engine=PolicyEngine(blocked_intents={"DELETE_PATH"}),
+            action_ledger=self.ledger, trace_id="t1",
+        )
+
+        self.assertFalse(rolled_back)
+        self.assertEqual(self.ledger.read_all(), [])
+
+    def test_a_failed_rollback_still_writes_a_receipt(self):
+        """Un rollback tentato ma fallito e' comunque un evento degno di una ricevuta - l'errore
+        non deve sparire in silenzio."""
+        class ExplodingRegistry:
+            def execute(self, intent, parameters=None):
+                raise RuntimeError("boom")
+
+        rolled_back = rollback_effect(
+            ExplodingRegistry(), "CREATE_PATH", {"path": "x"}, policy_engine=PolicyEngine(),
+            action_ledger=self.ledger, trace_id="t1",
+        )
+
+        self.assertFalse(rolled_back)
+        [receipt] = self.ledger.read_all()
+        self.assertEqual(receipt["result"], "rollback_failed")
+
+    def test_private_mode_writes_no_receipt(self):
+        """Stessa garanzia gia' verificata end-to-end per gli altri tre chokepoint (F1.7.8): la
+        modalita' privata non lascia traccia nemmeno per un rollback."""
+        target = self.tmp_dir / "nuovo.txt"
+        create_result = self.registry.execute("CREATE_PATH", {"path": str(target)})
+
+        rollback_effect(
+            self.registry, "CREATE_PATH", create_result.data, policy_engine=PolicyEngine(),
+            action_ledger=self.ledger, trace_id="t1", private=True,
+        )
+
+        self.assertEqual(self.ledger.read_all(), [])
+
+    def test_requested_by_defaults_to_a_plain_rollback_label_when_omitted(self):
+        target = self.tmp_dir / "nuovo.txt"
+        create_result = self.registry.execute("CREATE_PATH", {"path": str(target)})
+
+        rollback_effect(
+            self.registry, "CREATE_PATH", create_result.data, policy_engine=PolicyEngine(),
+            action_ledger=self.ledger, trace_id="t1",
+        )
+
+        [receipt] = self.ledger.read_all()
+        self.assertEqual(receipt["requested_by"], "rollback")
 
 
 class IntentSafetyRegistryConsistencyTests(unittest.TestCase):

@@ -9,6 +9,7 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
+from core.action_ledger import ActionLedger
 from core.agent import TaskAgent
 from core.ollama_client import OllamaError
 from core.policy_engine import PolicyEngine
@@ -331,6 +332,39 @@ class RollbackAfterFatalErrorTests(unittest.TestCase):
 
         self.assertEqual(outcome.rolled_back, [])
         self.assertTrue(target.exists(), "DELETE_PATH e' bloccato: il rollback non doveva cancellare il file")
+
+    def test_a_successful_rollback_writes_a_receipt_with_the_run_s_trace_id(self):
+        """F1.7.2 ("collegare command, sub-step, verifica, undo e notifica con lo stesso trace
+        id"): il rollback dell'agente ora produce una propria ActionReceipt, correlata alla
+        STESSA trace_id del passo originale che l'ha innescato - prima non ne produceva nessuna.
+        ActionLedger su file temporaneo esplicito (non il default _agent()), per non scrivere sul
+        registro vero del progetto."""
+        tmp_dir = Path(tempfile.mkdtemp(prefix="jake_agent_rollback_receipt_"))
+        self.addCleanup(shutil.rmtree, tmp_dir, ignore_errors=True)
+        target = tmp_dir / "nuovo_file.txt"
+        ledger = ActionLedger(path=tmp_dir / "ledger.jsonl")
+
+        registry = FakeRegistry()
+        client = ScriptedOllamaClient([
+            {"thought": "Creo il file", "action": {"intent": "CREATE_PATH", "parameters": {"path": str(target)}},
+             "final_answer": "", "ask_user": ""},
+            OllamaError("il modello non risponde"),
+        ])
+        agent = TaskAgent(
+            registry, FakeRetriever(["ADD_NOTE", "CREATE_PATH"]), client, model_provider=lambda: "fake-model",
+            format_result=lambda intent, result: str(result.data), policy_engine=PolicyEngine(),
+            action_ledger=ledger, agent_name="general",
+        )
+
+        outcome = agent.run("crea un file e poi fai qualcos'altro di rischioso")
+
+        self.assertEqual(len(outcome.rolled_back), 1)
+        records = ledger.read_all()
+        create_receipt = next(r for r in records if r["intent"] == "CREATE_PATH")
+        rollback_receipt = next(r for r in records if r["intent"] == "DELETE_PATH")
+        self.assertEqual(rollback_receipt["trace_id"], create_receipt["trace_id"])
+        self.assertEqual(rollback_receipt["requested_by"], "rollback:agent:general")
+        self.assertEqual(rollback_receipt["result"], "success")
 
 
 class AuthRequiredPropagationTests(unittest.TestCase):
