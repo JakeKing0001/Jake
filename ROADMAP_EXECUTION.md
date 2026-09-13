@@ -658,8 +658,8 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   filesystem, ora su ENTRAMBI i percorsi interattivo e automatico e su sette intent - le quattro
   mutazioni piu' le tre letture FIND_FILE/GET_FILE_INFO/READ_FILE_TEXT - vedi sotto); `F1.2.4`
   chiuso per il percorso planner (vedi sotto); `F1.2.6` e `F1.2.7` chiusi (vedi sotto); `F1.2.3`
-  fondamenta poste (identita' del dispositivo companion propagata fino al ledger, vedi sotto -
-  nessuna decisione di policy ancora basata su di essa)/resto aperto.
+  chiuso parzialmente (prima capability - dispositivo - vedi sotto; l'intersezione con
+  agente/skill/sessione e le altre capability elencate in ROADMAP.md restano aperte).
 - `F1.2.2` (parziale, prima capability: radici filesystem) — 12/09/2026: "definire capability per
   filesystem root, app, contatto, dominio web, device, servizio Home Assistant, rete e durata" -
   la prima delle otto, scelta perche' e' l'unica gia' collegabile senza dover prima costruire
@@ -858,6 +858,34 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   QUALE slot usare, non solo per il campo nel ledger. Deliberatamente non affrontato: nessuna coda
   generale per azioni concorrenti non legate a una conferma (il resto di F1.8.1). Prova:
   2.263/2.263 test, ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.2.3` (prima capability: dispositivo) — 13/09/2026: decisione esplicita dell'utente ("anzi
+  fai tutte e due") di costruire ANCHE la seconda meta' rimasta aperta dopo le fondamenta - una
+  capability vera per dispositivo, non solo lo slot per canale sopra. Funzionalita' NUOVA (la
+  capability non esisteva affatto prima), scelta come fetta verticale stretta esattamente come
+  `allowed_filesystem_roots` in F1.2.2: `PolicyEngine(device_blocked_intents=...)` - un dizionario
+  opt-in `{device_id: {intent, ...}}`, vuoto per default (comportamento invariato, stesso
+  principio di `blocked_intents`), simmetrico a `blocked_intents` ma per CANALE invece che
+  globale (usa lo stesso `core.request_context.current_device_id()` gia' propagato per il ledger
+  e per lo slot di conferma, F1.2.3/F1.8.1 fondamenta e chiusura sopra - nessuna nuova plumbing
+  necessaria, solo un dizionario in piu' letto da un nuovo metodo `_device_blocks()`). Controllato
+  su ENTRAMBI i percorsi (`_decide_interactive_reasoned`/`_decide_automated_reasoned`) subito dopo
+  `blocked_intents` e PRIMA della capability filesystem e di `CONFIRM` - "vince il piu'
+  restrittivo": un intent bloccato per un dispositivo si ferma sempre per QUEL dispositivo, mai
+  per la voce locale o per un altro dispositivo, anche se lo stesso intent sarebbe altrimenti
+  permesso o richiederebbe solo conferma. Nuova motivazione dedicata nel ledger,
+  `POLICY_REASON_DEVICE_BLOCKED` ("intent_in_device_blocked_intents"), distinta da
+  `POLICY_REASON_BLOCKED` per lo stesso motivo di `POLICY_REASON_CAPABILITY_DENIED` in F1.2.2: lo
+  STESSO intent puo' essere permesso o negato a seconda di quale dispositivo lo chiede, non e' mai
+  bloccato in assoluto - un motivo distinto dice onestamente "questo dispositivo non puo' farlo"
+  invece di far sembrare l'intent bloccato per chiunque. Configurabile da `config.json`
+  (`device_blocked_intents`, letto in `JakeCore.__init__` insieme alle altre chiavi di
+  `PolicyEngine`). Aggiunti 9 nuovi test in `tests/test_policy_engine.py::DeviceCapabilityTests`
+  (nessuna restrizione di default, blocco solo per il dispositivo giusto, permesso per un
+  dispositivo diverso o per la voce locale, motivo distinto, vince su `CONFIRM`, coesiste con un
+  blocco globale in entrambe le direzioni, applicato su entrambi i percorsi, riflesso da
+  `explain()`). Deliberatamente non affrontato: l'intersezione con agente/skill/sessione (le altre
+  tre dimensioni di F1.2.3) e le altre capability elencate in ROADMAP.md (app/contatto/dominio
+  web/HA/rete/durata). Prova: 2.272/2.272 test, ruff/mypy/compileall verdi su tutti i file toccati.
 - `F1.2.4` — 12/09/2026: `core/planner_provider.py::_build_output_schema()` chiedeva a Ollama
   passi con `"parameters": {"type": "object"}` SENZA alcuna restrizione sulle chiavi - la causa
   originale del bug corretto in F1.2.5 (un passo poteva arrivare gia' con `"confirmed": true`
@@ -2947,7 +2975,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 28 incrementi completati e verificati (PR #28-#55), la
+Aggiornato 13/09/2026. Sessione lunga con 29 incrementi completati e verificati (PR #28-#56), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -2983,14 +3011,17 @@ identificare un canale, ancora senza alcuna decisione di policy basata su di ess
 chiusura (lo stesso identificatore riusato per dare a `ConversationStateManager` uno slot di
 azione in sospeso PER CANALE invece di uno globale - due dispositivi companion con una propria
 richiesta di conferma nello stesso istante non si sovrascrivono piu' a vicenda; decisione esplicita
-dell'utente, "anzi fai tutte e due", su cosa costruire per primo sopra le fondamenta). Il resto:
+dell'utente, "anzi fai tutte e due", su cosa costruire per primo sopra le fondamenta), e `F1.2.3`
+prima capability - dispositivo (`device_blocked_intents`, simmetrico a `blocked_intents` ma per
+canale - la seconda meta' di "tutte e due", un intent bloccato per un dispositivo companion si
+ferma sempre per quel dispositivo senza toccare la voce locale o altri dispositivi). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.2` (parziale - la notifica di
 un'automazione ora porta lo stesso trace_id delle ricevute che l'ha prodotta), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.263/2.263 test, ruff/mypy/compileall verdi. `G1` resta aperto.
+`master` e' pulito, 2.272/2.272 test, ruff/mypy/compileall verdi. `G1` resta aperto.
 
 Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
 sessione (`sys.setswitchinterval()` abbassato + `threading.Barrier`, senza altro aiuto) NON
@@ -3018,9 +3049,8 @@ Candidati piccoli ancora aperti in F1: il resto di `F1.2.1` (percorso 7,
 `SkillRegistry.execute()`), il resto di `F1.2.2` (le altre sette capability - app/contatto/
 dominio web/device/HA/rete/durata; la capability filesystem stessa e' ora completa su entrambi i
 percorsi e su mutazioni+letture, resta solo il gap noto di FIND_FILE senza `path` esplicito),
-`F1.2.3` (intersezione permessi utente/dispositivo/agente/skill/sessione - fondamenta poste,
-`current_device_id()` ora disponibile ovunque, ma `PolicyEngine` non lo usa ancora per nessuna
-capability o intersezione), il resto di `F1.4` (una vera
+`F1.2.3` (resto: prima capability per dispositivo chiusa - `device_blocked_intents` - ma
+l'intersezione con agente/skill/sessione resta aperta), il resto di `F1.4` (una vera
 classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7` (il resto di `F1.7.2` -
 undo, mai wired a una ricevuta propria; `F1.7.3` retention differenziata; il resto di `F1.7.4` -
 altri tipi di dato per contenuto (telefono, IP, id dispositivo) - la classificazione per nome del

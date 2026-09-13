@@ -107,9 +107,14 @@ di poter esistere, non l'una o l'altra funzionalita' completa.
   Resta aperta l'altra meta' del testo originale di F1.8.1, "una coda per azioni concorrenti": un
   meccanismo generale per serializzare azioni concorrenti non legate a una conferma pendente, mai
   affrontato.
-- `F1.2.3` (resto, ora che l'identita' del dispositivo esiste - vedi sopra): `PolicyEngine`
-  non usa ancora `current_device_id()` per nessuna decisione (nessuna capability per-dispositivo,
-  nessuna intersezione con quelle utente/agente/skill/sessione).
+- `F1.2.3` (prima capability - dispositivo - chiusa, 13/09/2026): `PolicyEngine` ora accetta
+  `device_blocked_intents: {device_id: {intent, ...}}` (config.json, vuoto per default),
+  controllato su ENTRAMBI i percorsi (interattivo e automatico) PRIMA della capability filesystem
+  e di CONFIRM - un intent bloccato per un dispositivo si ferma sempre per quel dispositivo,
+  "vince il piu' restrittivo" rispetto a cio' che permetterebbe la sola policy utente, senza
+  toccare la voce locale o altri dispositivi (vedi `tests/test_policy_engine.py::
+  DeviceCapabilityTests`). Resta aperta l'intersezione con le altre dimensioni (agente/skill/
+  sessione) e le altre capability elencate in ROADMAP.md (app/contatto/dominio web/HA/rete/durata).
 - Questo inventario copre "chi puo' eseguire", non ancora "chi costruisce un `ActionProposal`"
   (`F1.1.2`, `F1.1.6`, `F1.1.7`): `_authorize_command` costruisce/valida `ActionProposal`,
   mentre le skill restituiscono ancora `SkillResult` (vedi `core/skill_result.py`). La ricevuta viene sintetizzata
