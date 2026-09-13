@@ -1149,3 +1149,11 @@ class JakeCore:
             self.retriever.capability_index.save_cache()
         except Exception:
             self.logger.exception("Errore salvando la cache degli indici semantici durante lo shutdown")
+        # F1.6: nessun worker da fermare se nessuna skill forgiata e' mai stata invocata in
+        # questa sessione (stop_sandbox_worker() e' un no-op in quel caso) - se invece il worker
+        # sandboxato e' vivo, deve essere chiuso esplicitamente qui: non e' un processo figlio
+        # che Windows terminerebbe da solo alla chiusura di Jake.
+        try:
+            self.skill_registry.stop_sandbox_worker()
+        except Exception:
+            self.logger.exception("Errore fermando il worker sandboxato per le skill forgiate durante lo shutdown")
