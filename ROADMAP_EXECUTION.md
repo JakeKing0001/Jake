@@ -825,6 +825,39 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   per dispositivo (F1.8.1 resta aperta per il resto) - vedi la nuova sezione in
   `docs/action-execution-paths.md` ("Identita' del dispositivo mittente"). Prova: 2.257/2.257
   test, ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.8.1` (chiusura, uno slot per canale) — 13/09/2026: decisione esplicita dell'utente
+  (AskUserQuestion) su cosa costruire per primo sopra le fondamenta appena poste - lo slot di
+  azione in sospeso per canale invece della capability per-dispositivo. Buco reale: prima di
+  questa correzione `ConversationStateManager` aveva UN solo slot globale (`_pending_action`) -
+  non la doppia esecuzione gia' chiusa sopra (12/09/2026), ma una PERDITA diversa: due dispositivi
+  companion CIASCUNO con una propria richiesta di conferma nello stesso istante si sovrascrivevano
+  a vicenda, perche' il secondo `set_pending_action()` cancellava silenziosamente la richiesta del
+  primo. Riprodotto per davvero end-to-end con un vero `JakeCore.answer()` (non solo a livello di
+  `ConversationStateManager`): due dispositivi ("telefono"/"tablet") chiedono ciascuno un
+  `DELETE_PATH` su un percorso diverso, il tablet conferma, la richiesta del telefono era gia'
+  sparita (`has_pending_action()` tornava `False`) - `tests/test_jake_core_pipeline.py::
+  PerChannelPendingActionIntegrationTests`, verificato che fallisce contro il codice precedente
+  prima del fix. Corretto sostituendo lo slot singolo con un dizionario `{canale: azione}`
+  (`_pending_actions`), chiave `core.request_context.current_device_id()` (lo stesso
+  identificatore per-thread appena introdotto per il ledger, riusato qui senza bisogno di
+  aggiungere un parametro a nessun metodo - ogni metodo di `ConversationStateManager` lo legge
+  internamente): `None` (la voce locale, o un client companion senza `device_id`) e ogni
+  device_id noto hanno ora ciascuno il proprio slot indipendente. Un solo `Lock` guarda l'intero
+  dizionario (la contesa e' irrilevante per un'operazione rara e leggera come una conferma in
+  sospeso); `take_pending_action()`/`clear_pending_action()` rimuovono la chiave con `pop()`
+  invece di lasciarla con valore `None`, evitando che il dizionario cresca indefinitamente con una
+  voce per ogni device_id mai visto su un processo di lunga durata. Nessuna modifica a
+  `JakeCore`/`core/companion_server.py`: l'intero fix e' contenuto in
+  `core/conversation_state.py`, gia' l'unico punto che gestiva questo stato. Aggiunti 5 nuovi test
+  in `tests/test_conversation_state.py::PerChannelPendingActionTests` (slot indipendenti, nessuna
+  sovrascrittura, `take` di un canale non consuma quello di un altro, la voce locale e' un canale
+  a se', igiene di memoria) e 1 end-to-end in `tests/test_jake_core_pipeline.py`. Aggiornato anche
+  un test esistente (`test_denied_action_receipt_carries_the_device_id_set_on_this_thread`, F1.2.3/
+  F1.8.1 fondamenta) che impostava il device_id SOLO al momento della conferma, non anche quando
+  la richiesta era stata creata - comportamento non piu' valido ora che il canale conta anche per
+  QUALE slot usare, non solo per il campo nel ledger. Deliberatamente non affrontato: nessuna coda
+  generale per azioni concorrenti non legate a una conferma (il resto di F1.8.1). Prova:
+  2.263/2.263 test, ruff/mypy/compileall verdi su tutti i file toccati.
 - `F1.2.4` — 12/09/2026: `core/planner_provider.py::_build_output_schema()` chiedeva a Ollama
   passi con `"parameters": {"type": "object"}` SENZA alcuna restrizione sulle chiavi - la causa
   originale del bug corretto in F1.2.5 (un passo poteva arrivare gia' con `"confirmed": true`
@@ -1454,8 +1487,10 @@ Dipende da: F1.1.
 
 Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock o ledger incoerente.
 
-- Stato: `DOING`; `F1.8.1` chiuso parzialmente (la forma piu' grave del buco - doppia esecuzione
-  della stessa azione in sospeso - chiusa, non l'intera ownership di sessione, vedi sotto);
+- Stato: `DOING`; `F1.8.1` chiuso parzialmente (la parte di "ownership della sessione" ora
+  completa - doppia esecuzione della stessa azione in sospeso E slot per canale, entrambi chiusi,
+  vedi sotto; resta aperta "una coda per azioni concorrenti" - un meccanismo generale per
+  serializzare azioni concorrenti non legate a una conferma pendente, mai affrontato);
   `F1.8.2` chiuso per tutti i registri/store condivisi tra thread (ledger, promemoria, todo,
   memoria a lungo termine, centro notifiche, elenco skill registrate, archivio esempi
   frase->intent, registro dispositivi/handoff); `F1.8.3` chiuso per RUN_COMMAND (il solo subprocess
@@ -2912,7 +2947,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 27 incrementi completati e verificati (PR #28-#54), la
+Aggiornato 13/09/2026. Sessione lunga con 28 incrementi completati e verificati (PR #28-#55), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -2944,14 +2979,18 @@ parametro `password`/`pin`/`token`/etc ora ottiene sempre un placeholder fisso s
 valore, chiudendo anche il caso di un valore non-stringa che prima passava invariato), e
 `F1.2.3`/`F1.8.1` fondamenta (identita' del dispositivo companion propagata per thread via
 `contextvars` fino ai quattro chokepoint del ledger - decisione esplicita dell'utente su come
-identificare un canale, ancora senza alcuna decisione di policy basata su di essa). Il resto:
+identificare un canale, ancora senza alcuna decisione di policy basata su di essa), e `F1.8.1`
+chiusura (lo stesso identificatore riusato per dare a `ConversationStateManager` uno slot di
+azione in sospeso PER CANALE invece di uno globale - due dispositivi companion con una propria
+richiesta di conferma nello stesso istante non si sovrascrivono piu' a vicenda; decisione esplicita
+dell'utente, "anzi fai tutte e due", su cosa costruire per primo sopra le fondamenta). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.2` (parziale - la notifica di
 un'automazione ora porta lo stesso trace_id delle ricevute che l'ha prodotta), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.257/2.257 test, ruff/mypy/compileall verdi. `G1` resta aperto.
+`master` e' pulito, 2.263/2.263 test, ruff/mypy/compileall verdi. `G1` resta aperto.
 
 Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
 sessione (`sys.setswitchinterval()` abbassato + `threading.Barrier`, senza altro aiuto) NON
@@ -2985,10 +3024,8 @@ capability o intersezione), il resto di `F1.4` (una vera
 classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7` (il resto di `F1.7.2` -
 undo, mai wired a una ricevuta propria; `F1.7.3` retention differenziata; il resto di `F1.7.4` -
 altri tipi di dato per contenuto (telefono, IP, id dispositivo) - la classificazione per nome del
-parametro e' ora chiusa; `F1.7.8` e' chiuso), il resto di `F1.8` (il resto di `F1.8.1` - fondamenta
-poste (vedi F1.2.3 sopra), ma `ConversationStateManager` ha ancora un solo slot di azione in
-sospeso globale, non uno per dispositivo: due dispositivi con una propria conferma pendente nello
-stesso istante si sovrascrivono ancora a vicenda; coda generale per azioni concorrenti non legate a una conferma;
+parametro e' ora chiusa; `F1.7.8` e' chiuso), il resto di `F1.8` (il resto di `F1.8.1` - lo slot
+per canale e' ora chiuso, resta solo "una coda per azioni concorrenti" non legate a una conferma;
 il resto di `F1.8.4` - drain limitato di un'azione in corso, checkpoint vero, release device
 audio; il resto di `F1.8.5` - diagnosi di un deadlock vero su un lock applicativo, non solo un
 thread esterno lento; il resto di `F1.8.7` - undo, non ancora testabile per race finche' non

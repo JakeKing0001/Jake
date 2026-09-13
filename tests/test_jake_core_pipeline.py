@@ -30,6 +30,7 @@ from core.jake_core import JakeCore
 from core.planner import Plan, PlanStep
 from core.plan_executor import PlanOutcome, StepOutcome
 from core.policy_engine import PolicyEngine
+from core.request_context import reset_current_device_id, set_current_device_id
 from core.session_recorder import SessionRecorder
 from core.skill_result import SkillResult
 from skills.delete_path import DeletePathSkill
@@ -462,6 +463,55 @@ class ConcurrentPendingActionConfirmationTests(_JakeCoreTestCase):
 
         self.assertEqual(len(skill.calls), 1, "l'azione deve essere eseguita esattamente una volta, non una per thread")
         self.assertFalse(core.conversation_state.has_pending_action())
+
+
+class PerChannelPendingActionIntegrationTests(_JakeCoreTestCase):
+    """F1.8.1 (chiusura, uno slot per canale): a differenza di ConcurrentPendingActionConfirmationTests
+    sopra (due CHIAMATE concorrenti sulla STESSA conferma, gia' risolto da take_pending_action()),
+    qui sono due DISPOSITIVI DIVERSI, ciascuno con una PROPRIA richiesta di conferma pendente
+    nello stesso momento - il buco che restava aperto: prima di questa correzione, la seconda
+    set_pending_action() (dal secondo dispositivo) cancellava silenziosamente la prima."""
+
+    def test_two_devices_with_their_own_pending_confirmation_do_not_clobber_each_other(self):
+        class _RouterByPath(FakeRouter):
+            def detect_intent(self, text):
+                path = "phone_target.txt" if "telefono" in text else "tablet_target.txt"
+                return Command("DELETE_PATH", {"path": path})
+
+        skill = FakeSkill(SkillResult(success=True, data={}))
+        core = self._core(
+            skill_registry=FakeRegistry({"DELETE_PATH": skill}),
+            router=_RouterByPath(), always_confirm_intents={"DELETE_PATH"},
+        )
+
+        phone_token = set_current_device_id("phone1")
+        try:
+            core.answer("elimina il file dal telefono")
+        finally:
+            reset_current_device_id(phone_token)
+
+        tablet_token = set_current_device_id("tablet1")
+        try:
+            core.answer("elimina il file dal tablet")
+            # La richiesta del telefono non deve essere sparita solo perche' il tablet ha
+            # impostato la propria - il buco reale: prima, questa avrebbe sovrascritto quella.
+            core.answer("si")
+        finally:
+            reset_current_device_id(tablet_token)
+
+        self.assertEqual(skill.calls, [{"path": "tablet_target.txt", "confirmed": True}])
+
+        phone_token = set_current_device_id("phone1")
+        try:
+            self.assertTrue(core.conversation_state.has_pending_action(), "la richiesta del telefono non doveva essere persa")
+            core.answer("si")
+        finally:
+            reset_current_device_id(phone_token)
+
+        self.assertEqual(
+            skill.calls,
+            [{"path": "tablet_target.txt", "confirmed": True}, {"path": "phone_target.txt", "confirmed": True}],
+        )
 
 
 class PendingPolicyIntegrationTests(_JakeCoreTestCase):
