@@ -12,6 +12,7 @@ from core.policy_engine import (
     POLICY_REASON_ALLOWED, POLICY_REASON_BLOCKED, POLICY_REASON_CONFIRM, POLICY_REASON_REQUIRE_AUTH,
     POLICY_REASONS,
 )
+from core.request_context import reset_current_device_id, set_current_device_id
 from core.skill_result import SkillResult
 from skills.create_path import CreatePathSkill
 from tests.test_agent import FakeRetriever, ScriptedOllamaClient
@@ -301,3 +302,93 @@ class PolicyLedgerTests(unittest.TestCase):
     def test_receipt_reasons_are_always_closed_values(self):
         self.execute()
         self.assertTrue(all(r.get("policy_reason") in POLICY_REASONS for r in self.receipts()))
+
+
+class _PolicyLedgerFixture(unittest.TestCase):
+    """Stesse fixture di PolicyLedgerTests (setUp/execute/agent/enable_auth/receipts), estratte
+    qui perche' PolicyLedgerTests stessa ha gia' i propri metodi test_*: ereditare direttamente da
+    lei farebbe scoprire ed eseguire anche quelli sotto ogni sottoclasse, duplicandoli. Nessun
+    metodo test_* qui: solo fixture, come le classi base _With*/*TestCase gia' usate altrove in
+    questa sessione (es. tests/test_trigger_manager.py::_WithManager)."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.skill = FakeSkill()
+        self.registry = AgentRegistry({
+            "ADD_NOTE": self.skill, "GET_TIME": self.skill, "OPEN_APP": self.skill,
+            "OPEN_URL": self.skill, "CREATE_PATH": CreatePathSkill(),
+        })
+        self.core = _bare_core(skill_registry=self.registry, ledger_path=self.root / "ledger.jsonl")
+        for target, kwargs in (
+            ("core.jake_core.log_action", {}), ("core.agent.log_action", {}),
+            ("core.jake_core.fallbacks.pre_execution_rewrite", {"side_effect": lambda cmd, registry: cmd}),
+        ):
+            patcher = mock.patch(target, **kwargs)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def receipts(self):
+        return self.core.action_ledger.read_all()
+
+    def execute(self, intent="ADD_NOTE", parameters=None):
+        return self.core._execute_command("richiesta fixture", Command(intent, parameters or {"text": "fixture"}))
+
+    def enable_auth(self, hello=None):
+        gate = AuthGate(passphrase="fixture passphrase", windows_hello_enabled=hello is not None,
+                        windows_hello_verify=hello)
+        self.core.auth_gate = gate
+        self.core.policy_engine.auth_gate = gate
+        self.core.policy_engine.require_auth_intents.add("ADD_NOTE")
+
+    def agent(self, intent="ADD_NOTE", parameters=None, raw=False, agent_name="general"):
+        client = ScriptedOllamaClient([
+            {"action": {"intent": intent, "parameters": parameters if parameters is not None else {"text": "fixture"}}},
+            {"action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto."},
+        ])
+        return TaskAgent(
+            self.registry, FakeRetriever([]), client, model_provider=lambda: "fixture-model",
+            format_result=lambda name, result: str(result.data),
+            executor=self.registry.execute if raw else lambda name, params: self.core._resolve_and_execute(Command(name, params)),
+            action_ledger=self.core.action_ledger, fixed_tools=[intent], agent_name=agent_name,
+        )
+
+
+class DeviceIdInReceiptsTests(_PolicyLedgerFixture):
+    """F1.2.3/F1.8.1 (fondamenta): il device_id del dispositivo companion che ha originato la
+    richiesta (core/request_context.py) arriva nella ricevuta sia per il percorso diretto
+    (_log_action_outcome) sia per l'agente a passi (TaskAgent._log_step) - lo stesso meccanismo
+    per thread copre entrambi senza bisogno di passare device_id come argomento a ciascuno."""
+
+    def test_direct_command_receipt_carries_the_device_id_set_on_this_thread(self):
+        token = set_current_device_id("phone1")
+        try:
+            self.execute()
+        finally:
+            reset_current_device_id(token)
+        self.assertEqual(self.receipts()[0]["device_id"], "phone1")
+
+    def test_direct_command_receipt_omits_device_id_when_none_is_set(self):
+        self.execute()
+        self.assertNotIn("device_id", self.receipts()[0])
+
+    def test_agent_step_receipt_carries_the_device_id_set_on_this_thread(self):
+        token = set_current_device_id("tablet1")
+        try:
+            self.agent().run("fixture")
+        finally:
+            reset_current_device_id(token)
+        self.assertEqual(self.receipts()[0]["device_id"], "tablet1")
+
+    def test_denied_action_receipt_carries_the_device_id_set_on_this_thread(self):
+        self.enable_auth()
+        self.execute("ADD_NOTE")
+        token = set_current_device_id("phone1")
+        try:
+            self.core._handle_confirmation("passphrase sbagliata")
+        finally:
+            reset_current_device_id(token)
+        denied = [r for r in self.receipts() if r["result"] == "denied_auth"]
+        self.assertEqual(len(denied), 1)
+        self.assertEqual(denied[0]["device_id"], "phone1")

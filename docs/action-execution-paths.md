@@ -66,6 +66,28 @@ collegamento esplicito (un test, uno strumento, un futuro chiamante) ora si ferm
 eseguire senza nessun controllo (vedi `tests/test_execution_safety.py::RollbackEdgeCaseTests::
 test_policy_engine_none_is_fail_closed_not_no_restriction`).
 
+## Identita' del dispositivo mittente (F1.2.3/F1.8.1, fondamenta)
+
+**Aggiunto il 13/09/2026.** I quattro chokepoint del ledger (`JakeCore._log_action_outcome`/
+`_log_denied_action`, `TaskAgent._log_step`, `PlanExecutor._log_step`) ora popolano un campo
+`ActionReceipt.device_id` opzionale (`None` per un comando vocale locale o un'automazione in
+background) con l'id del dispositivo companion che ha originato la richiesta - vedi
+`core/request_context.py`. Propagato per THREAD (`contextvars.ContextVar`), non come parametro
+esplicito lungo la catena `answer` → `_process` → ... → i quattro chokepoint: aggiungere un
+parametro a ~10 firme intermedie solo per farlo arrivare a 4 punti finali avrebbe reso il
+cambiamento molto piu' invasivo per lo stesso risultato. `core/companion_server.py::_Handler.
+_handle_command` imposta il contesto per la durata della chiamata a `command_handler` se il body
+include `device_id` (lo stesso id gia' usato per `/claim`); `ThreadingHTTPServer` gestisce ogni
+richiesta sul proprio thread, quindi due richieste concorrenti da dispositivi diversi non si
+vedono mai a vicenda il valore (verificato empiricamente, non solo assunto dalla documentazione di
+`contextvars`, in `tests/test_request_context.py::ThreadIsolationTests` e end-to-end attraverso
+l'intero server HTTP in `tests/test_companion_server.py`).
+
+Solo VISIBILITA' nel ledger per ora, nessuna decisione di policy: `PolicyEngine` non legge ancora
+questo valore per nessuna decisione - e' la fondamenta che F1.2.3 (intersezione permessi per
+dispositivo) e F1.8.1 (identita' di canale per conferme concorrenti distinte) hanno bisogno prima
+di poter esistere, non l'una o l'altra funzionalita' completa.
+
 ## Cosa resta aperto
 
 - `F1.2.1` (parziale): il fail-open silenzioso del percorso 3 e' chiuso (vedi sopra). Resta
@@ -76,6 +98,12 @@ test_policy_engine_none_is_fail_closed_not_no_restriction`).
   distinguere "chiamata di test/tool fidata" da "chiamata di produzione", non ancora deciso.
 - `F1.2.5` (resto): sotto-azioni generate da workflow e autorizzazione completa dei rollback
   ancora aperte. Il retry ha la protezione conservativa di `F1.3.6`, non capability per risorsa.
+- `F1.2.3`/`F1.8.1` (resto, ora che l'identita' del dispositivo esiste - vedi sopra): `PolicyEngine`
+  non usa ancora `current_device_id()` per nessuna decisione (nessuna capability per-dispositivo,
+  nessuna intersezione con quelle utente/agente/skill/sessione); `ConversationStateManager`
+  (`core/conversation_state.py`) ha ancora UN solo slot di azione in sospeso globale, non uno per
+  dispositivo/canale - due dispositivi con una propria conferma pendente nello stesso istante si
+  sovrascrivono ancora a vicenda.
 - Questo inventario copre "chi puo' eseguire", non ancora "chi costruisce un `ActionProposal`"
   (`F1.1.2`, `F1.1.6`, `F1.1.7`): `_authorize_command` costruisce/valida `ActionProposal`,
   mentre le skill restituiscono ancora `SkillResult` (vedi `core/skill_result.py`). La ricevuta viene sintetizzata

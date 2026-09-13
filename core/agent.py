@@ -21,6 +21,7 @@ from core.execution_safety import VERIFIABLE_INTENTS, execute_action_with_retry,
 from core.kill_switch import KillSwitch
 from core.logger import log_action, new_trace_id
 from core.ollama_client import OllamaClient, OllamaError
+from core.request_context import current_device_id
 from core.risk import risk_of
 from core.schema_validation import validate_confirm_envelope
 from core.session_recorder import SessionRecorder
@@ -264,6 +265,7 @@ class TaskAgent:
                 idempotency_key=idempotency_key_of(intent, parameters),
                 verified=verification_status_of(verified), error_category=error_category_of(result),
                 policy_reason=policy_reason, duration_ms=duration_ms, model=model,
+                device_id=current_device_id(),
             ),
             private=private,
         )

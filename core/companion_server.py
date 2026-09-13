@@ -35,6 +35,7 @@ from typing import cast
 from core.device_registry import DeviceRegistry
 from core.event_bus import EventBus
 from core.hud_protocol import EventType, HudEvent
+from core.request_context import reset_current_device_id, set_current_device_id
 from core.version import PROTOCOL_VERSION, VERSION
 
 DEFAULT_HOST = "127.0.0.1"
@@ -176,7 +177,19 @@ class _Handler(BaseHTTPRequestHandler):
         text = (body.get("text") or "").strip()
         if not text:
             return self._json_response(400, {"error": "missing_text"})
-        response = self.companion.command_handler(text)
+        # F1.2.3/F1.8.1 (fondamenta): device_id opzionale nel body - se il client lo manda (lo
+        # stesso id gia' usato per /claim), il resto della catena di chiamate su QUESTO thread
+        # (JakeCore.answer -> ... -> ActionLedger) lo vede tramite core/request_context.py senza
+        # che questo metodo debba passarlo esplicitamente. reset SEMPRE nel finally: anche se
+        # ThreadingHTTPServer non riusa i thread tra richieste (ognuna ne crea uno nuovo, che
+        # parte gia' dal default), resettare resta la scelta corretta a prescindere dai dettagli
+        # di implementazione di chi gestisce le richieste.
+        device_id = (body.get("device_id") or "").strip() or None
+        token = set_current_device_id(device_id)
+        try:
+            response = self.companion.command_handler(text)
+        finally:
+            reset_current_device_id(token)
         self._json_response(200, {"response": response})
         return None
 

@@ -28,6 +28,7 @@ from core import orchestrator
 from core.orchestrator import JakeOrchestrator
 from core.policy_engine import POLICY_REASONS, PolicyDecision, PolicyEngine, strip_authorization_signals
 from core.plugin_loader import load_plugins
+from core.request_context import current_device_id
 from core.response_formatter import format_plan_outcome, format_skill_result
 from core.risk import risk_of
 from core.router import Router
@@ -867,6 +868,7 @@ class JakeCore:
                 requested_by="user", risk_decision=risk, authorization=authorization_of(result, parameters),
                 result=result, idempotency_key=idempotency_key_of(intent, parameters),
                 error_category=action_error.category, policy_reason=policy_reason, duration_ms=duration_ms, model=self.model,
+                device_id=current_device_id(),
             ),
             private=self.private_mode,
         )
@@ -967,6 +969,7 @@ class JakeCore:
                 authorization=authorization_of(result, parameters), result=result,
                 idempotency_key=idempotency_key_of(intent, parameters),
                 error_category=action_error.category, policy_reason=policy_reason,
+                device_id=current_device_id(),
             ),
             private=self.private_mode,
         )

@@ -10,6 +10,7 @@ from urllib import error, request
 
 from core.companion_server import CompanionServer
 from core.hud_protocol import EventType
+from core.request_context import current_device_id
 from core.version import PROTOCOL_VERSION, VERSION
 
 
@@ -107,6 +108,60 @@ class CommandEndpointTests(CompanionServerTestCase):
         # non sono mai arrivati come argomento: se lo fossero, sarebbero un dict/oggetto, non la
         # str che _fake_answer registra qui.
         self.assertEqual(self.command_calls, ["che ore sono"])
+
+    def test_device_id_in_the_body_is_visible_to_the_handler_via_request_context(self):
+        """F1.2.3/F1.8.1 (fondamenta): il body puo' includere lo stesso device_id gia' usato per
+        /claim - il command_handler (JakeCore.answer nel caso reale) lo vede tramite
+        core/request_context.py senza che arrivi come argomento esplicito (vedi il test sopra:
+        command_handler continua a ricevere SOLO il testo)."""
+        observed = []
+        server = CompanionServer(command_handler=lambda text: observed.append(current_device_id()) or "ok")
+        server.start()
+        self.addCleanup(server.stop)
+
+        status, body = _post(f"http://127.0.0.1:{server.port}/command", {"text": "ciao", "device_id": "phone1"})
+
+        self.assertEqual(status, 200)
+        self.assertEqual(observed, ["phone1"])
+
+    def test_missing_device_id_leaves_the_context_at_its_default(self):
+        observed = []
+        server = CompanionServer(command_handler=lambda text: observed.append(current_device_id()) or "ok")
+        server.start()
+        self.addCleanup(server.stop)
+
+        _post(f"http://127.0.0.1:{server.port}/command", {"text": "ciao"})
+
+        self.assertEqual(observed, [None])
+
+    def test_device_id_does_not_leak_to_a_request_from_a_different_device(self):
+        """Due richieste companion concorrenti da dispositivi diversi non devono mai vedersi a
+        vicenda il device_id (ThreadingHTTPServer: ogni richiesta gira sul proprio thread) -
+        stessa proprieta' di sicurezza gia' verificata in isolamento in
+        tests/test_request_context.py, qui end-to-end attraverso l'intero server HTTP."""
+        release_second_request = threading.Event()
+        observed = {}
+
+        def _handler(text):
+            device_id = current_device_id()
+            if device_id == "phone1":
+                release_second_request.wait(timeout=5)
+            observed[device_id] = text
+            return "ok"
+
+        server = CompanionServer(command_handler=_handler)
+        server.start()
+        self.addCleanup(server.stop)
+        url = f"http://127.0.0.1:{server.port}/command"
+
+        first = threading.Thread(target=_post, args=(url, {"text": "dal telefono", "device_id": "phone1"}))
+        first.start()
+        time.sleep(0.05)  # lascia partire la prima richiesta e bloccarsi in attesa dell'evento
+        _post(url, {"text": "dal tablet", "device_id": "tablet1"})
+        release_second_request.set()
+        first.join(timeout=5)
+
+        self.assertEqual(observed, {"phone1": "dal telefono", "tablet1": "dal tablet"})
 
     def test_handle_command_does_not_publish_events_itself(self):
         """USER_MESSAGE/JAKE_MESSAGE sono responsabilita' del command_handler (JakeCore.answer
