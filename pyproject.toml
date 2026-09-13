@@ -81,6 +81,8 @@ files = [
     "core/network.py",
     "core/plugin_loader.py",
     "core/process_sandbox.py",
+    "core/forge_worker.py",
+    "core/sandboxed_skill_worker.py",
     "core/secrets_vault.py",
     "core/temporal_parser.py",
     "core/win_dpi.py",
