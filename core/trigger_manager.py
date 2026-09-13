@@ -30,11 +30,24 @@ class TriggerManager:
         return self.workflow_manager.load(workflow_name) is not None
 
     def mark_fired(self, name: str, when_iso: str) -> None:
-        record = self._load_raw(name)
-        if record is None:
-            return
-        record["last_fired"] = when_iso
-        self.memory_manager.remember(name, json.dumps(record), category=self.CATEGORY)
+        # F1.8.7 ("testare race su trigger"): buco reale, riprodotto per davvero prima del fix -
+        # TriggerScheduler chiama mark_fired() da un thread separato (core/trigger_scheduler.py),
+        # mentre il thread principale puo' salvare lo STESSO trigger nello stesso istante (es.
+        # l'utente lo ridefinisce con SET_TRIGGER). _load_raw()+remember() come due chiamate
+        # separate, ciascuna bloccata solo al proprio interno da MemoryManager, lasciava una
+        # finestra: se save() dell'utente arrivava tra la lettura e la scrittura di questo metodo,
+        # la remember() qui sotto riscriveva il record con i dati VECCHI gia' caricati (solo con
+        # last_fired aggiornato), cancellando silenziosamente la modifica dell'utente. Con
+        # sys.setswitchinterval() abbassato (nessun ritardo artificiale necessario, a differenza
+        # di DeviceRegistry.claim() - qui la finestra include gia' una query SQL vera) si perdeva
+        # in 1 prova su 15. Corretto estendendo la sezione critica all'intera sequenza con
+        # memory_manager.lock (RLock, sicuro da riacquisire dentro remember()).
+        with self.memory_manager.lock:
+            record = self._load_raw(name)
+            if record is None:
+                return
+            record["last_fired"] = when_iso
+            self.memory_manager.remember(name, json.dumps(record), category=self.CATEGORY)
 
     def _load_raw(self, name: str) -> dict | None:
         results = self.memory_manager.recall(key=name, category=self.CATEGORY, limit=1)
