@@ -1375,11 +1375,14 @@ Dipende da: F1.1 e F1.3.
 Criterio di uscita: una failure end-to-end è ricostruibile senza esporre contenuti privati.
 
 - Stato: `DOING`; `F1.7.1` chiuso; `F1.7.2` **chiuso** (notifica di un'automazione E ricevuta di
-  un rollback, entrambe correlate con lo stesso trace_id, vedi sotto); `F1.7.4` chiuso parzialmente (percorsi/URL/email per contenuto,
+  un rollback, entrambe correlate con lo stesso trace_id, vedi sotto); `F1.7.3` chiuso
+  parzialmente (retention verificata gia' adeguata per log operativo e memoria, nuovo strumento di
+  archiviazione in sola lettura per l'audit di sicurezza, vedi sotto); `F1.7.4` chiuso
+  parzialmente (percorsi/URL/email per contenuto,
   ora anche parametri sensibili per NOME - password/pin/token/etc, vedi sotto);
   `F1.7.5` chiuso; `F1.7.6` **chiuso** (failure taxonomy E rollback rate, vedi sotto);
   `F1.7.7` chiuso; `F1.7.8` chiuso (i tre chokepoint - diretto, agente, automatico - tutti
-  verificati end-to-end, vedi sotto); resto aperto (`F1.7.3` retention).
+  verificati end-to-end, vedi sotto).
 - `F1.7.2` (parziale, notifica di un'automazione) — 13/09/2026: "collegare command, sub-step,
   verifica, undo e notifica con lo stesso trace id". Buco reale, non ipotizzato -
   `PlanExecutor.execute()` correla gia' ogni singolo passo alla stessa ricevuta nel ledger
@@ -1440,6 +1443,46 @@ Criterio di uscita: una failure end-to-end è ricostruibile senza esporre conten
   (`rollback_effect()` produce anch'esso una `ActionReceipt` che deve rispettare lo stesso
   contratto minimo degli altri quattro). Con questo, `F1.7.2` e' **chiuso**. Prova: 2.311/2.311
   test, ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.7.3` (parziale, memoria e log operativo verificati, nuovo strumento per l'audit di
+  sicurezza) — 13/09/2026: "definire retention diversa per log operativo, audit di sicurezza e
+  memoria" - tre categorie distinte, tre esiti distinti. **Log operativo**
+  (`data/jake_actions.jsonl`/`jake.log`): VERIFICA, nessun cambio di codice -
+  `core/logger.py::get_action_logger()`/`get_logger()` configurano gia' un
+  `RotatingFileHandler` con un limite di dimensione fisso (2MB x 4 file), quindi questa
+  categoria ha gia' una retention limitata per costruzione, non illimitata. **Memoria**
+  (`core/memory_manager.py`): VERIFICA, nessun cambio di codice, ma solo dopo aver scartato un
+  piano scritto che avrebbe introdotto una regressione - l'idea iniziale era agganciare
+  `purge_history_older_than()` (cronologia di conversazione) allo stesso giro periodico
+  automatico di `SystemAdvisor` gia' usato per `purge_expired()` (scadenza per-ricordo), per dare
+  a "memoria" una politica di retention completa e automatica. Il docstring di
+  `purge_history_older_than()` dichiara pero' esplicitamente che l'invocazione automatica e' una
+  scelta di design gia' RIFIUTATA: "Deliberatamente SOLO su richiesta esplicita dell'utente...,
+  mai automatica in background: cancellare dati dell'utente senza che li abbia chiesti sarebbe un
+  danno silenzioso, non una funzionalita' di privacy" - lo stesso principio "mai automatica,
+  sempre esplicita" gia' seguito altrove in F1. Rispettato senza modificarlo: i ricordi con
+  scadenza esplicita per-ricordo (`ttl_days`) hanno gia' una retention automatica legittima
+  (l'utente l'ha chiesta lui scegliendo la scadenza), la cronologia di conversazione resta
+  cancellabile solo a comando (`PURGE_OLD_HISTORY`, gia' esistente). **Audit di sicurezza**
+  (`data/jake_ledger.jsonl`): buco reale, colmato con uno strumento NUOVO,
+  `tools/archive_ledger.py`. A differenza delle altre due categorie, il ledger (append-only per
+  F1.7.1, crash-resistant) non aveva NESSUN limite di crescita - confermato empiricamente
+  eseguendo il nuovo strumento contro il ledger reale del progetto (3.969 voci, 1,2MB). Data la
+  natura di un registro di audit (la sua utilita' e' restare disponibile per eventi passati,
+  proprio quelli che qualcuno vorrebbe far sparire) e il rischio di corsa critica nel troncare dal
+  vivo un file a cui Jake stesso continua a scrivere (il lock di `ActionLedger` e' per-processo,
+  invisibile a uno strumento esterno), lo strumento e' stato progettato deliberatamente in SOLA
+  LETTURA sul ledger sorgente: legge le voci piu' vecchie di una soglia (`split_by_age()`, stesso
+  principio "nega per default" gia' visto altrove in F1 - una voce senza `ts` valido resta
+  prudentemente tra le recenti) e le copia in un file di archivio separato (`archive()`), senza
+  mai troncare o modificare l'originale - sicuro da eseguire anche con Jake in esecuzione. Se/
+  quando rimuovere per davvero le voci gia' archiviate dal file originale resta,
+  deliberatamente, una decisione dell'utente, non dello strumento - stessa filosofia di
+  `purge_history_older_than()` sopra. Aggiunti 10 nuovi test in `tests/test_archive_ledger.py`
+  (`LoadJsonlTests`, `SplitByAgeTests`, `DefaultArchivePathTests`, `ArchiveEndToEndTests` -
+  incluso un test end-to-end su file temporanei reali che verifica byte-per-byte che il file
+  sorgente resti immutato). Non ancora affrontato: la rimozione EFFETTIVA delle voci archiviate
+  dal ledger live resta manuale/fuori scope, per scelta. Prova: 2.327/2.327 test,
+  ruff/mypy/compileall verdi su tutti i file toccati.
 - `F1.7.4` — 13/09/2026: "aggiungere redazione strutturata per tipo di dato, non solo lunghezza
   stringa". Non un buco trovato e corretto, una funzionalita' NUOVA - `core/session_recorder.py::
   redact_value()` sostituiva OGNI stringa con lo stesso segnaposto generico `<str:N caratteri>`,
@@ -3105,7 +3148,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 34 incrementi completati e verificati (PR #28-#61), la
+Aggiornato 13/09/2026. Sessione lunga con 35 incrementi completati e verificati (PR #28-#62), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -3164,13 +3207,19 @@ evento distinto anche in `data/jake_actions.jsonl` con `result` a prefisso `"rol
 dashboard calcola una vera percentuale invece di ometterla; trovato e corretto nello stesso
 passaggio un buco laterale - contare `"rollback_success"` come un fallimento perche' diverso dalla
 stringa esatta `"success"` avrebbe gonfiato "fallimenti"/error rate per skill con l'esito CORRETTO
-di un errore altrove). Il resto:
+di un errore altrove), e `F1.7.3` (retention: **verifica**, non fix, per log operativo -
+gia' limitato per dimensione da `RotatingFileHandler` - e memoria - `purge_expired()` gia'
+automatico per scadenza esplicita, `purge_history_older_than()` deliberatamente MAI automatico,
+principio scoperto rileggendo il suo stesso docstring prima di introdurre per errore una
+regressione; **funzionalita' nuova**, non fix, per l'audit di sicurezza - `tools/archive_ledger.py`,
+uno strumento in sola lettura sul ledger che copia le voci vecchie in un archivio separato senza
+mai troncare l'originale, la rimozione vera resta una decisione esplicita dell'utente). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.317/2.317 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.327/2.327 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati, non coperto da "mypy selettivo" in CI). `G1` resta aperto.
 
 Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
@@ -3203,10 +3252,12 @@ dichiarati - FIND_FILE senza `path` esplicito, CHECK_WEBSITE_STATUS/LIST_SMART_D
 app/contatto/device su stringa grezza non risolta),
 `F1.2.3` (resto: prima capability per dispositivo chiusa - `device_blocked_intents` - ma
 l'intersezione con agente/skill/sessione resta aperta), il resto di `F1.4` (una vera
-classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7` (`F1.7.2` e `F1.7.6` sono
-ora CHIUSI - l'undo scrive una ricevuta propria correlata per trace_id, e la dashboard mostra un
-vero rollback rate; resta solo `F1.7.3` retention
-differenziata; il resto di `F1.7.4` -
+classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7` (`F1.7.2`, `F1.7.3` e
+`F1.7.6` sono ora CHIUSI (o chiusi quanto possibile senza una decisione di rimozione attiva) -
+l'undo scrive una ricevuta propria correlata per trace_id, la dashboard mostra un vero rollback
+rate, e le tre categorie di retention sono verificate/coperte (log operativo e memoria gia'
+adeguati, audit di sicurezza ora con uno strumento di archiviazione in sola lettura); il resto di
+`F1.7.4` -
 altri tipi di dato per contenuto (telefono, IP, id dispositivo) - la classificazione per nome del
 parametro e' ora chiusa; `F1.7.8` e' chiuso), il resto di `F1.8` (il resto di `F1.8.1` - lo slot
 per canale e' ora chiuso, resta solo "una coda per azioni concorrenti" non legate a una conferma;
