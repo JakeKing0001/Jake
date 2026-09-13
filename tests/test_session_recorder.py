@@ -78,6 +78,50 @@ class StructuredRedactionByTypeTests(unittest.TestCase):
         value = "tesi_finale.pdf"
         self.assertEqual(redact_value(value), f"<str:{len(value)} caratteri>")
 
+    def test_ipv4_address_shows_only_the_version_not_the_octets(self):
+        value = "192.168.1.42"
+        self.assertEqual(redact_value(value), f"<ip:{len(value)} caratteri, versione=v4>")
+
+    def test_ipv4_with_an_out_of_range_octet_is_not_misclassified(self):
+        value = "999.999.999.999"
+        self.assertEqual(redact_value(value), f"<str:{len(value)} caratteri>")
+
+    def test_a_three_component_version_number_is_not_misclassified_as_ipv4(self):
+        value = "3.11.5"
+        self.assertEqual(redact_value(value), f"<str:{len(value)} caratteri>")
+
+    def test_ipv6_address_is_recognized(self):
+        value = "2001:0db8:85a3:0000:0000:8a2e:0370:7334"
+        self.assertEqual(redact_value(value), f"<ip:{len(value)} caratteri, versione=v6>")
+
+    def test_compressed_ipv6_address_is_recognized(self):
+        value = "fe80::1"
+        self.assertEqual(redact_value(value), f"<ip:{len(value)} caratteri, versione=v6>")
+
+    def test_a_clock_time_is_not_misclassified_as_ipv6(self):
+        """"14:30:00" e' fatto anche lui di sole cifre e ":", ma con soli 3 gruppi e senza "::"
+        non e' una struttura IPv6 valida - deve restare il segnaposto generico."""
+        value = "14:30:00"
+        self.assertEqual(redact_value(value), f"<str:{len(value)} caratteri>")
+
+    def test_phone_number_with_country_code_shows_only_the_prefix(self):
+        value = "+39 320 1234567"
+        self.assertEqual(redact_value(value), f"<telefono:{len(value)} caratteri, prefisso=+39>")
+
+    def test_phone_number_with_local_formatting_and_no_country_code(self):
+        value = "(02) 1234-5678"
+        self.assertEqual(redact_value(value), f"<telefono:{len(value)} caratteri>")
+
+    def test_a_bare_digit_string_without_formatting_is_not_misclassified_as_a_phone_number(self):
+        """Senza un prefisso "+" o un separatore, una sequenza di cifre e' troppo ambigua (un
+        PIN, un codice OTP, un ID) per essere classificata come telefono solo per la lunghezza."""
+        value = "3201234567"
+        self.assertEqual(redact_value(value), f"<str:{len(value)} caratteri>")
+
+    def test_a_short_digit_sequence_is_not_misclassified_as_a_phone_number(self):
+        value = "+39 12"
+        self.assertEqual(redact_value(value), f"<str:{len(value)} caratteri>")
+
 
 class RedactionByParameterNameTests(unittest.TestCase):
     """F1.7.4 ("classificazione per nome del parametro, non solo per contenuto"): un valore

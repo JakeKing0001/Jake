@@ -1378,8 +1378,9 @@ Criterio di uscita: una failure end-to-end è ricostruibile senza esporre conten
   un rollback, entrambe correlate con lo stesso trace_id, vedi sotto); `F1.7.3` chiuso
   parzialmente (retention verificata gia' adeguata per log operativo e memoria, nuovo strumento di
   archiviazione in sola lettura per l'audit di sicurezza, vedi sotto); `F1.7.4` chiuso
-  parzialmente (percorsi/URL/email per contenuto,
-  ora anche parametri sensibili per NOME - password/pin/token/etc, vedi sotto);
+  parzialmente (percorsi/URL/email/IP/telefono per contenuto,
+  parametri sensibili per NOME - password/pin/token/etc, vedi sotto; resta solo
+  "identificatore di dispositivo", deliberatamente fuori scope per essere troppo vago);
   `F1.7.5` chiuso; `F1.7.6` **chiuso** (failure taxonomy E rollback rate, vedi sotto);
   `F1.7.7` chiuso; `F1.7.8` chiuso (i tre chokepoint - diretto, agente, automatico - tutti
   verificati end-to-end, vedi sotto).
@@ -1533,6 +1534,31 @@ Criterio di uscita: una failure end-to-end è ricostruibile senza esporre conten
   altro dict). Non ancora affrontato: altri tipi di dato per CONTENUTO (numero di telefono,
   indirizzo IP, identificatore di dispositivo - il gap gia' noto lasciato dalla prima fetta).
   Prova: 2.233/2.233 test, ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.7.4` (terza fetta, indirizzo IP e numero di telefono per contenuto) — 13/09/2026: colma due
+  dei tre tipi lasciati aperti dalla prima fetta. Funzionalita' nuova, stessa euristica
+  conservativa gia' applicata a percorso/URL/email in `redact_value()`: un IPv4
+  (`<ip:N caratteri, versione=v4>`, con convalida numerica di ogni ottetto 0-255 - cosi'
+  "999.999.999.999" o un numero di versione a 3 cifre come "3.11.5" non vengono scambiati per un
+  indirizzo), un IPv6 (`<ip:N caratteri, versione=v6>`, con una convalida STRUTTURALE - non solo
+  "cifre esadecimali e due punti" - che richiede esattamente 8 gruppi (o meno con una singola
+  compressione "::"), cosi' un orario come "14:30:00", fatto anch'esso di sole cifre e ":", non
+  viene scambiato per un IPv6: ha solo 3 gruppi separati da un singolo ":", una struttura mai
+  valida per un indirizzo IPv6 vero), un numero di telefono (`<telefono:N caratteri[,
+  prefisso=+NN]>`, rivela il prefisso internazionale se presente - stessa idea del dominio per
+  URL/email, un'informazione a bassa capacita' identificativa ma diagnosticamente utile, es. "il
+  bug capita solo con numeri +39" - mai le cifre vere). Deliberatamente conservativo sul telefono:
+  una sequenza di sole cifre senza un prefisso "+" o un separatore di formattazione
+  (spazio/trattino/parentesi) resta il segnaposto generico, perche' troppo ambigua rispetto a un
+  PIN/OTP/ID qualsiasi per essere classificata come telefono solo dalla lunghezza (7-15 cifre,
+  standard E.164). **Deliberatamente FUORI scope** (a differenza di IP/telefono, gia' menzionato
+  come limite noto): "identificatore di dispositivo" - non ha un formato standard riconoscibile (un
+  ID Home Assistant puo' essere un UUID, un hex arbitrario, o `dominio.oggetto`), troppo vago per
+  un'euristica per contenuto senza rischiare falsi positivi su testo libero qualsiasi - stesso
+  motivo per cui altre aree vaghe di questa sessione sono state esplicitamente rimandate. Aggiunti
+  10 nuovi test in `tests/test_session_recorder.py::StructuredRedactionByTypeTests` (IPv4/IPv6
+  validi, ottetto fuori range, numero di versione a 3 componenti, orario NON scambiato per IPv6,
+  telefono con/senza prefisso, sequenza di cifre nuda NON scambiata per telefono, sequenza troppo
+  corta). Prova: 2.337/2.337 test, ruff/mypy/compileall verdi su tutti i file toccati.
 - `F1.7.5` — 12/09/2026: "rendere replay sicuro: dry-run predefinito, scope temporaneo e conferma
   per effetti". Buco reale, riprodotto prima del fix - **un bypass completo dell'intera
   architettura di autorizzazione costruita in questa sessione, in uno strumento di debug**.
@@ -3148,7 +3174,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 35 incrementi completati e verificati (PR #28-#62), la
+Aggiornato 13/09/2026. Sessione lunga con 36 incrementi completati e verificati (PR #28-#63), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -3213,13 +3239,19 @@ automatico per scadenza esplicita, `purge_history_older_than()` deliberatamente 
 principio scoperto rileggendo il suo stesso docstring prima di introdurre per errore una
 regressione; **funzionalita' nuova**, non fix, per l'audit di sicurezza - `tools/archive_ledger.py`,
 uno strumento in sola lettura sul ledger che copia le voci vecchie in un archivio separato senza
-mai troncare l'originale, la rimozione vera resta una decisione esplicita dell'utente). Il resto:
+mai troncare l'originale, la rimozione vera resta una decisione esplicita dell'utente), e `F1.7.4`
+terza fetta - IP e telefono per contenuto (funzionalita' nuova: un IPv4/IPv6 riconosciuto mostra
+solo la versione, un numero di telefono solo il prefisso internazionale se presente, mai il
+contenuto vero; convalida STRUTTURALE per IPv6 - non solo "cifre e due punti" - cosi' un orario
+come "14:30:00" non viene scambiato per un indirizzo; "identificatore di dispositivo",
+il terzo tipo gia' citato nel gap, lasciato deliberatamente fuori scope per essere troppo vago,
+senza un formato standard riconoscibile). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.327/2.327 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.337/2.337 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati, non coperto da "mypy selettivo" in CI). `G1` resta aperto.
 
 Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
@@ -3256,10 +3288,11 @@ classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7` (`F1.7.
 `F1.7.6` sono ora CHIUSI (o chiusi quanto possibile senza una decisione di rimozione attiva) -
 l'undo scrive una ricevuta propria correlata per trace_id, la dashboard mostra un vero rollback
 rate, e le tre categorie di retention sono verificate/coperte (log operativo e memoria gia'
-adeguati, audit di sicurezza ora con uno strumento di archiviazione in sola lettura); il resto di
-`F1.7.4` -
-altri tipi di dato per contenuto (telefono, IP, id dispositivo) - la classificazione per nome del
-parametro e' ora chiusa; `F1.7.8` e' chiuso), il resto di `F1.8` (il resto di `F1.8.1` - lo slot
+adeguati, audit di sicurezza ora con uno strumento di archiviazione in sola lettura); `F1.7.4` e'
+ora chiuso quanto ha senso chiudere per contenuto - percorso/URL/email/IP/telefono riconosciuti,
+classificazione per nome del parametro chiusa, "identificatore di dispositivo" deliberatamente
+fuori scope per essere troppo vago (nessun formato standard); `F1.7.8` e' chiuso), il resto di
+`F1.8` (il resto di `F1.8.1` - lo slot
 per canale e' ora chiuso, resta solo "una coda per azioni concorrenti" non legate a una conferma;
 il resto di `F1.8.4` - drain limitato di un'azione in corso, checkpoint vero, release device
 audio; il resto di `F1.8.5` - diagnosi di un deadlock vero su un lock applicativo, non solo un
