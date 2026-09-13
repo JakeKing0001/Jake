@@ -228,6 +228,11 @@ class JakeCore:
             # utente avanzato puo' limitare CREATE_PATH/RENAME_PATH/MOVE_PATH/DELETE_PATH a
             # cartelle esplicite in config.json, come gia' fa con blocked_intents.
             allowed_filesystem_roots=config.get("allowed_filesystem_roots", []) or [],
+            # F1.2.3 (prima capability per dispositivo): {device_id: [intent, ...]} in
+            # config.json, vuoto per default. Es. {"phone-ospite": ["DELETE_PATH", "RUN_COMMAND"]}
+            # limita cosa puo' fare QUEL dispositivo companion, senza toccare la voce locale o
+            # altri dispositivi.
+            device_blocked_intents=config.get("device_blocked_intents", {}) or {},
         )
         # F1.2.5: collegato DOPO la creazione (self.agent/coding_agent/research_agent esistono
         # gia', self.policy_engine no, quando i tre TaskAgent vengono costruiti sopra) - senza
