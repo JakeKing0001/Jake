@@ -98,12 +98,18 @@ di poter esistere, non l'una o l'altra funzionalita' completa.
   distinguere "chiamata di test/tool fidata" da "chiamata di produzione", non ancora deciso.
 - `F1.2.5` (resto): sotto-azioni generate da workflow e autorizzazione completa dei rollback
   ancora aperte. Il retry ha la protezione conservativa di `F1.3.6`, non capability per risorsa.
-- `F1.2.3`/`F1.8.1` (resto, ora che l'identita' del dispositivo esiste - vedi sopra): `PolicyEngine`
+- `F1.8.1` (parte "ownership della sessione" chiusa, 13/09/2026): `ConversationStateManager` (`core/conversation_state.py`) usa
+  ora un dizionario `{canale: azione}` (`_pending_actions`, chiave `current_device_id()`) invece
+  di un unico slot globale - due dispositivi con una propria conferma pendente nello stesso
+  istante hanno ciascuno il proprio, senza sovrascriversi a vicenda (vedi
+  `tests/test_conversation_state.py::PerChannelPendingActionTests` e, end-to-end con un vero
+  `JakeCore.answer()`, `tests/test_jake_core_pipeline.py::PerChannelPendingActionIntegrationTests`).
+  Resta aperta l'altra meta' del testo originale di F1.8.1, "una coda per azioni concorrenti": un
+  meccanismo generale per serializzare azioni concorrenti non legate a una conferma pendente, mai
+  affrontato.
+- `F1.2.3` (resto, ora che l'identita' del dispositivo esiste - vedi sopra): `PolicyEngine`
   non usa ancora `current_device_id()` per nessuna decisione (nessuna capability per-dispositivo,
-  nessuna intersezione con quelle utente/agente/skill/sessione); `ConversationStateManager`
-  (`core/conversation_state.py`) ha ancora UN solo slot di azione in sospeso globale, non uno per
-  dispositivo/canale - due dispositivi con una propria conferma pendente nello stesso istante si
-  sovrascrivono ancora a vicenda.
+  nessuna intersezione con quelle utente/agente/skill/sessione).
 - Questo inventario copre "chi puo' eseguire", non ancora "chi costruisce un `ActionProposal`"
   (`F1.1.2`, `F1.1.6`, `F1.1.7`): `_authorize_command` costruisce/valida `ActionProposal`,
   mentre le skill restituiscono ancora `SkillResult` (vedi `core/skill_result.py`). La ricevuta viene sintetizzata
