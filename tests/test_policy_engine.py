@@ -362,12 +362,43 @@ class FilesystemCapabilityTests(unittest.TestCase):
         decision = engine.decide_interactive("DELETE_PATH", {"path": traversal})
         self.assertEqual(decision, PolicyDecision.BLOCK)
 
-    def test_read_only_path_intents_are_not_covered_yet(self):
-        """Dichiarato apertamente nel modulo: solo le quattro mutazioni sono coperte oggi, non
-        FIND_FILE/GET_FILE_INFO/READ_FILE_TEXT."""
+    def test_read_only_path_intents_are_now_covered_too(self):
+        """F1.2.2 (terza fetta): FIND_FILE/GET_FILE_INFO/READ_FILE_TEXT (RiskLevel.READ_ONLY)
+        rispettano la capability quanto le quattro mutazioni - altrimenti la capability
+        lascerebbe comunque Jake libero di LEGGERE qualunque file fuori dal recinto configurato."""
         engine = PolicyEngine(allowed_filesystem_roots={str(self.allowed_root)})
-        decision = engine.decide_interactive("FIND_FILE", {"path": str(self.outside_root)})
+        for intent in ("FIND_FILE", "GET_FILE_INFO", "READ_FILE_TEXT"):
+            with self.subTest(intent=intent):
+                decision = engine.decide_interactive(intent, {"path": str(self.outside_root / "x.txt")})
+                self.assertEqual(decision, PolicyDecision.BLOCK)
+
+    def test_read_only_path_intents_inside_an_allowed_root_are_still_permitted(self):
+        engine = PolicyEngine(allowed_filesystem_roots={str(self.allowed_root)})
+        for intent in ("FIND_FILE", "GET_FILE_INFO", "READ_FILE_TEXT"):
+            with self.subTest(intent=intent):
+                decision = engine.decide_interactive(intent, {"path": str(self.allowed_root / "x.txt")})
+                self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_open_path_is_deliberately_not_covered(self):
+        """OPEN_PATH e' RiskLevel.LOCAL_REVERSIBLE (apre un file con l'applicazione predefinita),
+        non READ_ONLY - un rischio diverso da una lettura pura, fuori scope per questa capability
+        finche' non viene deciso diversamente."""
+        engine = PolicyEngine(allowed_filesystem_roots={str(self.allowed_root)})
+        decision = engine.decide_interactive("OPEN_PATH", {"path": str(self.outside_root / "x.txt")})
         self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_find_file_without_an_explicit_path_is_not_restricted(self):
+        """Gap noto e dichiarato apertamente: il parametro `path` di FIND_FILE e' opzionale (cerca
+        nelle cartelle utente comuni se omesso) - senza un percorso da controllare, questo
+        controllo non ha nulla su cui applicarsi."""
+        engine = PolicyEngine(allowed_filesystem_roots={str(self.allowed_root)})
+        decision = engine.decide_interactive("FIND_FILE", {"name": "tesi.pdf"})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_read_only_path_intents_are_covered_on_the_automated_path_too(self):
+        engine = PolicyEngine(allowed_filesystem_roots={str(self.allowed_root)})
+        decision = engine.decide_automated("READ_FILE_TEXT", {"path": str(self.outside_root / "x.txt")})
+        self.assertEqual(decision, PolicyDecision.BLOCK)
 
     def test_capability_denial_is_checked_before_confirmation_would_otherwise_apply(self):
         """Un DELETE_PATH gia' 'confirmed' non deve bypassare la capability - il controllo di

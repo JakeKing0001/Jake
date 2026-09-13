@@ -34,13 +34,13 @@ F1.2.2 (capability, primo pezzo): `allowed_filesystem_roots` e' la prima capabil
 solo un intent permesso/vietato, ma UN INTENT permesso solo entro certi confini. Deliberatamente
 opt-in e limitata: default vuoto (nessuna restrizione, comportamento identico a prima - Jake
 continua a poter toccare qualunque percorso come sempre, non e' un cambio retroattivo che
-romperebbe l'uso normale senza che l'utente lo chieda), e applicata oggi ai quattro intent di
-mutazione filesystem gia' raggruppati altrove (CREATE_PATH/RENAME_PATH/MOVE_PATH/DELETE_PATH, vedi
-core/execution_safety.py::INTENT_SAFETY_REGISTRY), sia sul percorso interattivo (decide_interactive)
-sia su quello automatico (decide_automated, esteso in un secondo momento - vedi la nota su
-`parameters` piu' sotto). App/contatto/dominio web/device/servizio Home Assistant/rete/durata (le
-altre capability elencate in ROADMAP.md) e l'intersezione multi-livello di F1.2.3 (utente/
-dispositivo/agente/skill/sessione) restano completamente aperte."""
+romperebbe l'uso normale senza che l'utente lo chieda), applicata sia sul percorso interattivo
+(decide_interactive) sia su quello automatico (decide_automated), e oggi copre sia le quattro
+mutazioni (CREATE_PATH/RENAME_PATH/MOVE_PATH/DELETE_PATH) sia le tre letture
+(FIND_FILE/GET_FILE_INFO/READ_FILE_TEXT, vedi FILESYSTEM_CAPABILITY_INTENTS piu' sotto per il
+perche' OPEN_PATH ne resta fuori). App/contatto/dominio web/device/servizio Home Assistant/rete/
+durata (le altre capability elencate in ROADMAP.md) e l'intersezione multi-livello di F1.2.3
+(utente/dispositivo/agente/skill/sessione) restano completamente aperte."""
 import os
 from enum import Enum
 from pathlib import Path
@@ -92,17 +92,30 @@ POLICY_REASONS = frozenset({
     POLICY_REASON_CAPABILITY_DENIED,
 })
 
-# F1.2.2: gli stessi quattro intent gia' raggruppati in core/execution_safety.py::
+# F1.2.2: le quattro mutazioni sono le stesse gia' raggruppate in core/execution_safety.py::
 # INTENT_SAFETY_REGISTRY come "i quattro intent filesystem" (naturalmente idempotenti, con
-# rollback) - qui sono anche gli unici che oggi rispettano allowed_filesystem_roots. Trovare/
-# leggere file (FIND_FILE, GET_FILE_INFO, READ_FILE_TEXT...) non e' ancora coperto: un primo
-# passo deliberatamente limitato alle mutazioni, le piu' rischiose.
-FILESYSTEM_CAPABILITY_INTENTS = frozenset({"CREATE_PATH", "RENAME_PATH", "MOVE_PATH", "DELETE_PATH"})
+# rollback) - quella e' pero' una lista con uno scopo DIVERSO (chi ha un compensating action per
+# il rollback), una coincidenza di quattro nomi in comune, non lo stesso insieme per definizione:
+# OPEN_PATH non c'e' qui (RiskLevel.LOCAL_REVERSIBLE, non READ_ONLY - apre un file con
+# l'applicazione predefinita, un rischio diverso da una lettura pura, deliberatamente fuori da
+# questa prima estensione). FIND_FILE/GET_FILE_INFO/READ_FILE_TEXT (RiskLevel.READ_ONLY, vedi
+# core/risk.py) sono coperti da questa capability quanto le quattro mutazioni: "solo dentro le
+# radici consentite" vale anche per trovare/leggere, non solo per creare/spostare/cancellare -
+# altrimenti la capability lascerebbe comunque Jake libero di leggere qualunque file sul disco,
+# vanificando in parte il senso di un "recinto" filesystem. FIND_FILE ha il suo parametro `path`
+# OPZIONALE (cerca nelle cartelle utente comuni se omesso): quando omesso, questo controllo non ha
+# nulla da confrontare e non si applica (stesso principio "un valore assente non viene bloccato"
+# gia' vero per ogni altro intent qui) - un gap noto, non ancora chiuso: la ricerca di default
+# nelle cartelle comuni puo' ancora uscire dalle radici consentite se l'utente non specifica un
+# percorso esplicito.
+FILESYSTEM_CAPABILITY_INTENTS = frozenset({
+    "CREATE_PATH", "RENAME_PATH", "MOVE_PATH", "DELETE_PATH", "FIND_FILE", "GET_FILE_INFO", "READ_FILE_TEXT",
+})
 
-# Nomi di parametro gia' in uso dalle quattro skill sopra per un percorso su cui l'azione ha
-# effetto (vedi le rispettive metadata["parameters"]): "path" da tutte e quattro,
-# "destination" in aggiunta da MOVE_PATH - un file spostato FUORI dalle radici consentite
-# sarebbe un modo per aggirare la capability anche partendo da un percorso permesso.
+# Nomi di parametro gia' in uso dalle skill sopra per un percorso su cui l'azione ha effetto
+# (vedi le rispettive metadata["parameters"]): "path" da tutte e sette, "destination" in aggiunta
+# da MOVE_PATH - un file spostato FUORI dalle radici consentite sarebbe un modo per aggirare la
+# capability anche partendo da un percorso permesso.
 _FILESYSTEM_PATH_PARAMETER_KEYS = ("path", "destination")
 
 
