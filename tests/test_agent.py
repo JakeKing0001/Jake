@@ -636,6 +636,51 @@ class ActionLedgerWiringTests(unittest.TestCase):
         self.assertTrue(ledger.record.call_args.kwargs["private"])
 
 
+class ActionErrorWiredIntoTheLedgerTests(unittest.TestCase):
+    """F1.1.7 (secondo chokepoint adottato, dopo il pilota F1.1.6 su JakeCore -
+    tests/test_jake_core_action_contracts.py): TaskAgent._log_step costruisce ora un ActionError
+    reale (F1.1.2) e ne usa la categoria per la ricevuta - stesso valore di prima
+    (error_category_of), ma attraverso il tipo condiviso. Un ActionLedger vero su file
+    temporaneo, non mockato: verifica cosa finisce SU DISCO."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.ledger_path = Path(self._tmpdir.name) / "ledger.jsonl"
+
+    def test_a_successful_step_is_categorized_as_success_via_the_shared_contract(self):
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
+        client = ScriptedOllamaClient([
+            {"thought": "Aggiungo l'appunto", "action": {"intent": "ADD_NOTE", "parameters": {"text": "prova"}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto.", "ask_user": ""},
+        ])
+        agent = _agent(registry, client)
+        agent.action_ledger = ActionLedger(path=self.ledger_path)
+
+        with unittest.mock.patch("core.agent.log_action"):
+            agent.run("aggiungi un appunto")
+
+        receipts = agent.action_ledger.read_all()
+        self.assertEqual(receipts[0]["error_category"], "success")
+
+    def test_a_transient_failure_is_categorized_as_transient_via_the_shared_contract(self):
+        registry = FakeRegistry(add_note_results=[SkillResult(success=False, data={}, error="OPERATION_FAILED")])
+        client = ScriptedOllamaClient([
+            {"thought": "Aggiungo l'appunto", "action": {"intent": "ADD_NOTE", "parameters": {"text": "prova"}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Non riuscito.", "ask_user": ""},
+        ])
+        agent = _agent(registry, client)
+        agent.action_ledger = ActionLedger(path=self.ledger_path)
+
+        with unittest.mock.patch("core.agent.log_action"):
+            agent.run("aggiungi un appunto")
+
+        receipts = agent.action_ledger.read_all()
+        self.assertEqual(receipts[0]["error_category"], "transient")
+
+
 class SpecializedAgentConfigurationTests(unittest.TestCase):
     """v5.0/5.1: un agente 'di dominio' (es. CodingAgent) e' lo stesso TaskAgent con
     fixed_tools/persona_line impostati, non una classe diversa (vedi core/orchestrator.py)."""
