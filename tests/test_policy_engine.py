@@ -18,7 +18,9 @@ from unittest import mock
 
 from core.auth_gate import AuthGate
 from core.policy_engine import PolicyDecision, PolicyEngine, strip_authorization_signals
-from core.request_context import reset_current_device_id, set_current_device_id
+from core.request_context import (
+    reset_current_agent_name, reset_current_device_id, set_current_agent_name, set_current_device_id,
+)
 
 
 class StripAuthorizationSignalsTests(unittest.TestCase):
@@ -907,6 +909,81 @@ class NetworkCapabilityTests(unittest.TestCase):
         self.assertEqual(result["interactive"]["reason"], "host_outside_allowed_network_hosts")
         self.assertEqual(result["automated"]["decision"], "block")
         self.assertEqual(result["automated"]["reason"], "host_outside_allowed_network_hosts")
+
+
+class AgentCapabilityTests(unittest.TestCase):
+    """F1.2.3 (intersezione, seconda capability - per AGENTE): stesso identico principio di
+    DeviceCapabilityTests sopra ("vince il piu' restrittivo"), ma per TaskAgent.agent_name
+    invece che per dispositivo companion."""
+
+    def setUp(self):
+        self._tokens = []
+        self.addCleanup(self._reset_all)
+
+    def _reset_all(self):
+        for token in reversed(self._tokens):
+            reset_current_agent_name(token)
+
+    def _as_agent(self, agent_name):
+        self._tokens.append(set_current_agent_name(agent_name))
+
+    def test_no_agent_blocked_intents_configured_means_no_restriction(self):
+        engine = PolicyEngine()
+        self._as_agent("coding")
+        self.assertEqual(engine.decide_interactive("SYSTEM_POWER", {}), PolicyDecision.ALLOW)
+
+    def test_an_intent_blocked_for_an_agent_is_blocked_only_for_that_agent(self):
+        engine = PolicyEngine(agent_blocked_intents={"coding": {"SYSTEM_POWER"}})
+
+        self._as_agent("coding")
+        self.assertEqual(engine.decide_interactive("SYSTEM_POWER", {}), PolicyDecision.BLOCK)
+
+    def test_the_same_intent_is_still_allowed_for_a_different_agent(self):
+        engine = PolicyEngine(agent_blocked_intents={"coding": {"SYSTEM_POWER"}})
+
+        self._as_agent("research")
+        self.assertEqual(engine.decide_interactive("SYSTEM_POWER", {}), PolicyDecision.ALLOW)
+
+    def test_the_same_intent_is_still_allowed_outside_any_agent(self):
+        engine = PolicyEngine(agent_blocked_intents={"coding": {"SYSTEM_POWER"}})
+        # Nessun set_current_agent_name chiamato: comando diretto o automazione (None).
+        self.assertEqual(engine.decide_interactive("SYSTEM_POWER", {}), PolicyDecision.ALLOW)
+
+    def test_agent_block_reports_a_distinct_reason_from_the_global_block(self):
+        engine = PolicyEngine(agent_blocked_intents={"coding": {"SYSTEM_POWER"}})
+        self._as_agent("coding")
+
+        decision, reason = engine.decide_interactive_with_reason("SYSTEM_POWER", {})
+
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+        self.assertEqual(reason, "intent_in_agent_blocked_intents")
+
+    def test_agent_block_wins_over_confirmation(self):
+        engine = PolicyEngine(
+            always_confirm_intents={"SYSTEM_POWER"}, agent_blocked_intents={"coding": {"SYSTEM_POWER"}},
+        )
+        self._as_agent("coding")
+
+        decision = engine.decide_interactive("SYSTEM_POWER", {"confirmed": True})
+
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+
+    def test_a_global_block_still_applies_regardless_of_agent_capability(self):
+        engine = PolicyEngine(blocked_intents={"SYSTEM_POWER"}, agent_blocked_intents={"coding": {"RENAME_PATH"}})
+        self._as_agent("coding")
+
+        decision, reason = engine.decide_interactive_with_reason("SYSTEM_POWER", {})
+
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+        self.assertEqual(reason, "intent_in_blocked_intents")
+
+    def test_agent_capability_applies_on_the_automated_path_too(self):
+        engine = PolicyEngine(agent_blocked_intents={"coding": {"SYSTEM_POWER"}})
+        self._as_agent("coding")
+
+        decision = engine.decide_automated("SYSTEM_POWER")
+
+        self.assertEqual(decision, PolicyDecision.BLOCK)
 
 
 if __name__ == "__main__":
