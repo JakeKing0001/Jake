@@ -985,6 +985,22 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   QUALE slot usare, non solo per il campo nel ledger. Deliberatamente non affrontato: nessuna coda
   generale per azioni concorrenti non legate a una conferma (il resto di F1.8.1). Prova:
   2.263/2.263 test, ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.8.1` (investigazione, contesto condiviso tra canali) — 13/09/2026: **VERIFICA, nessun
+  codice cambiato** - cercando cos'altro potesse mancare nel resto dichiarato aperto ("una coda
+  generale per azioni concorrenti"), trovato che `ConversationStateManager` tiene cronologia
+  recente (`_short_term_history`), entita' per la risoluzione dei pronomi ("chiudilo"/"aprilo",
+  `_entities`) e ultimi risultati di ricerca (`_last_search_results`) come TRE campi condivisi da
+  TUTTI i canali - a differenza delle azioni in sospeso, resi per-canale poco sopra. Usare voce e
+  un dispositivo companion nella stessa sessione mescola quindi i loro turni/entita' nello stesso
+  contesto. A differenza del buco delle azioni in sospeso (una PERDITA inequivocabile), qui non
+  era chiaro se fosse un difetto o il comportamento voluto ("Jake e' un solo assistente, la
+  conversazione continua da qualsiasi dispositivo la si riprenda") - **chiesto esplicitamente
+  all'utente prima di scrivere qualunque codice** (AskUserQuestion), che ha confermato: e' il
+  comportamento VOLUTO, non va isolato per canale. Nessuna modifica fatta. Questo NON chiude il
+  resto letterale di F1.8.1 (una coda che serializzi l'ESECUZIONE di azioni concorrenti sullo
+  stesso resource key resta un concetto diverso, gia' in parte coperto da F1.8.2 per gli store
+  condivisi) - registra solo che questa specifica domanda e' stata posta e risolta, per non
+  reinvestigarla in una sessione futura.
 - `F1.2.3` (prima capability: dispositivo) — 13/09/2026: decisione esplicita dell'utente ("anzi
   fai tutte e due") di costruire ANCHE la seconda meta' rimasta aperta dopo le fondamenta - una
   capability vera per dispositivo, non solo lo slot per canale sopra. Funzionalita' NUOVA (la
@@ -1929,8 +1945,10 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
 
 - Stato: `DOING`; `F1.8.1` chiuso parzialmente (la parte di "ownership della sessione" ora
   completa - doppia esecuzione della stessa azione in sospeso E slot per canale, entrambi chiusi,
-  vedi sotto; resta aperta "una coda per azioni concorrenti" - un meccanismo generale per
-  serializzare azioni concorrenti non legate a una conferma pendente, mai affrontato);
+  vedi sotto; contesto conversazionale condiviso tra canali investigato e confermato VOLUTO
+  dall'utente, non un buco - vedi sotto; resta aperta "una coda per azioni concorrenti" - un
+  meccanismo generale per serializzare azioni concorrenti non legate a una conferma pendente, mai
+  affrontato);
   `F1.8.2` chiuso per tutti i registri/store condivisi tra thread (ledger, promemoria, todo,
   memoria a lungo termine, centro notifiche, elenco skill registrate, archivio esempi
   frase->intent, registro dispositivi/handoff); `F1.8.3` chiuso per RUN_COMMAND (il solo subprocess
@@ -3387,7 +3405,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 41 incrementi completati e verificati (PR #28-#68), la
+Aggiornato 13/09/2026. Sessione lunga con 42 incrementi completati e verificati (PR #28-#69), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -3493,7 +3511,11 @@ esplicita dell'utente, dopo aver visto questi fatti, di procedere solo con ident
 dispositivo; nuovo `core/identity.py::current_windows_user()`, ortogonale a `current_device_id()`
 - costante per processo, nessun contextvar necessario - nuovo campo `ActionReceipt.windows_user`
 agli stessi 5 chokepoint di `device_id`, nuova capability simmetrica `windows_user_blocked_
-intents` in `PolicyEngine`). Il resto:
+intents` in `PolicyEngine`), e `F1.8.1` investigazione sul contesto condiviso tra canali (VERIFICA,
+nessun codice cambiato - cronologia/entita'/ultimi risultati di ricerca in
+`ConversationStateManager` sono condivisi da tutti i canali, a differenza delle azioni in
+sospeso; chiesto esplicitamente all'utente PRIMA di scrivere codice se fosse un buco o il
+comportamento voluto - confermato voluto, "Jake e' un solo assistente"). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
@@ -3551,7 +3573,9 @@ ora chiuso quanto ha senso chiudere per contenuto - percorso/URL/email/IP/telefo
 classificazione per nome del parametro chiusa, "identificatore di dispositivo" deliberatamente
 fuori scope per essere troppo vago (nessun formato standard); `F1.7.8` e' chiuso), il resto di
 `F1.8` (il resto di `F1.8.1` - lo slot
-per canale e' ora chiuso, resta solo "una coda per azioni concorrenti" non legate a una conferma;
+per canale e' ora chiuso, il contesto conversazionale condiviso tra canali e' stato investigato e
+confermato VOLUTO dall'utente (non un buco), resta solo "una coda per azioni concorrenti" non
+legate a una conferma - un concetto letteralmente diverso, gia' in parte coperto da F1.8.2;
 il resto di `F1.8.4` - drain limitato di un'azione in corso, checkpoint vero, release device
 audio; il resto di `F1.8.5` - diagnosi di un deadlock vero su un lock applicativo, non solo un
 thread esterno lento; il resto di `F1.8.7` - undo, non ancora testabile per race finche' non
