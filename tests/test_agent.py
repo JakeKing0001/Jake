@@ -283,7 +283,10 @@ class RollbackAfterFatalErrorTests(unittest.TestCase):
              "final_answer": "", "ask_user": ""},
             OllamaError("il modello non risponde"),
         ])
-        outcome = _agent(registry, client).run("crea un file e poi fai qualcos'altro di rischioso")
+        # log_action() mascherato: da F1.7.6 anche rollback_effect() lo chiama, altrimenti
+        # questo test scriverebbe sul file di produzione del progetto (data/jake_actions.jsonl).
+        with unittest.mock.patch("core.agent.log_action"), unittest.mock.patch("core.execution_safety.log_action"):
+            outcome = _agent(registry, client).run("crea un file e poi fai qualcos'altro di rischioso")
 
         # Il rollback avviene dentro run(), quindi a questo punto e' gia' concluso: la prova che
         # il passo sia davvero riuscito PRIMA di essere annullato e' che CREATE_PATH compare tra
@@ -356,7 +359,12 @@ class RollbackAfterFatalErrorTests(unittest.TestCase):
             action_ledger=ledger, agent_name="general",
         )
 
-        outcome = agent.run("crea un file e poi fai qualcos'altro di rischioso")
+        # log_action() (data/jake_actions.jsonl, un logger di libreria standard condiviso per
+        # l'intero processo) mascherato in entrambi i moduli che lo chiamano qui (_log_step E,
+        # da F1.7.6, rollback_effect()): altrimenti questo test scriverebbe davvero sul file di
+        # produzione del progetto.
+        with unittest.mock.patch("core.agent.log_action"), unittest.mock.patch("core.execution_safety.log_action"):
+            outcome = agent.run("crea un file e poi fai qualcos'altro di rischioso")
 
         self.assertEqual(len(outcome.rolled_back), 1)
         records = ledger.read_all()
@@ -364,7 +372,7 @@ class RollbackAfterFatalErrorTests(unittest.TestCase):
         rollback_receipt = next(r for r in records if r["intent"] == "DELETE_PATH")
         self.assertEqual(rollback_receipt["trace_id"], create_receipt["trace_id"])
         self.assertEqual(rollback_receipt["requested_by"], "rollback:agent:general")
-        self.assertEqual(rollback_receipt["result"], "success")
+        self.assertEqual(rollback_receipt["result"], "rollback_success")
 
 
 class AuthRequiredPropagationTests(unittest.TestCase):
