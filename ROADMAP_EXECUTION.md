@@ -654,12 +654,12 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
 
 - Stato: `DOING`; `F1.2.5` parziale per rollback filesystem e ripresa del consenso (questa
   ultima verificata localmente, in attesa di CI); `F1.2.1` chiuso parzialmente
-  (percorsi 3 e 6, vedi sotto; resta aperto solo il percorso 7); `F1.2.2` chiuso parzialmente (prima capability vera - radici
-  filesystem, ora su ENTRAMBI i percorsi interattivo e automatico e su sette intent - le quattro
-  mutazioni piu' le tre letture FIND_FILE/GET_FILE_INFO/READ_FILE_TEXT - vedi sotto); `F1.2.4`
+  (percorsi 3 e 6, vedi sotto; resta aperto solo il percorso 7); `F1.2.2` chiuso parzialmente (due
+  capability vere - radici filesystem su ENTRAMBI i percorsi e su sette intent, dominio web su
+  OPEN_URL - vedi sotto; restano aperte app/contatto/device/HA/rete/durata); `F1.2.4`
   chiuso per il percorso planner (vedi sotto); `F1.2.6` e `F1.2.7` chiusi (vedi sotto); `F1.2.3`
   chiuso parzialmente (prima capability - dispositivo - vedi sotto; l'intersezione con
-  agente/skill/sessione e le altre capability elencate in ROADMAP.md restano aperte).
+  agente/skill/sessione resta aperta).
 - `F1.2.2` (parziale, prima capability: radici filesystem) — 12/09/2026: "definire capability per
   filesystem root, app, contatto, dominio web, device, servizio Home Assistant, rete e durata" -
   la prima delle otto, scelta perche' e' l'unica gia' collegabile senza dover prima costruire
@@ -741,6 +741,33 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   e ALLOW dentro le radici) e aggiunti 3 nuovi test (`OPEN_PATH` deliberatamente escluso,
   `FIND_FILE` senza `path` non ristretto, copertura confermata anche sul percorso automatico).
   Prova: 2.241/2.241 test, ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.2.2` (seconda capability: dominio web) — 13/09/2026: dopo aver chiuso la capability
+  filesystem, la prossima delle otto capability elencate dalla roadmap ("filesystem root, app,
+  contatto, dominio web, device, servizio Home Assistant, rete e durata") gia' collegabile senza
+  nuova infrastruttura - `OPEN_URL` (`skills/open_url.py`) ha gia' un parametro `url` pronto da
+  controllare. Funzionalita' NUOVA (non un buco preesistente), stessa fetta verticale stretta di
+  `allowed_filesystem_roots`: `PolicyEngine(allowed_web_domains=...)`, opt-in, vuoto per default,
+  controllato PRIMA di `CONFIRM` su entrambi i percorsi (interattivo e automatico). Un dominio
+  permesso copre anche i suoi sottodomini (`wikipedia.org` permette `it.wikipedia.org`), simmetrico
+  a come una radice filesystem copre i suoi discendenti - confronto per suffisso ESATTO (`.` +
+  dominio), non una sottostringa qualsiasi, per non confondere `not-wikipedia.org` con un
+  sottodominio di `wikipedia.org`. Un url senza schema (com'e' spesso quando lo dice l'utente)
+  riceve lo stesso trattamento di `OpenUrlSkill.execute()` (si aggiunge `https://` prima di
+  analizzarlo), altrimenti un dominio vietato scritto senza schema avrebbe aggirato il controllo.
+  Deliberatamente NON incluso: `CHECK_WEBSITE_STATUS` (`RiskLevel.READ_ONLY`, non apre nulla -
+  verifica solo se un sito risponde - stesso schema gia' seguito per `FIND_FILE`/`GET_FILE_INFO`/
+  `READ_FILE_TEXT` in F1.2.2: prima l'azione che ha un effetto reale, poi eventualmente le letture
+  come fetta separata). Nuova motivazione dedicata nel ledger, `POLICY_REASON_WEB_CAPABILITY_
+  DENIED` ("domain_outside_allowed_web_domains"), distinta da `POLICY_REASON_CAPABILITY_DENIED`
+  (il cui valore stringa e' specifico del filesystem) per lo stesso principio: lo STESSO intent
+  puo' essere permesso o negato a seconda del parametro. Configurabile da `config.json`
+  (`allowed_web_domains`). Aggiunti 11 nuovi test in
+  `tests/test_policy_engine.py::WebDomainCapabilityTests` (nessuna restrizione di default, dominio
+  e sottodominio permessi, dominio vietato bloccato con il motivo giusto, url senza schema ancora
+  controllato, un dominio con suffisso simile non confuso per un sottodominio,
+  `CHECK_WEBSITE_STATUS` deliberatamente escluso, la capability vince su `CONFIRM`, un blocco
+  globale vince comunque, copertura su entrambi i percorsi, riflesso da `explain()`). Prova:
+  2.283/2.283 test, ruff/mypy/compileall verdi su tutti i file toccati.
 - `F1.2.1` (parziale) — 12/09/2026: chiuso il buco concreto documentato in
   [docs/action-execution-paths.md](docs/action-execution-paths.md) ("Nota sul percorso 3"):
   `PlanExecutor.execute(plan, policy_engine=None, ...)` trattava l'assenza di policy_engine come
@@ -2975,7 +3002,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 29 incrementi completati e verificati (PR #28-#56), la
+Aggiornato 13/09/2026. Sessione lunga con 30 incrementi completati e verificati (PR #28-#57), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -2999,7 +3026,7 @@ terza fetta (la capability filesystem lasciava comunque Jake libero di LEGGERE q
 fuori dal recinto - solo le mutazioni erano coperte, ora anche FIND_FILE/GET_FILE_INFO/
 READ_FILE_TEXT), `F1.2.1` percorso 6 (`rollback_effect()` con `policy_engine=None` eseguiva un
 rollback senza controllare `blocked_intents` - non gia' sfruttabile in produzione, che collega
-sempre un `policy_engine` vero, ma un default fail-open pericoloso per chiunque altro). Le quattro
+sempre un `policy_engine` vero, ma un default fail-open pericoloso per chiunque altro). Le
 funzionalita' nuove: `F1.2.2` prima fetta (prima capability vera - radici filesystem
 consentite), `F1.7.4` prima fetta (redazione strutturata per tipo di dato - percorso/URL/email invece del
 generico "<str:N caratteri>"), `F1.7.4` seconda fetta (redazione per NOME del parametro - un
@@ -3014,14 +3041,17 @@ richiesta di conferma nello stesso istante non si sovrascrivono piu' a vicenda; 
 dell'utente, "anzi fai tutte e due", su cosa costruire per primo sopra le fondamenta), e `F1.2.3`
 prima capability - dispositivo (`device_blocked_intents`, simmetrico a `blocked_intents` ma per
 canale - la seconda meta' di "tutte e due", un intent bloccato per un dispositivo companion si
-ferma sempre per quel dispositivo senza toccare la voce locale o altri dispositivi). Il resto:
+ferma sempre per quel dispositivo senza toccare la voce locale o altri dispositivi), e `F1.2.2`
+seconda capability - dominio web (`allowed_web_domains` su OPEN_URL, stessa fetta verticale
+stretta di `allowed_filesystem_roots`, con lo stesso principio di sottodominio-copre-dominio gia'
+usato per le radici filesystem). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.2` (parziale - la notifica di
 un'automazione ora porta lo stesso trace_id delle ricevute che l'ha prodotta), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.272/2.272 test, ruff/mypy/compileall verdi. `G1` resta aperto.
+`master` e' pulito, 2.283/2.283 test, ruff/mypy/compileall verdi. `G1` resta aperto.
 
 Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
 sessione (`sys.setswitchinterval()` abbassato + `threading.Barrier`, senza altro aiuto) NON
@@ -3046,9 +3076,10 @@ una `threading.Barrier` - molti buchi di questa sessione non si manifestavano af
 aggiornamento di questo file, e commit/PR separati invece di un unico commit enorme.
 
 Candidati piccoli ancora aperti in F1: il resto di `F1.2.1` (percorso 7,
-`SkillRegistry.execute()`), il resto di `F1.2.2` (le altre sette capability - app/contatto/
-dominio web/device/HA/rete/durata; la capability filesystem stessa e' ora completa su entrambi i
-percorsi e su mutazioni+letture, resta solo il gap noto di FIND_FILE senza `path` esplicito),
+`SkillRegistry.execute()`), il resto di `F1.2.2` (le altre sei capability - app/contatto/
+device/HA/rete/durata; filesystem e dominio web sono ora complete, filesystem resta con il gap
+noto di FIND_FILE senza `path` esplicito, dominio web con CHECK_WEBSITE_STATUS deliberatamente
+escluso),
 `F1.2.3` (resto: prima capability per dispositivo chiusa - `device_blocked_intents` - ma
 l'intersezione con agente/skill/sessione resta aperta), il resto di `F1.4` (una vera
 classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7` (il resto di `F1.7.2` -
