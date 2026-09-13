@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 from core.logger import get_logger
-from core.secrets_vault import is_protected, protect, unprotect
+from core.secrets_vault import SecretsVault, is_protected
 
 # Chiavi cifrate a riposo con DPAPI (F1, vedi core/secrets_vault.py) invece di restare in chiaro
 # su config/settings.json: la passphrase admin e il token di un hub Home Assistant sono le uniche
@@ -26,6 +26,9 @@ class Config:
     def __init__(self, path: Path | None = None):
         self.path = Path(path) if path else self.DEFAULT_PATH
         self._logger = get_logger()
+        # F1.4.1: la protezione DPAPI e' ora consolidata in una classe vera (core/secrets_vault.py
+        # ::SecretsVault), non piu' funzioni libere senza stato.
+        self._vault = SecretsVault()
         self._values = self._load()
         self._migrate_secrets()
 
@@ -42,13 +45,28 @@ class Config:
         sicura dei token gia' salvati") - una tantum, silenziosa, alla prima apertura dopo
         l'aggiornamento: chi aveva gia' admin_passphrase/home_assistant_token in chiaro da una
         versione precedente di Jake non deve fare nulla, e il file su disco smette di contenerli
-        in chiaro dal prossimo avvio."""
+        in chiaro dal prossimo avvio.
+
+        F1.4.1 ("...con versione e migrazione atomica"): ricifra sul posto anche un valore GIA'
+        protetto ma nel formato DPAPI legacy (senza tag di versione esplicito, da prima di questa
+        correzione) - non solo uno ancora in chiaro. Un valore che non si riesce a decifrare
+        (`needs_migration()` vero ma `unprotect()` restituisce None: vault corrotto o profilo
+        Windows diverso) non viene MAI riscritto - stesso principio gia' verificato per un
+        segreto gia' corrotto, il file su disco resta quello che era finche' non si riesce a
+        leggerlo per davvero."""
         changed = False
         for key in SECRET_KEYS:
             value = self._values.get(key)
-            if value and not is_protected(value):
-                self._values[key] = protect(value)
+            if not value:
+                continue
+            if not is_protected(value):
+                self._values[key] = self._vault.protect(value)
                 changed = True
+            elif self._vault.needs_migration(value):
+                plaintext = self._vault.unprotect(value)
+                if plaintext is not None:
+                    self._values[key] = self._vault.protect(plaintext)
+                    changed = True
         if changed:
             self._write()
 
@@ -69,7 +87,7 @@ class Config:
             # deve capire perche' la sua passphrase/il suo token ha smesso di funzionare, invece
             # di scoprire "stranamente" che l'autenticazione non e' piu' attiva.
             was_protected = is_protected(value)
-            value = unprotect(value)
+            value = self._vault.unprotect(value)
             if value is None and was_protected:
                 self._logger.warning(
                     "Impossibile decifrare '%s' da %s (vault corrotto o profilo Windows diverso "
@@ -83,7 +101,7 @@ class Config:
         """Aggiorna un valore e lo persiste su config/settings.json (v2.0: modelli
         intercambiabili, tra gli usi). Le variabili d'ambiente restano prioritarie in get()."""
         if key in SECRET_KEYS and value:
-            value = protect(value)
+            value = self._vault.protect(value)
         self._values[key] = value
         self._write()
 
