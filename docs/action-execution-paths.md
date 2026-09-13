@@ -20,7 +20,7 @@ aggiornato.
 | 4 | Companion server (rete locale) | `core/companion_server.py::_Handler._handle_command` | Si', delega a `command_handler` = `JakeCore.answer`, nessuna logica di esecuzione propria | Stessa del percorso 1/2 (qualunque cosa `answer()` risolva) |
 | 5 | Registrazione skill (plugin loader, Skill Forge) | `core/plugin_loader.py`, `core/skill_forge.py` → `SkillRegistry.register_skill` | N/A: registra soltanto, non esegue | N/A |
 | 6 | Rollback di un passo gia' riuscito | `core/execution_safety.py::rollback_effect`, chiamato da `TaskAgent._rollback` e `PlanExecutor._rollback` | Parziale: rifiuta se l'intent compensatorio e' in `blocked_intents` (F1.2.5, 11/09/2026) - da 13/09/2026 (F1.2.1) `policy_engine=None` e' FAIL-CLOSED (nessun rollback) invece di "nessun controllo", stesso principio del percorso 3; non passa da `decide_automated`/`decide_interactive` per intero, ne' da `CONFIRM`/`REQUIRE_AUTH` (nessun utente pronto a rispondere durante un rollback automatico) | Nessuna propria: il rollback stesso non produce un `ActionReceipt` separato, solo l'esecuzione del passo originale che l'ha innescato |
-| 7 | Dispatch grezzo | `SkillRegistry.execute` (`core/skill_registry.py`) | **No**: dispatcher senza alcun controllo di policy proprio. Sicuro solo perche' oggi tutti i chiamanti reali (percorsi 1-3, rollback) lo invocano dopo una decisione gia' presa altrove - non e' pero' impedito strutturalmente che un futuro chiamante lo invochi direttamente, saltando ogni gate (`F1.2.1`, ancora aperto) | Nessuna: non e' un chokepoint del ledger |
+| 7 | Dispatch grezzo | `SkillRegistry.execute` (`core/skill_registry.py`) | Parziale: da 13/09/2026 (F1.2.1) `policy_engine=None` e' FAIL-CLOSED (`POLICY_BLOCKED`, nessuna skill eseguita) invece di "nessun controllo"; solo `blocked_intents` viene ricontrollato qui (non una decisione interattiva/automatica completa - vedi nota sotto) | Nessuna: non e' un chokepoint del ledger |
 
 ## Ripresa del consenso (percorsi 1, 2 e 4)
 
@@ -66,6 +66,26 @@ collegamento esplicito (un test, uno strumento, un futuro chiamante) ora si ferm
 eseguire senza nessun controllo (vedi `tests/test_execution_safety.py::RollbackEdgeCaseTests::
 test_policy_engine_none_is_fail_closed_not_no_restriction`).
 
+## Nota sul percorso 7 (dispatch grezzo)
+
+**Chiuso il 13/09/2026 (F1.2.1).** `SkillRegistry.execute()` non controllava MAI la policy da
+solo - un chiamante che lo invocava direttamente, saltando `JakeCore._authorize_command()` (o
+`PlanExecutor`/`decide_automated`), eseguiva la skill senza alcun controllo su `blocked_intents`.
+Nei chiamanti di produzione reali (percorsi 1/2, rollback) questo non era gia' sfruttabile -
+tutti passano gia' da una decisione di policy PRIMA di arrivare qui - ma era un default pericoloso
+per un futuro chiamante che se lo dimenticasse, stesso principio "nega per default" gia' applicato
+ai percorsi 3/6. Ora `policy_engine=None` e' **FAIL-CLOSED** (`SkillResult(success=False,
+error="POLICY_BLOCKED")`, la skill non viene nemmeno chiamata): solo `blocked_intents` viene
+ricontrollato (non una decisione interattiva/automatica completa - `CONFIRM`/`REQUIRE_AUTH` non
+hanno senso in un dispatcher sincrono senza un utente pronto a rispondere), stesso identico
+principio minimale gia' applicato a `rollback_effect()` (percorso 6). I chiamanti reali (percorsi
+1/2 via `JakeCore._resolve_and_execute`/`_run_confirmed_action`, il rollback via i tre handler in
+`core/execution_safety.py`, `PlanExecutor._execute_step`, `tools/replay_session.py::replay_one`,
+il ripiego di default di `TaskAgent.__init__`) passano tutti ora il proprio `policy_engine`
+esplicitamente. Prova: `tests/test_skill_registry.py::PolicyGateTests`,
+`tests/test_action_paths_inventory.py::DocumentedSymbolsStillExistTests::
+test_raw_dispatch_path_is_now_fail_closed_too`.
+
 ## Identita' del dispositivo mittente (F1.2.3/F1.8.1, fondamenta)
 
 **Aggiunto il 13/09/2026.** I quattro chokepoint del ledger (`JakeCore._log_action_outcome`/
@@ -90,12 +110,10 @@ di poter esistere, non l'una o l'altra funzionalita' completa.
 
 ## Cosa resta aperto
 
-- `F1.2.1` (parziale): il fail-open silenzioso del percorso 3 e' chiuso (vedi sopra). Resta
-  aperto rendere impossibile, non solo evitato per convenzione, chiamare `SkillRegistry.
-  execute()` senza una decisione di `PolicyEngine` gia' presa (percorso 7): oggi resta un
-  dispatcher a basso livello usato anche da centinaia di test di skill in isolamento e da
-  `tools/replay_session.py`, quindi renderlo fail-closed per costruzione richiede prima
-  distinguere "chiamata di test/tool fidata" da "chiamata di produzione", non ancora deciso.
+- `F1.2.1`: i tre "percorso N" dichiarati aperti sono ora tutti chiusi (percorso 3, percorso 6,
+  percorso 7 - vedi le note sopra). Resta parziale nel senso gia' dichiarato per il percorso 7: il
+  controllo li' e' solo su `blocked_intents`, non una decisione interattiva/automatica completa
+  (CONFIRM/REQUIRE_AUTH non hanno senso in un dispatcher sincrono).
 - `F1.2.5` (resto): sotto-azioni generate da workflow e autorizzazione completa dei rollback
   ancora aperte. Il retry ha la protezione conservativa di `F1.3.6`, non capability per risorsa.
 - `F1.8.1` (parte "ownership della sessione" chiusa, 13/09/2026): `ConversationStateManager` (`core/conversation_state.py`) usa

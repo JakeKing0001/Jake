@@ -118,7 +118,7 @@ class ChokepointsProduceConformingReceiptsTests(unittest.TestCase):
         """F1.7.2: il quinto chokepoint, aggiunto quando rollback_effect() ha iniziato a
         produrre una propria ActionReceipt (correlata alla trace_id dell'azione originale)."""
         class FakeRegistry:
-            def execute(self, intent, parameters=None):
+            def execute(self, intent, parameters=None, policy_engine=None):
                 return unittest.mock.Mock(success=True)
 
         ledger = unittest.mock.Mock()

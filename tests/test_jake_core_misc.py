@@ -29,7 +29,7 @@ class FakeRegistry:
     def get_skill(self, intent):
         return self._skills.get(intent)
 
-    def execute(self, intent, parameters=None):
+    def execute(self, intent, parameters=None, policy_engine=None):
         skill = self.get_skill(intent)
         return None if skill is None else skill.execute(parameters)
 

@@ -37,7 +37,7 @@ class RealSkillRegistry:
             "RENAME_PATH": RenamePathSkill(),
         }
 
-    def execute(self, intent, parameters=None):
+    def execute(self, intent, parameters=None, policy_engine=None):
         return self._skills[intent].execute(parameters or {})
 
 
@@ -165,7 +165,7 @@ class RollbackEdgeCaseTests(unittest.TestCase):
         farebbe tornare False PRIMA di arrivare a chiamare il registry, senza davvero verificare
         che l'eccezione venga inghiottita."""
         class ExplodingRegistry:
-            def execute(self, intent, parameters=None):
+            def execute(self, intent, parameters=None, policy_engine=None):
                 raise RuntimeError("boom")
 
         self.assertFalse(rollback_effect(ExplodingRegistry(), "CREATE_PATH", {"path": "x"}, policy_engine=PolicyEngine()))
@@ -254,7 +254,7 @@ class RollbackReceiptTests(unittest.TestCase):
         """Un rollback tentato ma fallito e' comunque un evento degno di una ricevuta - l'errore
         non deve sparire in silenzio."""
         class ExplodingRegistry:
-            def execute(self, intent, parameters=None):
+            def execute(self, intent, parameters=None, policy_engine=None):
                 raise RuntimeError("boom")
 
         rolled_back = rollback_effect(

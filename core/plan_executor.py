@@ -187,7 +187,7 @@ class PlanExecutor:
                 continue
 
             step_started = time.monotonic()
-            step_outcome = self._execute_step(step, safe_parameters)
+            step_outcome = self._execute_step(step, safe_parameters, policy_engine)
             verified = None
             if step_outcome.result.success:
                 effect_confirmed = verify_effect(step.intent, step_outcome.result.data)
@@ -258,12 +258,20 @@ class PlanExecutor:
                 risk_decision=risk, private=private,
             )
 
-    def _execute_step(self, step, parameters: dict | None = None) -> StepOutcome:
+    def _execute_step(self, step, parameters: dict | None = None, policy_engine=None) -> StepOutcome:
         """parameters e' quello che va davvero eseguito (sanificato da execute(), vedi sopra);
         step.parameters resta quello originale del piano solo per riferimento/descrizione -
-        StepOutcome.step lo conserva per format_plan_outcome, non per essere rieseguito."""
+        StepOutcome.step lo conserva per format_plan_outcome, non per essere rieseguito.
+
+        F1.2.1 (percorso 7): policy_engine e' lo stesso gia' verificato ALLOW poco sopra in
+        execute() - non un secondo controllo diverso, solo rifornito a SkillRegistry.execute()
+        (ora fail-closed di default sul proprio blocked_intents) perche' non si blocchi da solo su
+        un passo gia' approvato."""
         parameters = step.parameters if parameters is None else parameters
-        result, attempts = execute_with_retry(self.skill_registry.execute, step.intent, parameters)
+        result, attempts = execute_with_retry(
+            lambda intent, params: self.skill_registry.execute(intent, params, policy_engine=policy_engine),
+            step.intent, parameters,
+        )
         return StepOutcome(step=step, result=result, attempts=attempts)
 
     def _rollback(

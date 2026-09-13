@@ -63,14 +63,14 @@ class DocumentedSymbolsStillExistTests(unittest.TestCase):
         params = inspect.signature(core.execution_safety.rollback_effect).parameters
         self.assertIn("policy_engine", params)
 
-    def test_raw_dispatch_path_has_no_policy_parameter(self):
-        """Documenta il buco noto (F1.2.1): SkillRegistry.execute() non riceve/controlla un
-        policy_engine, a differenza di PlanExecutor.execute e rollback_effect qui sopra. Se in
-        futuro venisse aggiunto un controllo di policy qui, questo test fallira' e andra'
-        aggiornato insieme al documento (non e' un requisito che debba MAI accadere, solo una
-        prova che oggi non accade ancora - vedi docs/action-execution-paths.md)."""
+    def test_raw_dispatch_path_is_now_fail_closed_too(self):
+        """F1.2.1 (percorso 7, l'ultimo dei tre "percorso N" dichiarati aperti - chiude il gap che
+        questo stesso test documentava fino a poco fa): SkillRegistry.execute() ora riceve/
+        controlla un policy_engine, con lo stesso principio fail-closed gia' applicato a
+        PlanExecutor.execute e rollback_effect qui sopra - vedi il docstring di
+        SkillRegistry.execute() e docs/action-execution-paths.md ("Nota sul percorso 7")."""
         params = inspect.signature(core.skill_registry.SkillRegistry.execute).parameters
-        self.assertNotIn("policy_engine", params)
+        self.assertIn("policy_engine", params)
 
 
 if __name__ == "__main__":
