@@ -778,6 +778,11 @@ class JakeCore:
 
         if outcome.pending_confirmation is not None:
             reason = "auth_required" if outcome.pending_confirmation.get("kind") == "AUTH_REQUIRED" else "confirmation_required"
+            # F1.5.4 ("mostrare all'utente la sorgente che ha suggerito un'azione sensibile"):
+            # None quando il passo precedente non ha restituito contenuto esterno (il caso
+            # comune, vedi core/agent.py::TaskAgent.run()) - non aggiunto alla busta di conferma
+            # ne' al messaggio in quel caso, per non introdurre rumore su ogni conferma ordinaria.
+            external_source = outcome.pending_confirmation.get("suggested_by_external_content")
             self.conversation_state.set_pending_action({
                 "intent": outcome.pending_confirmation["intent"],
                 "parameters": outcome.pending_confirmation["parameters"],
@@ -789,8 +794,11 @@ class JakeCore:
                 # dell'agente che hanno gia' portato a questa richiesta di conferma.
                 "trace_id": trace_id,
                 "policy_reason": outcome.pending_confirmation.get("policy_reason"),
+                "suggested_by_external_content": external_source,
             })
             message = outcome.pending_confirmation["message"]
+            if external_source is not None:
+                message = f"{message} (Attenzione: suggerito da contenuto esterno - {external_source})"
             self._remember_exchange(remember_text, Command("AGENT", {"request": request}), message)
             return message
 
