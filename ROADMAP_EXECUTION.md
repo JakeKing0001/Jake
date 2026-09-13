@@ -1623,6 +1623,86 @@ Dipende da: F1.2 e F1.4.
 
 Criterio di uscita: un plugin ostile non legge file, rete o processi non dichiarati nei test d'attacco.
 
+- Stato: `DOING`; `F1.6.1`/`F1.6.2` chiusi, `F1.6.3` chiuso parzialmente (memoria e tempo CPU, non
+  ancora limite sul numero di processi ne' un vero timeout wall-clock imposto dal Job Object
+  stesso); `F1.6.4`-`F1.6.8` restano aperti. **Attenzione, importante**: l'infrastruttura sotto e'
+  costruita e verificata per davvero, ma NON e' ancora collegata a nulla - `SkillForge`/
+  `SkillRegistry` continuano a eseguire una skill forgiata IN PROCESSO, esattamente come prima di
+  questo incremento. Questo pezzo da solo non cambia il comportamento REALE di Jake per un
+  utente: e' la fondamenta (dimostrata con test reali, non solo scritta) su cui il collegamento
+  vero (un incremento a se', dichiaratamente non affrontato qui) potra' appoggiarsi.
+- `F1.6.1`/`F1.6.2`/`F1.6.3` (fondamenta: worker persistente sandboxato) — 13/09/2026: via libera
+  esplicito dell'utente su un lavoro grande finora rifiutato senza un nuovo via libera. Un Job
+  Object (o un AppContainer) si applica a un PROCESSO, non a una singola chiamata di funzione
+  dentro il processo di Jake: l'investigazione di scoping ha confermato che l'unico modo reale di
+  contenere l'esecuzione ONGOING di una skill forgiata (non solo il passo di validazione una
+  tantum, gia' coperto da `core/process_sandbox.py`/F1) e' eseguirla in un processo separato -
+  oggi una skill forgiata gira per sempre nello stesso processo di Jake dopo l'installazione,
+  nessuna distinzione da una skill built-in (confermato leggendo `SkillRegistry.execute()`:
+  nessun branch controlla mai "e' una skill forgiata?"). **Decisione esplicita dell'utente**: un
+  worker PERSISTENTE (un solo processo sandboxato, avviato una volta, che resta vivo e serve
+  tutte le chiamate successive tramite un protocollo a righe JSON su pipe), non un processo
+  usa-e-getta per ogni chiamata (piu' semplice ma con latenza reale a ogni invocazione e nessuno
+  stato tra una chiamata e l'altra).
+
+  Nuovo `core/forge_worker.py` (il worker, script standalone come `forge_probe.py`: nessun import
+  relativo, resta eseguibile a integrita' ridotta): protocollo `{"intent", "parameters"}` ->
+  `{"success", "data", "error"}` una riga JSON per volta, carica OGNI plugin gia' installato (un
+  solo worker condiviso da tutte le skill forgiate, non uno per skill), un'eccezione in una skill
+  non fa mai perdere il processo (le altre restano servibili). Nuovo
+  `core/sandboxed_skill_worker.py::SandboxedSkillWorker` (il gestore): avvia il worker con un
+  token a integrita' Low (stesso meccanismo di `process_sandbox.py`, duplicato qui perche' questo
+  processo deve restare vivo, non uscire dopo un solo esito) PIU' un Job Object nuovo
+  (`JOB_OBJECT_LIMIT_JOB_MEMORY`/`JOB_OBJECT_LIMIT_JOB_TIME`/`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`)
+  per i limiti di risorsa che l'integrita' Low da sola non da'; comunicazione bidirezionale con
+  pipe create a mano (`win32pipe.CreatePipe` + `SetHandleInformation` per il controllo
+  dell'ereditarieta' degli handle, `CreateProcessAsUser` con `bInheritHandles=True` e
+  `STARTUPINFO.hStdInput/hStdOutput` - non lo faceva ancora nessun modulo di questo progetto,
+  verificato con una serie di prove empiriche isolate PRIMA di scrivere l'implementazione vera,
+  incluso il caso combinato integrita' Low + pipe + Job Object insieme, non solo ciascuno da
+  solo); `CREATE_SUSPENDED` finche' il Job Object non e' assegnato, cosi' non resta una finestra
+  (per quanto breve) in cui il worker gira senza i limiti di risorsa.
+
+  Verificato empiricamente, non solo implementato (stesso principio di `process_sandbox.py`): un
+  worker a integrita' Low NON riesce a scrivere fuori dal proprio processo (stesso attacco
+  canarino gia' usato per la sandbox di validazione); un'allocazione oltre il limite di memoria
+  del Job Object fallisce con un `MemoryError` CATTURABILE dentro il worker (il worker
+  SOPRAVVIVE e continua a servire le chiamate successive - scoperta empirica non ipotizzata: un
+  singolo passo che esagera con la memoria non deve buttare giu' il worker condiviso da tutte le
+  skill forgiate); un limite di tempo CPU protegge da un ciclo infinito CPU-bound ma NON da una
+  skill semplicemente bloccata/in attesa (`time.sleep()` non consuma tempo CPU misurabile) - per
+  quel caso la difesa e' `invoke_timeout_seconds` lato Python piu' lo spegnimento forzato di
+  `stop()`, due meccanismi complementari, dichiarati apertamente come tali invece di sovra-
+  promettere cosa il solo Job Object copre. `stop()` chiede l'arresto pulito, aspetta, poi termina
+  a forza se il worker non risponde in tempo (stesso schema "prova a chiedere, poi imponi" gia'
+  usato per i quattro scheduler in background, F1.8.5); `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` resta
+  una rete di sicurezza in piu' anche se `stop()` fallisse per qualunque motivo. Degrado elegante
+  ma MAI silenzioso quando pywin32/le API di sicurezza non sono disponibili (ripiego su
+  `subprocess.Popen` normale, senza nessuna delle due protezioni, con un avviso esplicito nel
+  log) - stesso principio gia' stabilito per `process_sandbox.py`.
+
+  Aggiunti 21 nuovi test: 7 in `tests/test_forge_worker.py` (protocollo del worker, chiamato
+  direttamente in-process con `sys.stdin`/`sys.stdout` sostituiti da `io.StringIO` veri, stesso
+  principio di `tests/test_forge_probe.py`), 14 in `tests/test_sandboxed_skill_worker.py` -
+  quest'ultimi spawnano DAVVERO un processo Python per test (piu' lenti, ~6s in totale, ma l'unico
+  modo di dimostrare che il confine di sicurezza sia imposto dal sistema operativo, non solo
+  dichiarato nel codice), incluse le due proprieta' di sicurezza chiave (scrittura fuori processo
+  negata, allocazione oltre il limite di memoria fallita senza uccidere il worker) con lo stesso
+  schema `skipTest` di `test_process_sandbox.py` per un ambiente dove le API di sicurezza non si
+  attivano. Aggiunti entrambi i nuovi file alla lista mypy selettiva (78 file ora). **Non ancora
+  affrontato, dichiarato apertamente**: nessun collegamento a `SkillForge`/`SkillRegistry` - una
+  skill forgiata installata oggi continua a girare in processo, questo worker non viene ancora
+  mai istanziato da nessun percorso di produzione (un incremento a se', che dovra' anche decidere
+  cosa succede a una skill forgiata che dipende da stato condiviso di Jake - memoria, rubrica,
+  NEST - non serializzabile in JSON, oggi non risulta che le skill forgiate lo facciano ma andra'
+  verificato/vietato esplicitamente); `F1.6.4` (AppContainer, restrizioni filesystem/rete piu'
+  strette dell'integrita' Low); `F1.6.5` (manifest di directory montabili); `F1.6.6` (negare la
+  rete salvo capability esplicite); `F1.6.7` (audit che nessun oggetto `core` finisca mai passato
+  al plugin, solo dati serializzati - gia' vero per costruzione con questo protocollo, ma non
+  ancora verificato con un test dedicato); `F1.6.8` (quarantena di un plugin che viola i limiti,
+  oggi si limita a fallire quella singola chiamata). Prova: 2.397/2.397 test,
+  ruff/mypy/compileall verdi su tutti i file toccati.
+
 ### F1.7 — Ledger, replay e osservabilità
 
 Dipende da: F1.1 e F1.3.
@@ -3440,7 +3520,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 43 incrementi completati e verificati (PR #28-#70), la
+Aggiornato 13/09/2026. Sessione lunga con 44 incrementi completati e verificati (PR #28-#71), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -3556,16 +3636,25 @@ scrivere codice: nessuna delle ~200 skill costruisce o dovrebbe mai costruire `A
 `ActionError` da sola, sono i CHOKEPOINT a farlo da dati che gia' possiedono; estesa la stessa
 sostituzione a rischio quasi nullo del pilota F1.1.6 - `error_category_of()` diretto ->
 `ActionError.from_result()` validato - a `TaskAgent`/`PlanExecutor`, i due chokepoint rimasti:
-ora tutti e tre costruiscono il tipo condiviso). Il resto:
+ora tutti e tre costruiscono il tipo condiviso), e `F1.6` fondamenta - worker persistente
+sandboxato (l'altro lavoro grande autorizzato: un Job Object si applica a un processo, non a una
+chiamata dentro il processo di Jake, quindi contenere l'esecuzione ONGOING di una skill forgiata
+richiede eseguirla altrove - decisione esplicita dell'utente di un worker PERSISTENTE invece di
+un processo usa-e-getta per chiamata; nuovo `core/forge_worker.py`/`core/sandboxed_skill_worker.py`,
+Low Integrity + Job Object via pipe create a mano, verificato con prove empiriche isolate PRIMA
+di scrivere l'implementazione e poi con test reali che spawnano processi veri - MA non ancora
+collegato a `SkillForge`/`SkillRegistry`, dichiarato apertamente: una skill forgiata continua a
+girare in processo esattamente come prima). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.383/2.383 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.397/2.397 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
-invariati, nessuno dei due coperto da "mypy selettivo" in CI - 76 file nella lista selettiva,
-`core/identity.py` aggiunto). `G1` resta aperto.
+invariati, nessuno dei due coperto da "mypy selettivo" in CI - 78 file nella lista selettiva,
+`core/identity.py`/`core/forge_worker.py`/`core/sandboxed_skill_worker.py` aggiunti). `G1` resta
+aperto.
 
 Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
 sessione (`sys.setswitchinterval()` abbassato + `threading.Barrier`, senza altro aiuto) NON
@@ -3581,15 +3670,15 @@ deterministico invece di probabilistico - orchestrando l'esatto intreccio con du
 sufficiente di sicurezza su finestre strette.
 
 **Aggiornamento 13/09/2026**: l'utente ha dato il via libera esplicito su ENTRAMBI i lavori
-grandi sopra, dopo un'investigazione di scoping dedicata (vedi F1.1.7 sopra e F1.6 sotto).
-`F1.1.7` ha gia' un primo pezzo chiuso (i due chokepoint restanti, vedi sopra); `F1.6` resta da
-iniziare - la sua investigazione ha rivelato che anche la fetta piu' piccola possibile (Job
-Object per soli limiti di CPU/memoria/durata, senza ancora restrizioni di accesso a
-filesystem/rete/registro) richiede prima un'architettura di esecuzione FUORI PROCESSO per le
-skill forgiate (oggi girano nello stesso processo di Jake, nessuna distinzione da una skill
-built-in dopo l'installazione) - una decisione architetturale genuina, non una fetta stretta
-come gli altri incrementi di stasera, da affrontare con un design esplicito prima di scrivere
-codice. Ritmo per chi riprende: un incremento alla volta, ciascuno con test reali (non solo letti a tavolino),
+grandi sopra, dopo un'investigazione di scoping dedicata (vedi F1.1.7 e F1.6 nelle rispettive
+sezioni). Entrambi hanno ora un primo pezzo chiuso: `F1.1.7` i due chokepoint restanti,
+`F1.6` un worker persistente sandboxato (`core/forge_worker.py`/`core/sandboxed_skill_worker.py`,
+Low Integrity + Job Object, verificato con test reali che spawnano processi veri) - **ma NON
+ancora collegato a `SkillForge`/`SkillRegistry`**: una skill forgiata installata oggi continua a
+girare in processo, esattamente come prima. Il collegamento vero (route `SkillRegistry.execute()`
+verso il worker per le skill forgiate, decidere cosa fare di una skill che dipende da stato
+condiviso di Jake non serializzabile in JSON, gestire l'avvio/arresto del worker nel ciclo di vita
+di `JakeCore`) resta un incremento a se', dichiaratamente non affrontato qui. Ritmo per chi riprende: un incremento alla volta, ciascuno con test reali (non solo letti a tavolino),
 riprova empirica quando possibile (riprodurre il buco con il codice vecchio prima di dichiararlo
 risolto, idealmente con una tecnica di forzatura reale come `sys.setswitchinterval()` abbassato o
 una `threading.Barrier` - molti buchi di questa sessione non si manifestavano affatto senza),
