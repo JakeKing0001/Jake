@@ -1330,8 +1330,9 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
   (visibilita' dei fallimenti di shutdown, non ancora drain/checkpoint veri); `F1.8.5` chiuso
   parzialmente (diagnosi di un thread che non si ferma in tempo per i quattro scheduler in
   background, non ancora deadlock su lock applicativi, vedi sotto); `F1.8.6` chiuso (verificato,
-  vedi sotto); `F1.8.7` chiuso parzialmente (race su handoff device trovata e corretta, vedi
-  sotto; reminder/trigger/conferma/undo non ancora affrontati).
+  vedi sotto); `F1.8.7` chiuso parzialmente (race su handoff device e su trigger trovate e
+  corrette, vedi sotto; reminder e conferma gia' al sicuro, undo non ancora testabile - vedi
+  sotto).
 - `F1.8.1` (parziale, doppia esecuzione via conferma concorrente) — 12/09/2026: "definire
   ownership della sessione... e una coda per azioni concorrenti". Buco reale, riprodotto per
   davvero prima del fix - `JakeCore.answer()` e' l'UNICO ingresso condiviso sia dal loop voce
@@ -1649,6 +1650,33 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
   conferma e undo (il resto del testo di `F1.8.7`) - qui era gia' in corso un'indagine mirata
   sull'handoff, non ancora estesa agli altri quattro. Prova: 2.226/2.226 test, ruff/compileall
   verdi su tutti i file toccati.
+- `F1.8.7` (parziale, race su trigger) — 13/09/2026: seconda meta' della stessa indagine, ora su
+  "trigger". `core/reminder_manager.py` era gia' chiuso (RLock su ogni metodo, gia' in una sessione
+  precedente) e nessun endpoint di `companion_server.py` tocca reminder o trigger - il secondo
+  canale concorrente qui e' sempre il thread principale (voce/agente) contro il thread di
+  `TriggerScheduler`, non `ThreadingHTTPServer`. `TriggerManager.mark_fired()` invece faceva
+  `_load_raw()` (una `recall()`) e poi `remember()` come DUE chiamate separate a `MemoryManager`:
+  ciascuna e' bloccata singolarmente al proprio interno, ma la sequenza letta-poi-scritta nel suo
+  complesso no - se l'utente ridefinisce lo stesso trigger con `SET_TRIGGER` esattamente in mezzo
+  (thread principale) mentre lo scheduler lo marca scattato (il suo thread), `mark_fired()`
+  riscriveva sopra la modifica dell'utente con il record VECCHIO gia' letto, cancellandola in
+  silenzio - stesso identico difetto strutturale gia' corretto in `ConversationStateManager`
+  quest'anno (un check-then-act a due chiamate invece di una sola operazione atomica), qui a
+  livello di `MemoryManager` invece che di attributi d'istanza. Riprodotto per davvero con
+  `sys.setswitchinterval()` + `threading.Barrier` (1 perdita su 15 prove, incostante come
+  `DeviceRegistry` - finestra stretta), poi reso deterministico con due `threading.Event` che
+  forzano l'esatto intreccio (lettura -> modifica esterna -> scrittura). Corretto SENZA introdurre
+  un nuovo lock: `MemoryManager` ne ha gia' uno (`RLock`, rientrante) usato da ogni suo metodo
+  pubblico - aggiunta una property `MemoryManager.lock` che lo espone a chi ha bisogno di
+  allargare la sezione critica su piu' chiamate, e `mark_fired()` ora avvolge l'intera sequenza
+  `_load_raw()`+`remember()` in un unico `with self.memory_manager.lock:`. Aggiunto
+  `tests/test_trigger_manager.py::ConcurrentMarkFiredTests`, verificato che fallisce contro il
+  codice precedente (il record vecchio sovrascriveva quello nuovo) e passa in modo deterministico
+  contro il fix. Con questo, `F1.8.7` ha esaminato handoff e trigger; restano reminder (gia' al
+  sicuro, nessun fix necessario), conferma (gia' chiusa in `F1.8.1`) e undo (non ancora possibile
+  da testare per race: `UndoDescriptor` - F1.3.5 - e' solo un contratto dati, non esiste ancora
+  nessuno store con stato condiviso da annullare, vedi `F1.7.2`). Prova: 2.227/2.227 test,
+  ruff/compileall verdi su tutti i file toccati.
 
 ### Gate G1 — Nucleo fidato
 
@@ -2751,7 +2779,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 21 incrementi completati e verificati (PR #28-#48), la
+Aggiornato 13/09/2026. Sessione lunga con 22 incrementi completati e verificati (PR #28-#49), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -2764,10 +2792,11 @@ in `SkillRegistry.list_capabilities()`, `ExampleStore` con oltre il 60% di esemp
 `F1.4.1`/`F1.7.1` (scritture non atomiche - config e ledger - che un crash a meta' avrebbe potuto
 corrompere), `F1.4.3` (canale laterale temporale sulla passphrase admin), `F1.8.5` (i quattro
 scheduler in background non segnalavano MAI se il proprio thread restava bloccato oltre il
-timeout di arresto), `F1.8.7` (`DeviceRegistry.claim()` senza lock - corsa reale ma a bassa
-probabilita' con lo scheduler standard, riprodotta in modo affidabile solo allargando
-artificialmente la finestra tra lettura e scrittura, poi corretta con lock come gli altri store
-condivisi). Le due funzionalita' nuove: `F1.2.2` (prima capability vera - radici filesystem
+timeout di arresto), `F1.8.7` (due buchi da check-then-act non atomico su piu' chiamate:
+`DeviceRegistry.claim()` senza lock e `TriggerManager.mark_fired()` con lettura e scrittura come
+due chiamate separate a `MemoryManager` - entrambi corsa reale ma a bassa probabilita' con lo
+scheduler standard, riprodotti in modo affidabile solo forzando deliberatamente l'intreccio esatto
+tra lettura e scrittura). Le due funzionalita' nuove: `F1.2.2` (prima capability vera - radici filesystem
 consentite) e `F1.7.4` (redazione strutturata per tipo di dato - percorso/URL/email invece del
 generico "<str:N caratteri>"). Il resto: `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
@@ -2775,17 +2804,20 @@ verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.2` (parziale - la notifica di
 un'automazione ora porta lo stesso trace_id delle ricevute che l'ha prodotta), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.226/2.226 test, ruff/mypy/compileall verdi. `G1` resta aperto.
+`master` e' pulito, 2.227/2.227 test, ruff/mypy/compileall verdi. `G1` resta aperto.
 
-Nota di metodo da `F1.8.7`/`DeviceRegistry`: la tecnica standard di questa sessione
-(`sys.setswitchinterval()` abbassato + `threading.Barrier`, senza altro aiuto) NON riproduce ogni
-race reale - solo quelle con una finestra abbastanza larga da contenere una chiamata o un ciclo
-intermedio in cui il GIL possa cedere il controllo. Un check-then-act di sole 2-3 istruzioni
-adiacenti (leggi attributo, scrivi attributo) puo' restare a 0 riproduzioni su centinaia di prove
-pur essendo comunque un vero buco: va confermato allargando ARTIFICIALMENTE la finestra (un
-`time.sleep()` breve iniettato tra le due istruzioni, via un seam privato dedicato o
-monkeypatching mirato) prima di concludere "nessuna corsa qui" - un risultato negativo con la sola
-tecnica standard non e' prova sufficiente di sicurezza su finestre strette.
+Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
+sessione (`sys.setswitchinterval()` abbassato + `threading.Barrier`, senza altro aiuto) NON
+riproduce ogni race reale in modo affidabile - solo quelle con una finestra abbastanza larga da
+contenere una chiamata o un ciclo intermedio in cui il GIL possa cedere il controllo. Un
+check-then-act di poche istruzioni/chiamate adiacenti puo' restare a 0 (o quasi 0) riproduzioni su
+centinaia di prove pur essendo comunque un vero buco: va confermato o forzando artificialmente un
+ritardo tra le due meta' dell'operazione (un `time.sleep()` breve iniettato via un seam privato
+dedicato o monkeypatching mirato, come per `DeviceRegistry`), o - meglio quando possibile, perche'
+deterministico invece di probabilistico - orchestrando l'esatto intreccio con due
+`threading.Event` (uno che segnala "letto", uno che sblocca "procedi a scrivere"), come per
+`TriggerManager.mark_fired()`. Un risultato negativo con la sola tecnica standard non e' prova
+sufficiente di sicurezza su finestre strette.
 
 Restano fuori discussione, senza un nuovo via libera esplicito, i due lavori grandi gia' proposti
 e rifiutati: `F1.6` (sandbox permanente per le skill forgiate - Job Object/AppContainer) e
@@ -2808,8 +2840,9 @@ chiuso), il resto di `F1.8` (il resto di `F1.8.1` - identita' di canale/sessione
 conferme concorrenti distinte, coda generale per azioni concorrenti non legate a una conferma;
 il resto di `F1.8.4` - drain limitato di un'azione in corso, checkpoint vero, release device
 audio; il resto di `F1.8.5` - diagnosi di un deadlock vero su un lock applicativo, non solo un
-thread esterno lento; il resto di `F1.8.7` - race su reminder, trigger, conferma e undo, non
-ancora esaminati dopo l'handoff). Vale la pena anche un altro giro di ricerca mirata di race
+thread esterno lento; il resto di `F1.8.7` - undo, non ancora testabile per race finche' non
+esiste uno store con stato condiviso da annullare, vedi `F1.7.2`; reminder e conferma gia'
+verificati al sicuro, handoff e trigger gia' corretti). Vale la pena anche un altro giro di ricerca mirata di race
 condition non ancora trovate in strutture condivise tra thread non ancora esaminate (es.
 `core/learning_manager.py` - trovato un `_pending` a slot singolo con lo stesso pattern, ma
 l'effetto peggiore e' un doppio apprendimento innocuo, non una perdita/corruzione - deciso di non
