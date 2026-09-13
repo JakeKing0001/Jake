@@ -395,3 +395,24 @@ class DeviceIdInReceiptsTests(_PolicyLedgerFixture):
         denied = [r for r in self.receipts() if r["result"] == "denied_auth"]
         self.assertEqual(len(denied), 1)
         self.assertEqual(denied[0]["device_id"], "phone1")
+
+
+class WindowsUserInReceiptsTests(_PolicyLedgerFixture):
+    """F1.4.2 (prima fetta): l'account Windows (core/identity.py::current_windows_user()) arriva
+    nella ricevuta esattamente come device_id sopra, ma senza bisogno di un contextvar/thread da
+    propagare - e' costante per tutto il processo, quindi sempre presente (mai "omesso quando non
+    impostato" come device_id, che e' opzionale per costruzione)."""
+
+    def test_direct_command_receipt_carries_the_real_windows_user(self):
+        import getpass
+
+        self.execute()
+
+        self.assertEqual(self.receipts()[0]["windows_user"], getpass.getuser())
+
+    def test_agent_step_receipt_carries_the_real_windows_user(self):
+        import getpass
+
+        self.agent().run("fixture")
+
+        self.assertEqual(self.receipts()[0]["windows_user"], getpass.getuser())

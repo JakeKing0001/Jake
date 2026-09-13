@@ -14,6 +14,7 @@ consumatori reali la usino davvero."""
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from core.auth_gate import AuthGate
 from core.policy_engine import PolicyDecision, PolicyEngine, strip_authorization_signals
@@ -561,6 +562,71 @@ class DeviceCapabilityTests(unittest.TestCase):
         self.assertEqual(result["interactive"]["reason"], "intent_in_device_blocked_intents")
         self.assertEqual(result["automated"]["decision"], "block")
         self.assertEqual(result["automated"]["reason"], "intent_in_device_blocked_intents")
+
+
+class WindowsUserCapabilityTests(unittest.TestCase):
+    """F1.4.2 (prima fetta - "distinguere identita' Windows... dispositivo..."): stesso
+    principio "vince il piu' restrittivo" di DeviceCapabilityTests sopra, ma per l'account
+    Windows che esegue il processo invece che per canale companion - le due dimensioni sono
+    ortogonali (core/identity.py)."""
+
+    def _as_windows_user(self, name):
+        patcher = mock.patch("core.policy_engine.current_windows_user", return_value=name)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_no_windows_user_blocked_intents_configured_means_no_restriction(self):
+        engine = PolicyEngine()
+        self._as_windows_user("figlio")
+        self.assertEqual(engine.decide_interactive("DELETE_PATH", {}), PolicyDecision.ALLOW)
+
+    def test_an_intent_blocked_for_a_windows_user_is_blocked_only_for_that_user(self):
+        engine = PolicyEngine(windows_user_blocked_intents={"figlio": {"DELETE_PATH"}})
+        self._as_windows_user("figlio")
+
+        self.assertEqual(engine.decide_interactive("DELETE_PATH", {}), PolicyDecision.BLOCK)
+
+    def test_the_same_intent_is_still_allowed_for_a_different_windows_user(self):
+        engine = PolicyEngine(windows_user_blocked_intents={"figlio": {"DELETE_PATH"}})
+        self._as_windows_user("genitore")
+
+        self.assertEqual(engine.decide_interactive("DELETE_PATH", {}), PolicyDecision.ALLOW)
+
+    def test_windows_user_block_reports_a_distinct_reason_from_the_device_block(self):
+        engine = PolicyEngine(windows_user_blocked_intents={"figlio": {"DELETE_PATH"}})
+        self._as_windows_user("figlio")
+
+        decision, reason = engine.decide_interactive_with_reason("DELETE_PATH", {})
+
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+        self.assertEqual(reason, "intent_in_windows_user_blocked_intents")
+
+    def test_windows_user_block_wins_over_confirmation(self):
+        engine = PolicyEngine(
+            always_confirm_intents={"DELETE_PATH"}, windows_user_blocked_intents={"figlio": {"DELETE_PATH"}},
+        )
+        self._as_windows_user("figlio")
+
+        decision = engine.decide_interactive("DELETE_PATH", {"confirmed": True})
+
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+
+    def test_decide_automated_also_enforces_windows_user_blocked_intents(self):
+        engine = PolicyEngine(windows_user_blocked_intents={"figlio": {"DELETE_PATH"}})
+        self._as_windows_user("figlio")
+
+        self.assertEqual(engine.decide_automated("DELETE_PATH"), PolicyDecision.BLOCK)
+
+    def test_a_global_block_still_applies_regardless_of_windows_user_capability(self):
+        """L'intersezione vale nei due sensi: un account non specificamente ristretto resta
+        comunque soggetto a blocked_intents (livello utente)."""
+        engine = PolicyEngine(blocked_intents={"DELETE_PATH"}, windows_user_blocked_intents={"figlio": {"RENAME_PATH"}})
+        self._as_windows_user("figlio")
+
+        decision, reason = engine.decide_interactive_with_reason("DELETE_PATH", {})
+
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+        self.assertEqual(reason, "intent_in_blocked_intents")
 
 
 class WebDomainCapabilityTests(unittest.TestCase):
