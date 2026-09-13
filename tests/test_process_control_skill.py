@@ -180,6 +180,63 @@ class CloseAppVerifiedTerminationTests(unittest.TestCase):
         self.assertFalse(psutil.pid_exists(process.pid), "il processo deve essere gia' morto quando execute() ritorna")
 
 
+class CloseAppGracefulCloseVerifiedTests(unittest.TestCase):
+    """F1.3.2 ("...finestre"): lo stesso buco di CloseAppVerifiedTerminationTests, ma nel ramo
+    "chiusura gentile" (WM_CLOSE) - _close_windows()/_close_windows_by_title() contavano una
+    finestra come chiusa per il solo fatto che PostMessage non avesse sollevato un'eccezione,
+    senza mai verificare che fosse davvero sparita (vedi
+    skills/window_control.py::_wait_until_window_closed)."""
+
+    def _fake_win32(self, hwnd_titles: dict, pid_by_hwnd: dict = None, still_open_hwnds: set = None):
+        still_open_hwnds = still_open_hwnds or set()
+        win32gui = mock.MagicMock()
+        win32gui.IsWindowVisible.return_value = True
+        win32gui.GetWindowText.side_effect = lambda hwnd: hwnd_titles.get(hwnd, "")
+        win32gui.IsWindow.side_effect = lambda hwnd: hwnd in still_open_hwnds
+
+        def enum_windows(callback, extra):
+            for hwnd in hwnd_titles:
+                callback(hwnd, extra)
+
+        win32gui.EnumWindows.side_effect = enum_windows
+        win32con = mock.MagicMock(WM_CLOSE=0x0010)
+        win32process = mock.MagicMock()
+        win32process.GetWindowThreadProcessId.side_effect = lambda hwnd: (0, (pid_by_hwnd or {}).get(hwnd))
+        return win32gui, win32con, win32process
+
+    def test_close_windows_by_title_excludes_a_window_that_does_not_actually_close(self):
+        win32gui, win32con, _win32process = self._fake_win32(
+            hwnd_titles={1: "Blocco note", 2: "Blocco note 2"}, still_open_hwnds={2},
+        )
+        with mock.patch.dict("sys.modules", {"win32gui": win32gui, "win32con": win32con}):
+            closed = CloseAppSkill._close_windows_by_title("blocco note", wait_seconds=0.05)
+        self.assertEqual(closed, ["Blocco note"])
+
+    def test_close_windows_by_pid_excludes_a_window_that_does_not_actually_close(self):
+        fake_process = mock.MagicMock()
+        fake_process.info = {"pid": 4242}
+        win32gui, win32con, win32process = self._fake_win32(
+            hwnd_titles={1: "Notepad"}, pid_by_hwnd={1: 4242}, still_open_hwnds={1},
+        )
+        with mock.patch.dict("sys.modules", {"win32gui": win32gui, "win32con": win32con, "win32process": win32process}):
+            closed = CloseAppSkill._close_windows([fake_process], wait_seconds=0.05)
+        self.assertEqual(closed, [])
+
+    def test_graceful_close_end_to_end_does_not_report_success_for_a_window_that_stays_open(self):
+        """execute() completo (non solo il metodo statico in isolamento): una finestra che
+        ignora WM_CLOSE non deve piu' far dichiarare 'graceful': True a CLOSE_APP."""
+        fake_process = mock.MagicMock()
+        fake_process.info = {"pid": 4242, "name": "notepad.exe"}
+        win32gui, win32con, win32process = self._fake_win32(
+            hwnd_titles={1: "Blocco note"}, pid_by_hwnd={1: 4242}, still_open_hwnds={1},
+        )
+        with mock.patch("skills.process_control._matching_processes", return_value=[fake_process]):
+            with mock.patch.dict("sys.modules", {"win32gui": win32gui, "win32con": win32con, "win32process": win32process}):
+                with mock.patch.object(CloseAppSkill, "TERMINATE_WAIT_SECONDS", 0.05):
+                    result = CloseAppSkill().execute({"name": "blocco note"})
+        self.assertEqual(result.error, "CONFIRMATION_REQUIRED", "nessuna finestra davvero chiusa: deve ricadere sulla richiesta di conferma")
+
+
 class ListProcessesBasicTests(unittest.TestCase):
     def test_no_filter_lists_up_to_the_maximum(self):
         result = ListProcessesSkill().execute({})

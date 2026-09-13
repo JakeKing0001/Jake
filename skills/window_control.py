@@ -1,4 +1,26 @@
+import time
+
 from core.skill_result import SkillResult
+
+
+def _wait_until_window_closed(win32gui, hwnd, wait_seconds: float, poll_interval: float = 0.05) -> bool:
+    """F1.3.2 ("prove forti per... finestre"): attende che una finestra a cui e' stato appena
+    inviato WM_CLOSE sia DAVVERO sparita, invece di fidarsi che l'invio sia andato a buon fine
+    solo perche' PostMessage non ha sollevato un'eccezione. PostMessage e' fire-and-forget: il
+    programma destinatario puo' ignorare il messaggio, o mostrare un dialogo "salvare le
+    modifiche?" che blocca la chiusura vera - in entrambi i casi la finestra resta aperta anche
+    se la richiesta e' stata "inviata con successo". Condivisa tra CloseWindowSkill e
+    CloseAppSkill (skills/close_window.py, skills/process_control.py): stesso identico buco,
+    stessa correzione, un solo posto da mantenere invece di due copie che potrebbero divergere.
+    win32gui e' passato dal chiamante (gia' importato li', mai una seconda import qui) cosi' i
+    test possono continuare a mockarlo come modulo intero."""
+    deadline = time.monotonic() + wait_seconds
+    while True:
+        if not win32gui.IsWindow(hwnd):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(poll_interval)
 
 
 def _find_window(title_fragment: str):
