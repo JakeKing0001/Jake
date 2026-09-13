@@ -10,7 +10,7 @@ from pathlib import Path
 from core.action_ledger import (
     AUTHORIZATION_BLOCKED, AUTHORIZATION_CONFIRMED, AUTHORIZATION_DENIED, AUTHORIZATION_NONE,
     AUTHORIZATION_PASSPHRASE, AUTHORIZATION_PENDING, AUTHORIZATION_WINDOWS_HELLO,
-    ERROR_CATEGORY_DENIED, ERROR_CATEGORY_INVALID_INPUT, ERROR_CATEGORY_PENDING,
+    ERROR_CATEGORY_CONFLICT, ERROR_CATEGORY_DENIED, ERROR_CATEGORY_INVALID_INPUT, ERROR_CATEGORY_PENDING,
     ERROR_CATEGORY_SUCCESS, ERROR_CATEGORY_TIMEOUT, ERROR_CATEGORY_TRANSIENT,
     ERROR_CATEGORY_UNAVAILABLE, ERROR_CATEGORY_UNCATEGORIZED, ERROR_CATEGORY_USER_CANCELLED,
     ERROR_CATEGORY_VERIFICATION_FAILED, VERIFICATION_FAILED, VERIFICATION_UNVERIFIED,
@@ -210,14 +210,55 @@ class ErrorCategoryOfTests(unittest.TestCase):
     def test_killed_is_user_cancelled_not_a_system_error(self):
         self.assertEqual(error_category_of("error:KILLED"), ERROR_CATEGORY_USER_CANCELLED)
 
-    def test_unknown_skill_specific_error_falls_back_to_uncategorized(self):
-        """Un codice bespoke di UNA skill (es. PATH_NOT_FOUND di delete_path.py), non ancora
-        migrato sulla tassonomia condivisa (F1.1.6/F1.1.7): dichiarato onestamente, non forzato
-        in una categoria a caso."""
-        self.assertEqual(error_category_of("error:PATH_NOT_FOUND"), ERROR_CATEGORY_UNCATEGORIZED)
+    def test_a_code_truly_never_seen_before_falls_back_to_uncategorized(self):
+        """Un codice MAI usato da nessuna skill (non solo non ancora migrato - proprio inventato
+        per questo test): dichiarato onestamente, non forzato in una categoria a caso."""
+        self.assertEqual(error_category_of("error:UN_CODICE_MAI_VISTO_XYZ"), ERROR_CATEGORY_UNCATEGORIZED)
 
     def test_empty_result_falls_back_to_uncategorized(self):
         self.assertEqual(error_category_of(""), ERROR_CATEGORY_UNCATEGORIZED)
+
+
+class BespokeSkillErrorCodesAreCategorizedTests(unittest.TestCase):
+    """F1.1.7 (seconda meta': "migrare gli errori delle ~200 skill sulla tassonomia condivisa"):
+    i 35 codici bespoke REALMENTE usati dalle skill (`grep -rhoE 'error="[A-Z_]+"' skills/*.py`,
+    verificato uno per uno, non ipotizzato) e non ancora coperti da _KNOWN_RESULT_CATEGORIES prima
+    di questo incremento. Nessun file di skill e' stato toccato: sono le stesse stringhe che
+    result.error contiene gia' oggi, solo ora riconosciute da error_category_of() invece di
+    ricadere silenziosamente su "uncategorized" (vedi core/jake_core.py::_execute_command(),
+    che costruisce 'error:{result.error}' per ogni chokepoint gia' esistente)."""
+
+    def test_unavailable_dependency_codes(self):
+        for code in (
+            "AUDIO_UNAVAILABLE", "BRIGHTNESS_UNAVAILABLE", "BROWSER_HISTORY_UNAVAILABLE",
+            "HOME_ASSISTANT_UNAVAILABLE", "MISSING_API_KEY", "NEST_UNAVAILABLE",
+            "OCR_UNAVAILABLE", "VISION_UNAVAILABLE",
+        ):
+            self.assertEqual(error_category_of(f"error:{code}"), ERROR_CATEGORY_UNAVAILABLE, code)
+
+    def test_invalid_input_codes(self):
+        for code in (
+            "CITY_NOT_FOUND", "CLIPBOARD_EMPTY", "CONTACT_NOT_FOUND", "CURRENCY_NOT_FOUND",
+            "INCOMPATIBLE_UNITS", "INVALID_DATE", "INVALID_EXPRESSION", "INVALID_JSON",
+            "INVALID_TIME", "INVALID_URL", "INVALID_VALUE", "NOT_A_GIT_REPO", "NOT_FOUND",
+            "NO_SELECTION", "PATH_NOT_FOUND", "RESULT_NOT_FOUND", "UNSUPPORTED_APP",
+            "VOICE_ONLY", "WINDOW_NOT_FOUND",
+        ):
+            self.assertEqual(error_category_of(f"error:{code}"), ERROR_CATEGORY_INVALID_INPUT, code)
+
+    def test_denied_codes(self):
+        for code in ("BLOCKED", "PROTECTED_PATH"):
+            self.assertEqual(error_category_of(f"error:{code}"), ERROR_CATEGORY_DENIED, code)
+
+    def test_transient_codes(self):
+        for code in (
+            "FORGE_FAILED", "HOME_ASSISTANT_ERROR", "HOST_UNREACHABLE", "LAUNCH_FAILED",
+            "NEST_ERROR", "PLAN_FAILED",
+        ):
+            self.assertEqual(error_category_of(f"error:{code}"), ERROR_CATEGORY_TRANSIENT, code)
+
+    def test_already_exists_is_a_conflict(self):
+        self.assertEqual(error_category_of("error:ALREADY_EXISTS"), ERROR_CATEGORY_CONFLICT)
 
 
 class ActionReceiptErrorCategoryValidationTests(unittest.TestCase):

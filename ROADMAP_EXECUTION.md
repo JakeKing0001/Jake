@@ -517,10 +517,11 @@ Dipende da: G0.
 Criterio di uscita: il 100% dei percorsi produce lo stesso `ActionReceipt` validato.
 
 - Stato: `DOING`; `F1.1.1`, `F1.1.2`, `F1.1.3` (parzialmente), `F1.1.4`, `F1.1.6` (pilota su 5
-  intent) e `F1.1.8` conclusi con evidenza; `F1.1.7` esteso ai due chokepoint restanti
-  (`TaskAgent`/`PlanExecutor`, vedi sotto - tutti e tre i chokepoint reali ora costruiscono
-  `ActionError`; il resto di `F1.1.7`, la migrazione degli errori bespoke di ~200 skill sulla
-  tassonomia condivisa, resta aperto); `F1.1.5` resta aperta.
+  intent) e `F1.1.8` conclusi con evidenza; `F1.1.7` chiusa nella sostanza (i tre chokepoint
+  reali costruiscono tutti `ActionError`, e i 35 codici bespoke realmente usati dalle ~200 skill
+  sono ora censiti in `_KNOWN_RESULT_CATEGORIES`, vedi sotto); resta solo `effect_class`/
+  `preconditions`/`expected_effect` di `ActionProposal`, dichiaratamente non calcolabile dai dati
+  esistenti; `F1.1.5` resta aperta.
 - `F1.1.6` — 12/09/2026: pilota di adozione dei contratti F1.1.2 su un intent reale per
   ciascun `RiskLevel` (letterale dalla roadmap: "un intent read-only, uno reversibile, uno
   external, uno destructive e uno admin") - `GET_TIME`, `ADD_NOTE`, `CONTROL_SMART_DEVICE`,
@@ -578,6 +579,34 @@ Criterio di uscita: il 100% dei percorsi produce lo stesso `ActionReceipt` valid
   richiederebbe un censimento/una decisione di prodotto skill per skill, non semplicemente
   "adottare" un tipo gia' calcolabile da dati esistenti). Prova: 2.383/2.383 test,
   ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.1.7` (secondo pezzo - la migrazione degli errori bespoke) — 14/09/2026: prima di scrivere
+  codice, censiti i codici REALMENTE usati (`grep -rhoE 'error="[A-Z_]+"' skills/*.py | sort -u`,
+  non ipotizzati): 42 codici distinti nei file di skill, di cui 6 gia' mappati in
+  `_KNOWN_RESULT_CATEGORIES`, per 35 codici bespoke realmente non ancora coperti. Verificato anche
+  (`grep -rn 'error=f"'`/`error=[a-z_]`) che non esistono codici costruiti dinamicamente oltre
+  questo elenco statico. Tracciato il percorso completo che rende questo un lavoro di UN SOLO
+  file, non 89: `core/jake_core.py::_execute_command()` costruisce gia' oggi
+  `f"error:{result.error}"` dalla stringa che la skill restituisce - `_KNOWN_RESULT_CATEGORIES`
+  e' quindi l'UNICO punto che deve imparare a riconoscere questi codici, senza toccare nessuna
+  delle skill che li producono (nessun file in `skills/` modificato). Ogni codice mappato per il
+  SIGNIFICATO del fallimento (non per la skill che lo produce), riusando le categorie gia'
+  esistenti invece di introdurne di nuove: 8 codici di dipendenza esterna mancante
+  (`AUDIO_UNAVAILABLE`, `NEST_UNAVAILABLE`, `MISSING_API_KEY`, ...) su `unavailable`; 19 codici di
+  input non valido/riferimento inesistente (`CITY_NOT_FOUND`, `INVALID_DATE`, `PATH_NOT_FOUND`,
+  `WINDOW_NOT_FOUND`, ...) su `invalid_input`; 2 rifiuti espliciti di una protezione della skill
+  stessa (`BLOCKED`, `PROTECTED_PATH`) su `denied`, stesso principio gia' usato per
+  `BLOCKED_BY_POLICY`; 6 fallimenti tecnici ritentabili (`FORGE_FAILED`, `HOST_UNREACHABLE`,
+  `PLAN_FAILED`, ...) su `transient`, stesso principio di `OPERATION_FAILED`; `ALREADY_EXISTS` su
+  `conflict` (prima categoria mai popolata da un codice reale). Aggiornati due test che prima
+  usavano `PATH_NOT_FOUND` come ESEMPIO di codice "mai mappato" (`tests/test_action_ledger.py`,
+  `tests/test_action_contracts.py`, `tests/test_dashboard.py`) - non piu' vero dopo questo
+  incremento - sostituito con un codice davvero mai usato da nessuna skill
+  (`UN_CODICE_MAI_VISTO_XYZ`), e aggiunta una nuova classe di test dedicata
+  (`BespokeSkillErrorCodesAreCategorizedTests`) che verifica tutti e 35 i codici uno per uno
+  contro `error_category_of()` vero. Nessun cambio di comportamento delle skill: stesso
+  `SkillResult.error` di sempre, solo ora categorizzato onestamente invece di ricadere su
+  `uncategorized` ovunque questa stringa gia' fluisce (ledger, dashboard F1.7.6). Prova:
+  2.407/2.407 test, ruff/mypy verdi.
 - `F1.1.2` — 12/09/2026: creato `core/action_contracts.py` con i cinque contratti mancanti
   (`ActionProposal`, `ActionContext`, `VerificationEvidence`, `UndoDescriptor`, `ActionError`) -
   `ActionReceipt` esisteva gia' (`core/action_ledger.py`). **Deliberatamente NON collegati** ai
@@ -3562,7 +3591,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 14/09/2026. Sessione lunga con 45 incrementi completati e verificati (PR #28-#72), la
+Aggiornato 14/09/2026. Sessione lunga con 46 incrementi completati e verificati (PR #28-#73), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -3695,7 +3724,7 @@ non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ul
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.402/2.402 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.407/2.407 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
 invariati, nessuno dei due coperto da "mypy selettivo" in CI - 78 file nella lista selettiva,
 `core/identity.py`/`core/forge_worker.py`/`core/sandboxed_skill_worker.py` aggiunti). `G1` resta
@@ -3716,13 +3745,18 @@ sufficiente di sicurezza su finestre strette.
 
 **Aggiornamento 13-14/09/2026**: l'utente ha dato il via libera esplicito su ENTRAMBI i lavori
 grandi sopra, dopo un'investigazione di scoping dedicata (vedi F1.1.7 e F1.6 nelle rispettive
-sezioni). `F1.1.7` ha un primo pezzo chiuso (i due chokepoint restanti). `F1.6` e' andato oltre
-le fondamenta: il worker persistente sandboxato (`core/forge_worker.py`/`core/sandboxed_skill_
-worker.py`, Low Integrity + Job Object) e' ora anche COLLEGATO per davvero -
-`SkillRegistry.execute()` instrada un intent forgiato verso il worker invece di eseguirlo in
-processo, verificato con un confronto di `os.getpid()` che dimostra l'esecuzione avvenuta in un
-processo separato, non solo dichiarata. Restano aperti: `F1.6.4`-`F1.6.6`/`F1.6.8`
-(AppContainer, manifest di directory montabili, negazione rete, quarantena su violazione), e la
+sezioni). `F1.1.7` e' ora chiusa nella sostanza: i tre chokepoint restanti costruiscono tutti
+`ActionError` (primo pezzo), e i 35 codici bespoke realmente usati dalle skill sono censiti in
+`_KNOWN_RESULT_CATEGORIES` (secondo pezzo, zero file di skill toccati - un solo dizionario in
+`core/action_ledger.py`); resta solo `effect_class`/`preconditions`/`expected_effect` di
+`ActionProposal`, dichiaratamente non calcolabile dai dati esistenti senza un censimento skill
+per skill. `F1.6` e' andato oltre le fondamenta: il worker persistente sandboxato
+(`core/forge_worker.py`/`core/sandboxed_skill_worker.py`, Low Integrity + Job Object) e' ora
+anche COLLEGATO per davvero - `SkillRegistry.execute()` instrada un intent forgiato verso il
+worker invece di eseguirlo in processo, verificato con un confronto di `os.getpid()` che dimostra
+l'esecuzione avvenuta in un processo separato, non solo dichiarata. Restano aperti: `F1.6.4`-
+`F1.6.6`/`F1.6.8` (AppContainer, manifest di directory montabili, negazione rete, quarantena su
+violazione), e la
 domanda esplicita su cosa fare di una skill forgiata che dipendesse da stato condiviso di Jake
 non serializzabile in JSON (oggi nessuna lo fa, ma non c'e' ancora un controllo che lo vieti). Ritmo per chi riprende: un incremento alla volta, ciascuno con test reali (non solo letti a tavolino),
 riprova empirica quando possibile (riprodurre il buco con il codice vecchio prima di dichiararlo
