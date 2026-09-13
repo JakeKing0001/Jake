@@ -517,7 +517,10 @@ Dipende da: G0.
 Criterio di uscita: il 100% dei percorsi produce lo stesso `ActionReceipt` validato.
 
 - Stato: `DOING`; `F1.1.1`, `F1.1.2`, `F1.1.3` (parzialmente), `F1.1.4`, `F1.1.6` (pilota su 5
-  intent) e `F1.1.8` conclusi con evidenza; `F1.1.5`, `F1.1.7` restano aperti.
+  intent) e `F1.1.8` conclusi con evidenza; `F1.1.7` esteso ai due chokepoint restanti
+  (`TaskAgent`/`PlanExecutor`, vedi sotto - tutti e tre i chokepoint reali ora costruiscono
+  `ActionError`; il resto di `F1.1.7`, la migrazione degli errori bespoke di ~200 skill sulla
+  tassonomia condivisa, resta aperto); `F1.1.5` resta aperta.
 - `F1.1.6` — 12/09/2026: pilota di adozione dei contratti F1.1.2 su un intent reale per
   ciascun `RiskLevel` (letterale dalla roadmap: "un intent read-only, uno reversibile, uno
   external, uno destructive e uno admin") - `GET_TIME`, `ADD_NOTE`, `CONTROL_SMART_DEVICE`,
@@ -543,6 +546,38 @@ Criterio di uscita: il 100% dei percorsi produce lo stesso `ActionReceipt` valid
   comportamento identico a prima, adozione rimandata a `F1.1.7`. Prova: 2.048/2.048 test,
   ruff/mypy (incluso il set selettivo di `pyproject.toml`, che include `core/jake_core.py`)/
   compileall verdi.
+- `F1.1.7` (primo pezzo - i due chokepoint restanti) — 13/09/2026: decisione esplicita
+  dell'utente di autorizzare questo lavoro (in precedenza dichiarato fuori discussione senza un
+  nuovo via libera, insieme a `F1.6`). Investigato prima di scrivere codice (vedi il sottoagente
+  di ricerca dedicato) per capire cosa "migrare ~200 skill da `SkillResult` ad `ActionProposal`/
+  `ActionError`" significhi DAVVERO in questa codebase, non solo dal titolo della voce: nessuna
+  delle ~200 skill (210 classi `*Skill`, confermato con un conteggio letterale) costruisce oggi
+  `ActionProposal`/`ActionError` - e non e' previsto che lo facciano MAI, dato che
+  `ActionProposal` viene gia' costruito dal CHIAMANTE (il chokepoint) da dati che precedono
+  l'esecuzione della skill (intent/parametri/rischio), non dalla skill stessa - il pilota F1.1.6
+  lo dimostra gia' per `JakeCore`. `ActionError.from_result()` e' inoltre una PURA derivazione
+  dalla stessa stringa `result` che i chokepoint calcolano gia' oggi (`normalize_result_code`/
+  `error_category_of`, la stessa fonte): adottarla in un chokepoint in piu' e' quindi a rischio
+  quasi nullo, stesso principio "wrapper senza cambio di comportamento" gia' verificato per il
+  pilota. Estesa la stessa identica sostituzione (`error_category_of(result)` ->
+  `ActionError.from_result(result)` validato, `.category` per `ActionReceipt.error_category`) a
+  `TaskAgent._log_step` (`core/agent.py`) e `PlanExecutor._log_step` (`core/plan_executor.py`) -
+  i due chokepoint esplicitamente lasciati indietro dal pilota. Con questo, **tutti e tre i
+  chokepoint reali** (comando diretto/ripresa conferma, agente, piano) costruiscono lo stesso
+  tipo condiviso invece di due su tre restare su una stringa grezza. Aggiunti 4 nuovi test - 2 in
+  `tests/test_agent.py::ActionErrorWiredIntoTheLedgerTests`, 2 in
+  `tests/test_plan_executor.py::ActionErrorWiredIntoTheLedgerTests` - entrambi con un
+  `ActionLedger` VERO su file temporaneo (non mockato), stesso principio del pilota: verificano
+  cosa finisce SU DISCO, non solo cosa la funzione calcola in memoria. Non ancora affrontato (il
+  resto, piu' ampio, di `F1.1.7`): la migrazione degli errori BESPOKE delle ~200 skill (stringhe
+  specifiche di una sola skill, oggi `ERROR_CATEGORY_UNCATEGORIZED` per mancata corrispondenza)
+  sulla tassonomia condivisa - un lavoro dominio per dominio (16 domini in
+  `core/skill_catalog.py`), meccanico ma esteso, dichiaratamente rimandato a un incremento
+  successivo dedicato invece di infilarlo qui; ne' `effect_class`/`preconditions`/
+  `expected_effect` di `ActionProposal` (informazione NUOVA che nessuna skill dichiara ancora,
+  richiederebbe un censimento/una decisione di prodotto skill per skill, non semplicemente
+  "adottare" un tipo gia' calcolabile da dati esistenti). Prova: 2.383/2.383 test,
+  ruff/mypy/compileall verdi su tutti i file toccati.
 - `F1.1.2` — 12/09/2026: creato `core/action_contracts.py` con i cinque contratti mancanti
   (`ActionProposal`, `ActionContext`, `VerificationEvidence`, `UndoDescriptor`, `ActionError`) -
   `ActionReceipt` esisteva gia' (`core/action_ledger.py`). **Deliberatamente NON collegati** ai
@@ -3405,7 +3440,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 42 incrementi completati e verificati (PR #28-#69), la
+Aggiornato 13/09/2026. Sessione lunga con 43 incrementi completati e verificati (PR #28-#70), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -3515,15 +3550,21 @@ intents` in `PolicyEngine`), e `F1.8.1` investigazione sul contesto condiviso tr
 nessun codice cambiato - cronologia/entita'/ultimi risultati di ricerca in
 `ConversationStateManager` sono condivisi da tutti i canali, a differenza delle azioni in
 sospeso; chiesto esplicitamente all'utente PRIMA di scrivere codice se fosse un buco o il
-comportamento voluto - confermato voluto, "Jake e' un solo assistente"). Il resto:
+comportamento voluto - confermato voluto, "Jake e' un solo assistente"), e `F1.1.7` primo pezzo
+(via libera esplicito dell'utente su un lavoro grande finora rifiutato - investigato PRIMA di
+scrivere codice: nessuna delle ~200 skill costruisce o dovrebbe mai costruire `ActionProposal`/
+`ActionError` da sola, sono i CHOKEPOINT a farlo da dati che gia' possiedono; estesa la stessa
+sostituzione a rischio quasi nullo del pilota F1.1.6 - `error_category_of()` diretto ->
+`ActionError.from_result()` validato - a `TaskAgent`/`PlanExecutor`, i due chokepoint rimasti:
+ora tutti e tre costruiscono il tipo condiviso). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.379/2.379 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.383/2.383 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
-invariati, nessuno dei due coperto da "mypy selettivo" in CI - ora 76 file nella lista selettiva,
+invariati, nessuno dei due coperto da "mypy selettivo" in CI - 76 file nella lista selettiva,
 `core/identity.py` aggiunto). `G1` resta aperto.
 
 Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
@@ -3539,10 +3580,16 @@ deterministico invece di probabilistico - orchestrando l'esatto intreccio con du
 `TriggerManager.mark_fired()`. Un risultato negativo con la sola tecnica standard non e' prova
 sufficiente di sicurezza su finestre strette.
 
-Restano fuori discussione, senza un nuovo via libera esplicito, i due lavori grandi gia' proposti
-e rifiutati: `F1.6` (sandbox permanente per le skill forgiate - Job Object/AppContainer) e
-`F1.1.7` (migrazione delle ~200 skill da `SkillResult` ad `ActionProposal`/`ActionError`). Ritmo
-per chi riprende: un incremento alla volta, ciascuno con test reali (non solo letti a tavolino),
+**Aggiornamento 13/09/2026**: l'utente ha dato il via libera esplicito su ENTRAMBI i lavori
+grandi sopra, dopo un'investigazione di scoping dedicata (vedi F1.1.7 sopra e F1.6 sotto).
+`F1.1.7` ha gia' un primo pezzo chiuso (i due chokepoint restanti, vedi sopra); `F1.6` resta da
+iniziare - la sua investigazione ha rivelato che anche la fetta piu' piccola possibile (Job
+Object per soli limiti di CPU/memoria/durata, senza ancora restrizioni di accesso a
+filesystem/rete/registro) richiede prima un'architettura di esecuzione FUORI PROCESSO per le
+skill forgiate (oggi girano nello stesso processo di Jake, nessuna distinzione da una skill
+built-in dopo l'installazione) - una decisione architetturale genuina, non una fetta stretta
+come gli altri incrementi di stasera, da affrontare con un design esplicito prima di scrivere
+codice. Ritmo per chi riprende: un incremento alla volta, ciascuno con test reali (non solo letti a tavolino),
 riprova empirica quando possibile (riprodurre il buco con il codice vecchio prima di dichiararlo
 risolto, idealmente con una tecnica di forzatura reale come `sys.setswitchinterval()` abbassato o
 una `threading.Barrier` - molti buchi di questa sessione non si manifestavano affatto senza),

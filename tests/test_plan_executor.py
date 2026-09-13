@@ -331,6 +331,43 @@ class ActionLedgerWiringTests(unittest.TestCase):
         self.assertEqual(ledger.record.call_args.args[0].requested_by, "user")
 
 
+class ActionErrorWiredIntoTheLedgerTests(unittest.TestCase):
+    """F1.1.7 (terzo chokepoint adottato, dopo JakeCore - F1.1.6 - e TaskAgent - vedi
+    tests/test_agent.py::ActionErrorWiredIntoTheLedgerTests): PlanExecutor._log_step costruisce
+    ora un ActionError reale (F1.1.2) e ne usa la categoria per la ricevuta - stesso valore di
+    prima (error_category_of), ma attraverso il tipo condiviso. Un ActionLedger vero su file
+    temporaneo, non mockato."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.ledger_path = Path(self._tmpdir.name) / "ledger.jsonl"
+
+    def test_a_successful_step_is_categorized_as_success_via_the_shared_contract(self):
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
+        plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
+        executor = PlanExecutor(registry)
+        executor.action_ledger = ActionLedger(path=self.ledger_path)
+
+        with unittest.mock.patch("core.plan_executor.log_action"):
+            executor.execute(plan, policy_engine=PolicyEngine())
+
+        receipts = executor.action_ledger.read_all()
+        self.assertEqual(receipts[0]["error_category"], "success")
+
+    def test_a_denied_step_is_categorized_as_denied_via_the_shared_contract(self):
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
+        plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
+        executor = PlanExecutor(registry)
+        executor.action_ledger = ActionLedger(path=self.ledger_path)
+
+        with unittest.mock.patch("core.plan_executor.log_action"):
+            executor.execute(plan, policy_engine=PolicyEngine(blocked_intents={"ADD_NOTE"}))
+
+        receipts = executor.action_ledger.read_all()
+        self.assertEqual(receipts[0]["error_category"], "denied")
+
+
 class PrivateModeEndToEndTests(unittest.TestCase):
     """F1.7.8 ("testare modalita' privata end-to-end su tutti i nuovi record"): a differenza
     delle altre suite di questa classe, usa un ActionLedger e un SessionRecorder VERI (file
