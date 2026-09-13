@@ -483,7 +483,7 @@ class TaskAgent:
             # filosofia gia' usata da PlanExecutor per il vecchio piano fisso.
             if not outcome.final_answer:
                 outcome.final_answer = self._summarize_steps(outcome)
-            outcome.rolled_back = self._rollback(outcome.steps)
+            outcome.rolled_back = self._rollback(outcome.steps, trace_id, private)
             if outcome.rolled_back:
                 undone = ", ".join((step.thought or step.intent.replace("_", " ").lower()) for step in outcome.rolled_back)
                 prefix = f"{outcome.final_answer} " if outcome.final_answer else ""
@@ -491,12 +491,16 @@ class TaskAgent:
 
         return outcome
 
-    def _rollback(self, steps: list[AgentStep]) -> list[AgentStep]:
+    def _rollback(self, steps: list[AgentStep], trace_id: str, private: bool) -> list[AgentStep]:
         rolled_back = []
         for step in reversed(steps):
             if step.result is None or not step.result.success:
                 continue
-            if rollback_effect(self.registry, step.intent, step.result.data or {}, policy_engine=self.policy_engine):
+            if rollback_effect(
+                self.registry, step.intent, step.result.data or {}, policy_engine=self.policy_engine,
+                action_ledger=self.action_ledger, trace_id=trace_id,
+                requested_by=f"agent:{self.agent_name}", private=private,
+            ):
                 rolled_back.append(step)
         return rolled_back
 

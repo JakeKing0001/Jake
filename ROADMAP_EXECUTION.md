@@ -1374,12 +1374,12 @@ Dipende da: F1.1 e F1.3.
 
 Criterio di uscita: una failure end-to-end è ricostruibile senza esporre contenuti privati.
 
-- Stato: `DOING`; `F1.7.1` chiuso; `F1.7.2` chiuso parzialmente (solo la notifica di
-  un'automazione, vedi sotto); `F1.7.4` chiuso parzialmente (percorsi/URL/email per contenuto,
+- Stato: `DOING`; `F1.7.1` chiuso; `F1.7.2` **chiuso** (notifica di un'automazione E ricevuta di
+  un rollback, entrambe correlate con lo stesso trace_id, vedi sotto); `F1.7.4` chiuso parzialmente (percorsi/URL/email per contenuto,
   ora anche parametri sensibili per NOME - password/pin/token/etc, vedi sotto);
   `F1.7.5` chiuso; `F1.7.6` chiuso parzialmente (failure taxonomy, non ancora rollback rate),
   `F1.7.7` chiuso; `F1.7.8` chiuso (i tre chokepoint - diretto, agente, automatico - tutti
-  verificati end-to-end, vedi sotto); resto aperto.
+  verificati end-to-end, vedi sotto); resto aperto (`F1.7.3` retention).
 - `F1.7.2` (parziale, notifica di un'automazione) — 13/09/2026: "collegare command, sub-step,
   verifica, undo e notifica con lo stesso trace id". Buco reale, non ipotizzato -
   `PlanExecutor.execute()` correla gia' ogni singolo passo alla stessa ricevuta nel ledger
@@ -1409,6 +1409,37 @@ Criterio di uscita: una failure end-to-end è ricostruibile senza esporre conten
   ruff/mypy/compileall verdi su tutti i file toccati. Non ancora affrontato: il resto di F1.7.2
   (undo, gia' dichiarato non wired in `F1.7.6`/il docstring di `action_ledger.py` - "il rollback
   stesso non produce una ricevuta separata").
+- `F1.7.2` (chiusura, undo) — 13/09/2026: chiude l'ultimo pezzo di "collegare command, sub-step,
+  verifica, UNDO e notifica con lo stesso trace id". Buco reale, non ipotizzato: `core/execution_
+  safety.py::rollback_effect()` non produceva MAI una propria `ActionReceipt` - un rollback
+  riuscito (es. un `DELETE_PATH` automatico che annulla un `CREATE_PATH` fallito a meta' compito)
+  lasciava il ledger a mostrare solo la ricevuta ORIGINALE con `result="success"`, indistinguibile
+  da un'azione mai annullata - nessun modo di scoprire dal ledger che l'effetto era stato
+  ripristinato. Corretto estendendo `rollback_effect()` con `action_ledger`/`trace_id`/
+  `requested_by`/`private` opzionali (default `None`/`False`, nessun cambio di comportamento per
+  chi non li passa): quando presenti, un rollback davvero TENTATO (l'intent ha un inverso noto E
+  la policy lo permette) scrive una ricevuta con lo STESSO `trace_id` dell'azione originale,
+  `intent` uguale all'intent COMPENSATORIO che ha eseguito per davvero (`DELETE_PATH`, non
+  `CREATE_PATH` - e' quello successo sul serio), e `requested_by` con il prefisso `"rollback:"`
+  (es. `"rollback:agent:general"`, un template fisso su valori gia' esistenti, mai testo libero
+  dall'utente - stesso principio di sicurezza gia' applicato a `policy_reason`). Un rollback
+  FALLITO scrive comunque una ricevuta (`result="rollback_failed"`) - un errore che si annulla non
+  deve sparire in silenzio; un rollback MAI tentato (nessun inverso noto, o bloccato da
+  `blocked_intents`) resta senza ricevuta, come prima - non e' un'esecuzione, niente da correlare.
+  Aggiornati i due chiamanti (`TaskAgent._rollback()`, `PlanExecutor._rollback()`, 3 call site) per
+  passare `action_ledger`/`trace_id`/`requested_by`/`private` gia' disponibili nel loro scope -
+  nessuna nuova plumbing, solo argomenti in piu' su chiamate gia' esistenti. Aggiunti 6 nuovi test
+  in `tests/test_execution_safety.py::RollbackReceiptTests` (ricevuta con trace_id corretto,
+  nessuna ricevuta senza `action_ledger`, nessuna ricevuta quando il rollback non parte, ricevuta
+  anche per un rollback fallito, modalita' privata non scrive nulla - stessa garanzia F1.7.8, gia'
+  verificata per gli altri chokepoint - `requested_by` di default quando omesso), 1 end-to-end in
+  `tests/test_agent.py::RollbackAfterFatalErrorTests` e 1 in
+  `tests/test_plan_executor.py::KillSwitchStopsThePlanTests` (entrambi con un `ActionLedger` VERO
+  su file temporaneo, non il default che scriverebbe sul registro vero del progetto), oltre a un
+  quinto chokepoint aggiunto a `tests/test_action_contract.py::ChokepointsProduceConformingReceiptsTests`
+  (`rollback_effect()` produce anch'esso una `ActionReceipt` che deve rispettare lo stesso
+  contratto minimo degli altri quattro). Con questo, `F1.7.2` e' **chiuso**. Prova: 2.311/2.311
+  test, ruff/mypy/compileall verdi su tutti i file toccati.
 - `F1.7.4` — 13/09/2026: "aggiungere redazione strutturata per tipo di dato, non solo lunghezza
   stringa". Non un buco trovato e corretto, una funzionalita' NUOVA - `core/session_recorder.py::
   redact_value()` sostituiva OGNI stringa con lo stesso segnaposto generico `<str:N caratteri>`,
@@ -3048,7 +3079,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 32 incrementi completati e verificati (PR #28-#59), la
+Aggiornato 13/09/2026. Sessione lunga con 33 incrementi completati e verificati (PR #28-#60), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -3097,14 +3128,17 @@ dichiarato apertamente e accettato dall'utente come compromesso deliberato), e `
 capability - device Home Assistant (`allowed_smart_devices` su CONTROL_SMART_DEVICE, stessa forma
 esatta di app/contatto - `ControlSmartDeviceSkill` risolve per somiglianza DENTRO la skill, quindi
 stesso limite sulla stringa grezza, applicato qui senza bisogno di richiedere una nuova decisione
-perche' e' la stessa capability gia' autorizzata). Il resto:
+perche' e' la stessa capability gia' autorizzata), e `F1.7.2` chiusura - ricevuta per l'undo
+(`rollback_effect()` non produceva MAI una propria `ActionReceipt` - un rollback riuscito lasciava
+il ledger indistinguibile da un'azione mai annullata; ora scrive una ricevuta con l'intent
+compensatorio VERO, correlata per trace_id all'azione originale, sia per un successo sia per un
+fallimento del rollback stesso). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
-dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.2` (parziale - la notifica di
-un'automazione ora porta lo stesso trace_id delle ricevute che l'ha prodotta), `F1.7.8` (CHIUSO -
+dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.302/2.302 test, ruff/mypy/compileall verdi. `G1` resta aperto.
+`master` e' pulito, 2.311/2.311 test, ruff/mypy/compileall verdi. `G1` resta aperto.
 
 Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
 sessione (`sys.setswitchinterval()` abbassato + `threading.Barrier`, senza altro aiuto) NON
@@ -3136,8 +3170,9 @@ dichiarati - FIND_FILE senza `path` esplicito, CHECK_WEBSITE_STATUS/LIST_SMART_D
 app/contatto/device su stringa grezza non risolta),
 `F1.2.3` (resto: prima capability per dispositivo chiusa - `device_blocked_intents` - ma
 l'intersezione con agente/skill/sessione resta aperta), il resto di `F1.4` (una vera
-classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7` (il resto di `F1.7.2` -
-undo, mai wired a una ricevuta propria; `F1.7.3` retention differenziata; il resto di `F1.7.4` -
+classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7` (`F1.7.2` e' ora
+CHIUSO - anche l'undo scrive una ricevuta propria correlata per trace_id; `F1.7.3` retention
+differenziata; il resto di `F1.7.4` -
 altri tipi di dato per contenuto (telefono, IP, id dispositivo) - la classificazione per nome del
 parametro e' ora chiusa; `F1.7.8` e' chiuso), il resto di `F1.8` (il resto di `F1.8.1` - lo slot
 per canale e' ora chiuso, resta solo "una coda per azioni concorrenti" non legate a una conferma;

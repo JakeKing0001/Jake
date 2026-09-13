@@ -123,7 +123,9 @@ class PlanExecutor:
                     step=step, result=SkillResult(success=False, data={}, error="KILLED"), attempts=0,
                 )
                 if not dry_run:
-                    outcome.rolled_back = self._rollback(outcome.completed, policy_engine)
+                    outcome.rolled_back = self._rollback(
+                        outcome.completed, policy_engine, trace_id=trace_id, requested_by=requested_by, private=private,
+                    )
                     self._log_step(
                         trace_id, private, model, requested_by, time.monotonic(), step.intent, safe_parameters,
                         result="error:KILLED", verified=None, policy_reason=None,
@@ -152,7 +154,9 @@ class PlanExecutor:
                     attempts=0,
                 )
                 if not dry_run:
-                    outcome.rolled_back = self._rollback(outcome.completed, policy_engine)
+                    outcome.rolled_back = self._rollback(
+                        outcome.completed, policy_engine, trace_id=trace_id, requested_by=requested_by, private=private,
+                    )
                     self._log_step(
                         trace_id, private, model, requested_by, time.monotonic(), step.intent, safe_parameters,
                         result="policy_blocked", verified=None, policy_reason=policy_reason,
@@ -204,7 +208,9 @@ class PlanExecutor:
 
             outcome.stopped_step = step_outcome
             if step_outcome.result.error != "CONFIRMATION_REQUIRED":
-                outcome.rolled_back = self._rollback(outcome.completed, policy_engine)
+                outcome.rolled_back = self._rollback(
+                    outcome.completed, policy_engine, trace_id=trace_id, requested_by=requested_by, private=private,
+                )
             self._log_step(
                 trace_id, private, model, requested_by, step_started, step.intent, safe_parameters,
                 result=f"error:{step_outcome.result.error}", verified=verified, policy_reason=policy_reason,
@@ -260,12 +266,16 @@ class PlanExecutor:
         result, attempts = execute_with_retry(self.skill_registry.execute, step.intent, parameters)
         return StepOutcome(step=step, result=result, attempts=attempts)
 
-    def _rollback(self, completed_steps: list, policy_engine=None) -> list:
+    def _rollback(
+        self, completed_steps: list, policy_engine=None, *,
+        trace_id: str | None = None, requested_by: str = "user", private: bool = False,
+    ) -> list:
         rolled_back = []
         for step_outcome in reversed(completed_steps):
             if rollback_effect(
                 self.skill_registry, step_outcome.step.intent, step_outcome.result.data,
                 policy_engine=policy_engine,
+                action_ledger=self.action_ledger, trace_id=trace_id, requested_by=requested_by, private=private,
             ):
                 step_outcome.rolled_back = True
                 rolled_back.append(step_outcome)

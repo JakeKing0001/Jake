@@ -9,12 +9,15 @@ senza nessuno dei tre: un OPERATION_FAILED transitorio bruciava un passo di ragi
 di essere ritentato, e un errore a meta' compito lasciava sul disco gli effetti collaterali gia'
 fatti senza nessun tentativo di annullarli. Estratta qui cosi' i due esecutori condividono la
 stessa logica invece di poterla far divergere in silenzio, come sarebbe successo copiandola."""
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Optional
 
+from core.action_ledger import ActionReceipt, authorization_of, idempotency_key_of, new_action_id
 from core.command import Command
 from core.policy_engine import POLICY_REASONS
+from core.request_context import current_device_id
 from core.risk import RiskLevel, risk_of
 from core.skill_result import SkillResult
 
@@ -206,11 +209,33 @@ def verify_effect(intent: str, data: dict) -> bool:
     return entry.verifier(data)
 
 
-def rollback_effect(registry, intent: str, data: dict, policy_engine=None) -> bool:
+def rollback_effect(
+    registry, intent: str, data: dict, policy_engine=None, *,
+    action_ledger=None, trace_id: str | None = None, requested_by: str | None = None, private: bool = False,
+) -> bool:
     """Annulla l'effetto di un passo gia' eseguito con successo, se esiste un inverso noto per
     il suo intent (vedi INTENT_SAFETY_REGISTRY). Vero se e' stato davvero annullato; gli errori
     nel rollback stesso vengono inghiottiti (un rollback fallito non deve mai far crashare il
     chiamante, ne' mascherare l'errore originale che ha scatenato il rollback).
+
+    F1.7.2 ("collegare command, sub-step, verifica, undo e notifica con lo stesso trace id"):
+    buco reale - un rollback non produceva MAI una propria `ActionReceipt`, quindi il ledger non
+    mostrava da nessuna parte che un'azione era stata annullata (solo la ricevuta dell'azione
+    ORIGINALE restava, con "success", indistinguibile da un'azione mai annullata). `action_ledger`/
+    `trace_id` sono opzionali per compatibilita' con chi non ne ha ancora uno da passare (nessun
+    cambio di comportamento se omessi, stesso principio "opt-in" gia' usato altrove in F1) - se
+    presenti, un rollback davvero TENTATO (l'intent ha un inverso noto E la policy lo permette)
+    scrive una ricevuta con lo STESSO `trace_id` dell'azione originale che l'ha innescato, cosi'
+    un audit del ledger correla i due eventi invece di vederli come scollegati. `intent` nella
+    ricevuta e' l'intent COMPENSATORIO che ha eseguito per davvero (es. `DELETE_PATH` per
+    annullare un `CREATE_PATH`), non l'intent originale - e' quello che e' successo sul serio.
+    `requested_by` porta il prefisso `"rollback:"` (es. `"rollback:agent:general"`) per
+    distinguere nel ledger un'azione eseguita come conseguenza automatica di un rollback da
+    un'azione richiesta direttamente con lo stesso intent - un valore costruito da un template
+    fisso più `self.agent_name`/`requested_by` gia' esistenti (mai testo libero derivato
+    dall'utente), stesso principio di sicurezza gia' applicato a `policy_reason`. Un rollback non
+    tentato (nessun inverso noto, o bloccato da `blocked_intents`) resta senza ricevuta, come
+    prima: quel caso non e' un'esecuzione, non c'e' nulla di nuovo da correlare.
 
     F1.2.5: policy_engine (core/policy_engine.py::PolicyEngine) e' opzionale per compatibilita'
     con i chiamanti che non ne hanno ancora uno da passare, ma quando c'e' un blocked_intents
@@ -235,10 +260,25 @@ def rollback_effect(registry, intent: str, data: dict, policy_engine=None) -> bo
     entry = INTENT_SAFETY_REGISTRY.get(intent)
     if entry is None or entry.rollback is None:
         return False
-    if policy_engine is None or entry.rollback.compensating_intent in policy_engine.blocked_intents:
+    compensating_intent = entry.rollback.compensating_intent
+    if policy_engine is None or compensating_intent in policy_engine.blocked_intents:
         return False
     try:
         entry.rollback.handler(registry, data)
-        return True
+        succeeded = True
     except Exception:
-        return False
+        succeeded = False
+    if action_ledger is not None and trace_id is not None:
+        result = "success" if succeeded else "rollback_failed"
+        action_ledger.record(
+            ActionReceipt(
+                action_id=new_action_id(), trace_id=trace_id, ts=time.time(), intent=compensating_intent,
+                requested_by=f"rollback:{requested_by}" if requested_by else "rollback",
+                risk_decision=risk_of(compensating_intent).value,
+                authorization=authorization_of(result, None), result=result,
+                idempotency_key=idempotency_key_of(compensating_intent, data),
+                device_id=current_device_id(),
+            ),
+            private=private,
+        )
+    return succeeded
