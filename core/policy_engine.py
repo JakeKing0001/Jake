@@ -38,12 +38,23 @@ romperebbe l'uso normale senza che l'utente lo chieda), applicata sia sul percor
 (decide_interactive) sia su quello automatico (decide_automated), e oggi copre sia le quattro
 mutazioni (CREATE_PATH/RENAME_PATH/MOVE_PATH/DELETE_PATH) sia le tre letture
 (FIND_FILE/GET_FILE_INFO/READ_FILE_TEXT, vedi FILESYSTEM_CAPABILITY_INTENTS piu' sotto per il
-perche' OPEN_PATH ne resta fuori). App/contatto/dominio web/device/servizio Home Assistant/rete/
-durata (le altre capability elencate in ROADMAP.md) e l'intersezione multi-livello di F1.2.3
-(utente/dispositivo/agente/skill/sessione) restano completamente aperte."""
+perche' OPEN_PATH ne resta fuori).
+
+F1.2.3 (intersezione, primo pezzo - capability per DISPOSITIVO): `device_blocked_intents` e' la
+prima meta' di "vince il piu' restrittivo" - un dizionario opt-in `{device_id: {intent, ...}}`,
+vuoto per default (nessuna restrizione aggiuntiva, comportamento invariato), controllato PRIMA
+della capability filesystem e di CONFIRM: un intent bloccato per QUESTO dispositivo (es. un
+dispositivo companion ospite senza `DELETE_PATH`) si ferma sempre, anche se lo stesso intent
+sarebbe permesso dalla voce locale o da un altro dispositivo. Simmetrico a `blocked_intents`
+(globale) ma per canale, usando lo stesso `core.request_context.current_device_id()` gia'
+propagato per il ledger (F1.2.3/F1.8.1, fondamenta). App/contatto/dominio web/servizio Home
+Assistant/rete/durata (le altre capability elencate in ROADMAP.md) e l'intersezione con
+agente/skill/sessione restano completamente aperte."""
 import os
 from enum import Enum
 from pathlib import Path
+
+from core.request_context import current_device_id
 
 
 class PolicyDecision(str, Enum):
@@ -87,9 +98,15 @@ POLICY_REASON_ALLOWED = "no_restriction_matched"
 # POLICY_REASON_BLOCKED (che significa "l'intent stesso e' bloccato sempre") perche' qui lo
 # STESSO intent puo' essere permesso o negato a seconda del parametro, non dell'intent da solo.
 POLICY_REASON_CAPABILITY_DENIED = "path_outside_allowed_filesystem_roots"
+# F1.2.3 (prima capability per DISPOSITIVO): una motivazione DIVERSA da POLICY_REASON_BLOCKED per
+# lo stesso motivo di POLICY_REASON_CAPABILITY_DENIED sopra - lo STESSO intent puo' essere permesso
+# o negato a seconda di QUALE dispositivo lo chiede (core.request_context.current_device_id()),
+# non e' mai bloccato in assoluto. Un motivo distinto nel ledger dice onestamente "questo
+# dispositivo non puo' farlo" invece di far sembrare l'intent bloccato per chiunque.
+POLICY_REASON_DEVICE_BLOCKED = "intent_in_device_blocked_intents"
 POLICY_REASONS = frozenset({
     POLICY_REASON_BLOCKED, POLICY_REASON_REQUIRE_AUTH, POLICY_REASON_CONFIRM, POLICY_REASON_ALLOWED,
-    POLICY_REASON_CAPABILITY_DENIED,
+    POLICY_REASON_CAPABILITY_DENIED, POLICY_REASON_DEVICE_BLOCKED,
 })
 
 # F1.2.2: le quattro mutazioni sono le stesse gia' raggruppate in core/execution_safety.py::
@@ -143,6 +160,7 @@ class PolicyEngine:
     def __init__(
         self, auth_gate=None, blocked_intents: set | None = None, always_confirm_intents: set | None = None,
         require_auth_intents: set | None = None, allowed_filesystem_roots: set | list | None = None,
+        device_blocked_intents: dict[str | None, set] | None = None,
     ):
         self.auth_gate = auth_gate
         self.blocked_intents = set(blocked_intents or set())
@@ -154,6 +172,17 @@ class PolicyEngine:
         # controllo): un percorso configurato che non esiste ancora sul disco si risolve comunque
         # in modo deterministico con Path.resolve() (non richiede che esista).
         self._allowed_filesystem_roots = [Path(root).resolve() for root in (allowed_filesystem_roots or [])]
+        # F1.2.3 (prima capability per DISPOSITIVO, "vince il piu' restrittivo"): {device_id:
+        # {intent, ...}} - vuoto/None (default) = nessuna restrizione aggiuntiva, stesso principio
+        # di allowed_filesystem_roots. Un device_id assente dal dizionario (incluso None, la voce
+        # locale) non ha alcuna restrizione per dispositivo: solo blocked_intents/
+        # allowed_filesystem_roots (a livello utente) si applicano ancora. Simmetrico a
+        # blocked_intents ma per canale invece che globale: un dispositivo companion puo' essere
+        # ristretto a un sottoinsieme di intent (es. un dispositivo ospite senza DELETE_PATH)
+        # senza toccare cio' che puo' fare l'utente dalla voce locale o da un altro dispositivo.
+        self.device_blocked_intents = {
+            device_id: set(intents) for device_id, intents in (device_blocked_intents or {}).items()
+        }
 
     def register_intent(self, intent: str) -> None:
         """Sincronizza UN intent con la policy corrente, secondo la sua classificazione del
@@ -223,6 +252,8 @@ class PolicyEngine:
         parameters = parameters or {}
         if intent in self.blocked_intents:
             return PolicyDecision.BLOCK, POLICY_REASON_BLOCKED
+        if self._device_blocks(intent):
+            return PolicyDecision.BLOCK, POLICY_REASON_DEVICE_BLOCKED
         if intent in FILESYSTEM_CAPABILITY_INTENTS and not self._filesystem_capability_allows(parameters):
             return PolicyDecision.BLOCK, POLICY_REASON_CAPABILITY_DENIED
         if (
@@ -248,11 +279,20 @@ class PolicyEngine:
         # _FILESYSTEM_PATH_PARAMETER_KEYS), mai le chiavi di autorizzazione.
         if intent in self.blocked_intents:
             return PolicyDecision.BLOCK, POLICY_REASON_BLOCKED
+        if self._device_blocks(intent):
+            return PolicyDecision.BLOCK, POLICY_REASON_DEVICE_BLOCKED
         if intent in FILESYSTEM_CAPABILITY_INTENTS and not self._filesystem_capability_allows(parameters or {}):
             return PolicyDecision.BLOCK, POLICY_REASON_CAPABILITY_DENIED
         if intent in self.always_confirm_intents:
             return PolicyDecision.CONFIRM, POLICY_REASON_CONFIRM
         return PolicyDecision.ALLOW, POLICY_REASON_ALLOWED
+
+    def _device_blocks(self, intent: str) -> bool:
+        """F1.2.3 (prima capability per dispositivo): vero se il dispositivo che ha originato la
+        richiesta corrente (core.request_context.current_device_id(), None per la voce locale) ha
+        questo intent nel proprio elenco di intent bloccati. Un dizionario vuoto/senza voce per
+        questo device_id (comportamento di default) non blocca mai nulla."""
+        return intent in self.device_blocked_intents.get(current_device_id(), set())
 
     def _filesystem_capability_allows(self, parameters: dict) -> bool:
         """True se nessuna radice e' configurata (default, nessuna restrizione) oppure se OGNI

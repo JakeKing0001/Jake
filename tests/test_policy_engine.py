@@ -17,6 +17,7 @@ from pathlib import Path
 
 from core.auth_gate import AuthGate
 from core.policy_engine import PolicyDecision, PolicyEngine, strip_authorization_signals
+from core.request_context import reset_current_device_id, set_current_device_id
 
 
 class StripAuthorizationSignalsTests(unittest.TestCase):
@@ -468,6 +469,98 @@ class FilesystemCapabilityTests(unittest.TestCase):
         result = engine.explain("DELETE_PATH", {"path": str(self.outside_root / "x.txt")})
         self.assertEqual(result["automated"]["decision"], "block")
         self.assertEqual(result["automated"]["reason"], "path_outside_allowed_filesystem_roots")
+
+
+class DeviceCapabilityTests(unittest.TestCase):
+    """F1.2.3 (intersezione, primo pezzo - capability per DISPOSITIVO): "vince il piu'
+    restrittivo" - un intent bloccato per UN dispositivo si ferma sempre per quel dispositivo,
+    indipendentemente da cosa permetterebbe la policy a livello utente, senza toccare cio' che
+    puo' fare la voce locale o un altro dispositivo."""
+
+    def setUp(self):
+        self._tokens = []
+        self.addCleanup(self._reset_all)
+
+    def _reset_all(self):
+        for token in reversed(self._tokens):
+            reset_current_device_id(token)
+
+    def _as_device(self, device_id):
+        self._tokens.append(set_current_device_id(device_id))
+
+    def test_no_device_blocked_intents_configured_means_no_restriction(self):
+        """Comportamento invariato per chi non configura nulla (default vuoto)."""
+        engine = PolicyEngine()
+        self._as_device("phone-ospite")
+        self.assertEqual(engine.decide_interactive("DELETE_PATH", {}), PolicyDecision.ALLOW)
+
+    def test_an_intent_blocked_for_a_device_is_blocked_only_for_that_device(self):
+        engine = PolicyEngine(device_blocked_intents={"phone-ospite": {"DELETE_PATH"}})
+
+        self._as_device("phone-ospite")
+        self.assertEqual(engine.decide_interactive("DELETE_PATH", {}), PolicyDecision.BLOCK)
+
+    def test_the_same_intent_is_still_allowed_for_a_different_device(self):
+        engine = PolicyEngine(device_blocked_intents={"phone-ospite": {"DELETE_PATH"}})
+
+        self._as_device("tablet-fiducia")
+        self.assertEqual(engine.decide_interactive("DELETE_PATH", {}), PolicyDecision.ALLOW)
+
+    def test_the_same_intent_is_still_allowed_from_the_local_voice_channel(self):
+        engine = PolicyEngine(device_blocked_intents={"phone-ospite": {"DELETE_PATH"}})
+        # Nessun set_current_device_id chiamato: canale locale (None), un caso a se'.
+        self.assertEqual(engine.decide_interactive("DELETE_PATH", {}), PolicyDecision.ALLOW)
+
+    def test_device_block_reports_a_distinct_reason_from_the_global_block(self):
+        engine = PolicyEngine(device_blocked_intents={"phone-ospite": {"DELETE_PATH"}})
+        self._as_device("phone-ospite")
+
+        decision, reason = engine.decide_interactive_with_reason("DELETE_PATH", {})
+
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+        self.assertEqual(reason, "intent_in_device_blocked_intents")
+
+    def test_device_block_wins_over_confirmation(self):
+        """Un intent bloccato per il dispositivo non deve mai arrivare a CONFIRM - "vince il piu'
+        restrittivo" significa fermarsi qui, non chiedere conferma su qualcosa gia' vietato."""
+        engine = PolicyEngine(
+            always_confirm_intents={"DELETE_PATH"}, device_blocked_intents={"phone-ospite": {"DELETE_PATH"}},
+        )
+        self._as_device("phone-ospite")
+
+        decision = engine.decide_interactive("DELETE_PATH", {"confirmed": True})
+
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+
+    def test_a_global_block_still_applies_regardless_of_device_capability(self):
+        """L'intersezione vale nei due sensi: un dispositivo non specificamente ristretto resta
+        comunque soggetto a blocked_intents (livello utente)."""
+        engine = PolicyEngine(blocked_intents={"DELETE_PATH"}, device_blocked_intents={"phone-ospite": {"RENAME_PATH"}})
+        self._as_device("phone-ospite")
+
+        decision, reason = engine.decide_interactive_with_reason("DELETE_PATH", {})
+
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+        self.assertEqual(reason, "intent_in_blocked_intents")
+
+    def test_device_capability_applies_on_the_automated_path_too(self):
+        engine = PolicyEngine(device_blocked_intents={"phone-ospite": {"DELETE_PATH"}})
+        self._as_device("phone-ospite")
+
+        decision = engine.decide_automated("DELETE_PATH")
+
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+
+    def test_explain_reports_the_device_block_on_both_verdicts(self):
+        engine = PolicyEngine(device_blocked_intents={"phone-ospite": {"DELETE_PATH"}})
+        self._as_device("phone-ospite")
+
+        result = engine.explain("DELETE_PATH")
+
+        self.assertEqual(result["interactive"]["decision"], "block")
+        self.assertEqual(result["interactive"]["reason"], "intent_in_device_blocked_intents")
+        self.assertEqual(result["automated"]["decision"], "block")
+        self.assertEqual(result["automated"]["reason"], "intent_in_device_blocked_intents")
 
 
 if __name__ == "__main__":
