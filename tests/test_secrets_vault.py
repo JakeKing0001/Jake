@@ -82,11 +82,80 @@ class CorruptedVaultTests(unittest.TestCase):
         import base64
 
         encrypted = protect("segreto-vero-prima-della-corruzione")
-        raw = base64.b64decode(encrypted[len("dpapi:"):])
+        prefix, b64_payload = encrypted.rsplit(":", 1)  # "dpapi:1" / base64 - vedi VersionedFormatTests
+        raw = base64.b64decode(b64_payload)
         corrupted = bytes((b ^ 0xFF) for b in raw)  # capovolge ogni bit: un blob DPAPI vero ma illeggibile
-        tampered_value = "dpapi:" + base64.b64encode(corrupted).decode("ascii")
+        tampered_value = prefix + ":" + base64.b64encode(corrupted).decode("ascii")
 
         self.assertIsNone(unprotect(tampered_value))
+
+
+class VersionedFormatTests(unittest.TestCase):
+    """F1.4.1 ("consolidare DPAPI in un SecretsVault con versione e migrazione atomica"): prima
+    di questa correzione il blob non portava alcun tag di versione ("dpapi:<base64>"), quindi un
+    formato futuro diverso non avrebbe avuto modo di distinguersi da quello attuale ne' di
+    coesistere con blob vecchi gia' su disco."""
+
+    def test_protect_produces_a_versioned_blob(self):
+        from core.secrets_vault import CURRENT_VERSION
+
+        encrypted = protect("x")
+
+        self.assertTrue(encrypted.startswith(f"dpapi:{CURRENT_VERSION}:"))
+
+    def test_a_legacy_blob_without_a_version_tag_still_decrypts(self):
+        """Un blob "dpapi:<base64>" senza segmento di versione - il formato prodotto da
+        installazioni precedenti a questa correzione - deve restare decifrabile per sempre, non
+        diventare illeggibile solo perche' il codice e' cambiato."""
+        import win32crypt
+
+        encrypted = win32crypt.CryptProtectData("segreto-legacy".encode("utf-8"), None, None, None, None, 0)
+        import base64
+        legacy_value = "dpapi:" + base64.b64encode(encrypted).decode("ascii")
+
+        self.assertEqual(unprotect(legacy_value), "segreto-legacy")
+
+    def test_an_unsupported_future_version_returns_none_instead_of_raising(self):
+        """Un blob scritto da una versione FUTURA di Jake, ancora sconosciuta a questo codice:
+        nega per default invece di tentare comunque la decifratura su un formato che potrebbe non
+        essere nemmeno DPAPI."""
+        encrypted = protect("x")
+        _prefix, _version, b64_payload = encrypted.split(":", 2)
+        from_the_future = f"dpapi:99:{b64_payload}"
+
+        self.assertIsNone(unprotect(from_the_future))
+
+
+class NeedsMigrationTests(unittest.TestCase):
+    """SecretsVault.needs_migration() guida Config._migrate_secrets() nel ricifrare sul posto un
+    segreto gia' protetto ma nel formato legacy, non solo uno ancora in chiaro."""
+
+    def test_a_blob_produced_by_the_current_vault_does_not_need_migration(self):
+        from core.secrets_vault import SecretsVault
+
+        vault = SecretsVault()
+
+        self.assertFalse(vault.needs_migration(vault.protect("x")))
+
+    def test_a_legacy_unversioned_blob_needs_migration(self):
+        import base64
+
+        import win32crypt
+
+        from core.secrets_vault import SecretsVault
+
+        vault = SecretsVault()
+        encrypted = win32crypt.CryptProtectData("x".encode("utf-8"), None, None, None, None, 0)
+        legacy_value = "dpapi:" + base64.b64encode(encrypted).decode("ascii")
+
+        self.assertTrue(vault.needs_migration(legacy_value))
+
+    def test_plaintext_does_not_need_migration(self):
+        """Un valore mai protetto non e' compito di needs_migration() - quello lo copre gia' il
+        ramo "not is_protected" di Config._migrate_secrets(), protect() semplice."""
+        from core.secrets_vault import SecretsVault
+
+        self.assertFalse(SecretsVault().needs_migration("testo in chiaro"))
 
 
 if __name__ == "__main__":

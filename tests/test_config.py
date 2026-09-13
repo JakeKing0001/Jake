@@ -145,6 +145,50 @@ class MigrationOfPlaintextSecretsTests(ConfigTestCase):
         self.assertEqual(raw["ollama_model"], "qwen2.5:7b")
 
 
+class MigrationOfLegacyEncryptedSecretsTests(ConfigTestCase):
+    """F1.4.1 ("...con versione e migrazione atomica"): un segreto GIA' cifrato da
+    un'installazione precedente a SecretsVault (formato "dpapi:<base64>", senza tag di versione)
+    deve essere ricifrato sul posto nel formato versionato corrente alla prima apertura - non
+    solo un valore ancora in chiaro, che MigrationOfPlaintextSecretsTests sopra copre gia'."""
+
+    def _write_legacy_encrypted(self, key: str, plaintext: str) -> None:
+        import base64
+
+        import win32crypt
+
+        encrypted = win32crypt.CryptProtectData(plaintext.encode("utf-8"), None, None, None, None, 0)
+        self._write_raw({key: "dpapi:" + base64.b64encode(encrypted).decode("ascii")})
+
+    def test_legacy_encrypted_secret_is_rewritten_in_the_versioned_format_on_load(self):
+        from core.secrets_vault import CURRENT_VERSION
+
+        self._write_legacy_encrypted("admin_passphrase", "vecchia-passphrase-gia-cifrata")
+
+        Config(path=self.path)
+
+        raw = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertTrue(raw["admin_passphrase"].startswith(f"dpapi:{CURRENT_VERSION}:"))
+        self.assertEqual(unprotect(raw["admin_passphrase"]), "vecchia-passphrase-gia-cifrata")
+
+    def test_legacy_encrypted_secret_is_still_readable_through_get_after_migration(self):
+        self._write_legacy_encrypted("home_assistant_token", "vecchio-token-gia-cifrato")
+
+        config = Config(path=self.path)
+
+        self.assertEqual(config.get("home_assistant_token"), "vecchio-token-gia-cifrato")
+
+    def test_already_versioned_secret_is_not_rewritten_again(self):
+        """Nessuna doppia scrittura a ogni avvio: un segreto gia' nel formato corrente non deve
+        essere toccato una seconda volta."""
+        Config(path=self.path).set("admin_passphrase", "apri sesamo")
+        before = self.path.read_text(encoding="utf-8")
+
+        Config(path=self.path)
+
+        after = self.path.read_text(encoding="utf-8")
+        self.assertEqual(before, after)
+
+
 class CorruptedSecretTests(ConfigTestCase):
     """F1.4.8 ("testare... vault corrotto, profilo Windows differente e backup"): buco reale
     trovato e corretto - Config.get() propagava l'eccezione di secrets_vault.unprotect() per un
