@@ -84,6 +84,53 @@ class BuildReportTests(unittest.TestCase):
         self.assertEqual(report["failure_category_counts"]["transient"], 1)
         self.assertEqual(report["failure_category_counts"]["uncategorized"], 1)
 
+    def test_rollback_events_are_counted_separately_from_ordinary_actions(self):
+        """F1.7.6 ("rollback rate"): result inizia con "rollback_" - mai il generico "success" -
+        quindi un rollback riuscito/fallito e' distinguibile da un'azione qualsiasi con lo stesso
+        intent (vedi core/execution_safety.py::rollback_effect, F1.7.2)."""
+        actions = [
+            {"skill": "CREATE_PATH", "result": "success"},
+            {"skill": "DELETE_PATH", "result": "rollback_success"},
+            {"skill": "RENAME_PATH", "result": "rollback_failed"},
+        ]
+        report = build_report(actions, sessions=[])
+        self.assertEqual(report["rollback_count"], 2)
+        self.assertEqual(report["rollback_successes"], 1)
+        self.assertAlmostEqual(report["rollback_rate"], 2 / 3)
+
+    def test_a_successful_rollback_counts_as_a_success_not_a_failure(self):
+        """Un rollback riuscito e' l'esito CORRETTO di un errore altrove, non un errore suo: non
+        deve gonfiare "fallimenti" ne' l'error rate della propria skill."""
+        actions = [
+            {"skill": "CREATE_PATH", "result": "error:MODEL_ERROR"},
+            {"skill": "DELETE_PATH", "result": "rollback_success"},
+        ]
+        report = build_report(actions, sessions=[])
+        self.assertEqual(report["successes"], 1)
+        self.assertEqual(report["failures"], 1)
+        delete_row = next(row for row in report["skill_rows"] if row["skill"] == "DELETE_PATH")
+        self.assertEqual(delete_row["errors"], 0)
+
+    def test_a_failed_rollback_still_counts_as_a_failure(self):
+        actions = [{"skill": "DELETE_PATH", "result": "rollback_failed"}]
+        report = build_report(actions, sessions=[])
+        self.assertEqual(report["successes"], 0)
+        self.assertEqual(report["failures"], 1)
+
+    def test_recent_failures_excludes_successful_rollbacks(self):
+        actions = [
+            {"skill": "DELETE_PATH", "result": "rollback_success", "trace_id": "t1"},
+            {"skill": "RENAME_PATH", "result": "rollback_failed", "trace_id": "t2"},
+        ]
+        report = build_report(actions, sessions=[])
+        self.assertEqual(len(report["recent_failures"]), 1)
+        self.assertEqual(report["recent_failures"][0]["trace_id"], "t2")
+
+    def test_no_rollback_events_means_zero_rate_not_a_crash(self):
+        report = build_report([{"skill": "ADD_NOTE", "result": "success"}], sessions=[])
+        self.assertEqual(report["rollback_count"], 0)
+        self.assertEqual(report["rollback_rate"], 0)
+
 
 class RenderHtmlTests(unittest.TestCase):
     def test_produces_valid_looking_self_contained_html(self):
@@ -121,6 +168,17 @@ class RenderHtmlTests(unittest.TestCase):
 
         self.assertIn("Categoria di errore", output)
         self.assertIn("transient", output)
+
+    def test_rollback_rate_stat_is_rendered(self):
+        report = build_report(
+            [{"skill": "CREATE_PATH", "result": "success"}, {"skill": "DELETE_PATH", "result": "rollback_success"}],
+            sessions=[],
+        )
+        from pathlib import Path
+        output = render_html(report, Path("x"), Path("y"))
+
+        self.assertIn("rollback", output)
+        self.assertIn("50.0%", output)
 
 
 if __name__ == "__main__":

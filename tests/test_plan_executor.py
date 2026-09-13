@@ -415,7 +415,11 @@ class KillSwitchStopsThePlanTests(unittest.TestCase):
         executor = PlanExecutor(registry)
         executor.kill_switch = kill_switch
 
-        outcome = executor.execute(plan, policy_engine=PolicyEngine())
+        # log_action() mascherato: da F1.7.6 anche rollback_effect() lo chiama, altrimenti
+        # questo test scriverebbe sul file di produzione del progetto (data/jake_actions.jsonl).
+        with unittest.mock.patch("core.plan_executor.log_action"), \
+             unittest.mock.patch("core.execution_safety.log_action"):
+            outcome = executor.execute(plan, policy_engine=PolicyEngine())
 
         # CREATE_PATH (passo 1) poi DELETE_PATH (il rollback che lo annulla): ADD_NOTE (passo 2)
         # non compare mai, il kill switch l'ha bloccato prima che l'esecutore ci arrivasse.
@@ -453,7 +457,8 @@ class KillSwitchStopsThePlanTests(unittest.TestCase):
             executor = PlanExecutor(registry, action_ledger=ledger)
             executor.kill_switch = kill_switch
 
-            with unittest.mock.patch("core.plan_executor.log_action"):
+            with unittest.mock.patch("core.plan_executor.log_action"), \
+                 unittest.mock.patch("core.execution_safety.log_action"):
                 outcome = executor.execute(plan, policy_engine=PolicyEngine(), requested_by="trigger:automazione")
 
             self.assertEqual(len(outcome.rolled_back), 1)
@@ -462,7 +467,7 @@ class KillSwitchStopsThePlanTests(unittest.TestCase):
             rollback_receipt = next(r for r in records if r["intent"] == "DELETE_PATH")
             self.assertEqual(rollback_receipt["trace_id"], create_receipt["trace_id"])
             self.assertEqual(rollback_receipt["requested_by"], "rollback:trigger:automazione")
-            self.assertEqual(rollback_receipt["result"], "success")
+            self.assertEqual(rollback_receipt["result"], "rollback_success")
 
     def test_already_active_before_the_plan_starts_executes_no_step(self):
         from core.kill_switch import KillSwitch

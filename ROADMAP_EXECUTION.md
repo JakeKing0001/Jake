@@ -1377,7 +1377,7 @@ Criterio di uscita: una failure end-to-end è ricostruibile senza esporre conten
 - Stato: `DOING`; `F1.7.1` chiuso; `F1.7.2` **chiuso** (notifica di un'automazione E ricevuta di
   un rollback, entrambe correlate con lo stesso trace_id, vedi sotto); `F1.7.4` chiuso parzialmente (percorsi/URL/email per contenuto,
   ora anche parametri sensibili per NOME - password/pin/token/etc, vedi sotto);
-  `F1.7.5` chiuso; `F1.7.6` chiuso parzialmente (failure taxonomy, non ancora rollback rate),
+  `F1.7.5` chiuso; `F1.7.6` **chiuso** (failure taxonomy E rollback rate, vedi sotto);
   `F1.7.7` chiuso; `F1.7.8` chiuso (i tre chokepoint - diretto, agente, automatico - tutti
   verificati end-to-end, vedi sotto); resto aperto (`F1.7.3` retention).
 - `F1.7.2` (parziale, notifica di un'automazione) — 13/09/2026: "collegare command, sub-step,
@@ -1559,6 +1559,32 @@ Criterio di uscita: una failure end-to-end è ricostruibile senza esporre conten
   e indipendenti da questa modifica (verificato confrontando col file prima della modifica,
   stesso numero di errori) - il file non fa parte del set coperto da "mypy selettivo" in CI,
   dichiarato qui invece di essere ignorato silenziosamente.
+- `F1.7.6` (chiusura, rollback rate) — 13/09/2026: chiude l'ultima metrica dichiarata NON
+  disponibile sopra, ora che `rollback_effect()` (F1.7.2, PR precedente) scrive un evento
+  distinto per un rollback. `core/execution_safety.py::rollback_effect()` esteso per chiamare
+  ANCHE `core/logger.log_action()` (non solo `action_ledger.record()`), stesso schema gia' seguito
+  dagli altri quattro chokepoint - un rollback tentato ora compare anche in
+  `data/jake_actions.jsonl`, la fonte che la dashboard legge davvero. Rinominato il valore di
+  `result` da `"success"` (generico, indistinguibile da un'azione qualsiasi con lo stesso intent)
+  a `"rollback_success"`/`"rollback_failed"` - un prefisso comune (`"rollback_"`) che la dashboard
+  puo' contare senza ambiguita', invece di dover indovinare quali righe fossero rollback. Buco
+  laterale trovato e corretto nello stesso passaggio: contare un `"rollback_success"` come un
+  FALLIMENTO (perche' diverso dalla stringa esatta `"success"`) avrebbe gonfiato "fallimenti" e
+  l'error rate per skill con l'esito CORRETTO di un errore altrove - aggiunto un piccolo helper
+  `_is_success()` che tratta `"rollback_success"` come un successo ovunque il codice controllava
+  `== "success"` (successi/fallimenti totali, error rate per skill, tabella "ultimi fallimenti"),
+  mantenendo `rollback_count`/`rollback_rate` come una dimensione SEPARATA e visibile a parte -
+  "quale frazione di tutte le azioni era un tentativo di annullare qualcos'altro", non confusa con
+  "quante azioni sono fallite". Aggiornati anche i test di questa sessione che asserivano
+  `result == "success"` per un rollback riuscito (ora `"rollback_success"`, il nome piu' preciso),
+  e aggiunto il mascheramento di `log_action` mancante in alcuni di quei test (senza, avrebbero
+  scritto davvero su `data/jake_actions.jsonl`, il file di produzione del progetto - stessa
+  precauzione gia' presa ovunque altro in questa sessione per gli altri chokepoint). Aggiunti 7
+  nuovi test in `tests/test_dashboard.py::BuildReportTests`/`RenderHtmlTests` (conteggio separato,
+  un rollback riuscito non e' un fallimento, uno fallito lo resta, esclusione dalla tabella "ultimi
+  fallimenti", nessun rollback non crasha, la percentuale compare nell'HTML). Con questo, `F1.7.6`
+  e' **chiuso**. Prova: 2.317/2.317 test, ruff/compileall verdi; `mypy tools/dashboard.py` ancora
+  8 errori preesistenti, invariati; `mypy core/execution_safety.py` pulito.
 - `F1.7.7` — 12/09/2026: nuovo `tools/diagnostic_bundle.py`, un bundle diagnostico in un solo
   file JSON locale (le ultime N righe di `data/jake_actions.jsonl`, `data/jake_ledger.jsonl` e
   `data/jake_sessions.jsonl`, piu' versione Jake/Python/piattaforma) - stesso principio "local-
@@ -3079,7 +3105,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 33 incrementi completati e verificati (PR #28-#60), la
+Aggiornato 13/09/2026. Sessione lunga con 34 incrementi completati e verificati (PR #28-#61), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -3132,13 +3158,20 @@ perche' e' la stessa capability gia' autorizzata), e `F1.7.2` chiusura - ricevut
 (`rollback_effect()` non produceva MAI una propria `ActionReceipt` - un rollback riuscito lasciava
 il ledger indistinguibile da un'azione mai annullata; ora scrive una ricevuta con l'intent
 compensatorio VERO, correlata per trace_id all'azione originale, sia per un successo sia per un
-fallimento del rollback stesso). Il resto:
+fallimento del rollback stesso), e `F1.7.6` chiusura - rollback rate nella dashboard (chiuso
+l'ultimo pezzo lasciato esplicitamente NON disponibile in F1.7.6: ora che un rollback scrive un
+evento distinto anche in `data/jake_actions.jsonl` con `result` a prefisso `"rollback_"`, la
+dashboard calcola una vera percentuale invece di ometterla; trovato e corretto nello stesso
+passaggio un buco laterale - contare `"rollback_success"` come un fallimento perche' diverso dalla
+stringa esatta `"success"` avrebbe gonfiato "fallimenti"/error rate per skill con l'esito CORRETTO
+di un errore altrove). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.311/2.311 test, ruff/mypy/compileall verdi. `G1` resta aperto.
+`master` e' pulito, 2.317/2.317 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+errori preesistenti invariati, non coperto da "mypy selettivo" in CI). `G1` resta aperto.
 
 Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
 sessione (`sys.setswitchinterval()` abbassato + `threading.Barrier`, senza altro aiuto) NON
@@ -3170,8 +3203,9 @@ dichiarati - FIND_FILE senza `path` esplicito, CHECK_WEBSITE_STATUS/LIST_SMART_D
 app/contatto/device su stringa grezza non risolta),
 `F1.2.3` (resto: prima capability per dispositivo chiusa - `device_blocked_intents` - ma
 l'intersezione con agente/skill/sessione resta aperta), il resto di `F1.4` (una vera
-classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7` (`F1.7.2` e' ora
-CHIUSO - anche l'undo scrive una ricevuta propria correlata per trace_id; `F1.7.3` retention
+classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7` (`F1.7.2` e `F1.7.6` sono
+ora CHIUSI - l'undo scrive una ricevuta propria correlata per trace_id, e la dashboard mostra un
+vero rollback rate; resta solo `F1.7.3` retention
 differenziata; il resto di `F1.7.4` -
 altri tipi di dato per contenuto (telefono, IP, id dispositivo) - la classificazione per nome del
 parametro e' ora chiusa; `F1.7.8` e' chiuso), il resto di `F1.8` (il resto di `F1.8.1` - lo slot

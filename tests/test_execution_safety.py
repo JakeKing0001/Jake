@@ -12,6 +12,7 @@ passando dall'agente intero (tests/test_agent.py::RollbackAfterFatalErrorTests).
 import shutil
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from core.action_ledger import ActionLedger
@@ -200,6 +201,13 @@ class RollbackReceiptTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
         self.ledger = ActionLedger(path=self.tmp_dir / "ledger.jsonl")
         self.registry = RealSkillRegistry()
+        # F1.7.6: rollback_effect() ora chiama anche log_action() (data/jake_actions.jsonl, un
+        # logger di libreria standard condiviso per l'intero processo) - senza questo mock questi
+        # test scriverebbero davvero sul file di produzione del progetto, stessa precauzione gia'
+        # presa ovunque altro in questa suite per gli altri chokepoint.
+        patcher = unittest.mock.patch("core.execution_safety.log_action")
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_a_successful_rollback_writes_a_receipt_with_the_same_trace_id(self):
         target = self.tmp_dir / "nuovo.txt"
@@ -216,7 +224,7 @@ class RollbackReceiptTests(unittest.TestCase):
         self.assertEqual(receipt["trace_id"], "t1")
         self.assertEqual(receipt["intent"], "DELETE_PATH", "l'intent compensatorio che ha eseguito davvero")
         self.assertEqual(receipt["requested_by"], "rollback:agent:general")
-        self.assertEqual(receipt["result"], "success")
+        self.assertEqual(receipt["result"], "rollback_success")
 
     def test_no_receipt_when_action_ledger_is_not_passed(self):
         """Comportamento invariato per chi non passa action_ledger/trace_id (default None)."""
