@@ -281,5 +281,24 @@ class SystemAdvisorExpiredMemoryPurgeTests(unittest.TestCase):
         self.assertEqual(self.messages, [])
 
 
+class StopTimeoutTests(unittest.TestCase):
+    """F1.8.5 ("aggiungere deadlock timeout e diagnosi"): buco reale, riprodotto per davvero -
+    se _run() era bloccato oltre i 2s di timeout di stop(), join() tornava comunque,
+    silenziosamente, senza dire che il thread era ANCORA vivo."""
+
+    def test_stop_logs_a_warning_when_the_thread_does_not_stop_in_time(self):
+        advisor = SystemAdvisor(enabled=True, interval_seconds=100, stop_timeout_seconds=0.05)
+        advisor._logger = mock.Mock()
+        with mock.patch.object(advisor, "_check_battery", side_effect=lambda: time.sleep(0.5)):
+            advisor.start()
+            self.addCleanup(lambda: advisor._thread.join(timeout=5))
+            time.sleep(0.05)  # lascia partire _run() e bloccarsi dentro _check_battery()
+
+            advisor.stop()
+
+        self.assertTrue(advisor._thread.is_alive(), "il thread deve essere ancora bloccato a questo punto")
+        advisor._logger.warning.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

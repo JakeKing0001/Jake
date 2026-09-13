@@ -3,6 +3,7 @@ budget di autonomia (F6, Proactive Intelligence & Autonomy - vedi core/autonomy_
 ROADMAP.md). Il modulo non aveva ancora una suite dedicata. Usa fake/mock per trigger_manager/
 workflow_manager/plan_executor: _fire() non fa nulla di verificabile su disco da solo, la sua
 logica e' tutta nell'orchestrare quelle tre collaborazioni."""
+import time
 import unittest
 from unittest import mock
 
@@ -84,6 +85,28 @@ class FireTests(unittest.TestCase):
         scheduler = self._scheduler(autonomy_budget=None)
 
         self.assertIsInstance(scheduler.autonomy_budget, AutonomyBudget)
+
+
+class StopTimeoutTests(unittest.TestCase):
+    """F1.8.5 ("aggiungere deadlock timeout e diagnosi"): buco reale, riprodotto per davvero -
+    se _run() era bloccato (qui in list_all()) oltre i 2s di timeout di stop(), join() tornava
+    comunque, silenziosamente, senza dire che il thread era ANCORA vivo."""
+
+    def test_stop_logs_a_warning_when_the_thread_does_not_stop_in_time(self):
+        trigger_manager = mock.Mock()
+        trigger_manager.list_all.side_effect = lambda: time.sleep(0.5)
+        scheduler = TriggerScheduler(
+            trigger_manager, mock.Mock(), mock.Mock(), None, interval_seconds=100, stop_timeout_seconds=0.05,
+        )
+        scheduler._logger = mock.Mock()
+        scheduler.start()
+        self.addCleanup(lambda: scheduler._thread.join(timeout=5))
+        time.sleep(0.05)  # lascia partire _run() e bloccarsi dentro list_all()
+
+        scheduler.stop()
+
+        self.assertTrue(scheduler._thread.is_alive(), "il thread deve essere ancora bloccato a questo punto")
+        scheduler._logger.warning.assert_called_once()
 
 
 if __name__ == "__main__":
