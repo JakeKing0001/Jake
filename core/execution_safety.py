@@ -16,6 +16,7 @@ from typing import Callable, Optional
 
 from core.action_ledger import ActionReceipt, authorization_of, idempotency_key_of, new_action_id
 from core.command import Command
+from core.identity import current_windows_user
 from core.logger import log_action
 from core.policy_engine import POLICY_REASONS
 from core.request_context import current_device_id
@@ -327,7 +328,7 @@ def rollback_effect(
                 risk_decision=risk_decision,
                 authorization=authorization_of(result, None), result=result,
                 idempotency_key=idempotency_key_of(compensating_intent, data),
-                device_id=current_device_id(),
+                device_id=current_device_id(), windows_user=current_windows_user(),
             ),
             private=private,
         )

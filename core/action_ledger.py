@@ -254,6 +254,13 @@ class ActionReceipt:
     # passo, dare visibilita' nel ledger a QUALE dispositivo ha chiesto un'azione, prima ancora di
     # poter scrivere una policy che lo usi.
     device_id: Optional[str] = None
+    # F1.4.2 (prima fetta - "distinguere identita' Windows... dispositivo..."): l'account Windows
+    # che esegue il processo Jake (core/identity.py::current_windows_user()), ortogonale a
+    # device_id sopra (un account Windows puo' avere piu' dispositivi companion, un dispositivo
+    # companion non implica un solo account Windows nel tempo). Mai None in pratica (getpass.
+    # getuser() ha sempre un fallback), Optional solo per coerenza con gli altri campi
+    # informativi e per non rompere una ricevuta costruita a mano da un test esistente.
+    windows_user: Optional[str] = None
     schema_version: int = ACTION_RECEIPT_SCHEMA_VERSION
 
     def to_json(self) -> str:

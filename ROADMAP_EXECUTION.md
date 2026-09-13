@@ -1375,14 +1375,58 @@ Criterio di uscita: nessun segreto in chiaro e ogni azione admin richiede un fat
 
 - Stato: `DOING`; `F1.4.1` **chiuso** (classe `SecretsVault` vera con versione esplicita nel blob
   e migrazione atomica anche per un segreto GIA' cifrato in formato legacy, non solo uno ancora in
-  chiaro - vedi sotto); `F1.4.3` chiuso parzialmente
+  chiaro - vedi sotto); `F1.4.2` chiuso parzialmente (prima fetta - identita' Windows/dispositivo,
+  vedi sotto; "profilo Jake" e "speaker profile" restano dichiaratamente fuori, nessuna
+  infrastruttura esiste per nessuno dei due); `F1.4.3` chiuso parzialmente
   (irrobustito il confronto della passphrase esistente, non ancora l'audit completo del
   fallback - vedi sotto); `F1.4.8` chiuso parzialmente (vault corrotto/profilo diverso, non
-  ancora migrazione/backup end-to-end); il resto della fase (`F1.4.2`, `F1.4.4`-`F1.4.7`) resta
-  aperto - identita' distinte per dispositivo/speaker profile, passkey/WebAuthn, pairing QR,
-  rotazione token, anti-spoofing vocale: ciascuno un pezzo di prodotto a se', non una fetta
-  stretta come `F1.4.1` (`core/windows_hello.py` esiste gia' - vedi l'audit storico in
-  [ROADMAP.md](ROADMAP.md) fase F1 - ma non e' stato riletto contro l'elenco piu' fine di qui).
+  ancora migrazione/backup end-to-end); il resto della fase (`F1.4.4`-`F1.4.7`) resta
+  aperto - passkey/WebAuthn, pairing QR, rotazione token, anti-spoofing vocale: ciascuno un pezzo
+  di prodotto a se', non una fetta stretta come `F1.4.1`/`F1.4.2` (`core/windows_hello.py` esiste
+  gia' - vedi l'audit storico in [ROADMAP.md](ROADMAP.md) fase F1 - ma non e' stato riletto
+  contro l'elenco piu' fine di qui).
+- `F1.4.2` (prima fetta - identita' Windows/dispositivo) — 13/09/2026: "distinguere identita'
+  Windows, profilo Jake, dispositivo e speaker profile". Investigato PRIMA di scrivere codice
+  (non assunto dal testo della roadmap): "profilo Jake" non e' un concetto definito da nessuna
+  parte nel progetto, "speaker profile" richiederebbe un'infrastruttura di riconoscimento vocale/
+  voiceprint mai costruita (e F1.4.7 avverte comunque di non usarlo mai come unico fattore),
+  "identita' Windows" non era letta/usata in nessun punto (Jake e' single-user per design). Solo
+  "dispositivo" esisteva gia' (`DeviceRegistry`/`current_device_id`, F1.2.3). Implementare la voce
+  cosi' com'e' scritta avrebbe significato inventare un sistema di identita' a 4 dimensioni senza
+  una vera richiesta di prodotto dietro - **decisione esplicita dell'utente** (dopo aver
+  presentato questi fatti) di procedere solo con la fetta minima: identita' Windows + dispositivo,
+  "profilo Jake"/"speaker profile" dichiaratamente fuori scope.
+
+  Funzionalita' nuova, non un fix - nuovo `core/identity.py::current_windows_user()`
+  (`getpass.getuser()`, non `os.getlogin()`: quest'ultimo puo' sollevare `OSError` senza un
+  terminale di controllo, es. un servizio in background - `getpass.getuser()` ripiega sulle
+  variabili d'ambiente prima di fallire). Ortogonale a `current_device_id()`, non un sostituto:
+  costante per tutto il processo (nessun contextvar/propagazione per thread necessaria, a
+  differenza del device_id che varia per richiesta), e un account Windows puo' avere piu'
+  dispositivi companion nel tempo. Aggiunto un nuovo campo `ActionReceipt.windows_user`
+  (popolato agli stessi 5 chokepoint gia' usati per `device_id` - `JakeCore._log_action_outcome`/
+  `_log_denied_action`, `TaskAgent._log_step`, `PlanExecutor._log_step`, `rollback_effect` -
+  nessuno nuovo scoperto o dimenticato, stesso elenco gia' consolidato in questa sessione), e una
+  capability simmetrica in `PolicyEngine`: `windows_user_blocked_intents: {windows_user:
+  {intent, ...}}`, stesso principio "vince il piu' restrittivo" gia' applicato a
+  `device_blocked_intents` (F1.2.3), stesso ordine di controllo (prima di ogni capability per
+  risorsa, dopo `blocked_intents`/`_device_blocks`), nuova motivazione dedicata
+  `POLICY_REASON_WINDOWS_USER_BLOCKED` (mai riusare il motivo di un'altra capability). Utile solo
+  quando piu' account Windows condividono la stessa installazione di Jake (una macchina di
+  famiglia, un PC condiviso) - un account puo' essere ristretto a un sottoinsieme di intent senza
+  toccare gli altri account o i dispositivi companion. Aggiunti 3 nuovi test in
+  `tests/test_identity.py`, 7 in `tests/test_policy_engine.py::WindowsUserCapabilityTests`
+  (nessuna restrizione di default, blocco solo per l'account giusto, motivo distinto dal blocco
+  per dispositivo, vince su CONFIRM, copertura sul percorso automatico, `blocked_intents`
+  globale vince comunque nei due sensi), 2 in
+  `tests/test_jake_core_policy_ledger.py::WindowsUserInReceiptsTests` (percorso diretto e
+  agente, entrambi con l'account Windows reale della macchina, non mockato). Aggiunto
+  `core/identity.py` alla lista mypy selettiva (76 file ora, prima 75). Non ancora affrontato:
+  "profilo Jake"/"speaker profile" (le altre due dimensioni di F1.4.2, dichiaratamente fuori
+  scope), l'intersezione di questa nuova capability con le altre gia' esistenti (dispositivo,
+  filesystem, ecc. - oggi tutte indipendenti, "vince il piu' restrittivo" vale per ciascuna presa
+  singolarmente, non ancora in combinazione esplicita). Prova: 2.379/2.379 test,
+  ruff/mypy/compileall verdi su tutti i file toccati.
 - `F1.4.3` (parziale, irrobustimento del fallback) — 12/09/2026: "usare Windows Hello per
   admin/high-impact; mantenere fallback esplicito e auditato". Windows Hello (tentato per primo) e
   la passphrase (fallback esplicito, gia' loggato via `authorization_of()`) esistevano gia' da
@@ -3343,7 +3387,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 40 incrementi completati e verificati (PR #28-#67), la
+Aggiornato 13/09/2026. Sessione lunga con 41 incrementi completati e verificati (PR #28-#68), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -3441,15 +3485,24 @@ VERIFICATION per HUD/companion (funzionalita' nuova: deliberatamente NON inietta
 `event_bus` in `TaskAgent`/`PlanExecutor` come inizialmente temuto - `AgentOutcome`/`PlanOutcome`
 gia' portano tutto il necessario fino a `JakeCore`, che gia' possiede `self.event_bus`; nuovo
 campo `AgentStep.verified`/`StepOutcome.verified`, `None` - non `"unverified"` - quando l'intent
-non ha un verificatore indipendente, per non pubblicare rumore su ogni passo). Il resto:
+non ha un verificatore indipendente, per non pubblicare rumore su ogni passo), e `F1.4.2` prima
+fetta - identita' Windows/dispositivo (funzionalita' nuova, ma preceduta da un'investigazione che
+ha ridimensionato lo scope PRIMA di scrivere codice: "profilo Jake" e "speaker profile", le altre
+due dimensioni della voce originale, non hanno alcuna infrastruttura esistente - decisione
+esplicita dell'utente, dopo aver visto questi fatti, di procedere solo con identita' Windows +
+dispositivo; nuovo `core/identity.py::current_windows_user()`, ortogonale a `current_device_id()`
+- costante per processo, nessun contextvar necessario - nuovo campo `ActionReceipt.windows_user`
+agli stessi 5 chokepoint di `device_id`, nuova capability simmetrica `windows_user_blocked_
+intents` in `PolicyEngine`). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.367/2.367 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.379/2.379 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
-invariati, nessuno dei due coperto da "mypy selettivo" in CI). `G1` resta aperto.
+invariati, nessuno dei due coperto da "mypy selettivo" in CI - ora 76 file nella lista selettiva,
+`core/identity.py` aggiunto). `G1` resta aperto.
 
 Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
 sessione (`sys.setswitchinterval()` abbassato + `threading.Barrier`, senza altro aiuto) NON
@@ -3485,10 +3538,11 @@ l'intersezione con agente/skill/sessione resta aperta), il resto di `F1.3.2` (pr
 sono ora coperti - CLOSE_WINDOW ha anche un verificatore indipendente, CLOSE_APP resta corretto
 solo a livello di skill per la complessita' della sua busta dati; browser/casa restano aperti,
 "casa" bloccata su una decisione di dipendenza - iniettare un client Home Assistant in
-`verify_effect()`, oggi una funzione libera senza dipendenze esterne), il resto di `F1.4` (`F1.4.1` e' ora
-CHIUSO - la classe `SecretsVault` versionata esiste; restano `F1.4.2`-`F1.4.7`, ciascuno un pezzo
-di prodotto a se' - identita' per dispositivo/speaker profile, passkey/WebAuthn, pairing QR,
-rotazione token, anti-spoofing vocale - non fette strette come `F1.4.1`), il resto di `F1.7` (`F1.7.2`, `F1.7.3` e
+`verify_effect()`, oggi una funzione libera senza dipendenze esterne), il resto di `F1.4`
+(`F1.4.1` e `F1.4.2` sono ora CHIUSI/chiusi quanto deciso dall'utente - `SecretsVault` versionata,
+identita' Windows+dispositivo con "profilo Jake"/"speaker profile" dichiaratamente fuori scope;
+restano `F1.4.4`-`F1.4.7`, ciascuno un pezzo di prodotto a se' - passkey/WebAuthn, pairing QR,
+rotazione token, anti-spoofing vocale - non fette strette come `F1.4.1`/`F1.4.2`), il resto di `F1.7` (`F1.7.2`, `F1.7.3` e
 `F1.7.6` sono ora CHIUSI (o chiusi quanto possibile senza una decisione di rimozione attiva) -
 l'undo scrive una ricevuta propria correlata per trace_id, la dashboard mostra un vero rollback
 rate, e le tre categorie di retention sono verificate/coperte (log operativo e memoria gia'

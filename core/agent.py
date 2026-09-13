@@ -18,6 +18,7 @@ from core.action_ledger import (
     new_action_id, verification_status_of,
 )
 from core.execution_safety import VERIFIABLE_INTENTS, execute_action_with_retry, rollback_effect, verify_effect
+from core.identity import current_windows_user
 from core.kill_switch import KillSwitch
 from core.logger import log_action, new_trace_id
 from core.ollama_client import OllamaClient, OllamaError
@@ -274,7 +275,7 @@ class TaskAgent:
                 idempotency_key=idempotency_key_of(intent, parameters),
                 verified=verification_status_of(verified), error_category=error_category_of(result),
                 policy_reason=policy_reason, duration_ms=duration_ms, model=model,
-                device_id=current_device_id(),
+                device_id=current_device_id(), windows_user=current_windows_user(),
             ),
             private=private,
         )

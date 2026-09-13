@@ -14,6 +14,7 @@ from core.desktop_context import DesktopContextTracker
 from core.event_bus import EventBus
 from core.execution_safety import ActionExecution
 from core.hud_protocol import EventType, HudEvent
+from core.identity import current_windows_user
 from core.kill_switch import KillSwitch
 from core.learning_manager import LearningManager
 from core.logger import get_logger, log_action, new_trace_id
@@ -245,6 +246,12 @@ class JakeCore:
             # F1.2.2 (quinta capability: device Home Assistant): vuoto per default, stesso
             # principio/limite di allowed_apps/allowed_contacts.
             allowed_smart_devices=config.get("allowed_smart_devices", []) or [],
+            # F1.4.2 (prima fetta - capability per ACCOUNT WINDOWS): {windows_user:
+            # [intent, ...]} in config.json, vuoto per default - stesso principio di
+            # device_blocked_intents sopra, ma per current_windows_user() (core/identity.py)
+            # invece che per canale companion, utile solo se piu' account Windows condividono
+            # questa installazione di Jake.
+            windows_user_blocked_intents=config.get("windows_user_blocked_intents", {}) or {},
         )
         # F1.2.5: collegato DOPO la creazione (self.agent/coding_agent/research_agent esistono
         # gia', self.policy_engine no, quando i tre TaskAgent vengono costruiti sopra) - senza
@@ -924,7 +931,7 @@ class JakeCore:
                 requested_by="user", risk_decision=risk, authorization=authorization_of(result, parameters),
                 result=result, idempotency_key=idempotency_key_of(intent, parameters),
                 error_category=action_error.category, policy_reason=policy_reason, duration_ms=duration_ms, model=self.model,
-                device_id=current_device_id(),
+                device_id=current_device_id(), windows_user=current_windows_user(),
             ),
             private=self.private_mode,
         )
@@ -1026,7 +1033,7 @@ class JakeCore:
                 authorization=authorization_of(result, parameters), result=result,
                 idempotency_key=idempotency_key_of(intent, parameters),
                 error_category=action_error.category, policy_reason=policy_reason,
-                device_id=current_device_id(),
+                device_id=current_device_id(), windows_user=current_windows_user(),
             ),
             private=self.private_mode,
         )
