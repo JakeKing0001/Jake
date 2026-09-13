@@ -246,6 +246,10 @@ class JakeCore:
             # F1.2.2 (quinta capability: device Home Assistant): vuoto per default, stesso
             # principio/limite di allowed_apps/allowed_contacts.
             allowed_smart_devices=config.get("allowed_smart_devices", []) or [],
+            # F1.2.2 (sesta capability: rete): vuoto per default - un utente avanzato puo'
+            # limitare PING_HOST/TRACE_ROUTE/CHECK_WEBSITE_STATUS a host espliciti in
+            # config.json, come gia' fa con allowed_web_domains.
+            allowed_network_hosts=config.get("allowed_network_hosts", []) or [],
             # F1.4.2 (prima fetta - capability per ACCOUNT WINDOWS): {windows_user:
             # [intent, ...]} in config.json, vuoto per default - stesso principio di
             # device_blocked_intents sopra, ma per current_windows_user() (core/identity.py)

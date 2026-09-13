@@ -719,10 +719,10 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
 - Stato: `DOING`; `F1.2.5` parziale per rollback filesystem e ripresa del consenso (questa
   ultima verificata localmente, in attesa di CI); `F1.2.1` **chiuso** (percorsi 3, 6 e 7 -
   i tre "percorso N" dichiarati aperti sono ora tutti fail-closed, vedi sotto); `F1.2.2` chiuso parzialmente
-  (cinque capability vere - radici filesystem su ENTRAMBI i percorsi e su sette intent, dominio
+  (sei capability vere - radici filesystem su ENTRAMBI i percorsi e su sette intent, dominio
   web su OPEN_URL, app su OPEN_APP, contatto su SEND_WHATSAPP/SEND_EMAIL, device Home Assistant su
-  CONTROL_SMART_DEVICE (le ultime tre su stringa grezza, non risolta - limite dichiarato) - vedi
-  sotto; restano aperte rete/durata); `F1.2.4`
+  CONTROL_SMART_DEVICE, rete su PING_HOST/TRACE_ROUTE/CHECK_WEBSITE_STATUS (le ultime tre su
+  stringa grezza, non risolta - limite dichiarato) - vedi sotto; resta aperta solo "durata"); `F1.2.4`
   chiuso per il percorso planner (vedi sotto); `F1.2.6` e `F1.2.7` chiusi (vedi sotto); `F1.2.3`
   chiuso parzialmente (prima capability - dispositivo - vedi sotto; l'intersezione con
   agente/skill/sessione resta aperta).
@@ -878,6 +878,33 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   dispositivo consentito permesso, dispositivo vietato bloccato con il motivo giusto,
   `LIST_SMART_DEVICES` deliberatamente escluso, vince su `CONFIRM`, copertura sul percorso
   automatico). Prova: 2.302/2.302 test, ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.2.2` (sesta capability: rete) — 14/09/2026: la penultima delle otto capability elencate
+  dalla roadmap ("filesystem root, app, contatto, dominio web, device, servizio Home Assistant,
+  rete e durata"), investigata prima di scrivere codice: `skills/network_utils.py` ha esattamente
+  tre intent che fanno uscire una richiesta di rete verso un host arbitrario deciso dall'utente -
+  `PING_HOST`/`TRACE_ROUTE` (parametro `host`, gia' un host/IP grezzo) e `CHECK_WEBSITE_STATUS`
+  (parametro `url`). A differenza di filesystem/dominio web, qui NON esiste una "mutazione di
+  rete" da coprire per prima: tutti e tre gli intent sono `RiskLevel.READ_ONLY` (nessuno
+  apre/altera nulla, solo verifica raggiungibilita'), quindi - a differenza dello schema "prima
+  l'azione con un effetto reale, poi le letture" gia' seguito per filesystem/web/Home Assistant -
+  tutti e tre entrano nella stessa fetta invece di essere rimandati. `PolicyEngine(allowed_
+  network_hosts=...)` riusa la stessa logica di corrispondenza di `allowed_web_domains`
+  (`_domain_matches`, un host consentito copre anche i suoi sottodomini) sia per `host` (diretto)
+  sia per `url` (via lo stesso `_domain_of()` gia' usato per il dominio web) - due nomi di
+  parametro diversi per lo stesso concetto, ciascuno controllato solo per gli intent che lo usano
+  davvero, stesso principio di `_CONTACT_PARAMETER_KEYS`. Un IP consentito (senza sottodomini)
+  si riduce correttamente a un confronto per uguaglianza esatta, verificato con un test dedicato
+  invece di assunto. Opt-in, vuoto per default (nessuna restrizione, comportamento invariato).
+  Nuova motivazione dedicata, `POLICY_REASON_NETWORK_CAPABILITY_DENIED`
+  ("host_outside_allowed_network_hosts"). Configurabile da `config.json`
+  (`allowed_network_hosts`). Aggiunti 12 nuovi test in
+  `tests/test_policy_engine.py::NetworkCapabilityTests` (nessuna restrizione di default, host e
+  sottodominio permessi per PING_HOST/TRACE_ROUTE, host vietato bloccato con il motivo giusto,
+  confronto case-insensitive, CHECK_WEBSITE_STATUS via `url` con/senza schema, un IP per
+  uguaglianza esatta, vince su `CONFIRM`, un blocco globale vince comunque, copertura sul percorso
+  automatico, riflesso da `explain()`). Resta aperta solo "durata", l'ultima delle otto capability
+  - non ancora chiaro a quale intent/parametro mappi con precisione. Prova: 2.419/2.419 test,
+  ruff/mypy/compileall verdi su tutti i file toccati.
 - `F1.2.1` (parziale) — 12/09/2026: chiuso il buco concreto documentato in
   [docs/action-execution-paths.md](docs/action-execution-paths.md) ("Nota sul percorso 3"):
   `PlanExecutor.execute(plan, policy_engine=None, ...)` trattava l'assenza di policy_engine come
@@ -3591,7 +3618,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 14/09/2026. Sessione lunga con 46 incrementi completati e verificati (PR #28-#73), la
+Aggiornato 14/09/2026. Sessione lunga con 47 incrementi completati e verificati (PR #28-#74), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -3724,7 +3751,7 @@ non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ul
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.407/2.407 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.419/2.419 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
 invariati, nessuno dei due coperto da "mypy selettivo" in CI - 78 file nella lista selettiva,
 `core/identity.py`/`core/forge_worker.py`/`core/sandboxed_skill_worker.py` aggiunti). `G1` resta
@@ -3765,12 +3792,12 @@ una `threading.Barrier` - molti buchi di questa sessione non si manifestavano af
 aggiornamento di questo file, e commit/PR separati invece di un unico commit enorme.
 
 Candidati piccoli ancora aperti in F1: `F1.2.1` e' ora CHIUSO per intero (i tre "percorso N" -
-piano automatico, rollback, dispatch grezzo - sono tutti fail-closed). Il resto di `F1.2.2` (le
-ultime due capability - rete/durata, non
-ancora chiaro a quale intent/parametro mappino con precisione; le altre cinque - filesystem/
-dominio web/app/contatto/device Home Assistant - sono ora complete, con i rispettivi gap noti gia'
-dichiarati - FIND_FILE senza `path` esplicito, CHECK_WEBSITE_STATUS/LIST_SMART_DEVICES esclusi,
-app/contatto/device su stringa grezza non risolta),
+piano automatico, rollback, dispatch grezzo - sono tutti fail-closed). Il resto di `F1.2.2` (resta
+aperta solo l'ultima capability - "durata", non
+ancora chiaro a quale intent/parametro mappi con precisione; le altre sei - filesystem/
+dominio web/app/contatto/device Home Assistant/rete - sono ora complete, con i rispettivi gap noti
+gia' dichiarati - FIND_FILE senza `path` esplicito, LIST_SMART_DEVICES escluso, app/contatto/
+device/rete su stringa grezza non risolta),
 `F1.2.3` (resto: prima capability per dispositivo chiusa - `device_blocked_intents` - ma
 l'intersezione con agente/skill/sessione resta aperta), il resto di `F1.3.2` (processi e finestre
 sono ora coperti - CLOSE_WINDOW ha anche un verificatore indipendente, CLOSE_APP resta corretto
