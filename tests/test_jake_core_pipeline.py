@@ -674,6 +674,32 @@ class RunAgentTests(_JakeCoreTestCase):
         action = core.conversation_state.get_pending_action()
         self.assertEqual(action["reason"], "auth_required")
 
+    def test_a_confirmation_suggested_by_external_content_notes_the_source_in_the_message(self):
+        """F1.5.4 ("mostrare all'utente la sorgente che ha suggerito un'azione sensibile"): quando
+        il passo dell'agente immediatamente precedente ha restituito contenuto esterno (vedi
+        core/agent.py::TaskAgent.run(), last_external_content_source), il messaggio mostrato
+        all'utente lo dice esplicitamente - non solo il modello lo sa (F1.5.1), anche l'utente."""
+        outcome = AgentOutcome(pending_confirmation={
+            "intent": "DELETE_PATH", "parameters": {"confirmed": True}, "message": "Confermi?",
+            "suggested_by_external_content": "READ_FILE_TEXT",
+        })
+        core = self._core(orchestrator=FakeOrchestrator(outcome))
+        response = core._run_agent("cancella il file che hai letto")
+        self.assertIn("Confermi?", response)
+        self.assertIn("READ_FILE_TEXT", response)
+        action = core.conversation_state.get_pending_action()
+        self.assertEqual(action["suggested_by_external_content"], "READ_FILE_TEXT")
+
+    def test_a_confirmation_not_suggested_by_external_content_leaves_the_message_unchanged(self):
+        outcome = AgentOutcome(pending_confirmation={
+            "intent": "DELETE_PATH", "parameters": {"confirmed": True}, "message": "Confermi?",
+        })
+        core = self._core(orchestrator=FakeOrchestrator(outcome))
+        response = core._run_agent("cancella tutto")
+        self.assertEqual(response, "Confermi?")
+        action = core.conversation_state.get_pending_action()
+        self.assertIsNone(action["suggested_by_external_content"])
+
     def test_a_clarifying_question_sets_an_agent_continue_pending_action(self):
         outcome = AgentOutcome(question="Quale file, di preciso?")
         core = self._core(orchestrator=FakeOrchestrator(outcome))

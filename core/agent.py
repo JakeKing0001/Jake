@@ -28,7 +28,7 @@ from core.risk import risk_of
 from core.schema_validation import validate_confirm_envelope
 from core.session_recorder import SessionRecorder
 from core.skill_result import SkillResult
-from core.taint import wrap_external_content
+from core.taint import EXTERNAL_CONTENT_INTENTS, wrap_external_content
 
 # Strumenti sempre offerti all'agente, oltre a quelli pertinenti alla richiesta: sono i
 # "sensi" e le "mani" di base con cui si risolve quasi ogni compito composto.
@@ -342,6 +342,13 @@ class TaskAgent:
         messages.append({"role": "user", "content": f"Richiesta: {request}"})
         seen = set()
         start_time = time.monotonic()
+        # F1.5.4 ("mostrare all'utente la sorgente che ha suggerito un'azione sensibile"): tiene
+        # traccia di QUALE intent (se in EXTERNAL_CONTENT_INTENTS) ha prodotto l'osservazione
+        # immediatamente precedente - il passo che il modello sta per proporre ORA e' quello che
+        # potrebbe essere stato suggerito da quel contenuto. Solo l'ultima, non un elenco di
+        # tutte quelle viste nel run: un legame causale diretto (il passo appena prima), non
+        # "qualche osservazione lontana nel tempo l'ha mai toccato".
+        last_external_content_source: str | None = None
 
         for step_index in range(1, self.MAX_STEPS + 1):
             if self.kill_switch.is_active():
@@ -479,6 +486,10 @@ class TaskAgent:
                         # (vedi conversation_state pending_action.reason).
                         "kind": result.error,
                         "policy_reason": execution.policy_reason if envelope.get("confirm_intent", intent) == intent else None,
+                        # F1.5.4: None quando il passo precedente non ha restituito contenuto
+                        # esterno (il caso comune) - non un campo assente, cosi' chi legge
+                        # pending_confirmation sa sempre se controllarlo o meno.
+                        "suggested_by_external_content": last_external_content_source,
                     }
                     self._log_step(
                         trace_id, private, step_started, model, intent, parameters, result=result.error.lower(),
@@ -488,6 +499,12 @@ class TaskAgent:
                 step.observation = self._observe(intent, result)
                 if execution.note:
                     step.observation = f"{execution.note} {step.observation}"
+                # F1.5.4: aggiornato DOPO aver costruito l'osservazione di QUESTO passo, cosi' il
+                # PROSSIMO passo (se richiede conferma) sa se e' stato "suggerito" da questo.
+                last_external_content_source = (
+                    intent if (result is not None and result.success and intent in EXTERNAL_CONTENT_INTENTS)
+                    else None
+                )
                 outcome_label = "success" if (result is not None and result.success) else f"error:{result.error}" if result is not None else "no_result"
                 self._log_step(
                     trace_id, private, step_started, model, intent, parameters, result=outcome_label,
