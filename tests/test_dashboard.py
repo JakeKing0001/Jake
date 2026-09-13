@@ -76,7 +76,7 @@ class BuildReportTests(unittest.TestCase):
             {"skill": "ADD_NOTE", "result": "success"},
             {"skill": "CREATE_PATH", "result": "error:VERIFICATION_FAILED"},
             {"skill": "ADD_NOTE", "result": "error:OPERATION_FAILED"},
-            {"skill": "OPEN_APP", "result": "error:PATH_NOT_FOUND"},  # codice bespoke, non mappato
+            {"skill": "OPEN_APP", "result": "error:UN_CODICE_MAI_VISTO_XYZ"},  # bespoke, non mappato
         ]
         report = build_report(actions, sessions=[])
         self.assertEqual(report["failure_category_counts"]["success"], 1)

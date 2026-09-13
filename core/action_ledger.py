@@ -123,10 +123,11 @@ ERROR_CATEGORY_PARTIAL_EFFECT = "partial_effect"
 ERROR_CATEGORY_VERIFICATION_FAILED = "verification_failed"
 ERROR_CATEGORY_CONFLICT = "conflict"
 ERROR_CATEGORY_USER_CANCELLED = "user_cancelled"
-# Nessuna delle ~200 skill produce ancora un codice di errore pensato per questa tassonomia
-# (F1.1.6/F1.1.7, migrazione skill-per-skill, restano lavoro successivo): un codice bespoke di
-# una singola skill (es. "PATH_NOT_FOUND", "PROTECTED_PATH") finisce onestamente qui, invece di
-# essere forzato in una delle categorie sopra solo per evitare questo valore.
+# F1.1.7 (migrazione degli errori bespoke sulla tassonomia condivisa): la maggior parte dei
+# codici delle ~200 skill sono ora censiti in _KNOWN_RESULT_CATEGORIES sotto (vedi il commento
+# li'). Resta comunque questa categoria di ripiego per un codice DAVVERO mai visto (una skill
+# nuova, o un errore specifico troppo raro per meritare una voce dedicata): finisce onestamente
+# qui, invece di essere forzato in una delle categorie sopra solo per evitare questo valore.
 ERROR_CATEGORY_UNCATEGORIZED = "uncategorized"
 
 # Pubblico (non _ERROR_CATEGORIES): core/action_contracts.py::validate_action_error (F1.1.2) lo
@@ -170,6 +171,70 @@ _KNOWN_RESULT_CATEGORIES: dict[str, str] = {
     # Il kill switch e' un comando esplicito dell'utente ("ferma tutto"), non un errore del
     # sistema: un passo interrotto da li' e' un annullamento voluto, non un fallimento da capire.
     "KILLED": ERROR_CATEGORY_USER_CANCELLED,
+
+    # F1.1.7 ("migrare tutti gli intent per dominio"): censiti i codici bespoke REALMENTE usati
+    # dalle skill (`grep -rhoE 'error="[A-Z_]+"' skills/*.py`, non ipotizzati), un codice alla
+    # volta secondo il SIGNIFICATO del fallimento, non il nome della skill che lo produce - le
+    # stesse categorie di sopra, mai una tassonomia parallela. Nessuna skill e' stata modificata:
+    # queste sono le stesse stringhe che i chokepoint gia' leggono da result.error oggi, solo
+    # ora riconosciute invece di ricadere silenziosamente su "uncategorized".
+
+    # Un'operazione che richiede una risorsa dipendente (Home Assistant, NEST, un modulo OCR/
+    # vision, il microfono, la cronologia del browser, una chiave API mai configurata...) non
+    # disponibile in questo momento - stesso significato di OLLAMA_UNAVAILABLE/PLANNER_ERROR sopra.
+    "AUDIO_UNAVAILABLE": ERROR_CATEGORY_UNAVAILABLE,
+    "BRIGHTNESS_UNAVAILABLE": ERROR_CATEGORY_UNAVAILABLE,
+    "BROWSER_HISTORY_UNAVAILABLE": ERROR_CATEGORY_UNAVAILABLE,
+    "HOME_ASSISTANT_UNAVAILABLE": ERROR_CATEGORY_UNAVAILABLE,
+    "MISSING_API_KEY": ERROR_CATEGORY_UNAVAILABLE,
+    "NEST_UNAVAILABLE": ERROR_CATEGORY_UNAVAILABLE,
+    "OCR_UNAVAILABLE": ERROR_CATEGORY_UNAVAILABLE,
+    "VISION_UNAVAILABLE": ERROR_CATEGORY_UNAVAILABLE,
+
+    # Un parametro/valore fornito che non si risolve a nulla di valido - non diverso in sostanza
+    # da MISSING_PARAMETERS sopra (l'input non basta per procedere), solo piu' specifico su COSA
+    # non va (un formato non valido, un riferimento che non esiste, un nome non supportato).
+    "CITY_NOT_FOUND": ERROR_CATEGORY_INVALID_INPUT,
+    "CLIPBOARD_EMPTY": ERROR_CATEGORY_INVALID_INPUT,
+    "CONTACT_NOT_FOUND": ERROR_CATEGORY_INVALID_INPUT,
+    "CURRENCY_NOT_FOUND": ERROR_CATEGORY_INVALID_INPUT,
+    "INCOMPATIBLE_UNITS": ERROR_CATEGORY_INVALID_INPUT,
+    "INVALID_DATE": ERROR_CATEGORY_INVALID_INPUT,
+    "INVALID_EXPRESSION": ERROR_CATEGORY_INVALID_INPUT,
+    "INVALID_JSON": ERROR_CATEGORY_INVALID_INPUT,
+    "INVALID_TIME": ERROR_CATEGORY_INVALID_INPUT,
+    "INVALID_URL": ERROR_CATEGORY_INVALID_INPUT,
+    "INVALID_VALUE": ERROR_CATEGORY_INVALID_INPUT,
+    "NOT_A_GIT_REPO": ERROR_CATEGORY_INVALID_INPUT,
+    "NOT_FOUND": ERROR_CATEGORY_INVALID_INPUT,
+    "NO_SELECTION": ERROR_CATEGORY_INVALID_INPUT,
+    "PATH_NOT_FOUND": ERROR_CATEGORY_INVALID_INPUT,
+    "RESULT_NOT_FOUND": ERROR_CATEGORY_INVALID_INPUT,
+    "UNSUPPORTED_APP": ERROR_CATEGORY_INVALID_INPUT,
+    "VOICE_ONLY": ERROR_CATEGORY_INVALID_INPUT,
+    "WINDOW_NOT_FOUND": ERROR_CATEGORY_INVALID_INPUT,
+
+    # Un'azione esplicitamente rifiutata da una protezione della skill stessa (non dal
+    # PolicyEngine centrale, ma stesso significato: qualcosa ha impedito di procedere per
+    # scelta, non per un problema tecnico) - stesso principio di BLOCKED_BY_POLICY/POLICY_BLOCKED.
+    "BLOCKED": ERROR_CATEGORY_DENIED,
+    "PROTECTED_PATH": ERROR_CATEGORY_DENIED,
+
+    # Un tentativo fallito che ha senso ritentare (chiamata di rete, generazione di codice,
+    # esecuzione di un piano) - stesso significato di OPERATION_FAILED/NETWORK_UNAVAILABLE sopra.
+    # Nota: la categoria da sola non fa ritentare nulla automaticamente (F1.3.6, is_safe_to_auto_
+    # retry() dipende anche dall'INTENT, non solo dal codice) - serve solo alla dashboard/al
+    # ledger per raggruppare "questo tipo di fallimento" onestamente.
+    "FORGE_FAILED": ERROR_CATEGORY_TRANSIENT,
+    "HOME_ASSISTANT_ERROR": ERROR_CATEGORY_TRANSIENT,
+    "HOST_UNREACHABLE": ERROR_CATEGORY_TRANSIENT,
+    "LAUNCH_FAILED": ERROR_CATEGORY_TRANSIENT,
+    "NEST_ERROR": ERROR_CATEGORY_TRANSIENT,
+    "PLAN_FAILED": ERROR_CATEGORY_TRANSIENT,
+
+    # Il target richiesto esiste gia' - un conflitto, non un input invalido ne' un fallimento
+    # tecnico (stessa categoria di ERROR_CATEGORY_CONFLICT, finora mai popolata da nessun codice).
+    "ALREADY_EXISTS": ERROR_CATEGORY_CONFLICT,
 }
 
 
