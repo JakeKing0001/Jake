@@ -423,6 +423,10 @@ class JakeCore:
         print(f"\nJake > {gated}\nTu > ", end="", flush=True)
 
     def _default_on_trigger_fired(self, trigger: dict, outcome, total_steps: int) -> None:
+        # F1.3.8: il percorso automatico (nessun turno di conversazione, nessun utente in
+        # ascolto) e' quello che beneficia di piu' da questi eventi - senza, l'unico modo di
+        # scoprire cosa un'automazione ha DAVVERO verificato o annullato era rileggere il ledger.
+        self._publish_plan_outcome_effect_proof_events(outcome)
         summary = format_plan_outcome(outcome, total_steps, self.skill_registry)
         message = self.notify(
             "trigger", f"Ho eseguito automaticamente '{trigger.get('name')}':\n{summary}",
@@ -439,6 +443,36 @@ class JakeCore:
     def _on_agent_step(self, step_index: int, description: str) -> None:
         self.session_hooks.call("set_state", "working", description)
         self.event_bus.publish(HudEvent(EventType.AGENT_STEP, {"step": step_index, "description": description}))
+
+    def _publish_plan_outcome_effect_proof_events(self, outcome) -> None:
+        """Estrae da un `PlanOutcome` (core/plan_executor.py) le stesse due liste che
+        `_publish_effect_proof_events` sotto si aspetta, condivisa dai due chiamanti che
+        ricevono un PlanOutcome (`_try_plan`, `_default_on_trigger_fired`) invece di ripetere la
+        stessa estrazione due volte."""
+        verified_steps = [
+            (step_outcome.step.intent, step_outcome.verified)
+            for step_outcome in (*outcome.completed, *([outcome.stopped_step] if outcome.stopped_step else []))
+            if step_outcome.verified is not None
+        ]
+        self._publish_effect_proof_events(
+            verified_steps, [step_outcome.step.intent for step_outcome in outcome.rolled_back],
+        )
+
+    def _publish_effect_proof_events(self, verified_steps: list[tuple[str, str]], rolled_back_intents: list[str]) -> None:
+        """F1.3.8 ("esporre undo e prove a HUD/companion tramite eventi versionati"): prima di
+        questo, un rollback (core/execution_safety.py::rollback_effect) o una verifica
+        indipendente dell'effetto (F1.3.3, verify_effect) erano visibili SOLO nel ledger
+        (data/jake_ledger.jsonl) - un HUD o un'app companion non aveva modo di saperlo in tempo
+        reale, solo rileggendo il ledger dopo. Chiamato sia dal percorso agente
+        (core/agent.py::AgentOutcome) sia dal percorso piano (core/plan_executor.py::
+        PlanOutcome), che espongono la stessa informazione con forme leggermente diverse -
+        l'estrazione resta al chiamante, qui solo la pubblicazione condivisa. Nessun evento
+        quando non c'e' nulla da riportare (nessun intent verificabile in questo turno, nessun
+        rollback) - non aggiunge rumore al caso comune."""
+        for intent in rolled_back_intents:
+            self.event_bus.publish(HudEvent(EventType.UNDO, {"intent": intent}))
+        for intent, verified in verified_steps:
+            self.event_bus.publish(HudEvent(EventType.VERIFICATION, {"intent": intent, "verified": verified}))
 
     def _on_skill_installed(self, draft) -> None:
         # F1: always_confirm_intents/require_auth_intents (vedi sopra) sono popolati una sola
@@ -720,6 +754,11 @@ class JakeCore:
         if outcome is None or (outcome.error is not None and not outcome.did_something):
             return self._try_plan(request)
 
+        self._publish_effect_proof_events(
+            [(step.intent, step.verified) for step in outcome.steps if step.verified is not None],
+            [step.intent for step in outcome.rolled_back],
+        )
+
         if outcome.pending_confirmation is not None:
             reason = "auth_required" if outcome.pending_confirmation.get("kind") == "AUTH_REQUIRED" else "confirmation_required"
             self.conversation_state.set_pending_action({
@@ -921,6 +960,7 @@ class JakeCore:
             plan, policy_engine=self.policy_engine,
             trace_id=new_trace_id(), private=self.private_mode, model=self.model,
         )
+        self._publish_plan_outcome_effect_proof_events(outcome)
         response = format_plan_outcome(outcome, len(plan.steps), self.skill_registry)
         self._remember_exchange(text, Command("PLAN", {"steps": len(plan.steps)}), response)
         return response

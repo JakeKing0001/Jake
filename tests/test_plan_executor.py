@@ -141,6 +141,24 @@ class IndependentVerificationTests(unittest.TestCase):
         outcome = PlanExecutor(registry).execute(plan, policy_engine=PolicyEngine())
 
         self.assertEqual(outcome.stopped_step.result.error, "VERIFICATION_FAILED")
+        self.assertEqual(outcome.stopped_step.verified, "verification_failed", "F1.3.8: esposto sul passo")
+
+    def test_a_genuinely_verified_effect_is_exposed_on_the_step(self):
+        registry = FakeRegistry()
+        target = str(Path(tempfile.mkdtemp(prefix="jake_plan_verified_field_")) / "nuovo.txt")
+        plan = Plan(steps=[PlanStep(intent="CREATE_PATH", parameters={"path": target})])
+
+        outcome = PlanExecutor(registry).execute(plan, policy_engine=PolicyEngine())
+
+        self.assertEqual(outcome.completed[0].verified, "verified")
+
+    def test_an_intent_without_an_independent_verifier_leaves_the_field_none(self):
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
+        plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
+
+        outcome = PlanExecutor(registry).execute(plan, policy_engine=PolicyEngine())
+
+        self.assertIsNone(outcome.completed[0].verified)
 
 
 class StructuredLoggingTests(unittest.TestCase):

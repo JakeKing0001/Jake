@@ -64,6 +64,10 @@ class AgentStep:
     observation: str = ""
     attempts: int = 1  # >1 se e' scattato un retry automatico su un errore transitorio (v3.3)
     policy_reason: str | None = None
+    # F1.3.8 ("esporre... prove a HUD/companion"): stesso tri-stato gia' calcolato per il ledger
+    # (verification_status_of()) - prima non usciva mai da questo metodo, solo la ricevuta lo
+    # vedeva. None quando l'intent non ha un verificatore indipendente (nessuna prova da esporre).
+    verified: str | None = None
 
 
 @dataclass
@@ -420,6 +424,13 @@ class TaskAgent:
                 step = AgentStep(
                     intent=intent, parameters=parameters, thought=thought, result=result, attempts=attempts,
                     policy_reason=execution.policy_reason,
+                    # None qui (a differenza della ricevuta nel ledger, che vuole sempre uno dei
+                    # tre valori espliciti - F1.3.3) significa "nessun verificatore indipendente
+                    # per questo intent": niente da esporre alla HUD, non "non verificato" da
+                    # riportare comunque - altrimenti OGNI passo (anche ADD_NOTE/GET_TIME, senza
+                    # alcuna prova possibile) pubblicherebbe un evento VERIFICATION, rumore senza
+                    # significato invece di una prova vera.
+                    verified=verification_status_of(verified) if verified is not None else None,
                 )
                 if result is not None and result.error in ("CONFIRMATION_REQUIRED", "AUTH_REQUIRED"):
                     outcome.steps.append(step)
