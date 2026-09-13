@@ -655,9 +655,9 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
 - Stato: `DOING`; `F1.2.5` parziale per rollback filesystem e ripresa del consenso (questa
   ultima verificata localmente, in attesa di CI); `F1.2.1` chiuso parzialmente
   (percorso 3, vedi sotto); `F1.2.2` chiuso parzialmente (prima capability vera - radici
-  filesystem, ora su ENTRAMBI i percorsi interattivo e automatico, ancora solo quattro intent di
-  mutazione, vedi sotto); `F1.2.4` chiuso per
-  il percorso planner (vedi sotto); `F1.2.6` e `F1.2.7` chiusi (vedi sotto); `F1.2.3`/resto
+  filesystem, ora su ENTRAMBI i percorsi interattivo e automatico e su sette intent - le quattro
+  mutazioni piu' le tre letture FIND_FILE/GET_FILE_INFO/READ_FILE_TEXT - vedi sotto); `F1.2.4`
+  chiuso per il percorso planner (vedi sotto); `F1.2.6` e `F1.2.7` chiusi (vedi sotto); `F1.2.3`/resto
   aperto.
 - `F1.2.2` (parziale, prima capability: radici filesystem) — 12/09/2026: "definire capability per
   filesystem root, app, contatto, dominio web, device, servizio Home Assistant, rete e durata" -
@@ -719,6 +719,27 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   buco: il percorso che sta annullando ha gia' superato questo stesso controllo quando l'azione
   originale e' stata eseguita, non c'e' un nuovo modo di aggirarlo passando dal rollback). Prova:
   2.237/2.237 test, ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.2.2` (terza fetta, intent di sola lettura) — 13/09/2026: chiude l'ultimo gap dichiarato
+  apertamente nel modulo fin dall'inizio - la capability copriva solo le quattro mutazioni
+  (CREATE_PATH/RENAME_PATH/MOVE_PATH/DELETE_PATH), lasciando Jake libero di TROVARE/LEGGERE
+  qualunque file fuori dalle radici consentite anche con la capability configurata, vanificando in
+  parte il senso di un "recinto" filesystem (si poteva comunque leggere ovunque, solo non
+  scrivere). Estesa `FILESYSTEM_CAPABILITY_INTENTS` con le tre letture classificate
+  `RiskLevel.READ_ONLY` in `core/risk.py`: `FIND_FILE`, `GET_FILE_INFO`, `READ_FILE_TEXT` - tutte
+  usano gia' lo stesso parametro `path` delle quattro mutazioni, nessuna modifica a
+  `_filesystem_capability_allows()` necessaria. Deliberatamente NON incluso: `OPEN_PATH`
+  (`RiskLevel.LOCAL_REVERSIBLE`, non `READ_ONLY` - apre un file con l'applicazione predefinita, un
+  rischio diverso da una lettura pura, la roadmap parla esplicitamente di "intent di sola
+  lettura"). Gap noto e dichiarato apertamente, non chiuso qui: il parametro `path` di `FIND_FILE`
+  e' OPZIONALE (cerca nelle cartelle utente comuni se omesso) - senza un percorso esplicito da
+  controllare, la ricerca di default puo' ancora uscire dalle radici consentite. Chiarito anche un
+  equivoco nella documentazione precedente: `FILESYSTEM_CAPABILITY_INTENTS` NON e' lo stesso
+  insieme di `core/execution_safety.py::INTENT_SAFETY_REGISTRY` (quattro nomi in comune per
+  coincidenza, scopi diversi - rollback li', capability qui). Aggiornato il test che documentava
+  il gap (`test_read_only_path_intents_are_not_covered_yet` -> due test che verificano BLOCK fuori
+  e ALLOW dentro le radici) e aggiunti 3 nuovi test (`OPEN_PATH` deliberatamente escluso,
+  `FIND_FILE` senza `path` non ristretto, copertura confermata anche sul percorso automatico).
+  Prova: 2.241/2.241 test, ruff/mypy/compileall verdi su tutti i file toccati.
 - `F1.2.1` (parziale) — 12/09/2026: chiuso il buco concreto documentato in
   [docs/action-execution-paths.md](docs/action-execution-paths.md) ("Nota sul percorso 3"):
   `PlanExecutor.execute(plan, policy_engine=None, ...)` trattava l'assenza di policy_engine come
@@ -2829,7 +2850,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 24 incrementi completati e verificati (PR #28-#51), la
+Aggiornato 13/09/2026. Sessione lunga con 25 incrementi completati e verificati (PR #28-#52), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -2848,7 +2869,10 @@ due chiamate separate a `MemoryManager` - entrambi corsa reale ma a bassa probab
 scheduler standard, riprodotti in modo affidabile solo forzando deliberatamente l'intreccio esatto
 tra lettura e scrittura), `F1.2.2` seconda fetta (un piano automatico/`RUN_WORKFLOW`/trigger
 poteva mutare un percorso FUORI dalle radici filesystem consentite, perche' `decide_automated()`
-non riceveva affatto `parameters` - la capability proteggeva solo un comando diretto). Le tre
+non riceveva affatto `parameters` - la capability proteggeva solo un comando diretto), `F1.2.2`
+terza fetta (la capability filesystem lasciava comunque Jake libero di LEGGERE qualunque file
+fuori dal recinto - solo le mutazioni erano coperte, ora anche FIND_FILE/GET_FILE_INFO/
+READ_FILE_TEXT). Le tre
 funzionalita' nuove: `F1.2.2` prima fetta (prima capability vera - radici filesystem
 consentite), `F1.7.4` prima fetta (redazione strutturata per tipo di dato - percorso/URL/email invece del
 generico "<str:N caratteri>") e `F1.7.4` seconda fetta (redazione per NOME del parametro - un
@@ -2860,7 +2884,7 @@ verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.2` (parziale - la notifica di
 un'automazione ora porta lo stesso trace_id delle ricevute che l'ha prodotta), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.237/2.237 test, ruff/mypy/compileall verdi. `G1` resta aperto.
+`master` e' pulito, 2.241/2.241 test, ruff/mypy/compileall verdi. `G1` resta aperto.
 
 Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
 sessione (`sys.setswitchinterval()` abbassato + `threading.Barrier`, senza altro aiuto) NON
@@ -2886,8 +2910,9 @@ aggiornamento di questo file, e commit/PR separati invece di un unico commit eno
 
 Candidati piccoli ancora aperti in F1: il resto di `F1.2.1` (percorso 7,
 `SkillRegistry.execute()`), il resto di `F1.2.2` (le altre sette capability - app/contatto/
-dominio web/device/HA/rete/durata; estendere le radici filesystem agli intent di sola lettura -
-il percorso automatico e' ora coperto), `F1.2.3` (intersezione permessi utente/dispositivo/agente/skill/
+dominio web/device/HA/rete/durata; la capability filesystem stessa e' ora completa su entrambi i
+percorsi e su mutazioni+letture, resta solo il gap noto di FIND_FILE senza `path` esplicito),
+`F1.2.3` (intersezione permessi utente/dispositivo/agente/skill/
 sessione - oggi solo un allowlist utente, nessuna intersezione), il resto di `F1.4` (una vera
 classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7` (il resto di `F1.7.2` -
 undo, mai wired a una ricevuta propria; `F1.7.3` retention differenziata; il resto di `F1.7.4` -
