@@ -237,6 +237,11 @@ class JakeCore:
             # puo' limitare OPEN_URL a domini espliciti in config.json, come gia' fa con
             # allowed_filesystem_roots.
             allowed_web_domains=config.get("allowed_web_domains", []) or [],
+            # F1.2.2 (terza/quarta capability: app e contatto): vuoti per default. Controllano la
+            # stringa grezza, non il risultato della risoluzione (AppResolver/ContactBook) - vedi
+            # il docstring di core/policy_engine.py per il limite dichiarato apertamente.
+            allowed_apps=config.get("allowed_apps", []) or [],
+            allowed_contacts=config.get("allowed_contacts", []) or [],
         )
         # F1.2.5: collegato DOPO la creazione (self.agent/coding_agent/research_agent esistono
         # gia', self.policy_engine no, quando i tre TaskAgent vengono costruiti sopra) - senza

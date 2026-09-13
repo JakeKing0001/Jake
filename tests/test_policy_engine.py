@@ -638,5 +638,91 @@ class WebDomainCapabilityTests(unittest.TestCase):
         self.assertEqual(result["automated"]["reason"], "domain_outside_allowed_web_domains")
 
 
+class AppCapabilityTests(unittest.TestCase):
+    """F1.2.2 (terza capability: app). Controlla la stringa GREZZA del parametro "app", non il
+    risultato della risoluzione fuzzy di AppResolver - limite dichiarato apertamente nel
+    docstring del modulo, accettato come compromesso deliberato."""
+
+    def test_no_configured_apps_means_no_restriction_at_all(self):
+        engine = PolicyEngine()
+        decision = engine.decide_interactive("OPEN_APP", {"app": "qualunque cosa"})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_an_allowed_app_is_permitted(self):
+        engine = PolicyEngine(allowed_apps={"notepad"})
+        decision = engine.decide_interactive("OPEN_APP", {"app": "notepad"})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_the_comparison_is_case_and_whitespace_insensitive(self):
+        engine = PolicyEngine(allowed_apps={"notepad"})
+        decision = engine.decide_interactive("OPEN_APP", {"app": "  NotePad  "})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_an_app_outside_the_allowed_list_is_blocked_with_the_right_reason(self):
+        engine = PolicyEngine(allowed_apps={"notepad"})
+        decision, reason = engine.decide_interactive_with_reason("OPEN_APP", {"app": "regedit"})
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+        self.assertEqual(reason, "app_outside_allowed_apps")
+
+    def test_capability_denial_is_checked_before_confirmation_would_otherwise_apply(self):
+        engine = PolicyEngine(allowed_apps={"notepad"}, always_confirm_intents={"OPEN_APP"})
+        decision = engine.decide_interactive("OPEN_APP", {"app": "regedit", "confirmed": True})
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+
+    def test_decide_automated_enforces_allowed_apps_when_parameters_are_passed(self):
+        engine = PolicyEngine(allowed_apps={"notepad"})
+        decision = engine.decide_automated("OPEN_APP", {"app": "regedit"})
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+
+
+class ContactCapabilityTests(unittest.TestCase):
+    """F1.2.2 (quarta capability: contatto). Controlla la stringa GREZZA del parametro
+    ("contact" per SEND_WHATSAPP, "to" per SEND_EMAIL), non il contatto risolto dalla rubrica -
+    stesso limite dichiarato di AppCapabilityTests."""
+
+    def test_no_configured_contacts_means_no_restriction_at_all(self):
+        engine = PolicyEngine()
+        decision = engine.decide_interactive("SEND_WHATSAPP", {"contact": "chiunque", "message": "ciao"})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_an_allowed_contact_is_permitted_for_whatsapp(self):
+        engine = PolicyEngine(allowed_contacts={"marco"})
+        decision = engine.decide_interactive("SEND_WHATSAPP", {"contact": "Marco", "message": "ciao"})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_an_allowed_contact_is_permitted_for_email_using_the_to_parameter(self):
+        engine = PolicyEngine(allowed_contacts={"marco@esempio.com"})
+        decision = engine.decide_interactive("SEND_EMAIL", {"to": "marco@esempio.com", "subject": "ciao"})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_a_contact_outside_the_allowed_list_is_blocked_with_the_right_reason(self):
+        engine = PolicyEngine(allowed_contacts={"marco"})
+        decision, reason = engine.decide_interactive_with_reason(
+            "SEND_WHATSAPP", {"contact": "sconosciuto", "message": "ciao"},
+        )
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+        self.assertEqual(reason, "contact_outside_allowed_contacts")
+
+    def test_an_unrelated_parameter_like_subject_is_never_checked(self):
+        """"to" e' controllato, "subject"/"body" no - solo _CONTACT_PARAMETER_KEYS."""
+        engine = PolicyEngine(allowed_contacts={"marco@esempio.com"})
+        decision = engine.decide_interactive(
+            "SEND_EMAIL", {"to": "marco@esempio.com", "subject": "qualunque cosa", "body": "qualunque cosa"},
+        )
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_capability_denial_is_checked_before_confirmation_would_otherwise_apply(self):
+        engine = PolicyEngine(allowed_contacts={"marco"}, always_confirm_intents={"SEND_WHATSAPP"})
+        decision = engine.decide_interactive(
+            "SEND_WHATSAPP", {"contact": "sconosciuto", "message": "ciao", "confirmed": True},
+        )
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+
+    def test_decide_automated_enforces_allowed_contacts_when_parameters_are_passed(self):
+        engine = PolicyEngine(allowed_contacts={"marco"})
+        decision = engine.decide_automated("SEND_WHATSAPP", {"contact": "sconosciuto", "message": "ciao"})
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+
+
 if __name__ == "__main__":
     unittest.main()

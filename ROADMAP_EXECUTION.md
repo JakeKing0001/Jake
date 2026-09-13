@@ -654,9 +654,11 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
 
 - Stato: `DOING`; `F1.2.5` parziale per rollback filesystem e ripresa del consenso (questa
   ultima verificata localmente, in attesa di CI); `F1.2.1` chiuso parzialmente
-  (percorsi 3 e 6, vedi sotto; resta aperto solo il percorso 7); `F1.2.2` chiuso parzialmente (due
-  capability vere - radici filesystem su ENTRAMBI i percorsi e su sette intent, dominio web su
-  OPEN_URL - vedi sotto; restano aperte app/contatto/device/HA/rete/durata); `F1.2.4`
+  (percorsi 3 e 6, vedi sotto; resta aperto solo il percorso 7); `F1.2.2` chiuso parzialmente
+  (quattro capability vere - radici filesystem su ENTRAMBI i percorsi e su sette intent, dominio
+  web su OPEN_URL, app su OPEN_APP, contatto su SEND_WHATSAPP/SEND_EMAIL (queste ultime due su
+  stringa grezza, non risolta - limite dichiarato) - vedi sotto; restano aperte device-HA/rete/
+  durata); `F1.2.4`
   chiuso per il percorso planner (vedi sotto); `F1.2.6` e `F1.2.7` chiusi (vedi sotto); `F1.2.3`
   chiuso parzialmente (prima capability - dispositivo - vedi sotto; l'intersezione con
   agente/skill/sessione resta aperta).
@@ -768,6 +770,33 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   `CHECK_WEBSITE_STATUS` deliberatamente escluso, la capability vince su `CONFIRM`, un blocco
   globale vince comunque, copertura su entrambi i percorsi, riflesso da `explain()`). Prova:
   2.283/2.283 test, ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.2.2` (terza/quarta capability: app e contatto) — 13/09/2026: decisione esplicita
+  dell'utente ("accetto un check piu' debole") dopo aver segnalato il limite: a differenza di
+  percorso/dominio (valori sintattici), `OPEN_APP` ("app") e `SEND_WHATSAPP`/`SEND_EMAIL`
+  ("contact"/"to") vengono risolti a runtime DENTRO la skill - `AppResolver` fa fuzzy matching
+  contro le app installate, `ContactBook` cerca il contatto nella rubrica - un tempo DOPO che
+  `PolicyEngine` ha gia' deciso. `PolicyEngine(allowed_apps=..., allowed_contacts=...)` controlla
+  quindi la stringa GREZZA cosi' com'e' arrivata dal modello (normalizzata solo per spazi/
+  maiuscole con `_normalized_text()`, non risolta), non il risultato della risoluzione: una
+  richiesta formulata diversamente da una voce dell'elenco consentito (es. "blocco note" quando
+  l'elenco ha "notepad") puo' aggirare il controllo - limite dichiarato apertamente nel docstring
+  del modulo, non nascosto. Scelto comunque di procedere perche' l'alternativa (dare a
+  `PolicyEngine` una dipendenza diretta su `AppResolver`/`ContactBook`) e' un cambio architetturale
+  piu' ampio, non una fetta stretta - il controllo sulla stringa grezza resta un livello di difesa
+  reale contro un uso diretto/letterale. `SEND_WHATSAPP` usa il parametro `contact` (nome o
+  numero), `SEND_EMAIL` usa `to` (indirizzo o nome di un contatto in rubrica) - due nomi diversi
+  per lo stesso concetto, entrambi controllati per entrambi gli intent (`_CONTACT_PARAMETER_KEYS =
+  ("contact", "to")`) senza falsi positivi: il controllo si applica solo quando l'intent e' in
+  `CONTACT_CAPABILITY_INTENTS`, quindi `to` non viene mai guardato per un intent che non c'entra
+  (es. `subject`/`body` di `SEND_EMAIL` non sono mai controllati). Due motivazioni dedicate nel
+  ledger, `POLICY_REASON_APP_CAPABILITY_DENIED`/`POLICY_REASON_CONTACT_CAPABILITY_DENIED`, per lo
+  stesso principio delle altre capability. Configurabile da `config.json` (`allowed_apps`,
+  `allowed_contacts`). Aggiunti 13 nuovi test in
+  `tests/test_policy_engine.py::AppCapabilityTests`/`ContactCapabilityTests` (nessuna restrizione
+  di default, valore consentito permesso, confronto case/spazi-insensibile, valore vietato
+  bloccato con il motivo giusto, un parametro non pertinente mai controllato, vince su `CONFIRM`,
+  copertura sul percorso automatico). Prova: 2.296/2.296 test, ruff/mypy/compileall verdi su tutti
+  i file toccati.
 - `F1.2.1` (parziale) — 12/09/2026: chiuso il buco concreto documentato in
   [docs/action-execution-paths.md](docs/action-execution-paths.md) ("Nota sul percorso 3"):
   `PlanExecutor.execute(plan, policy_engine=None, ...)` trattava l'assenza di policy_engine come
@@ -3002,7 +3031,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 30 incrementi completati e verificati (PR #28-#57), la
+Aggiornato 13/09/2026. Sessione lunga con 31 incrementi completati e verificati (PR #28-#58), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -3044,14 +3073,17 @@ canale - la seconda meta' di "tutte e due", un intent bloccato per un dispositiv
 ferma sempre per quel dispositivo senza toccare la voce locale o altri dispositivi), e `F1.2.2`
 seconda capability - dominio web (`allowed_web_domains` su OPEN_URL, stessa fetta verticale
 stretta di `allowed_filesystem_roots`, con lo stesso principio di sottodominio-copre-dominio gia'
-usato per le radici filesystem). Il resto:
+usato per le radici filesystem), e `F1.2.2` terza/quarta capability - app e contatto
+(`allowed_apps`/`allowed_contacts` su OPEN_APP/SEND_WHATSAPP/SEND_EMAIL - a differenza delle
+precedenti, controllano la stringa GREZZA non risolta da AppResolver/ContactBook, un limite
+dichiarato apertamente e accettato dall'utente come compromesso deliberato). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.2` (parziale - la notifica di
 un'automazione ora porta lo stesso trace_id delle ricevute che l'ha prodotta), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.283/2.283 test, ruff/mypy/compileall verdi. `G1` resta aperto.
+`master` e' pulito, 2.296/2.296 test, ruff/mypy/compileall verdi. `G1` resta aperto.
 
 Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
 sessione (`sys.setswitchinterval()` abbassato + `threading.Barrier`, senza altro aiuto) NON
@@ -3076,10 +3108,10 @@ una `threading.Barrier` - molti buchi di questa sessione non si manifestavano af
 aggiornamento di questo file, e commit/PR separati invece di un unico commit enorme.
 
 Candidati piccoli ancora aperti in F1: il resto di `F1.2.1` (percorso 7,
-`SkillRegistry.execute()`), il resto di `F1.2.2` (le altre sei capability - app/contatto/
-device/HA/rete/durata; filesystem e dominio web sono ora complete, filesystem resta con il gap
-noto di FIND_FILE senza `path` esplicito, dominio web con CHECK_WEBSITE_STATUS deliberatamente
-escluso),
+`SkillRegistry.execute()`), il resto di `F1.2.2` (le ultime due capability - servizio Home
+Assistant/rete/durata; filesystem/dominio web/app/contatto sono ora complete, con i rispettivi gap
+noti gia' dichiarati - FIND_FILE senza `path` esplicito, CHECK_WEBSITE_STATUS escluso, app/
+contatto su stringa grezza non risolta),
 `F1.2.3` (resto: prima capability per dispositivo chiusa - `device_blocked_intents` - ma
 l'intersezione con agente/skill/sessione resta aperta), il resto di `F1.4` (una vera
 classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7` (il resto di `F1.7.2` -
