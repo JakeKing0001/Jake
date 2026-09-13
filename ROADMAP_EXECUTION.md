@@ -1191,8 +1191,9 @@ Dipende da: F1.1 e F1.2.
 Criterio di uscita: tutte le azioni external/destructive/admin hanno prova; l'80% delle azioni
 reversibili dispone di undo testato.
 
-- Stato: `DOING`; `F1.3.1`, `F1.3.3` e `F1.3.6` chiusi, `F1.3.2` esteso ai processi (un solo
-  intent, non ancora finestre/browser/casa), resto aperto.
+- Stato: `DOING`; `F1.3.1`, `F1.3.3` e `F1.3.6` chiusi, `F1.3.2` esteso a processi E finestre
+  (CLOSE_WINDOW/CLOSE_APP, vedi sotto - non ancora browser/casa, quest'ultima bloccata su una
+  decisione di dipendenza per un client Home Assistant iniettabile), resto aperto.
 - `F1.3.1` — 11/09/2026: `core/execution_safety.py` aveva tre strutture parallele da tenere
   sincronizzate a mano - `VERIFIABLE_INTENTS` (insieme), l'if/elif di `verify_effect`,
   `ROLLBACK_HANDLERS` + `ROLLBACK_COMPENSATING_INTENT` (due dizionari) - esattamente il pattern
@@ -1287,6 +1288,42 @@ reversibili dispone di undo testato.
   ogni istanza nota di "successo dichiarato subito dopo terminate(), senza aspettare" nel
   progetto; finestre/browser/casa (il resto della fase) restano senza prova indipendente. Prova:
   2.094/2.094 test, ruff/compileall verdi su tutti i file toccati.
+- `F1.3.2` (esteso alle finestre - CLOSE_WINDOW/CLOSE_APP) — 13/09/2026: colma esattamente il
+  passo dedicato rimandato sopra ("un verificatore generico per entrambi i rami richiederebbe
+  distinguerli nella busta dati"). Buco reale, stesso identico pattern gia' trovato due volte per
+  i processi, mai corretto per le finestre - `skills/close_window.py::CloseWindowSkill` e il ramo
+  "chiusura gentile" di `skills/process_control.py::CloseAppSkill`
+  (`_close_windows`/`_close_windows_by_title`) dichiaravano `success=True` (o contavano una
+  finestra come "chiusa") subito dopo `win32gui.PostMessage(WM_CLOSE)`, senza aspettare che la
+  finestra fosse DAVVERO sparita - `PostMessage` e' fire-and-forget: il programma destinatario
+  puo' ignorare il messaggio, o mostrare un dialogo "salvare le modifiche?" che blocca la
+  chiusura vera, eppure l'invio "riuscito" (nessuna eccezione) veniva scambiato per l'effetto
+  avvenuto. Corretto con un helper condiviso, `skills/window_control.py::
+  _wait_until_window_closed(win32gui, hwnd, wait_seconds)` (poll su `win32gui.IsWindow(hwnd)` fino
+  a un timeout, `time.sleep` breve tra un controllo e l'altro) - un solo posto da mantenere invece
+  di due copie che potrebbero divergere, usato da entrambe le skill. `CloseWindowSkill` ora
+  restituisce `OPERATION_FAILED` (non piu' `success=True`) se la finestra non sparisce entro
+  `CLOSE_WAIT_SECONDS`, e porta sempre `data["hwnd"]` (successo o fallimento) per un verificatore
+  indipendente. Il ramo "gentile" di `CloseAppSkill` ora conta come "chiuse" solo le finestre
+  VERIFICATE sparite (non piu' quelle a cui e' stato solo inviato il messaggio) - la decisione
+  precedente ("un verificatore generico richiederebbe distinguere i rami nella busta dati") resta
+  corretta e non affrontata QUI: nessuna voce `INTENT_SAFETY_REGISTRY` per CLOSE_APP, la
+  correzione resta al livello della singola skill (`_close_windows`/`_close_windows_by_title`
+  stesse, non un verificatore esterno) - CLOSE_WINDOW invece ha una busta dati semplice (un solo
+  hwnd), quindi ha ricevuto ANCHE un verificatore indipendente in `INTENT_SAFETY_REGISTRY`
+  (`_verify_window_closed`, `rollback=None` - non si puo' "riaprire" una finestra nello stato
+  esatto di prima, stesso principio di KILL_PROCESS_BY_PORT). Aggiunti 2 nuovi test in
+  `tests/test_close_window_skill.py::VerifiedClosureTests`, 3 in
+  `tests/test_process_control_skill.py::CloseAppGracefulCloseVerifiedTests`, 2 in
+  `tests/test_execution_safety.py::CloseWindowVerificationTests` (7 totali) - tutti con
+  `CLOSE_WAIT_SECONDS`/`wait_seconds` ridotti nei test per non aspettare per davvero il timeout
+  reale (stesso principio "reso configurabile SOLO per i test" gia' usato per `stop_timeout_
+  seconds` in F1.8.5). Non ancora affrontato: browser/casa (il resto di F1.3.2) - "casa"
+  richiederebbe iniettare un client Home Assistant in `verify_effect()`, oggi una funzione libera
+  senza dipendenze esterne, un cambio di firma piu' ampio non affrontato qui. Prova: 2.357/2.357
+  test, ruff/mypy/compileall verdi su tutti i file toccati (mypy: `core/execution_safety.py`
+  resta nella lista "selettiva" e pulito; i file `skills/*.py` toccati non erano gia' nella lista
+  - non nuovi errori introdotti, verificato individualmente, ma nemmeno mai stati coperti).
 
 ### F1.4 — Identità, autenticazione e segreti
 
@@ -3273,7 +3310,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 38 incrementi completati e verificati (PR #28-#65), la
+Aggiornato 13/09/2026. Sessione lunga con 39 incrementi completati e verificati (PR #28-#66), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -3361,13 +3398,18 @@ dichiarati aperti in F1.2.1 sono chiusi), e `F1.4.1` chiusura - classe `SecretsV
 `"dpapi:<versione>:<base64>"`, `unprotect()` legge ancora il vecchio formato senza versione per
 sempre, un nuovo `needs_migration()` fa ricifrare sul posto - con la stessa scrittura atomica gia'
 in F1.4.1 - anche un segreto GIA' cifrato in formato legacy, non solo uno ancora in chiaro; `Config`
-ora tiene e usa un'istanza `SecretsVault` invece delle funzioni libere di prima). Il resto:
+ora tiene e usa un'istanza `SecretsVault` invece delle funzioni libere di prima), e `F1.3.2`
+esteso alle finestre (buco reale, stesso pattern gia' trovato due volte per i processi - CLOSE_
+WINDOW/il ramo "gentile" di CLOSE_APP dichiaravano l'effetto avvenuto subito dopo
+`win32gui.PostMessage(WM_CLOSE)`, fire-and-forget, senza aspettare che la finestra fosse DAVVERO
+sparita; nuovo helper condiviso `_wait_until_window_closed`, CLOSE_WINDOW ha anche un
+verificatore indipendente in `INTENT_SAFETY_REGISTRY`). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.350/2.350 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.357/2.357 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
 invariati, nessuno dei due coperto da "mypy selettivo" in CI). `G1` resta aperto.
 
@@ -3401,7 +3443,11 @@ dominio web/app/contatto/device Home Assistant - sono ora complete, con i rispet
 dichiarati - FIND_FILE senza `path` esplicito, CHECK_WEBSITE_STATUS/LIST_SMART_DEVICES esclusi,
 app/contatto/device su stringa grezza non risolta),
 `F1.2.3` (resto: prima capability per dispositivo chiusa - `device_blocked_intents` - ma
-l'intersezione con agente/skill/sessione resta aperta), il resto di `F1.4` (`F1.4.1` e' ora
+l'intersezione con agente/skill/sessione resta aperta), il resto di `F1.3.2` (processi e finestre
+sono ora coperti - CLOSE_WINDOW ha anche un verificatore indipendente, CLOSE_APP resta corretto
+solo a livello di skill per la complessita' della sua busta dati; browser/casa restano aperti,
+"casa" bloccata su una decisione di dipendenza - iniettare un client Home Assistant in
+`verify_effect()`, oggi una funzione libera senza dipendenze esterne), il resto di `F1.4` (`F1.4.1` e' ora
 CHIUSO - la classe `SecretsVault` versionata esiste; restano `F1.4.2`-`F1.4.7`, ciascuno un pezzo
 di prodotto a se' - identita' per dispositivo/speaker profile, passkey/WebAuthn, pairing QR,
 rotazione token, anti-spoofing vocale - non fette strette come `F1.4.1`), il resto di `F1.7` (`F1.7.2`, `F1.7.3` e

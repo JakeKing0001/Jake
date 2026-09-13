@@ -139,6 +139,17 @@ def _verify_process_terminated(data: dict) -> bool:
     return not psutil.pid_exists(data["pid"])
 
 
+def _verify_window_closed(data: dict) -> bool:
+    """F1.3.2 ("prove forti per... finestre"): controlla per davvero che l'handle non sia piu'
+    una finestra valida, invece di fidarsi del successo dichiarato da CloseWindowSkill (che dalla
+    correzione in skills/close_window.py attende gia' lei stessa la chiusura reale prima di
+    dichiarare successo - questo e' un secondo controllo indipendente, non l'unico, stesso
+    principio di _verify_process_terminated sopra)."""
+    import win32gui
+
+    return not win32gui.IsWindow(data["hwnd"])
+
+
 @dataclass(frozen=True)
 class RollbackAction:
     """L'inverso naturale di un intent gia' eseguito con successo, e l'intent che DAVVERO esegue
@@ -171,10 +182,11 @@ class IntentSafetyEntry:
 
 # Le operazioni filesystem hanno un effetto verificabile senza dipendenze aggiuntive E un
 # inverso naturale (per lo schermo/UI arrivera' con il Computer Use Engine, fase 3.7).
-# KILL_PROCESS_BY_PORT (F1.3.2) ha solo il primo: un processo terminato non ha un "rollback"
-# sensato (non si puo' far ripartire lo stato esatto di prima). Le altre azioni (aprire un'app,
-# cercare, ricordare un'informazione, ...) non hanno ne' l'uno ne' l'altro e restano fuori da
-# questo registry (verify_effect/rollback_effect le trattano di conseguenza).
+# KILL_PROCESS_BY_PORT/CLOSE_WINDOW (F1.3.2) hanno solo il primo: un processo terminato o una
+# finestra chiusa non hanno un "rollback" sensato (non si puo' far ripartire lo stato esatto di
+# prima). Le altre azioni (aprire un'app, cercare, ricordare un'informazione, ...) non hanno
+# ne' l'uno ne' l'altro e restano fuori da questo registry (verify_effect/rollback_effect le
+# trattano di conseguenza).
 INTENT_SAFETY_REGISTRY: dict[str, IntentSafetyEntry] = {
     "CREATE_PATH": IntentSafetyEntry(
         verifier=lambda data: Path(data["path"]).exists(),
@@ -191,6 +203,10 @@ INTENT_SAFETY_REGISTRY: dict[str, IntentSafetyEntry] = {
     "KILL_PROCESS_BY_PORT": IntentSafetyEntry(
         verifier=_verify_process_terminated,
         rollback=None,  # terminare un processo non ha un inverso naturale
+    ),
+    "CLOSE_WINDOW": IntentSafetyEntry(
+        verifier=_verify_window_closed,
+        rollback=None,  # non si puo' "riaprire" una finestra nello stato esatto di prima
     ),
     "DELETE_PATH": IntentSafetyEntry(
         verifier=lambda data: not Path(data["path"]).exists(),
