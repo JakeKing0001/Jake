@@ -382,10 +382,13 @@ class DeviceIdInReceiptsTests(_PolicyLedgerFixture):
         self.assertEqual(self.receipts()[0]["device_id"], "tablet1")
 
     def test_denied_action_receipt_carries_the_device_id_set_on_this_thread(self):
+        # F1.8.1 (chiusura, uno slot per canale): la richiesta in sospeso e' ora per-canale
+        # (core/conversation_state.py), quindi va creata E confermata con lo STESSO device_id -
+        # esattamente come accadrebbe per davvero (stessa richiesta HTTP dallo stesso dispositivo).
         self.enable_auth()
-        self.execute("ADD_NOTE")
         token = set_current_device_id("phone1")
         try:
+            self.execute("ADD_NOTE")
             self.core._handle_confirmation("passphrase sbagliata")
         finally:
             reset_current_device_id(token)

@@ -12,6 +12,7 @@ import time
 import unittest
 
 from core.conversation_state import ConversationStateManager
+from core.request_context import reset_current_device_id, set_current_device_id
 
 
 class TakePendingActionTests(unittest.TestCase):
@@ -107,6 +108,89 @@ class ConcurrentTakePendingActionTests(unittest.TestCase):
             thread.join()
 
         self.assertEqual(len(executions), 2, "il vecchio pattern a tre chiamate esegue ancora due volte")
+
+
+class PerChannelPendingActionTests(unittest.TestCase):
+    """F1.8.1 (chiusura, uno slot per canale): prima di questa correzione esisteva UN solo slot
+    globale - due dispositivi companion CIASCUNO con una propria conferma pendente nello stesso
+    istante si sovrascrivevano a vicenda. Il canale e' core.request_context.current_device_id()
+    (None per la voce locale)."""
+
+    def setUp(self):
+        self.state = ConversationStateManager()
+        self._tokens = []
+        self.addCleanup(self._reset_all)
+
+    def _reset_all(self):
+        for token in reversed(self._tokens):
+            reset_current_device_id(token)
+
+    def _as_device(self, device_id):
+        self._tokens.append(set_current_device_id(device_id))
+
+    def test_two_devices_each_get_their_own_pending_action_slot(self):
+        self._as_device("phone1")
+        self.state.set_pending_action({"intent": "DELETE_PATH", "parameters": {"path": "telefono.txt"}})
+        self._as_device("tablet1")
+        self.state.set_pending_action({"intent": "DELETE_PATH", "parameters": {"path": "tablet.txt"}})
+
+        self._as_device("phone1")
+        phone_action = self.state.get_pending_action()
+        self._as_device("tablet1")
+        tablet_action = self.state.get_pending_action()
+
+        self.assertEqual(phone_action["parameters"]["path"], "telefono.txt")
+        self.assertEqual(tablet_action["parameters"]["path"], "tablet.txt")
+
+    def test_a_second_devices_confirmation_does_not_overwrite_the_first(self):
+        """Il buco reale che questa correzione chiude: prima, il secondo set_pending_action()
+        cancellava silenziosamente la richiesta del primo dispositivo."""
+        self._as_device("phone1")
+        self.state.set_pending_action({"intent": "DELETE_PATH", "parameters": {"path": "telefono.txt"}})
+        self._as_device("tablet1")
+        self.state.set_pending_action({"intent": "DELETE_PATH", "parameters": {"path": "tablet.txt"}})
+
+        self._as_device("phone1")
+        self.assertTrue(self.state.has_pending_action(), "la richiesta del primo dispositivo non deve essere andata persa")
+
+    def test_taking_one_channels_action_does_not_consume_another_channels(self):
+        self._as_device("phone1")
+        self.state.set_pending_action({"intent": "DELETE_PATH", "parameters": {}})
+        self._as_device("tablet1")
+        self.state.set_pending_action({"intent": "RENAME_PATH", "parameters": {}})
+
+        self._as_device("phone1")
+        taken = self.state.take_pending_action()
+
+        self.assertEqual(taken["intent"], "DELETE_PATH")
+        self._as_device("tablet1")
+        self.assertTrue(self.state.has_pending_action(), "prendere l'azione di phone1 non deve toccare quella di tablet1")
+
+    def test_the_local_voice_channel_is_its_own_independent_slot(self):
+        """Nessun device_id impostato (None, la voce locale) e' un canale a se' stante, distinto
+        da qualunque dispositivo companion."""
+        self.state.set_pending_action({"intent": "DELETE_PATH", "parameters": {"path": "voce.txt"}})
+        self._as_device("phone1")
+        self.state.set_pending_action({"intent": "RENAME_PATH", "parameters": {"path": "telefono.txt"}})
+
+        self._as_device(None)
+        local_action = self.state.get_pending_action()
+
+        self.assertEqual(local_action["intent"], "DELETE_PATH")
+
+    def test_clearing_one_channel_does_not_remove_another_channels_entry_from_the_dict(self):
+        """Verifica anche l'igiene di memoria (pop(), non un valore None lasciato li'): dopo che
+        un canale ha consumato/annullato la propria azione, la sua chiave sparisce del tutto,
+        senza toccare le altre."""
+        self._as_device("phone1")
+        self.state.set_pending_action({"intent": "DELETE_PATH", "parameters": {}})
+        self._as_device("tablet1")
+        self.state.set_pending_action({"intent": "RENAME_PATH", "parameters": {}})
+        self.state.clear_pending_action()
+
+        self.assertNotIn("tablet1", self.state._pending_actions)
+        self._as_device("phone1")
+        self.assertIn("phone1", self.state._pending_actions)
 
 
 if __name__ == "__main__":
