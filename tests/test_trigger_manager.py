@@ -10,8 +10,11 @@ decidere cosa far scattare, quindi un utente con piu' di 50 trigger avrebbe vist
 vecchi/meno di recente aggiornati smettere di scattare mai piu' superata quella soglia, in
 silenzio."""
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from core.memory_manager import MemoryManager
 from core.planner import Plan
@@ -100,6 +103,57 @@ class DeleteAndWorkflowExistsTests(_WithManager):
     def test_default_workflow_manager_is_created_when_none_is_passed(self):
         manager = TriggerManager(self.memory_manager)
         self.assertIsInstance(manager.workflow_manager, WorkflowManager)
+
+
+class ConcurrentMarkFiredTests(_WithManager):
+    """F1.8.7 ("testare race su trigger"): mark_fired() (chiamato da TriggerScheduler su un
+    thread separato) faceva una lettura e una scrittura come due chiamate separate a
+    memory_manager - vedi il docstring di mark_fired() per il buco reale. A differenza degli
+    altri buchi di questa sessione, qui sys.setswitchinterval()+Barrier da soli riproducono la
+    corsa solo raramente e in modo incostante (finestra stretta, come per
+    DeviceRegistry.claim()): questo test forza invece l'interleaving esatto con due
+    threading.Event, cosi' da essere deterministico invece di probabilistico."""
+
+    def test_a_concurrent_save_is_not_silently_lost_by_mark_fired(self):
+        self.manager.save("buonanotte", "vecchia_automazione", "time", {"at": "22:00"})
+
+        record_read = threading.Event()
+        proceed_to_write = threading.Event()
+        real_load_raw = self.manager._load_raw
+
+        def _load_raw_then_wait(name):
+            record = real_load_raw(name)
+            record_read.set()
+            proceed_to_write.wait(timeout=5)
+            return record
+
+        def _scheduler_fires():
+            with mock.patch.object(self.manager, "_load_raw", side_effect=_load_raw_then_wait):
+                self.manager.mark_fired("buonanotte", "2026-09-13T22:00:00+00:00")
+
+        fire_thread = threading.Thread(target=_scheduler_fires)
+        fire_thread.start()
+        self.assertTrue(record_read.wait(timeout=5), "mark_fired non ha letto il record in tempo")
+
+        edit_thread = threading.Thread(
+            target=self.manager.save, args=("buonanotte", "nuova_automazione", "time", {"at": "23:00"})
+        )
+        edit_thread.start()
+        # Senza il fix, save() non e' bloccata da nessun lock e fa in tempo a completare qui,
+        # PRIMA che mark_fired() scriva sopra con il record vecchio gia' letto - questo e'
+        # esattamente il buco. Con il fix, save() resta bloccata su memory_manager.lock finche'
+        # mark_fired() non lo rilascia, quindi questa pausa non le basta per completare.
+        time.sleep(0.05)
+
+        proceed_to_write.set()
+        fire_thread.join(timeout=5)
+        edit_thread.join(timeout=5)
+
+        [trigger] = self.manager.list_all()
+        self.assertEqual(
+            trigger["workflow_name"], "nuova_automazione",
+            "la modifica concorrente dell'utente e' stata sovrascritta da mark_fired()",
+        )
 
 
 if __name__ == "__main__":

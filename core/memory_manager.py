@@ -460,3 +460,15 @@ class MemoryManager:
     def close(self) -> None:
         with self._lock:
             self._connection.close()
+
+    @property
+    def lock(self) -> threading.RLock:
+        """Il RLock interno, esposto per chi ha bisogno di una sequenza read-modify-write ATOMICA
+        su piu' chiamate pubbliche (F1.8.7): `remember()`/`recall()` bloccano gia' ciascuna
+        singolarmente, ma non una lettura seguita da una scrittura fatte come due chiamate
+        separate - un altro thread puo' infilarsi in mezzo. Buco reale trovato e corretto in
+        questa sessione in `TriggerManager.mark_fired()` (vedi il suo docstring): usa questa
+        property con `with memory_manager.lock:` per estendere la sezione critica a un'intera
+        sequenza. E' un RLock, quindi chiamare `remember()`/`recall()` da dentro quel blocco (che
+        riacquisiscono lo stesso lock) e' sicuro."""
+        return self._lock
