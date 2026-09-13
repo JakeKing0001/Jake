@@ -12,6 +12,7 @@ from core.action_ledger import ActionLedger
 from core.plan_executor import PlanExecutor
 from core.planner import Plan, PlanStep
 from core.policy_engine import PolicyEngine
+from core.request_context import reset_current_device_id, set_current_device_id
 from core.session_recorder import SessionRecorder
 from core.skill_result import SkillResult
 
@@ -360,6 +361,27 @@ class PrivateModeEndToEndTests(unittest.TestCase):
             records = ActionLedger(path=ledger_path).read_all()
             self.assertEqual(len(records), 1)
             self.assertEqual(records[0]["policy_reason"], "intent_in_blocked_intents")
+
+    def test_receipt_carries_the_device_id_set_on_this_thread(self):
+        """F1.2.3/F1.8.1 (fondamenta): un piano automatico lanciato dalla stessa richiesta
+        companion che ha impostato il device_id (core/request_context.py) - es. RunWorkflowSkill
+        eseguito dal ripiego del planner - lo porta nella ricevuta quanto il percorso a comando
+        singolo o l'agente a passi."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            ledger_path = Path(tmp_dir) / "ledger.jsonl"
+            registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
+            plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
+            executor = PlanExecutor(registry, action_ledger=ActionLedger(path=ledger_path))
+
+            token = set_current_device_id("phone1")
+            try:
+                with unittest.mock.patch("core.plan_executor.log_action"):
+                    executor.execute(plan, policy_engine=PolicyEngine(), private=False)
+            finally:
+                reset_current_device_id(token)
+
+            records = ActionLedger(path=ledger_path).read_all()
+            self.assertEqual(records[0]["device_id"], "phone1")
 
 
 class KillSwitchStopsThePlanTests(unittest.TestCase):
