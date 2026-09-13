@@ -90,8 +90,21 @@ dimensioni sono ortogonali, non alternative - vedi core/identity.py). "Profilo J
 profile" (le altre due dimensioni di F1.4.2) restano fuori: nessuna infrastruttura esiste ancora
 per nessuno dei due.
 
-Rete/durata (le altre capability elencate in ROADMAP.md) e l'intersezione
-con agente/skill/sessione restano completamente aperte."""
+F1.2.2 (sesta capability: rete) - `allowed_network_hosts` restringe `PING_HOST`/`TRACE_ROUTE`
+(parametro `host`, gia' un host/IP grezzo) e `CHECK_WEBSITE_STATUS` (parametro `url`, stesso
+`_domain_of()` gia' usato per `allowed_web_domains`) - le tre uniche skill che fanno DAVVERO
+uscire una richiesta di rete verso un host arbitrario deciso dall'utente (vedi
+skills/network_utils.py). A differenza di filesystem/dominio web (dove prima si e' coperta la
+mutazione e poi rimandate le letture come fetta separata), qui non esiste alcuna "mutazione di
+rete" nella roadmap - i tre intent sono tutti RiskLevel.READ_ONLY (nessuno apre/altera nulla, solo
+verifica raggiungibilita'): "prima l'azione con un effetto reale" non si applica, quindi tutti e
+tre entrano nella stessa fetta invece di essere rimandati. Stesso principio di `_domain_matches`
+per un host/IP consentito che copre anche i suoi sottodomini (un IP non ha sottodomini, quindi per
+un IP il confronto si riduce comunque a un'uguaglianza esatta - nessun comportamento sorprendente).
+Opt-in, vuoto per default, stesso schema di tutte le capability sopra.
+
+Durata (l'ultima capability elencata in ROADMAP.md) e l'intersezione con agente/skill/sessione
+restano completamente aperte."""
 import os
 from enum import Enum
 from pathlib import Path
@@ -167,11 +180,15 @@ POLICY_REASON_SMART_DEVICE_CAPABILITY_DENIED = "smart_device_outside_allowed_sma
 # companion - un motivo distinto cosi' un audit del ledger distingue "questo account Windows non
 # puo' farlo" da "questo dispositivo companion non puo' farlo", due controlli diversi.
 POLICY_REASON_WINDOWS_USER_BLOCKED = "intent_in_windows_user_blocked_intents"
+# F1.2.2 (sesta capability: rete): stesso principio di app/contatto/device sopra - un host/url
+# fuori da allowed_network_hosts, non l'intent bloccato in assoluto.
+POLICY_REASON_NETWORK_CAPABILITY_DENIED = "host_outside_allowed_network_hosts"
 POLICY_REASONS = frozenset({
     POLICY_REASON_BLOCKED, POLICY_REASON_REQUIRE_AUTH, POLICY_REASON_CONFIRM, POLICY_REASON_ALLOWED,
     POLICY_REASON_CAPABILITY_DENIED, POLICY_REASON_DEVICE_BLOCKED, POLICY_REASON_WEB_CAPABILITY_DENIED,
     POLICY_REASON_APP_CAPABILITY_DENIED, POLICY_REASON_CONTACT_CAPABILITY_DENIED,
     POLICY_REASON_SMART_DEVICE_CAPABILITY_DENIED, POLICY_REASON_WINDOWS_USER_BLOCKED,
+    POLICY_REASON_NETWORK_CAPABILITY_DENIED,
 })
 
 # F1.2.2: le quattro mutazioni sono le stesse gia' raggruppate in core/execution_safety.py::
@@ -231,6 +248,15 @@ _CONTACT_PARAMETER_KEYS = ("contact", "to")
 SMART_DEVICE_CAPABILITY_INTENTS = frozenset({"CONTROL_SMART_DEVICE"})
 _SMART_DEVICE_NAME_PARAMETER_KEYS = ("name",)
 
+# F1.2.2 (sesta capability: rete) - vedi il docstring del modulo per il perche' tutti e tre
+# entrano nella stessa fetta (nessuna "mutazione di rete" da coprire prima). PING_HOST/TRACE_ROUTE
+# usano "host" (gia' un host/IP grezzo, vedi skills/network_utils.py); CHECK_WEBSITE_STATUS usa
+# "url" (stesso _domain_of() di WEB_CAPABILITY_INTENTS sopra) - due nomi di parametro diversi per
+# lo stesso concetto, ciascuno controllato solo per gli intent che lo usano davvero.
+NETWORK_CAPABILITY_INTENTS = frozenset({"PING_HOST", "TRACE_ROUTE", "CHECK_WEBSITE_STATUS"})
+_NETWORK_HOST_PARAMETER_KEYS = ("host",)
+_NETWORK_URL_PARAMETER_KEYS = ("url",)
+
 
 def _normalized_text(value: str) -> str:
     # casefold() invece di lower(): un confronto testuale case-insensitive corretto anche per
@@ -289,6 +315,7 @@ class PolicyEngine:
         device_blocked_intents: dict[str | None, set] | None = None, allowed_web_domains: set | list | None = None,
         allowed_apps: set | list | None = None, allowed_contacts: set | list | None = None,
         allowed_smart_devices: set | list | None = None, windows_user_blocked_intents: dict[str, set] | None = None,
+        allowed_network_hosts: set | list | None = None,
     ):
         self.auth_gate = auth_gate
         self.blocked_intents = set(blocked_intents or set())
@@ -330,6 +357,10 @@ class PolicyEngine:
         self._allowed_contacts = {_normalized_text(contact) for contact in (allowed_contacts or [])}
         # F1.2.2 (quinta capability: device Home Assistant): stesso principio di app/contatto.
         self._allowed_smart_devices = {_normalized_text(device) for device in (allowed_smart_devices or [])}
+        # F1.2.2 (sesta capability: rete): vuoto/None (default) = nessuna restrizione, stesso
+        # principio di allowed_web_domains. Minuscolo qui una volta sola, stesso motivo di
+        # allowed_web_domains (host/domini sono case-insensitive per definizione).
+        self._allowed_network_hosts = {host.strip().lower() for host in (allowed_network_hosts or [])}
 
     def register_intent(self, intent: str) -> None:
         """Sincronizza UN intent con la policy corrente, secondo la sua classificazione del
@@ -413,6 +444,8 @@ class PolicyEngine:
             return PolicyDecision.BLOCK, POLICY_REASON_CONTACT_CAPABILITY_DENIED
         if intent in SMART_DEVICE_CAPABILITY_INTENTS and not self._smart_device_capability_allows(parameters):
             return PolicyDecision.BLOCK, POLICY_REASON_SMART_DEVICE_CAPABILITY_DENIED
+        if intent in NETWORK_CAPABILITY_INTENTS and not self._network_capability_allows(parameters):
+            return PolicyDecision.BLOCK, POLICY_REASON_NETWORK_CAPABILITY_DENIED
         if (
             self.auth_gate is not None
             and getattr(self.auth_gate, "enabled", False)
@@ -450,6 +483,8 @@ class PolicyEngine:
             return PolicyDecision.BLOCK, POLICY_REASON_CONTACT_CAPABILITY_DENIED
         if intent in SMART_DEVICE_CAPABILITY_INTENTS and not self._smart_device_capability_allows(parameters or {}):
             return PolicyDecision.BLOCK, POLICY_REASON_SMART_DEVICE_CAPABILITY_DENIED
+        if intent in NETWORK_CAPABILITY_INTENTS and not self._network_capability_allows(parameters or {}):
+            return PolicyDecision.BLOCK, POLICY_REASON_NETWORK_CAPABILITY_DENIED
         if intent in self.always_confirm_intents:
             return PolicyDecision.CONFIRM, POLICY_REASON_CONFIRM
         return PolicyDecision.ALLOW, POLICY_REASON_ALLOWED
@@ -546,6 +581,31 @@ class PolicyEngine:
             if not value or not isinstance(value, str):
                 continue
             if _normalized_text(value) not in self._allowed_smart_devices:
+                return False
+        return True
+
+    def _network_capability_allows(self, parameters: dict) -> bool:
+        """True se nessun host e' configurato (default, nessuna restrizione) oppure se l'host
+        (`host` per PING_HOST/TRACE_ROUTE, `url` per CHECK_WEBSITE_STATUS via `_domain_of()`) e'
+        uno degli host consentiti o un loro sottodominio - stesso confronto di
+        _web_capability_allows, vedi il docstring del modulo per il perche' entrambi i nomi di
+        parametro sono controllati insieme senza falsi positivi (ciascuno si applica solo agli
+        intent che lo usano davvero)."""
+        if not self._allowed_network_hosts:
+            return True
+        for key in _NETWORK_HOST_PARAMETER_KEYS:
+            value = parameters.get(key)
+            if not value or not isinstance(value, str):
+                continue
+            host = value.strip().lower()
+            if not host or not any(_domain_matches(host, allowed) for allowed in self._allowed_network_hosts):
+                return False
+        for key in _NETWORK_URL_PARAMETER_KEYS:
+            value = parameters.get(key)
+            if not value or not isinstance(value, str):
+                continue
+            domain = _domain_of(value)
+            if not domain or not any(_domain_matches(domain, allowed) for allowed in self._allowed_network_hosts):
                 return False
         return True
 

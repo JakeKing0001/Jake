@@ -833,5 +833,81 @@ class SmartDeviceCapabilityTests(unittest.TestCase):
         self.assertEqual(decision, PolicyDecision.BLOCK)
 
 
+class NetworkCapabilityTests(unittest.TestCase):
+    """F1.2.2 (sesta capability: rete). A differenza di filesystem/dominio web, tutti e tre gli
+    intent (PING_HOST/TRACE_ROUTE su "host", CHECK_WEBSITE_STATUS su "url") entrano nella stessa
+    fetta - vedi il docstring di core/policy_engine.py per il perche' ("nessuna mutazione di rete"
+    da coprire prima)."""
+
+    def test_no_configured_hosts_means_no_restriction_at_all(self):
+        engine = PolicyEngine()
+        decision = engine.decide_interactive("PING_HOST", {"host": "qualunque-host.com"})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_an_allowed_host_is_permitted_for_ping(self):
+        engine = PolicyEngine(allowed_network_hosts={"esempio.com"})
+        decision = engine.decide_interactive("PING_HOST", {"host": "esempio.com"})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_a_subdomain_of_an_allowed_host_is_permitted_for_traceroute(self):
+        engine = PolicyEngine(allowed_network_hosts={"esempio.com"})
+        decision = engine.decide_interactive("TRACE_ROUTE", {"host": "sub.esempio.com"})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_a_host_outside_every_allowed_host_is_blocked_with_the_right_reason(self):
+        engine = PolicyEngine(allowed_network_hosts={"esempio.com"})
+        decision, reason = engine.decide_interactive_with_reason("PING_HOST", {"host": "vietato.com"})
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+        self.assertEqual(reason, "host_outside_allowed_network_hosts")
+
+    def test_the_comparison_is_case_insensitive(self):
+        engine = PolicyEngine(allowed_network_hosts={"esempio.com"})
+        decision = engine.decide_interactive("PING_HOST", {"host": "ESEMPIO.com"})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_check_website_status_uses_the_url_parameter_like_web_domains(self):
+        engine = PolicyEngine(allowed_network_hosts={"esempio.com"})
+        decision = engine.decide_interactive("CHECK_WEBSITE_STATUS", {"url": "https://esempio.com"})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_check_website_status_without_a_scheme_is_still_checked(self):
+        engine = PolicyEngine(allowed_network_hosts={"esempio.com"})
+        decision = engine.decide_interactive("CHECK_WEBSITE_STATUS", {"url": "vietato.com"})
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+
+    def test_an_ip_address_is_matched_by_exact_equality(self):
+        """Un IP non ha sottodomini: _domain_matches si riduce a un'uguaglianza esatta, nessun
+        comportamento sorprendente rispetto a un nome host."""
+        engine = PolicyEngine(allowed_network_hosts={"192.168.1.1"})
+        allowed = engine.decide_interactive("PING_HOST", {"host": "192.168.1.1"})
+        blocked = engine.decide_interactive("PING_HOST", {"host": "192.168.1.2"})
+        self.assertEqual(allowed, PolicyDecision.ALLOW)
+        self.assertEqual(blocked, PolicyDecision.BLOCK)
+
+    def test_capability_denial_is_checked_before_confirmation_would_otherwise_apply(self):
+        engine = PolicyEngine(allowed_network_hosts={"esempio.com"}, always_confirm_intents={"PING_HOST"})
+        decision = engine.decide_interactive("PING_HOST", {"host": "vietato.com", "confirmed": True})
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+
+    def test_a_blocked_intent_still_wins_over_the_capability_check(self):
+        engine = PolicyEngine(blocked_intents={"PING_HOST"}, allowed_network_hosts={"esempio.com"})
+        decision, reason = engine.decide_interactive_with_reason("PING_HOST", {"host": "esempio.com"})
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+        self.assertEqual(reason, "intent_in_blocked_intents")
+
+    def test_decide_automated_enforces_allowed_network_hosts_when_parameters_are_passed(self):
+        engine = PolicyEngine(allowed_network_hosts={"esempio.com"})
+        decision = engine.decide_automated("TRACE_ROUTE", {"host": "vietato.com"})
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+
+    def test_explain_reports_the_network_capability_denial_on_both_verdicts(self):
+        engine = PolicyEngine(allowed_network_hosts={"esempio.com"})
+        result = engine.explain("PING_HOST", {"host": "vietato.com"})
+        self.assertEqual(result["interactive"]["decision"], "block")
+        self.assertEqual(result["interactive"]["reason"], "host_outside_allowed_network_hosts")
+        self.assertEqual(result["automated"]["decision"], "block")
+        self.assertEqual(result["automated"]["reason"], "host_outside_allowed_network_hosts")
+
+
 if __name__ == "__main__":
     unittest.main()
