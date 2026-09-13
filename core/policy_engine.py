@@ -34,14 +34,13 @@ F1.2.2 (capability, primo pezzo): `allowed_filesystem_roots` e' la prima capabil
 solo un intent permesso/vietato, ma UN INTENT permesso solo entro certi confini. Deliberatamente
 opt-in e limitata: default vuoto (nessuna restrizione, comportamento identico a prima - Jake
 continua a poter toccare qualunque percorso come sempre, non e' un cambio retroattivo che
-romperebbe l'uso normale senza che l'utente lo chieda), e applicata oggi solo ai quattro intent di
+romperebbe l'uso normale senza che l'utente lo chieda), e applicata oggi ai quattro intent di
 mutazione filesystem gia' raggruppati altrove (CREATE_PATH/RENAME_PATH/MOVE_PATH/DELETE_PATH, vedi
-core/execution_safety.py::INTENT_SAFETY_REGISTRY) e solo sul percorso interattivo
-(decide_interactive), non ancora su decide_automated (che oggi non riceve affatto `parameters` -
-estenderlo e' un cambio di firma piu' ampio, rimandato deliberatamente invece di infilarlo qui).
-App/contatto/dominio web/device/servizio Home Assistant/rete/durata (le altre capability elencate
-in ROADMAP.md) e l'intersezione multi-livello di F1.2.3 (utente/dispositivo/agente/skill/sessione)
-restano completamente aperte."""
+core/execution_safety.py::INTENT_SAFETY_REGISTRY), sia sul percorso interattivo (decide_interactive)
+sia su quello automatico (decide_automated, esteso in un secondo momento - vedi la nota su
+`parameters` piu' sotto). App/contatto/dominio web/device/servizio Home Assistant/rete/durata (le
+altre capability elencate in ROADMAP.md) e l'intersezione multi-livello di F1.2.3 (utente/
+dispositivo/agente/skill/sessione) restano completamente aperte."""
 import os
 from enum import Enum
 from pathlib import Path
@@ -177,7 +176,7 @@ class PolicyEngine:
         composto."""
         return self._decide_interactive_reasoned(intent, parameters)[0]
 
-    def decide_automated(self, intent: str) -> PolicyDecision:
+    def decide_automated(self, intent: str, parameters: dict | None = None) -> PolicyDecision:
         """Percorso automatico: PlanExecutor (il ripiego del planner, RUN_WORKFLOW, i trigger).
         NESSUNO e' pronto a confermare/autenticare in tempo reale qui, quindi:
         - non esiste un gradino REQUIRE_AUTH separato: un intent ADMIN e' comunque gia' in
@@ -185,10 +184,16 @@ class PolicyEngine:
           quindi si ferma comunque con CONFIRM - REQUIRE_AUTH ha senso solo quando c'e' un
           utente a cui chiedere la passphrase;
         - chi chiama DEVE aver gia' ripulito i parametri del passo con
-          strip_authorization_signals() prima di eseguirlo: questo metodo non guarda i
-          parametri del tutto, decide solo in base all'intent, cosi' un "confirmed": true
-          falsificato non ha nessun modo di influenzare il risultato."""
-        return self._decide_automated_reasoned(intent)[0]
+          strip_authorization_signals() prima di passarli qui: questo metodo ignora comunque le
+          chiavi di autorizzazione (vedi AUTHORIZATION_SIGNAL_KEYS), cosi' un "confirmed": true
+          falsificato non ha nessun modo di influenzare il risultato, ma DA F1.2.2 guarda
+          `parameters` per la capability filesystem (allowed_filesystem_roots) - lo stesso
+          controllo gia' applicato al percorso interattivo, ora anche qui: un piano/automazione/
+          trigger non puo' piu' mutare un percorso fuori dalle radici consentite solo perche' non
+          c'e' un utente a confermare. `parameters=None` (default) equivale a nessun parametro:
+          comportamento invariato per chi non ne passa (nessuna restrizione applicabile senza un
+          percorso da controllare)."""
+        return self._decide_automated_reasoned(intent, parameters)[0]
 
     # ---- F1.2.7 (policy simulator): "mostra se e perche' un'azione sarebbe permessa" ---------
     #
@@ -218,15 +223,20 @@ class PolicyEngine:
             return PolicyDecision.CONFIRM, POLICY_REASON_CONFIRM
         return PolicyDecision.ALLOW, POLICY_REASON_ALLOWED
 
-    def _decide_automated_reasoned(self, intent: str) -> tuple[PolicyDecision, str]:
-        # F1.2.2: allowed_filesystem_roots NON e' ancora applicato qui - decide_automated() non
-        # riceve `parameters` (vedi il docstring del modulo), quindi PlanExecutor/RUN_WORKFLOW/i
-        # trigger possono oggi ancora mutare un percorso fuori dalle radici consentite. Dichiarato
-        # apertamente, non nascosto: estendere la firma e' un cambio piu' ampio (tocca
-        # PlanExecutor, execution_safety.rollback_effect, RunWorkflowSkill, TriggerScheduler e i
-        # rispettivi test), rimandato deliberatamente a un incremento dedicato.
+    def _decide_automated_reasoned(self, intent: str, parameters: dict | None = None) -> tuple[PolicyDecision, str]:
+        # F1.2.2 (seconda fetta): allowed_filesystem_roots ora applicato anche qui, con lo stesso
+        # ordine di priorita' del percorso interattivo (blocked_intents vince su tutto, la
+        # capability viene controllata PRIMA di CONFIRM - un'automazione con un DELETE_PATH fuori
+        # dalle radici consentite deve fermarsi con BLOCK/CAPABILITY_DENIED, non arrivare a
+        # CONFIRM che qui non ha comunque nessuno pronto a rispondere). L'unico chiamante di
+        # produzione (PlanExecutor.execute()) passa gia' `safe_parameters` - i parametri del passo
+        # DOPO strip_authorization_signals() - quindi non serve ripeterlo qui: le uniche chiavi
+        # che questo controllo legge sono `path`/`destination` (vedi
+        # _FILESYSTEM_PATH_PARAMETER_KEYS), mai le chiavi di autorizzazione.
         if intent in self.blocked_intents:
             return PolicyDecision.BLOCK, POLICY_REASON_BLOCKED
+        if intent in FILESYSTEM_CAPABILITY_INTENTS and not self._filesystem_capability_allows(parameters or {}):
+            return PolicyDecision.BLOCK, POLICY_REASON_CAPABILITY_DENIED
         if intent in self.always_confirm_intents:
             return PolicyDecision.CONFIRM, POLICY_REASON_CONFIRM
         return PolicyDecision.ALLOW, POLICY_REASON_ALLOWED
@@ -258,20 +268,23 @@ class PolicyEngine:
     def decide_interactive_with_reason(self, intent: str, parameters: dict | None) -> tuple[PolicyDecision, str]:
         return self._decide_interactive_reasoned(intent, parameters)
 
-    def decide_automated_with_reason(self, intent: str) -> tuple[PolicyDecision, str]:
-        return self._decide_automated_reasoned(intent)
+    def decide_automated_with_reason(self, intent: str, parameters: dict | None = None) -> tuple[PolicyDecision, str]:
+        return self._decide_automated_reasoned(intent, parameters)
 
     def explain(self, intent: str, parameters: dict | None = None) -> dict:
         """Simula la policy per `intent` SENZA eseguire nulla: utile per un pannello diagnostico
         (HUD/companion, non ancora costruito) o per debug locale - "perche' Jake mi ha chiesto
-        conferma per X?"/"questa automazione si fermerebbe?". `parameters` conta solo per il
-        verdetto interattivo (`confirmed`/`authenticated`, coerenti con decide_interactive): il
-        verdetto automatico non li considera mai, per lo stesso motivo per cui decide_automated()
-        non li guarda (nessun segnale di autorizzazione e' mai genuino in un percorso automatico -
-        vedi strip_authorization_signals). Restituisce entrambi i verdetti perche' possono
-        differire: REQUIRE_AUTH esiste solo per il percorso interattivo."""
+        conferma per X?"/"questa automazione si fermerebbe?". Le chiavi di autorizzazione
+        (`confirmed`/`authenticated`) contano solo per il verdetto interattivo, coerenti con
+        decide_interactive: il verdetto automatico le ignora sempre, per lo stesso motivo per cui
+        decide_automated() le ignora (nessun segnale di autorizzazione e' mai genuino in un
+        percorso automatico - vedi strip_authorization_signals). DA F1.2.2 (seconda fetta) i
+        parametri-percorso (`path`/`destination`) contano invece per ENTRAMBI i verdetti: la
+        capability filesystem si applica sia al percorso interattivo sia a quello automatico.
+        Restituisce entrambi i verdetti perche' possono differire: REQUIRE_AUTH esiste solo per
+        il percorso interattivo."""
         interactive_decision, interactive_reason = self._decide_interactive_reasoned(intent, parameters)
-        automated_decision, automated_reason = self._decide_automated_reasoned(intent)
+        automated_decision, automated_reason = self._decide_automated_reasoned(intent, parameters)
         return {
             "intent": intent,
             "interactive": {"decision": interactive_decision.value, "reason": interactive_reason},

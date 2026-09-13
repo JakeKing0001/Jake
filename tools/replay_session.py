@@ -95,7 +95,7 @@ def replay_one(record: dict, policy_engine=None, registry=None) -> str:
 
         policy_engine = PolicyEngine(blocked_intents=Config().get("blocked_intents", []) or [])
         policy_engine.sync_with_registry(registry)
-    decision = policy_engine.decide_automated(intent)
+    decision = policy_engine.decide_automated(intent, parameters)
     if decision != PolicyDecision.ALLOW:
         return (
             f"NON RIESEGUITO: la policy risponde '{decision.value}' per {intent} - nessun utente "
