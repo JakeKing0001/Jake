@@ -655,10 +655,10 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
 - Stato: `DOING`; `F1.2.5` parziale per rollback filesystem e ripresa del consenso (questa
   ultima verificata localmente, in attesa di CI); `F1.2.1` chiuso parzialmente
   (percorsi 3 e 6, vedi sotto; resta aperto solo il percorso 7); `F1.2.2` chiuso parzialmente
-  (quattro capability vere - radici filesystem su ENTRAMBI i percorsi e su sette intent, dominio
-  web su OPEN_URL, app su OPEN_APP, contatto su SEND_WHATSAPP/SEND_EMAIL (queste ultime due su
-  stringa grezza, non risolta - limite dichiarato) - vedi sotto; restano aperte device-HA/rete/
-  durata); `F1.2.4`
+  (cinque capability vere - radici filesystem su ENTRAMBI i percorsi e su sette intent, dominio
+  web su OPEN_URL, app su OPEN_APP, contatto su SEND_WHATSAPP/SEND_EMAIL, device Home Assistant su
+  CONTROL_SMART_DEVICE (le ultime tre su stringa grezza, non risolta - limite dichiarato) - vedi
+  sotto; restano aperte rete/durata); `F1.2.4`
   chiuso per il percorso planner (vedi sotto); `F1.2.6` e `F1.2.7` chiusi (vedi sotto); `F1.2.3`
   chiuso parzialmente (prima capability - dispositivo - vedi sotto; l'intersezione con
   agente/skill/sessione resta aperta).
@@ -797,6 +797,23 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   bloccato con il motivo giusto, un parametro non pertinente mai controllato, vince su `CONFIRM`,
   copertura sul percorso automatico). Prova: 2.296/2.296 test, ruff/mypy/compileall verdi su tutti
   i file toccati.
+- `F1.2.2` (quinta capability: device Home Assistant) — 13/09/2026: continuazione diretta dello
+  stesso pattern gia' accettato dall'utente per app/contatto - `CONTROL_SMART_DEVICE`
+  (`skills/smart_home.py::ControlSmartDeviceSkill`) ha la STESSA forma esatta: cerca l'entita' Home
+  Assistant per somiglianza (`_find_device()`, `SequenceMatcher`) DENTRO la skill, dopo che
+  `PolicyEngine` ha gia' deciso. `PolicyEngine(allowed_smart_devices=...)` controlla quindi la
+  stringa GREZZA del parametro `name`, stesso limite gia' dichiarato per app/contatto (una
+  richiesta formulata diversamente dall'elenco consentito puo' aggirare il controllo). Nessuna
+  nuova decisione richiesta all'utente: e' la stessa capability gia' autorizzata, applicata a un
+  terzo intent con la stessa forma. Deliberatamente NON incluso `LIST_SMART_DEVICES` (sola
+  lettura, elenca senza agire) - stesso schema gia' seguito per le altre capability. Nuova
+  motivazione dedicata, `POLICY_REASON_SMART_DEVICE_CAPABILITY_DENIED`
+  ("smart_device_outside_allowed_smart_devices"). Configurabile da `config.json`
+  (`allowed_smart_devices`). Aggiunti 6 nuovi test in
+  `tests/test_policy_engine.py::SmartDeviceCapabilityTests` (nessuna restrizione di default,
+  dispositivo consentito permesso, dispositivo vietato bloccato con il motivo giusto,
+  `LIST_SMART_DEVICES` deliberatamente escluso, vince su `CONFIRM`, copertura sul percorso
+  automatico). Prova: 2.302/2.302 test, ruff/mypy/compileall verdi su tutti i file toccati.
 - `F1.2.1` (parziale) — 12/09/2026: chiuso il buco concreto documentato in
   [docs/action-execution-paths.md](docs/action-execution-paths.md) ("Nota sul percorso 3"):
   `PlanExecutor.execute(plan, policy_engine=None, ...)` trattava l'assenza di policy_engine come
@@ -3031,7 +3048,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 31 incrementi completati e verificati (PR #28-#58), la
+Aggiornato 13/09/2026. Sessione lunga con 32 incrementi completati e verificati (PR #28-#59), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -3076,14 +3093,18 @@ stretta di `allowed_filesystem_roots`, con lo stesso principio di sottodominio-c
 usato per le radici filesystem), e `F1.2.2` terza/quarta capability - app e contatto
 (`allowed_apps`/`allowed_contacts` su OPEN_APP/SEND_WHATSAPP/SEND_EMAIL - a differenza delle
 precedenti, controllano la stringa GREZZA non risolta da AppResolver/ContactBook, un limite
-dichiarato apertamente e accettato dall'utente come compromesso deliberato). Il resto:
+dichiarato apertamente e accettato dall'utente come compromesso deliberato), e `F1.2.2` quinta
+capability - device Home Assistant (`allowed_smart_devices` su CONTROL_SMART_DEVICE, stessa forma
+esatta di app/contatto - `ControlSmartDeviceSkill` risolve per somiglianza DENTRO la skill, quindi
+stesso limite sulla stringa grezza, applicato qui senza bisogno di richiedere una nuova decisione
+perche' e' la stessa capability gia' autorizzata). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.2` (parziale - la notifica di
 un'automazione ora porta lo stesso trace_id delle ricevute che l'ha prodotta), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.296/2.296 test, ruff/mypy/compileall verdi. `G1` resta aperto.
+`master` e' pulito, 2.302/2.302 test, ruff/mypy/compileall verdi. `G1` resta aperto.
 
 Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
 sessione (`sys.setswitchinterval()` abbassato + `threading.Barrier`, senza altro aiuto) NON
@@ -3108,10 +3129,11 @@ una `threading.Barrier` - molti buchi di questa sessione non si manifestavano af
 aggiornamento di questo file, e commit/PR separati invece di un unico commit enorme.
 
 Candidati piccoli ancora aperti in F1: il resto di `F1.2.1` (percorso 7,
-`SkillRegistry.execute()`), il resto di `F1.2.2` (le ultime due capability - servizio Home
-Assistant/rete/durata; filesystem/dominio web/app/contatto sono ora complete, con i rispettivi gap
-noti gia' dichiarati - FIND_FILE senza `path` esplicito, CHECK_WEBSITE_STATUS escluso, app/
-contatto su stringa grezza non risolta),
+`SkillRegistry.execute()`), il resto di `F1.2.2` (le ultime due capability - rete/durata, non
+ancora chiaro a quale intent/parametro mappino con precisione; le altre cinque - filesystem/
+dominio web/app/contatto/device Home Assistant - sono ora complete, con i rispettivi gap noti gia'
+dichiarati - FIND_FILE senza `path` esplicito, CHECK_WEBSITE_STATUS/LIST_SMART_DEVICES esclusi,
+app/contatto/device su stringa grezza non risolta),
 `F1.2.3` (resto: prima capability per dispositivo chiusa - `device_blocked_intents` - ma
 l'intersezione con agente/skill/sessione resta aperta), il resto di `F1.4` (una vera
 classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7` (il resto di `F1.7.2` -
