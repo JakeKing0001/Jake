@@ -25,7 +25,7 @@ class FakeRegistry:
         self._add_note_queue = list(add_note_results or [])
         self.calls = []
 
-    def execute(self, intent, parameters=None):
+    def execute(self, intent, parameters=None, policy_engine=None):
         parameters = parameters or {}
         self.calls.append((intent, dict(parameters)))
         if intent == "CREATE_PATH":
@@ -130,7 +130,7 @@ class PolicyReasonInTheLedgerTests(unittest.TestCase):
 class IndependentVerificationTests(unittest.TestCase):
     def test_success_claim_without_real_effect_is_downgraded_to_verification_failed(self):
         class LyingRegistry(FakeRegistry):
-            def execute(self, intent, parameters=None):
+            def execute(self, intent, parameters=None, policy_engine=None):
                 self.calls.append((intent, parameters))
                 return SkillResult(success=True, data={"path": parameters["path"]})
 
@@ -400,8 +400,8 @@ class KillSwitchStopsThePlanTests(unittest.TestCase):
                 super().__init__()
                 self.kill_switch = kill_switch
 
-            def execute(self, intent, parameters=None):
-                result = super().execute(intent, parameters)
+            def execute(self, intent, parameters=None, policy_engine=None):
+                result = super().execute(intent, parameters, policy_engine=policy_engine)
                 self.kill_switch.activate()
                 return result
 
@@ -441,8 +441,8 @@ class KillSwitchStopsThePlanTests(unittest.TestCase):
                     super().__init__()
                     self.kill_switch = kill_switch
 
-                def execute(self, intent, parameters=None):
-                    result = super().execute(intent, parameters)
+                def execute(self, intent, parameters=None, policy_engine=None):
+                    result = super().execute(intent, parameters, policy_engine=policy_engine)
                     self.kill_switch.activate()
                     return result
 
@@ -528,7 +528,7 @@ class AuthorizationSignalStrippingTests(unittest.TestCase):
             def __init__(self):
                 self.skill = DeletePathSkill()
 
-            def execute(self, intent, parameters=None):
+            def execute(self, intent, parameters=None, policy_engine=None):
                 assert intent == "DELETE_PATH"
                 return self.skill.execute(parameters or {})
 

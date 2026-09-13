@@ -48,7 +48,7 @@ class FakeRegistry:
     def list_capabilities(self):
         return list(CAPABILITIES.values())
 
-    def execute(self, intent, parameters=None):
+    def execute(self, intent, parameters=None, policy_engine=None):
         parameters = parameters or {}
         self.calls.append((intent, dict(parameters)))
         if intent == "CREATE_PATH":
@@ -166,7 +166,7 @@ class IndependentVerificationTests(unittest.TestCase):
         skill finta qui NON tocca il disco (a differenza di FakeRegistry.execute normale),
         simulando una skill che mente sul proprio risultato."""
         class LyingRegistry(FakeRegistry):
-            def execute(self, intent, parameters=None):
+            def execute(self, intent, parameters=None, policy_engine=None):
                 self.calls.append((intent, parameters))
                 return SkillResult(success=True, data={"path": parameters["path"]})  # non crea nulla davvero
 
@@ -446,7 +446,7 @@ class StructuredLoggingTests(unittest.TestCase):
 
     def test_verifiable_intent_records_verified_false_when_effect_not_confirmed(self):
         class LyingRegistry(FakeRegistry):
-            def execute(self, intent, parameters=None):
+            def execute(self, intent, parameters=None, policy_engine=None):
                 self.calls.append((intent, parameters))
                 return SkillResult(success=True, data={"path": parameters["path"]})
 

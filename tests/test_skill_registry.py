@@ -10,7 +10,9 @@ import sys
 import threading
 import unittest
 
+from core.policy_engine import PolicyEngine
 from core.skill_registry import SkillRegistry
+from core.skill_result import SkillResult
 
 
 class FakeLoggerCapturingWarnings:
@@ -113,6 +115,65 @@ class ConcurrentListCapabilitiesTests(unittest.TestCase):
             thread.join()
 
         self.assertEqual(errors, [], "list_capabilities() non deve mai sollevare per una mutazione concorrente")
+
+
+class RecordingSkill:
+    def __init__(self):
+        self.calls = 0
+
+    def execute(self, parameters=None):
+        self.calls += 1
+        return SkillResult(success=True, data={})
+
+
+class PolicyGateTests(unittest.TestCase):
+    """F1.2.1 (percorso 7, l'ultimo dei tre "percorso N" dichiarati aperti - i percorsi 3
+    (PlanExecutor.execute) e 6 (rollback_effect) erano gia' fail-closed): questo dispatcher grezzo
+    non controllava MAI la policy da solo. Nei due chiamanti di produzione reali
+    (JakeCore._resolve_and_execute/_run_confirmed_action) non era gia' sfruttabile - entrambi
+    chiamano _authorize_command() PRIMA di arrivare qui - ma restava un default pericoloso per un
+    futuro chiamante che se lo dimenticasse, stesso principio "nega per default" gia' applicato ai
+    percorsi 3/6."""
+
+    def test_no_policy_engine_blocks_without_calling_the_skill(self):
+        skill = RecordingSkill()
+        registry = _bare_registry({"CREATE_PATH": skill})
+
+        result = registry.execute("CREATE_PATH", {"path": "x"})
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "POLICY_BLOCKED")
+        self.assertEqual(skill.calls, 0)
+
+    def test_intent_in_blocked_intents_blocks_without_calling_the_skill(self):
+        skill = RecordingSkill()
+        registry = _bare_registry({"DELETE_PATH": skill})
+        policy_engine = PolicyEngine(blocked_intents={"DELETE_PATH"})
+
+        result = registry.execute("DELETE_PATH", {"path": "x"}, policy_engine=policy_engine)
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "POLICY_BLOCKED")
+        self.assertEqual(skill.calls, 0)
+
+    def test_intent_not_blocked_actually_executes_the_skill(self):
+        skill = RecordingSkill()
+        registry = _bare_registry({"ADD_NOTE": skill})
+        policy_engine = PolicyEngine()
+
+        result = registry.execute("ADD_NOTE", {"text": "x"}, policy_engine=policy_engine)
+
+        self.assertTrue(result.success)
+        self.assertEqual(skill.calls, 1)
+
+    def test_unknown_intent_still_returns_none_regardless_of_policy_engine(self):
+        """Il controllo di policy si applica solo dopo aver trovato la skill: un intent
+        sconosciuto resta None (UNKNOWN_INTENT per chi legge il risultato), non POLICY_BLOCKED -
+        comportamento invariato rispetto a prima di questa correzione."""
+        registry = _bare_registry({})
+
+        self.assertIsNone(registry.execute("NON_ESISTE", {}))
+        self.assertIsNone(registry.execute("NON_ESISTE", {}, policy_engine=PolicyEngine()))
 
 
 if __name__ == "__main__":

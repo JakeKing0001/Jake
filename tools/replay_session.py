@@ -102,7 +102,7 @@ def replay_one(record: dict, policy_engine=None, registry=None) -> str:
             "presente per confermare durante un replay. Verificalo a mano se ti serve davvero."
         )
 
-    result = registry.execute(intent, parameters)
+    result = registry.execute(intent, parameters, policy_engine=policy_engine)
     if result is None:
         return "ERRORE ANCORA PRESENTE: intent non trovato (UNKNOWN_INTENT)"
     new_error = None if result.success else result.error
