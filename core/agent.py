@@ -119,8 +119,13 @@ class TaskAgent:
         # compensazione (vedi core/execution_safety.py::rollback_effect).
         self.policy_engine = policy_engine
         # executor(intent, parameters) -> SkillResult: di default il registry (con risoluzione
-        # dei percorsi); il core puo' passare una versione con policy/ripieghi.
-        self.executor = executor or (lambda intent, parameters: registry.execute(intent, parameters))
+        # dei percorsi); il core puo' passare una versione con policy/ripieghi. self.policy_engine
+        # (non policy_engine, il parametro): F1.2.5 lo assegna spesso DOPO la costruzione
+        # (PolicyEngine non esiste ancora quando i tre TaskAgent vengono creati), quindi la
+        # chiusura deve leggerlo da self a ogni chiamata, non catturarne il valore iniziale (quasi
+        # sempre None) - altrimenti F1.2.1 (percorso 7, SkillRegistry.execute() ora fail-closed di
+        # default) bloccherebbe ogni esecuzione passata da questo ripiego di default.
+        self.executor = executor or (lambda intent, parameters: registry.execute(intent, parameters, policy_engine=self.policy_engine))
         self.on_step = None  # callable(step_index, description)
         # Specializzazione (v5.0/5.1, Multi-Agent Architecture): un TaskAgent "di dominio" (es.
         # CodingAgent) usa un elenco di strumenti FISSO invece del recupero semantico generico,

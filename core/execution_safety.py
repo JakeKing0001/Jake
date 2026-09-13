@@ -110,18 +110,23 @@ def execute_action_with_retry(
     return execution, attempts
 
 
-def _rollback_create_path(registry, data):
-    registry.execute("DELETE_PATH", {"path": data["path"], "confirmed": True})
+def _rollback_create_path(registry, data, policy_engine):
+    registry.execute("DELETE_PATH", {"path": data["path"], "confirmed": True}, policy_engine=policy_engine)
 
 
-def _rollback_rename_path(registry, data):
+def _rollback_rename_path(registry, data, policy_engine):
     original_name = Path(data["path"]).name
-    registry.execute("RENAME_PATH", {"path": data["new_path"], "new_name": original_name})
+    registry.execute(
+        "RENAME_PATH", {"path": data["new_path"], "new_name": original_name}, policy_engine=policy_engine,
+    )
 
 
-def _rollback_move_path(registry, data):
+def _rollback_move_path(registry, data, policy_engine):
     original_dir = str(Path(data["path"]).parent)
-    registry.execute("MOVE_PATH", {"path": data["new_path"], "destination": original_dir, "confirmed": True})
+    registry.execute(
+        "MOVE_PATH", {"path": data["new_path"], "destination": original_dir, "confirmed": True},
+        policy_engine=policy_engine,
+    )
 
 
 def _verify_process_terminated(data: dict) -> bool:
@@ -140,9 +145,13 @@ class RollbackAction:
     (i tre handler sotto chiamano registry.execute() con "confirmed": True gia' impostato, per
     compensare un effetto gia' approvato senza bloccarsi in attesa di una conferma che qui
     nessuno puo' dare - vedi rollback_effect). compensating_intent serve a controllare
-    blocked_intents PRIMA di chiamare handler, non dopo (F1.2.5)."""
+    blocked_intents PRIMA di chiamare handler, non dopo (F1.2.5). handler riceve anche
+    policy_engine (F1.2.1, percorso 7): SkillRegistry.execute() e' ora fail-closed di default,
+    quindi va rifornito qui dello stesso policy_engine gia' controllato sopra - non e' un secondo
+    controllo diverso, e' lo stesso risultato gia' deciso, solo passato al dispatcher grezzo che
+    lo richiede."""
 
-    handler: Callable[[object, dict], None]
+    handler: Callable[[object, dict, object], None]
     compensating_intent: str
 
 
@@ -264,7 +273,13 @@ def rollback_effect(
     "nega per default" gia' applicato a `PlanExecutor.execute()`: un `TaskAgent` costruito senza
     collegare `policy_engine` esplicitamente (un test, uno strumento, un futuro chiamante) non
     deve poter eseguire un rollback senza NESSUN controllo su `blocked_intents` solo perche' se
-    l'e' dimenticato - lo stesso ragionamento che ha reso `PlanExecutor.execute()` fail-closed."""
+    l'e' dimenticato - lo stesso ragionamento che ha reso `PlanExecutor.execute()` fail-closed.
+
+    F1.2.1 (percorso 7): ora che anche `SkillRegistry.execute()` e' fail-closed di default (vedi
+    il suo docstring), `policy_engine` viene passato anche a `entry.rollback.handler(...)` - non
+    un secondo controllo diverso, e' lo stesso `policy_engine` gia' verificato qui sopra contro
+    `blocked_intents`, solo rifornito al dispatcher grezzo che lo richiede per non bloccarsi da
+    solo su un rollback gia' approvato."""
     entry = INTENT_SAFETY_REGISTRY.get(intent)
     if entry is None or entry.rollback is None:
         return False
@@ -272,7 +287,7 @@ def rollback_effect(
     if policy_engine is None or compensating_intent in policy_engine.blocked_intents:
         return False
     try:
-        entry.rollback.handler(registry, data)
+        entry.rollback.handler(registry, data, policy_engine)
         succeeded = True
     except Exception:
         succeeded = False

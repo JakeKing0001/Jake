@@ -670,7 +670,7 @@ class JakeCore:
         resolved, policy_result, policy_reason = self._authorize_command(resolved)
         if policy_result is not None:
             return ActionExecution(resolved, policy_result, policy_reason=policy_reason)
-        result = self.skill_registry.execute(resolved.intent, resolved.parameters)
+        result = self.skill_registry.execute(resolved.intent, resolved.parameters, policy_engine=self.policy_engine)
         if result is not None and not result.success and result.error != "CONFIRMATION_REQUIRED":
             alt_command, note = fallbacks.alternative_for(resolved, result, self.skill_registry)
             if alt_command is not None:
@@ -684,7 +684,7 @@ class JakeCore:
                 # richiesta di conferma per qualcosa che l'utente non ha chiesto direttamente.
                 alt_decision, alt_reason = self.policy_engine.decide_interactive_with_reason(alt_command.intent, alt_command.parameters)
                 if alt_decision == PolicyDecision.ALLOW:
-                    alt_result = self.skill_registry.execute(alt_command.intent, alt_command.parameters)
+                    alt_result = self.skill_registry.execute(alt_command.intent, alt_command.parameters, policy_engine=self.policy_engine)
                     if alt_result is not None and alt_result.success:
                         return ActionExecution(alt_command, alt_result, note, alt_reason)
             else:
@@ -1012,7 +1012,7 @@ class JakeCore:
             parameters.update(authenticated=True, authenticated_via="passphrase")
         command, result, policy_reason = self._authorize_command(Command(action["intent"], parameters))
         if result is None:
-            result = self.skill_registry.execute(command.intent, command.parameters)
+            result = self.skill_registry.execute(command.intent, command.parameters, policy_engine=self.policy_engine)
         # Una conferma puo' chiederne un'altra (CREATE_SKILL: "provo a imparare?" -> codice
         # scritto -> "lo attivo?"): stessa gestione del percorso normale.
         if result is not None and result.error in ("CONFIRMATION_REQUIRED", "AUTH_REQUIRED"):

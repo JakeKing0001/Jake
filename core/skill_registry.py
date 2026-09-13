@@ -23,6 +23,7 @@ from core.reminder_manager import ReminderManager
 from core.todo_manager import TodoManager
 from core.risk import risk_of
 from core.logger import get_logger
+from core.skill_result import SkillResult
 from copy import deepcopy
 
 
@@ -173,10 +174,26 @@ class SkillRegistry:
         except Exception:
             return []
 
-    def execute(self, intent: str, parameters: dict | None = None):
+    def execute(self, intent: str, parameters: dict | None = None, policy_engine=None):
+        """F1.2.1 (percorso 7, l'ultimo dei tre "percorso N" dichiarati aperti - i percorsi 3 e 6
+        sono gia' fail-closed, vedi docs/action-execution-paths.md): questo dispatcher grezzo non
+        controllava MAI la policy da solo - un chiamante che lo invoca direttamente, saltando
+        `JakeCore._authorize_command()` (o `PlanExecutor`/`decide_automated`), eseguiva la skill
+        SENZA alcun controllo su `blocked_intents`. Nei due chiamanti di produzione reali
+        (`JakeCore._resolve_and_execute`/`_run_confirmed_action`) questo non era gia' sfruttabile -
+        entrambi chiamano `_authorize_command()` PRIMA di arrivare qui - ma era un default
+        pericoloso per un futuro chiamante che se lo dimenticasse, stesso principio "nega per
+        default" gia' applicato ai percorsi 3/6. `policy_engine=None` e' quindi FAIL-CLOSED (come
+        i percorsi 3/6, non piu' "nessun controllo"): solo `blocked_intents` viene ricontrollato
+        qui (non una decisione interattiva/automatica completa - CONFIRM/REQUIRE_AUTH non hanno
+        senso in un dispatcher sincrono senza un utente pronto a rispondere, la decisione vera e'
+        gia' stata presa da chi ha chiamato prima di arrivare qui), stesso identico principio
+        minimale gia' applicato a `rollback_effect()` (percorso 6)."""
         skill = self.get_skill(intent)
         if skill is None:
             return None
+        if policy_engine is None or intent in policy_engine.blocked_intents:
+            return SkillResult(success=False, data={}, error="POLICY_BLOCKED")
 
         # Percorsi "parlati" (v3.0): "desktop\note.txt", "download" -> percorso reale.
         if parameters:

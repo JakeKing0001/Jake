@@ -653,8 +653,8 @@ Dipende da: F1.1.
 Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa dal PolicyEngine.
 
 - Stato: `DOING`; `F1.2.5` parziale per rollback filesystem e ripresa del consenso (questa
-  ultima verificata localmente, in attesa di CI); `F1.2.1` chiuso parzialmente
-  (percorsi 3 e 6, vedi sotto; resta aperto solo il percorso 7); `F1.2.2` chiuso parzialmente
+  ultima verificata localmente, in attesa di CI); `F1.2.1` **chiuso** (percorsi 3, 6 e 7 -
+  i tre "percorso N" dichiarati aperti sono ora tutti fail-closed, vedi sotto); `F1.2.2` chiuso parzialmente
   (cinque capability vere - radici filesystem su ENTRAMBI i percorsi e su sette intent, dominio
   web su OPEN_URL, app su OPEN_APP, contatto su SEND_WHATSAPP/SEND_EMAIL, device Home Assistant su
   CONTROL_SMART_DEVICE (le ultime tre su stringa grezza, non risolta - limite dichiarato) - vedi
@@ -859,6 +859,60 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   mancanza di policy_engine, non per il motivo che il test intendeva verificare). Aggiornato anche
   `docs/action-execution-paths.md` (nuova sezione "Nota sul percorso 6"). Prova: 2.242/2.242 test,
   ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.2.1` (percorso 7, chiusura - l'ultimo dei tre "percorso N" dichiarati aperti) — 13/09/2026:
+  `SkillRegistry.execute()` (il dispatcher grezzo) non controllava MAI la policy da solo - un
+  chiamante che lo invocava direttamente, saltando `JakeCore._authorize_command()` (o
+  `PlanExecutor`/`decide_automated`), eseguiva la skill SENZA alcun controllo su
+  `blocked_intents`. Nei chiamanti di produzione reali (percorsi 1/2 - `_resolve_and_execute`/
+  `_run_confirmed_action` - e il rollback) questo non era gia' sfruttabile, tutti passano gia' da
+  una decisione di policy PRIMA di arrivare qui, ma era lo stesso default pericoloso gia' chiuso
+  per i percorsi 3/6: un futuro chiamante che lo invocasse direttamente eseguirebbe senza nessun
+  controllo. Corretto con lo stesso principio minimale gia' applicato a `rollback_effect()`
+  (percorso 6): nuovo parametro opzionale `policy_engine=None`, e quando assente O quando l'intent
+  e' in `blocked_intents` restituisce `SkillResult(success=False, error="POLICY_BLOCKED")` SENZA
+  chiamare la skill - non una decisione interattiva/automatica completa (CONFIRM/REQUIRE_AUTH non
+  hanno senso in un dispatcher sincrono senza un utente pronto a rispondere), la decisione vera e'
+  gia' stata presa da chi ha chiamato prima di arrivare qui.
+
+  Lo scope si e' rivelato piu' ampio di quanto la nota precedente lasciasse intendere: rendere
+  fail-closed il dispatcher grezzo significa che OGNI chiamante che lo raggiunge deve fornirgli un
+  `policy_engine`, non solo i due call site diretti di `JakeCore`. Aggiornati: i due call site di
+  `JakeCore._resolve_and_execute`/`_run_confirmed_action` (passano `self.policy_engine`); i tre
+  handler di rollback interni in `core/execution_safety.py`
+  (`_rollback_create_path`/`_rollback_rename_path`/`_rollback_move_path`, la cui firma e quella di
+  `RollbackAction.handler` sono state estese con un terzo parametro `policy_engine` - non un
+  secondo controllo diverso, e' lo STESSO `policy_engine` che `rollback_effect()` ha gia'
+  verificato contro `blocked_intents` poco sopra, semplicemente rifornito al dispatcher che ora lo
+  richiede); `PlanExecutor._execute_step()` (esteso con lo stesso parametro, passato tramite una
+  lambda invece che il riferimento diretto a `self.skill_registry.execute` usato prima, per
+  chiudere sul `policy_engine` locale del passo corrente - gia' verificato ALLOW poco sopra in
+  `execute()`); il ripiego di default di `TaskAgent.__init__`
+  (`self.executor = executor or (lambda...)`, che ora legge `self.policy_engine` ANZICHE' il
+  parametro del costruttore - necessario perche' F1.2.5 lo assegna spesso DOPO la costruzione,
+  quindi la chiusura deve rileggerlo da `self` a ogni chiamata, non catturarne il valore iniziale
+  quasi sempre `None`); `tools/replay_session.py::replay_one()` (gia' passava da una vera
+  `decide_automated()` prima di eseguire, F1.7.5 - ora rifornisce anche il dispatcher).
+
+  Effetto collaterale piu' esteso del previsto: ~18 classi `FakeRegistry`/`RealSkillRegistry` di
+  test in 9 file diversi (`test_agent.py`, `test_execution_safety.py`, `test_plan_executor.py`,
+  `test_jake_core_action_contracts.py`, `test_jake_core_misc.py`, `test_jake_core_permissions.py`,
+  `test_jake_core_pipeline.py`, `test_action_contract.py`) fungono da sostituto di
+  `SkillRegistry` con un proprio `execute(self, intent, parameters=None)` - nessuna accettava un
+  terzo argomento, quindi passare `policy_engine=...` a una di loro avrebbe sollevato
+  `TypeError`. Aggiornata ciascuna per accettare (e ignorare, non e' compito loro applicare la
+  policy) `policy_engine=None`; verificato con l'intera suite, non file per file, che nessuna sia
+  stata dimenticata. Nuovi test dedicati in `tests/test_skill_registry.py::PolicyGateTests` (4
+  test: nessun `policy_engine` blocca senza chiamare la skill, un intent in `blocked_intents`
+  blocca senza chiamare la skill, un intent non bloccato esegue per davvero, un intent sconosciuto
+  resta `None` indipendentemente dalla policy - comportamento invariato). Capovolto
+  `tests/test_action_paths_inventory.py::test_raw_dispatch_path_has_no_policy_parameter` (che
+  documentava deliberatamente il buco) nel suo opposto,
+  `test_raw_dispatch_path_is_now_fail_closed_too`. Aggiornato `docs/action-execution-paths.md`
+  (riga della tabella per il percorso 7, nuova sezione "Nota sul percorso 7", "Cosa resta aperto"
+  aggiornato - i tre percorsi sono ora tutti chiusi). Con questo, `F1.2.1` e' **chiuso** per
+  intero. Prova: 2.341/2.341 test, ruff/mypy/compileall verdi su tutti i file toccati (i 3 errori
+  mypy preesistenti in `tools/replay_session.py`, righe 43/96, non toccate da questa correzione,
+  restano invariati).
 - `F1.2.3`/`F1.8.1` (fondamenta: identita' del dispositivo companion) — 13/09/2026: decisione
   esplicita dell'utente su come identificare un canale/dispositivo (AskUserQuestion: "Identita'
   per token companion" - propagare il device_id gia' esistente in `DeviceRegistry` come identita'
@@ -3174,7 +3228,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 36 incrementi completati e verificati (PR #28-#63), la
+Aggiornato 13/09/2026. Sessione lunga con 37 incrementi completati e verificati (PR #28-#64), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -3198,7 +3252,13 @@ terza fetta (la capability filesystem lasciava comunque Jake libero di LEGGERE q
 fuori dal recinto - solo le mutazioni erano coperte, ora anche FIND_FILE/GET_FILE_INFO/
 READ_FILE_TEXT), `F1.2.1` percorso 6 (`rollback_effect()` con `policy_engine=None` eseguiva un
 rollback senza controllare `blocked_intents` - non gia' sfruttabile in produzione, che collega
-sempre un `policy_engine` vero, ma un default fail-open pericoloso per chiunque altro). Le
+sempre un `policy_engine` vero, ma un default fail-open pericoloso per chiunque altro), e `F1.2.1`
+percorso 7 - chiusura finale (`SkillRegistry.execute()`, il dispatcher grezzo, non controllava MAI
+la policy da solo; stesso principio "nega per default", ma con uno scope di correzione molto piu'
+ampio del previsto una volta iniziato - ha richiesto rifornire `policy_engine` a due call site di
+`JakeCore`, tre handler di rollback interni, `PlanExecutor._execute_step`, il ripiego di default
+di `TaskAgent`, `tools/replay_session.py`, e aggiornare ~18 classi `FakeRegistry` di test in 9
+file diversi che altrimenti avrebbero sollevato `TypeError` sul nuovo parametro). Le
 funzionalita' nuove: `F1.2.2` prima fetta (prima capability vera - radici filesystem
 consentite), `F1.7.4` prima fetta (redazione strutturata per tipo di dato - percorso/URL/email invece del
 generico "<str:N caratteri>"), `F1.7.4` seconda fetta (redazione per NOME del parametro - un
@@ -3245,14 +3305,21 @@ solo la versione, un numero di telefono solo il prefisso internazionale se prese
 contenuto vero; convalida STRUTTURALE per IPv6 - non solo "cifre e due punti" - cosi' un orario
 come "14:30:00" non viene scambiato per un indirizzo; "identificatore di dispositivo",
 il terzo tipo gia' citato nel gap, lasciato deliberatamente fuori scope per essere troppo vago,
-senza un formato standard riconoscibile). Il resto:
+senza un formato standard riconoscibile), e `F1.2.1` percorso 7 - chiusura finale
+(`SkillRegistry.execute()` fail-closed di default come i percorsi 3/6, con uno scope di
+correzione molto piu' ampio del previsto: due call site di `JakeCore`, tre handler di rollback
+interni, `PlanExecutor._execute_step`, il ripiego di default di `TaskAgent`,
+`tools/replay_session.py`, e ~18 classi `FakeRegistry` di test in 9 file diversi aggiornate per
+accettare il nuovo parametro senza sollevare `TypeError` - con questo, tutti e tre i "percorso N"
+dichiarati aperti in F1.2.1 sono chiusi). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.337/2.337 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
-errori preesistenti invariati, non coperto da "mypy selettivo" in CI). `G1` resta aperto.
+`master` e' pulito, 2.341/2.341 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
+invariati, nessuno dei due coperto da "mypy selettivo" in CI). `G1` resta aperto.
 
 Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
 sessione (`sys.setswitchinterval()` abbassato + `threading.Barrier`, senza altro aiuto) NON
@@ -3276,8 +3343,9 @@ risolto, idealmente con una tecnica di forzatura reale come `sys.setswitchinterv
 una `threading.Barrier` - molti buchi di questa sessione non si manifestavano affatto senza),
 aggiornamento di questo file, e commit/PR separati invece di un unico commit enorme.
 
-Candidati piccoli ancora aperti in F1: il resto di `F1.2.1` (percorso 7,
-`SkillRegistry.execute()`), il resto di `F1.2.2` (le ultime due capability - rete/durata, non
+Candidati piccoli ancora aperti in F1: `F1.2.1` e' ora CHIUSO per intero (i tre "percorso N" -
+piano automatico, rollback, dispatch grezzo - sono tutti fail-closed). Il resto di `F1.2.2` (le
+ultime due capability - rete/durata, non
 ancora chiaro a quale intent/parametro mappino con precisione; le altre cinque - filesystem/
 dominio web/app/contatto/device Home Assistant - sono ora complete, con i rispettivi gap noti gia'
 dichiarati - FIND_FILE senza `path` esplicito, CHECK_WEBSITE_STATUS/LIST_SMART_DEVICES esclusi,
