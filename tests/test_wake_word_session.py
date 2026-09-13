@@ -322,5 +322,113 @@ class RespondTests(unittest.TestCase):
         speak_async.assert_called_once_with("Fatto.")
 
 
+class RunReleasesTheMicrophoneTests(unittest.TestCase):
+    """F1.8.4 ("gestire shutdown con... release dei device"): run() non aveva alcuna copertura
+    diretta, ne' un test aveva mai verificato per davvero se il microfono viene rilasciato quando
+    la sessione si ferma - solo letto a tavolino (VadListener.listen_for_utterances() apre lo
+    stream dentro un `with sd.InputStream(...):` che avvolge l'intero ciclo). Qui si usa un
+    VadListener VERO (non un SimpleNamespace finto come sopra), con solo 'webrtcvad'/'sounddevice'
+    patchati (pacchetti veri installati, stessa tecnica di tests/test_vad_listener.py), per
+    dimostrare che `stream.__exit__` viene DAVVERO chiamato quando `run()` esce - sia per l'uscita
+    esplicita (EXIT_SENTINEL, che imposta `_running = False` e poi fa `break` nel `for` che
+    consuma il generatore SENZA che il generatore stesso abbia mai ricontrollato `should_
+    continue()`) sia per un `stop()` chiamato da un altro thread mentre `run()` e' bloccato in
+    attesa di audio (qui il generatore stesso nota `should_continue()` falso ed esce da solo)."""
+
+    @staticmethod
+    def _real_vad_listener(is_speech_sequence):
+        fake_vad_instance = mock.MagicMock()
+        fake_vad_instance.is_speech.side_effect = is_speech_sequence
+        with mock.patch("webrtcvad.Vad", return_value=fake_vad_instance):
+            from core.voice.vad_listener import VadListener
+            return VadListener(silence_ms=30)
+
+    @staticmethod
+    def _fake_input_stream_factory(frames, stream_holder):
+        def _fake_input_stream(**kwargs):
+            callback = kwargs["callback"]
+            for frame in frames:
+                callback(frame, frame.shape[0], None, None)
+            stream = mock.MagicMock()
+            stream.__enter__.return_value = stream
+            stream.__exit__.return_value = False
+            stream_holder["stream"] = stream
+            return stream
+        return _fake_input_stream
+
+    def test_exiting_via_the_exit_sentinel_still_closes_the_input_stream(self):
+        import numpy as np
+
+        from core.voice.vad_listener import VadListener
+        frame_samples = VadListener.FRAME_SAMPLES
+        speech_frame = np.full((frame_samples, 1), 1000, dtype=np.int16)
+        silence_frame = np.zeros((frame_samples, 1), dtype=np.int16)
+        vad_listener = self._real_vad_listener([True, False])
+
+        jake_core = mock.MagicMock(EXIT_SENTINEL="ESCI")
+        jake_core.conversation_state.has_pending_action.return_value = False
+        jake_core.answer.return_value = "ESCI"
+        session = WakeWordSession(jake_core, FakeSttProvider("jake esci"), FakeTtsProvider(), vad_listener=vad_listener)
+
+        stream_holder: dict = {}
+        with mock.patch("sounddevice.InputStream", side_effect=self._fake_input_stream_factory(
+            [speech_frame, silence_frame], stream_holder,
+        )), mock.patch("sounddevice.query_devices", return_value=[{"max_input_channels": 1}]):
+            session.run()
+
+        self.assertFalse(session._running)
+        self.assertIn("stream", stream_holder, "sd.InputStream non e' mai stato aperto")
+        stream_holder["stream"].__exit__.assert_called_once()
+
+    def test_stop_called_from_another_thread_while_blocked_still_closes_the_input_stream(self):
+        """Simula JarvisApp._cleanup() (F1.8.4, gia' chiuso per la visibilita' dei fallimenti):
+        stop() e' chiamato mentre run() e' bloccato in attesa di audio - qui simulato con una
+        callback che non produce mai una frase completa, cosi' il generatore resta nel proprio
+        `while should_continue():` finche' stop() non azzera `_running` (nessun `break` esterno
+        dal lato consumatore, a differenza del test sopra: e' il generatore stesso a fermarsi)."""
+        import threading
+
+        import numpy as np
+
+        from core.voice.vad_listener import VadListener
+        frame_samples = VadListener.FRAME_SAMPLES
+        silence_frame = np.zeros((frame_samples, 1), dtype=np.int16)
+        vad_listener = self._real_vad_listener([False] * 100)
+
+        jake_core = mock.MagicMock(EXIT_SENTINEL="ESCI")
+        jake_core.conversation_state.has_pending_action.return_value = False
+        session = WakeWordSession(jake_core, FakeSttProvider(""), FakeTtsProvider(), vad_listener=vad_listener)
+
+        stream_holder: dict = {}
+
+        def fake_input_stream(**kwargs):
+            callback = kwargs["callback"]
+            stream = mock.MagicMock()
+            stream.__enter__.return_value = stream
+            stream.__exit__.return_value = False
+            stream_holder["stream"] = stream
+
+            def _feed():
+                for _ in range(100):
+                    if not session._running:
+                        return
+                    callback(silence_frame, frame_samples, None, None)
+
+            threading.Thread(target=_feed, daemon=True).start()
+            return stream
+
+        with mock.patch("sounddevice.InputStream", side_effect=fake_input_stream), \
+                mock.patch("sounddevice.query_devices", return_value=[{"max_input_channels": 1}]):
+            run_thread = threading.Thread(target=session.run, daemon=True)
+            run_thread.start()
+            time.sleep(0.1)
+            session.stop()
+            run_thread.join(timeout=5)
+
+        self.assertFalse(run_thread.is_alive(), "run() non e' terminato dopo stop()")
+        self.assertIn("stream", stream_holder, "sd.InputStream non e' mai stato aperto")
+        stream_holder["stream"].__exit__.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
