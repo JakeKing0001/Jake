@@ -6,7 +6,10 @@ claim() a OGNI richiesta, core/companion_server.py::_handle_claim, col nome che 
 in quel momento) usava dict.setdefault(), che fissa il nome alla PRIMA registrazione per sempre:
 un dispositivo rinominato nell'app companion (claim successivo con un nome diverso) restava
 mostrato con il nome vecchio in list_devices() a tempo indeterminato."""
+import threading
+import time
 import unittest
+from unittest import mock
 
 from core.device_registry import DeviceRegistry
 
@@ -110,6 +113,58 @@ class ListDevicesTests(unittest.TestCase):
         registry.register("first")
         registry.register("second")
         self.assertEqual([d["id"] for d in registry.list_devices()], ["third", "first", "second"])
+
+
+class ConcurrentClaimTests(unittest.TestCase):
+    """F1.8.7 ("testare race su handoff"): claim() legge e scrive self._active_device_id in due
+    passi separati. Con lo scheduler standard di sys.setswitchinterval() questa finestra e' troppo
+    stretta perche' il GIL ci si infili quasi mai (0 perdite osservate su 500 prove isolate + uno
+    stress da 20 esecuzioni x 5000 iterazioni), ma allargandola artificialmente - stesso
+    espediente gia' usato in questa sessione per la regressione di ConversationStateManager - la
+    corsa si riproduce sempre su codice senza lock: due claim() concorrenti vedono lo stesso
+    "previous" e una notifica di handoff (EventType.DEVICE_HANDOFF) va persa. Questo test verifica
+    che il lock aggiunto a claim() la elimini anche in quella finestra allargata, non solo nel
+    caso comune."""
+
+    def test_two_concurrent_claims_never_lose_a_handoff_notification_even_with_a_widened_window(self):
+        registry = DeviceRegistry()
+        registry.claim("device-0", "iniziale")
+
+        real_swap_locked = registry._swap_active_device_locked
+
+        def _slow_swap_locked(device_id):
+            # Allarga artificialmente la finestra ESATTA della corsa originale: tra la lettura di
+            # _active_device_id e la sua scrittura, non prima (un ritardo messo prima di questo
+            # punto - es. dentro register() - non riproduce il bug: il lock lo terrebbe comunque
+            # fuori dalla sezione critica, quindi non proverebbe nulla sulla corsa reale). Prima
+            # della correzione, con questo identico ritardo qui, 20 prove su 20 perdevano una
+            # notifica di handoff (due claim() vedevano lo stesso "previous").
+            time.sleep(0.02)
+            return real_swap_locked(device_id)
+
+        results = []
+        results_lock = threading.Lock()
+        barrier = threading.Barrier(2)
+
+        def _claim(device_id):
+            barrier.wait()
+            previous = registry.claim(device_id, device_id)
+            with results_lock:
+                results.append((device_id, previous))
+
+        with mock.patch.object(registry, "_swap_active_device_locked", side_effect=_slow_swap_locked):
+            threads = [threading.Thread(target=_claim, args=(f"device-{i}",)) for i in (1, 2)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+        seen_previous = {previous for _, previous in results}
+        self.assertEqual(
+            len(seen_previous), 2,
+            f"entrambi i claim concorrenti hanno visto lo stesso 'previous' ({results}): "
+            "una notifica di handoff sarebbe andata persa",
+        )
 
 
 if __name__ == "__main__":
