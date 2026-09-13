@@ -1,9 +1,10 @@
 import time
 from dataclasses import dataclass, field
 
+from core.action_contracts import ActionError, validate_action_error
 from core.action_ledger import (
-    ActionLedger, ActionReceipt, authorization_of, error_category_of, idempotency_key_of,
-    new_action_id, verification_status_of,
+    ActionLedger, ActionReceipt, authorization_of, idempotency_key_of, new_action_id,
+    verification_status_of,
 )
 from core.execution_safety import VERIFIABLE_INTENTS, execute_with_retry, rollback_effect, verify_effect
 from core.identity import current_windows_user
@@ -250,12 +251,19 @@ class PlanExecutor:
             trace_id, private=private, duration_ms=duration_ms,
             model=model, skill=intent, risk_decision=risk, result=result, verified=verified,
         )
+        # F1.1.7 (terzo chokepoint adottato, dopo JakeCore - F1.1.6 - e TaskAgent sopra):
+        # ActionError.from_result() sostituisce la chiamata diretta a error_category_of(), stesso
+        # valore per receipt.error_category, nessun cambio di comportamento. Con questo, tutti e
+        # tre i chokepoint reali (comando diretto/ripresa conferma, agente, piano) costruiscono lo
+        # stesso tipo condiviso invece che due su tre restare su una stringa grezza.
+        action_error = ActionError.from_result(result)
+        validate_action_error(action_error)
         self.action_ledger.record(
             ActionReceipt(
                 action_id=new_action_id(), trace_id=trace_id, ts=time.time(), intent=intent,
                 requested_by=requested_by, risk_decision=risk, authorization=authorization_of(result, parameters),
                 result=result, idempotency_key=idempotency_key_of(intent, parameters),
-                verified=verification_status_of(verified), error_category=error_category_of(result),
+                verified=verification_status_of(verified), error_category=action_error.category,
                 policy_reason=policy_reason, duration_ms=duration_ms, model=model,
                 device_id=current_device_id(), windows_user=current_windows_user(),
             ),
