@@ -56,7 +56,7 @@ class RollbackCreatePathTests(unittest.TestCase):
         self.assertTrue(target.exists())
         self.assertTrue(verify_effect("CREATE_PATH", create_result.data))
 
-        rolled_back = rollback_effect(registry, "CREATE_PATH", create_result.data)
+        rolled_back = rollback_effect(registry, "CREATE_PATH", create_result.data, policy_engine=PolicyEngine())
 
         self.assertTrue(rolled_back)
         self.assertFalse(target.exists())
@@ -85,7 +85,7 @@ class RollbackMovePathTests(unittest.TestCase):
         self.assertFalse(source.exists())
         self.assertTrue(verify_effect("MOVE_PATH", move_result.data))
 
-        rolled_back = rollback_effect(self.registry, "MOVE_PATH", move_result.data)
+        rolled_back = rollback_effect(self.registry, "MOVE_PATH", move_result.data, policy_engine=PolicyEngine())
 
         self.assertTrue(rolled_back)
         self.assertTrue(source.exists(), "il rollback doveva riportare il file nella cartella originale")
@@ -110,7 +110,7 @@ class RollbackRenamePathTests(unittest.TestCase):
         self.assertFalse(original.exists())
         self.assertTrue(verify_effect("RENAME_PATH", rename_result.data))
 
-        rolled_back = rollback_effect(self.registry, "RENAME_PATH", rename_result.data)
+        rolled_back = rollback_effect(self.registry, "RENAME_PATH", rename_result.data, policy_engine=PolicyEngine())
 
         self.assertTrue(rolled_back)
         self.assertTrue(original.exists(), "il rollback doveva ripristinare il nome originale")
@@ -158,12 +158,33 @@ class RollbackEdgeCaseTests(unittest.TestCase):
 
     def test_rollback_swallows_errors_and_returns_false(self):
         """Un rollback fallito non deve mai far crashare il chiamante (vedi il docstring di
-        rollback_effect): qui il "registry" esplode per qualunque execute()."""
+        rollback_effect): qui il "registry" esplode per qualunque execute(). policy_engine
+        passato esplicitamente: altrimenti il fail-closed su policy_engine=None (vedi sotto)
+        farebbe tornare False PRIMA di arrivare a chiamare il registry, senza davvero verificare
+        che l'eccezione venga inghiottita."""
         class ExplodingRegistry:
             def execute(self, intent, parameters=None):
                 raise RuntimeError("boom")
 
-        self.assertFalse(rollback_effect(ExplodingRegistry(), "CREATE_PATH", {"path": "x"}))
+        self.assertFalse(rollback_effect(ExplodingRegistry(), "CREATE_PATH", {"path": "x"}, policy_engine=PolicyEngine()))
+
+    def test_policy_engine_none_is_fail_closed_not_no_restriction(self):
+        """F1.2.1 (percorso 6): stesso principio "nega per default" gia' applicato a
+        PlanExecutor.execute() (JakeCore gia' collega un vero policy_engine ai tre TaskAgent -
+        F1.2.5 - quindi in produzione questo non era gia' sfruttabile, ma un TaskAgent costruito
+        senza quel collegamento esplicito - un test, uno strumento, un futuro chiamante - non deve
+        poter eseguire un rollback senza NESSUN controllo su blocked_intents)."""
+        tmp_dir = Path(tempfile.mkdtemp(prefix="jake_execution_safety_"))
+        self.addCleanup(shutil.rmtree, tmp_dir, ignore_errors=True)
+        registry = RealSkillRegistry()
+        target = tmp_dir / "nuovo.txt"
+        create_result = registry.execute("CREATE_PATH", {"path": str(target)})
+        self.assertTrue(create_result.success)
+
+        rolled_back = rollback_effect(registry, "CREATE_PATH", create_result.data)
+
+        self.assertFalse(rolled_back)
+        self.assertTrue(target.exists(), "senza un policy_engine il rollback non deve eseguire nulla")
 
 
 class IntentSafetyRegistryConsistencyTests(unittest.TestCase):

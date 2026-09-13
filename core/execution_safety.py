@@ -220,11 +220,22 @@ def rollback_effect(registry, intent: str, data: dict, policy_engine=None) -> bo
     eseguibile come "annullamento" di un CREATE_PATH. Non si passa invece da decide_automated():
     quello richiederebbe CONFIRM per un intent DESTRUCTIVE/ADMIN, ma qui nessun utente e' pronto
     a confermare in tempo reale - bloccare resta l'unico controllo che ha senso applicare a
-    un'azione gia' approvata in origine."""
+    un'azione gia' approvata in origine.
+
+    F1.2.1 (percorso 6): `policy_engine=None` e' FAIL-CLOSED (nessun rollback), non piu' "nessun
+    controllo" - stesso principio gia' applicato a `PlanExecutor.execute()` (F1.2.1, percorso 3).
+    In produzione `JakeCore.__init__` collega gia' `policy_engine` a tutti e tre i `TaskAgent`
+    (F1.2.5, `self.agent.policy_engine = self.policy_engine` e i suoi due gemelli, DOPO la
+    creazione perche' `PolicyEngine` non esiste ancora quando i tre `TaskAgent` vengono costruiti)
+    - questo non era quindi un buco gia' sfruttabile in produzione. E' pero' lo stesso principio
+    "nega per default" gia' applicato a `PlanExecutor.execute()`: un `TaskAgent` costruito senza
+    collegare `policy_engine` esplicitamente (un test, uno strumento, un futuro chiamante) non
+    deve poter eseguire un rollback senza NESSUN controllo su `blocked_intents` solo perche' se
+    l'e' dimenticato - lo stesso ragionamento che ha reso `PlanExecutor.execute()` fail-closed."""
     entry = INTENT_SAFETY_REGISTRY.get(intent)
     if entry is None or entry.rollback is None:
         return False
-    if policy_engine is not None and entry.rollback.compensating_intent in policy_engine.blocked_intents:
+    if policy_engine is None or entry.rollback.compensating_intent in policy_engine.blocked_intents:
         return False
     try:
         entry.rollback.handler(registry, data)
