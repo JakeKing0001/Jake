@@ -80,6 +80,16 @@ limite dichiarato, controllo sulla stringa grezza del parametro `name`, non sull
 `LIST_SMART_DEVICES` (sola lettura, elenca senza agire) ne resta fuori, stesso schema gia' seguito
 per le altre capability (prima l'azione con un effetto reale, poi eventualmente le letture).
 
+F1.4.2 (prima fetta - "distinguere identita' Windows... dispositivo..."):
+`windows_user_blocked_intents` e' simmetrico a `device_blocked_intents` sopra ma per ACCOUNT
+WINDOWS invece che per canale companion - un dizionario opt-in `{windows_user: {intent, ...}}`,
+vuoto per default. Utile solo quando piu' account Windows condividono la stessa installazione di
+Jake (core/identity.py::current_windows_user()): un account puo' essere ristretto a un
+sottoinsieme di intent senza toccare gli altri account o i dispositivi companion (le due
+dimensioni sono ortogonali, non alternative - vedi core/identity.py). "Profilo Jake" e "speaker
+profile" (le altre due dimensioni di F1.4.2) restano fuori: nessuna infrastruttura esiste ancora
+per nessuno dei due.
+
 Rete/durata (le altre capability elencate in ROADMAP.md) e l'intersezione
 con agente/skill/sessione restano completamente aperte."""
 import os
@@ -87,6 +97,7 @@ from enum import Enum
 from pathlib import Path
 from urllib.parse import urlparse
 
+from core.identity import current_windows_user
 from core.request_context import current_device_id
 
 
@@ -151,11 +162,16 @@ POLICY_REASON_APP_CAPABILITY_DENIED = "app_outside_allowed_apps"
 POLICY_REASON_CONTACT_CAPABILITY_DENIED = "contact_outside_allowed_contacts"
 # F1.2.2 (quinta capability: device Home Assistant): stesso principio di app/contatto sopra.
 POLICY_REASON_SMART_DEVICE_CAPABILITY_DENIED = "smart_device_outside_allowed_smart_devices"
+# F1.4.2 (prima fetta - capability per ACCOUNT WINDOWS): stesso principio di
+# POLICY_REASON_DEVICE_BLOCKED sopra, ma per current_windows_user() invece che per canale
+# companion - un motivo distinto cosi' un audit del ledger distingue "questo account Windows non
+# puo' farlo" da "questo dispositivo companion non puo' farlo", due controlli diversi.
+POLICY_REASON_WINDOWS_USER_BLOCKED = "intent_in_windows_user_blocked_intents"
 POLICY_REASONS = frozenset({
     POLICY_REASON_BLOCKED, POLICY_REASON_REQUIRE_AUTH, POLICY_REASON_CONFIRM, POLICY_REASON_ALLOWED,
     POLICY_REASON_CAPABILITY_DENIED, POLICY_REASON_DEVICE_BLOCKED, POLICY_REASON_WEB_CAPABILITY_DENIED,
     POLICY_REASON_APP_CAPABILITY_DENIED, POLICY_REASON_CONTACT_CAPABILITY_DENIED,
-    POLICY_REASON_SMART_DEVICE_CAPABILITY_DENIED,
+    POLICY_REASON_SMART_DEVICE_CAPABILITY_DENIED, POLICY_REASON_WINDOWS_USER_BLOCKED,
 })
 
 # F1.2.2: le quattro mutazioni sono le stesse gia' raggruppate in core/execution_safety.py::
@@ -272,7 +288,7 @@ class PolicyEngine:
         require_auth_intents: set | None = None, allowed_filesystem_roots: set | list | None = None,
         device_blocked_intents: dict[str | None, set] | None = None, allowed_web_domains: set | list | None = None,
         allowed_apps: set | list | None = None, allowed_contacts: set | list | None = None,
-        allowed_smart_devices: set | list | None = None,
+        allowed_smart_devices: set | list | None = None, windows_user_blocked_intents: dict[str, set] | None = None,
     ):
         self.auth_gate = auth_gate
         self.blocked_intents = set(blocked_intents or set())
@@ -294,6 +310,12 @@ class PolicyEngine:
         # senza toccare cio' che puo' fare l'utente dalla voce locale o da un altro dispositivo.
         self.device_blocked_intents = {
             device_id: set(intents) for device_id, intents in (device_blocked_intents or {}).items()
+        }
+        # F1.4.2 (prima fetta): {windows_user: {intent, ...}} - stesso principio di
+        # device_blocked_intents sopra, ma per current_windows_user() invece che per canale
+        # companion, dimensioni ortogonali (vedi il docstring del modulo).
+        self.windows_user_blocked_intents = {
+            user: set(intents) for user, intents in (windows_user_blocked_intents or {}).items()
         }
         # F1.2.2 (seconda capability: dominio web): vuoto/None (default) = nessuna restrizione,
         # stesso principio di allowed_filesystem_roots. Minuscolo qui una volta sola (non a ogni
@@ -379,6 +401,8 @@ class PolicyEngine:
             return PolicyDecision.BLOCK, POLICY_REASON_BLOCKED
         if self._device_blocks(intent):
             return PolicyDecision.BLOCK, POLICY_REASON_DEVICE_BLOCKED
+        if self._windows_user_blocks(intent):
+            return PolicyDecision.BLOCK, POLICY_REASON_WINDOWS_USER_BLOCKED
         if intent in FILESYSTEM_CAPABILITY_INTENTS and not self._filesystem_capability_allows(parameters):
             return PolicyDecision.BLOCK, POLICY_REASON_CAPABILITY_DENIED
         if intent in WEB_CAPABILITY_INTENTS and not self._web_capability_allows(parameters):
@@ -414,6 +438,8 @@ class PolicyEngine:
             return PolicyDecision.BLOCK, POLICY_REASON_BLOCKED
         if self._device_blocks(intent):
             return PolicyDecision.BLOCK, POLICY_REASON_DEVICE_BLOCKED
+        if self._windows_user_blocks(intent):
+            return PolicyDecision.BLOCK, POLICY_REASON_WINDOWS_USER_BLOCKED
         if intent in FILESYSTEM_CAPABILITY_INTENTS and not self._filesystem_capability_allows(parameters or {}):
             return PolicyDecision.BLOCK, POLICY_REASON_CAPABILITY_DENIED
         if intent in WEB_CAPABILITY_INTENTS and not self._web_capability_allows(parameters or {}):
@@ -434,6 +460,13 @@ class PolicyEngine:
         questo intent nel proprio elenco di intent bloccati. Un dizionario vuoto/senza voce per
         questo device_id (comportamento di default) non blocca mai nulla."""
         return intent in self.device_blocked_intents.get(current_device_id(), set())
+
+    def _windows_user_blocks(self, intent: str) -> bool:
+        """F1.4.2 (prima fetta): vero se l'account Windows che esegue il processo
+        (core.identity.current_windows_user()) ha questo intent nel proprio elenco di intent
+        bloccati. Un dizionario vuoto/senza voce per questo account (comportamento di default)
+        non blocca mai nulla."""
+        return intent in self.windows_user_blocked_intents.get(current_windows_user(), set())
 
     def _filesystem_capability_allows(self, parameters: dict) -> bool:
         """True se nessuna radice e' configurata (default, nessuna restrizione) oppure se OGNI

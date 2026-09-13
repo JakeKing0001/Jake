@@ -75,6 +75,7 @@ files = [
     "core/filesystem_policy.py",
     "core/forge_probe.py",
     "core/home_assistant_client.py",
+    "core/identity.py",
     "core/intent_provider_base.py",
     "core/nest_search.py",
     "core/network.py",
