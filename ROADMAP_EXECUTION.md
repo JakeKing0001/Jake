@@ -655,7 +655,8 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
 - Stato: `DOING`; `F1.2.5` parziale per rollback filesystem e ripresa del consenso (questa
   ultima verificata localmente, in attesa di CI); `F1.2.1` chiuso parzialmente
   (percorso 3, vedi sotto); `F1.2.2` chiuso parzialmente (prima capability vera - radici
-  filesystem, solo percorso interattivo, solo quattro intent, vedi sotto); `F1.2.4` chiuso per
+  filesystem, ora su ENTRAMBI i percorsi interattivo e automatico, ancora solo quattro intent di
+  mutazione, vedi sotto); `F1.2.4` chiuso per
   il percorso planner (vedi sotto); `F1.2.6` e `F1.2.7` chiusi (vedi sotto); `F1.2.3`/resto
   aperto.
 - `F1.2.2` (parziale, prima capability: radici filesystem) — 12/09/2026: "definire capability per
@@ -693,6 +694,31 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   intersezione), la copertura degli intent di sola lettura (`FIND_FILE`/`GET_FILE_INFO`/
   `READ_FILE_TEXT`...) e del percorso automatico. Prova: 2.176/2.176 test, ruff/mypy/compileall
   verdi su tutti i file toccati.
+- `F1.2.2` (seconda fetta, capability sul percorso automatico) — 13/09/2026: colma il gap piu'
+  serio lasciato aperto sopra, dichiarato apertamente nel modulo stesso da quando esisteva:
+  `PolicyEngine.decide_automated()` non riceveva affatto `parameters`, quindi un piano automatico
+  (il ripiego del planner, `RUN_WORKFLOW`, un trigger) poteva mutare un percorso FUORI dalle
+  radici consentite anche con `allowed_filesystem_roots` configurato - la capability proteggeva
+  solo un comando diretto dell'utente, non un'automazione che parte da sola. Corretto estendendo
+  la firma di `decide_automated()`/`_decide_automated_reasoned()`/`decide_automated_with_reason()`
+  con un `parameters: dict | None = None` opzionale (default `None` = comportamento invariato per
+  chi non lo passa) e applicando `_filesystem_capability_allows()` esattamente come sul percorso
+  interattivo, PRIMA di `CONFIRM` (un'automazione con un `DELETE_PATH` fuori dalle radici si ferma
+  per la capability, non arriva a un `CONFIRM` fuorviante che nessuno e' comunque pronto a
+  rispondere). Un solo chiamante di produzione da aggiornare: `PlanExecutor.execute()` (riga dove
+  gia' calcola `safe_parameters` con `strip_authorization_signals()` per il logging - lo stesso
+  valore ora passa anche alla decisione, un'unica fonte). `tools/replay_session.py::replay_one()`
+  aggiornato allo stesso modo (aveva gia' `parameters` a portata di mano). `explain()` ora riflette
+  correttamente anche il verdetto automatico per un percorso fuori dalle radici, non solo quello
+  interattivo. Aggiornati due stub `PolicyEngine` di test in `tests/test_replay_session.py` che
+  sovrascrivevano `decide_automated()` con la vecchia firma a un solo argomento (avrebbero
+  sollevato `TypeError` sulla nuova chiamata a due argomenti). Aggiunti 5 nuovi test in
+  `tests/test_policy_engine.py::FilesystemCapabilityTests` (capability applicata/non applicata sul
+  percorso automatico, capability che vince su `CONFIRM`, `explain()` per il verdetto automatico).
+  Non ancora affrontato: `execution_safety.rollback_effect()` resta fuori DELIBERATAMENTE (non un
+  buco: il percorso che sta annullando ha gia' superato questo stesso controllo quando l'azione
+  originale e' stata eseguita, non c'e' un nuovo modo di aggirarlo passando dal rollback). Prova:
+  2.237/2.237 test, ruff/mypy/compileall verdi su tutti i file toccati.
 - `F1.2.1` (parziale) — 12/09/2026: chiuso il buco concreto documentato in
   [docs/action-execution-paths.md](docs/action-execution-paths.md) ("Nota sul percorso 3"):
   `PlanExecutor.execute(plan, policy_engine=None, ...)` trattava l'assenza di policy_engine come
@@ -2803,7 +2829,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 23 incrementi completati e verificati (PR #28-#50), la
+Aggiornato 13/09/2026. Sessione lunga con 24 incrementi completati e verificati (PR #28-#51), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -2820,7 +2846,10 @@ timeout di arresto), `F1.8.7` (due buchi da check-then-act non atomico su piu' c
 `DeviceRegistry.claim()` senza lock e `TriggerManager.mark_fired()` con lettura e scrittura come
 due chiamate separate a `MemoryManager` - entrambi corsa reale ma a bassa probabilita' con lo
 scheduler standard, riprodotti in modo affidabile solo forzando deliberatamente l'intreccio esatto
-tra lettura e scrittura). Le tre funzionalita' nuove: `F1.2.2` (prima capability vera - radici filesystem
+tra lettura e scrittura), `F1.2.2` seconda fetta (un piano automatico/`RUN_WORKFLOW`/trigger
+poteva mutare un percorso FUORI dalle radici filesystem consentite, perche' `decide_automated()`
+non riceveva affatto `parameters` - la capability proteggeva solo un comando diretto). Le tre
+funzionalita' nuove: `F1.2.2` prima fetta (prima capability vera - radici filesystem
 consentite), `F1.7.4` prima fetta (redazione strutturata per tipo di dato - percorso/URL/email invece del
 generico "<str:N caratteri>") e `F1.7.4` seconda fetta (redazione per NOME del parametro - un
 parametro `password`/`pin`/`token`/etc ora ottiene sempre un placeholder fisso senza lunghezza ne'
@@ -2831,7 +2860,7 @@ verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.2` (parziale - la notifica di
 un'automazione ora porta lo stesso trace_id delle ricevute che l'ha prodotta), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.233/2.233 test, ruff/mypy/compileall verdi. `G1` resta aperto.
+`master` e' pulito, 2.237/2.237 test, ruff/mypy/compileall verdi. `G1` resta aperto.
 
 Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
 sessione (`sys.setswitchinterval()` abbassato + `threading.Barrier`, senza altro aiuto) NON
@@ -2857,8 +2886,8 @@ aggiornamento di questo file, e commit/PR separati invece di un unico commit eno
 
 Candidati piccoli ancora aperti in F1: il resto di `F1.2.1` (percorso 7,
 `SkillRegistry.execute()`), il resto di `F1.2.2` (le altre sette capability - app/contatto/
-dominio web/device/HA/rete/durata; estendere le radici filesystem al percorso automatico e agli
-intent di sola lettura), `F1.2.3` (intersezione permessi utente/dispositivo/agente/skill/
+dominio web/device/HA/rete/durata; estendere le radici filesystem agli intent di sola lettura -
+il percorso automatico e' ora coperto), `F1.2.3` (intersezione permessi utente/dispositivo/agente/skill/
 sessione - oggi solo un allowlist utente, nessuna intersezione), il resto di `F1.4` (una vera
 classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7` (il resto di `F1.7.2` -
 undo, mai wired a una ricevuta propria; `F1.7.3` retention differenziata; il resto di `F1.7.4` -
