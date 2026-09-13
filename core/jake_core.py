@@ -242,6 +242,9 @@ class JakeCore:
             # il docstring di core/policy_engine.py per il limite dichiarato apertamente.
             allowed_apps=config.get("allowed_apps", []) or [],
             allowed_contacts=config.get("allowed_contacts", []) or [],
+            # F1.2.2 (quinta capability: device Home Assistant): vuoto per default, stesso
+            # principio/limite di allowed_apps/allowed_contacts.
+            allowed_smart_devices=config.get("allowed_smart_devices", []) or [],
         )
         # F1.2.5: collegato DOPO la creazione (self.agent/coding_agent/research_agent esistono
         # gia', self.policy_engine no, quando i tre TaskAgent vengono costruiti sopra) - senza

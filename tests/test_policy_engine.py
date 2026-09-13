@@ -724,5 +724,48 @@ class ContactCapabilityTests(unittest.TestCase):
         self.assertEqual(decision, PolicyDecision.BLOCK)
 
 
+class SmartDeviceCapabilityTests(unittest.TestCase):
+    """F1.2.2 (quinta capability: device Home Assistant). Controlla la stringa GREZZA del
+    parametro "name", non l'entita' risolta per somiglianza da ControlSmartDeviceSkill - stesso
+    limite dichiarato di AppCapabilityTests/ContactCapabilityTests."""
+
+    def test_no_configured_devices_means_no_restriction_at_all(self):
+        engine = PolicyEngine()
+        decision = engine.decide_interactive("CONTROL_SMART_DEVICE", {"name": "qualunque cosa", "action": "on"})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_an_allowed_device_is_permitted(self):
+        engine = PolicyEngine(allowed_smart_devices={"luce del soggiorno"})
+        decision = engine.decide_interactive("CONTROL_SMART_DEVICE", {"name": "Luce del Soggiorno", "action": "on"})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_a_device_outside_the_allowed_list_is_blocked_with_the_right_reason(self):
+        engine = PolicyEngine(allowed_smart_devices={"luce del soggiorno"})
+        decision, reason = engine.decide_interactive_with_reason(
+            "CONTROL_SMART_DEVICE", {"name": "presa della cucina", "action": "off"},
+        )
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+        self.assertEqual(reason, "smart_device_outside_allowed_smart_devices")
+
+    def test_list_smart_devices_is_deliberately_not_covered(self):
+        """LIST_SMART_DEVICES e' sola lettura (elenca senza agire) - stesso schema gia' seguito
+        per le altre capability."""
+        engine = PolicyEngine(allowed_smart_devices={"luce del soggiorno"})
+        decision = engine.decide_interactive("LIST_SMART_DEVICES", {})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_capability_denial_is_checked_before_confirmation_would_otherwise_apply(self):
+        engine = PolicyEngine(allowed_smart_devices={"luce del soggiorno"}, always_confirm_intents={"CONTROL_SMART_DEVICE"})
+        decision = engine.decide_interactive(
+            "CONTROL_SMART_DEVICE", {"name": "presa della cucina", "action": "off", "confirmed": True},
+        )
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+
+    def test_decide_automated_enforces_allowed_smart_devices_when_parameters_are_passed(self):
+        engine = PolicyEngine(allowed_smart_devices={"luce del soggiorno"})
+        decision = engine.decide_automated("CONTROL_SMART_DEVICE", {"name": "presa della cucina", "action": "off"})
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+
+
 if __name__ == "__main__":
     unittest.main()
