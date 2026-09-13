@@ -19,7 +19,7 @@ aggiornato.
 | 3 | Piano automatico (ripiego del planner, `RUN_WORKFLOW`, trigger) | `PlanExecutor.execute` (`core/plan_executor.py`), chiamato da `JakeCore._try_plan`, `skills/workflow.py::RunWorkflowSkill`, `core/trigger_scheduler.py::TriggerScheduler` | Si', `decide_automated`, purche' il chiamante passi `policy_engine` (vedi nota sotto) | `PlanExecutor._log_step` |
 | 4 | Companion server (rete locale) | `core/companion_server.py::_Handler._handle_command` | Si', delega a `command_handler` = `JakeCore.answer`, nessuna logica di esecuzione propria | Stessa del percorso 1/2 (qualunque cosa `answer()` risolva) |
 | 5 | Registrazione skill (plugin loader, Skill Forge) | `core/plugin_loader.py`, `core/skill_forge.py` → `SkillRegistry.register_skill` | N/A: registra soltanto, non esegue | N/A |
-| 6 | Rollback di un passo gia' riuscito | `core/execution_safety.py::rollback_effect`, chiamato da `TaskAgent._rollback` e `PlanExecutor._rollback` | Parziale: rifiuta solo se l'intent compensatorio e' in `blocked_intents` (F1.2.5, 11/09/2026); non passa da `decide_automated`/`decide_interactive` per intero, ne' da `CONFIRM`/`REQUIRE_AUTH` (nessun utente pronto a rispondere durante un rollback automatico) | Nessuna propria: il rollback stesso non produce un `ActionReceipt` separato, solo l'esecuzione del passo originale che l'ha innescato |
+| 6 | Rollback di un passo gia' riuscito | `core/execution_safety.py::rollback_effect`, chiamato da `TaskAgent._rollback` e `PlanExecutor._rollback` | Parziale: rifiuta se l'intent compensatorio e' in `blocked_intents` (F1.2.5, 11/09/2026) - da 13/09/2026 (F1.2.1) `policy_engine=None` e' FAIL-CLOSED (nessun rollback) invece di "nessun controllo", stesso principio del percorso 3; non passa da `decide_automated`/`decide_interactive` per intero, ne' da `CONFIRM`/`REQUIRE_AUTH` (nessun utente pronto a rispondere durante un rollback automatico) | Nessuna propria: il rollback stesso non produce un `ActionReceipt` separato, solo l'esecuzione del passo originale che l'ha innescato |
 | 7 | Dispatch grezzo | `SkillRegistry.execute` (`core/skill_registry.py`) | **No**: dispatcher senza alcun controllo di policy proprio. Sicuro solo perche' oggi tutti i chiamanti reali (percorsi 1-3, rollback) lo invocano dopo una decisione gia' presa altrove - non e' pero' impedito strutturalmente che un futuro chiamante lo invochi direttamente, saltando ogni gate (`F1.2.1`, ancora aperto) | Nessuna: non e' un chokepoint del ledger |
 
 ## Ripresa del consenso (percorsi 1, 2 e 4)
@@ -52,9 +52,19 @@ MissingPolicyEngineFailsClosedTests`). I tre chiamanti reali (`JakeCore._try_pla
 tutti un `policy_engine` vero, quindi il loro comportamento non cambia; cambia solo l'esito di
 un quarto chiamante futuro che se ne dimenticasse, da "esegue tutto senza policy" a "si ferma su
 ogni passo" - coerente con "minimo privilegio"/"negare per default" (`ROADMAP_EXECUTION.md`,
-F1.2.4). Stesso principio resta da applicare a `TaskAgent.policy_engine`/rollback (percorso 6):
-opzionale, collegato esplicitamente da `JakeCore.__init__` dopo aver creato
-`self.policy_engine`, non ancora fail-closed per costruzione.
+F1.2.4).
+
+## Nota sul percorso 6 (rollback)
+
+**Chiuso il 13/09/2026 (F1.2.1).** Stesso principio applicato a `core/execution_safety.py::
+rollback_effect`: `policy_engine=None` trattava `blocked_intents` come "niente da controllare"
+(il rollback eseguiva comunque) invece di FAIL-CLOSED. In produzione questo non era gia'
+sfruttabile - `JakeCore.__init__` collega `policy_engine` a tutti e tre i `TaskAgent` (F1.2.5,
+assegnato esplicitamente DOPO la creazione, perche' `PolicyEngine` non esiste ancora quando i tre
+`TaskAgent` vengono costruiti) - ma un `TaskAgent`/chiamata a `rollback_effect` senza quel
+collegamento esplicito (un test, uno strumento, un futuro chiamante) ora si ferma invece di
+eseguire senza nessun controllo (vedi `tests/test_execution_safety.py::RollbackEdgeCaseTests::
+test_policy_engine_none_is_fail_closed_not_no_restriction`).
 
 ## Cosa resta aperto
 

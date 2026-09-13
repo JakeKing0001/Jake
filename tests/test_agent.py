@@ -94,9 +94,14 @@ class ScriptedOllamaClient:
 
 
 def _agent(registry, client, executor=None) -> TaskAgent:
+    # F1.2.1 (percorso 6): policy_engine permissivo di default - rollback_effect() e' fail-closed
+    # su policy_engine=None (vedi core/execution_safety.py), quindi un test che verifica un vero
+    # rollback ha bisogno di un'istanza vera qui, non del default. Chi vuole verificare un blocco
+    # specifico sovrascrive agent.policy_engine dopo (vedi
+    # RollbackAfterFatalErrorTests.test_rollback_is_refused_when_the_compensating_intent_is_blocked).
     return TaskAgent(
         registry, FakeRetriever(["ADD_NOTE", "CREATE_PATH"]), client, model_provider=lambda: "fake-model",
-        format_result=lambda intent, result: str(result.data), executor=executor,
+        format_result=lambda intent, result: str(result.data), executor=executor, policy_engine=PolicyEngine(),
     )
 
 

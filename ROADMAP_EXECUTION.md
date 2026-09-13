@@ -654,7 +654,7 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
 
 - Stato: `DOING`; `F1.2.5` parziale per rollback filesystem e ripresa del consenso (questa
   ultima verificata localmente, in attesa di CI); `F1.2.1` chiuso parzialmente
-  (percorso 3, vedi sotto); `F1.2.2` chiuso parzialmente (prima capability vera - radici
+  (percorsi 3 e 6, vedi sotto; resta aperto solo il percorso 7); `F1.2.2` chiuso parzialmente (prima capability vera - radici
   filesystem, ora su ENTRAMBI i percorsi interattivo e automatico e su sette intent - le quattro
   mutazioni piu' le tre letture FIND_FILE/GET_FILE_INFO/READ_FILE_TEXT - vedi sotto); `F1.2.4`
   chiuso per il percorso planner (vedi sotto); `F1.2.6` e `F1.2.7` chiusi (vedi sotto); `F1.2.3`/resto
@@ -763,6 +763,28 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   `self.agent`/`self.coding_agent`/`self.research_agent` ricevano sempre un executor esplicito
   gia' passato attraverso `_resolve_and_execute`). Prova: 1.977/1.977 test, ruff/mypy/compileall
   verdi su `core/plan_executor.py` e `tests/test_plan_executor.py`.
+- `F1.2.1` (percorso 6, rollback) — 13/09/2026: stesso principio applicato a
+  `core/execution_safety.py::rollback_effect`, l'ultimo dei tre "percorso N" dichiarati aperti
+  che restava senza fail-closed (il percorso 3 sopra e' chiuso, il percorso 7 resta l'unico
+  ancora aperto, vedi sotto). `policy_engine=None` trattava `blocked_intents` come "niente da
+  controllare" - il rollback eseguiva comunque - invece di FAIL-CLOSED. Verificato PRIMA di
+  correggere se questo fosse gia' sfruttabile in produzione: `JakeCore.__init__` collega gia'
+  `policy_engine` a tutti e tre i `TaskAgent` (`self.agent.policy_engine = self.policy_engine` e
+  i due gemelli, F1.2.5, assegnato DOPO la creazione perche' `PolicyEngine` non esiste ancora
+  quando i tre `TaskAgent` vengono costruiti nel costruttore) - QUINDI NON era un buco gia'
+  sfruttabile in produzione, solo un default pericoloso per chi costruisce un `TaskAgent` senza
+  ripetere quel collegamento (un test, uno strumento, un futuro chiamante). Corretto comunque per
+  lo stesso motivo "minimo privilegio/nega per default" gia' applicato al percorso 3: cambiato
+  `if policy_engine is not None and ...blocked...` in `if policy_engine is None or
+  ...blocked...`. Aggiornati 4 test in `tests/test_execution_safety.py` che si affidavano al
+  vecchio default per passare ora un `PolicyEngine()` permissivo esplicito, aggiunto un test
+  dedicato che verifica il fail-closed, e aggiornato l'helper condiviso `_agent()` in
+  `tests/test_agent.py` (usato da 30+ test) per costruire un `TaskAgent` con un `PolicyEngine()`
+  permissivo di default invece di affidarsi al vecchio comportamento - 2 test in
+  `tests/test_agent.py` sarebbero altrimenti falliti (un rollback che non avveniva piu' per
+  mancanza di policy_engine, non per il motivo che il test intendeva verificare). Aggiornato anche
+  `docs/action-execution-paths.md` (nuova sezione "Nota sul percorso 6"). Prova: 2.242/2.242 test,
+  ruff/mypy/compileall verdi su tutti i file toccati.
 - `F1.2.4` — 12/09/2026: `core/planner_provider.py::_build_output_schema()` chiedeva a Ollama
   passi con `"parameters": {"type": "object"}` SENZA alcuna restrizione sulle chiavi - la causa
   originale del bug corretto in F1.2.5 (un passo poteva arrivare gia' con `"confirmed": true`
@@ -2850,7 +2872,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 25 incrementi completati e verificati (PR #28-#52), la
+Aggiornato 13/09/2026. Sessione lunga con 26 incrementi completati e verificati (PR #28-#53), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -2872,7 +2894,9 @@ poteva mutare un percorso FUORI dalle radici filesystem consentite, perche' `dec
 non riceveva affatto `parameters` - la capability proteggeva solo un comando diretto), `F1.2.2`
 terza fetta (la capability filesystem lasciava comunque Jake libero di LEGGERE qualunque file
 fuori dal recinto - solo le mutazioni erano coperte, ora anche FIND_FILE/GET_FILE_INFO/
-READ_FILE_TEXT). Le tre
+READ_FILE_TEXT), `F1.2.1` percorso 6 (`rollback_effect()` con `policy_engine=None` eseguiva un
+rollback senza controllare `blocked_intents` - non gia' sfruttabile in produzione, che collega
+sempre un `policy_engine` vero, ma un default fail-open pericoloso per chiunque altro). Le tre
 funzionalita' nuove: `F1.2.2` prima fetta (prima capability vera - radici filesystem
 consentite), `F1.7.4` prima fetta (redazione strutturata per tipo di dato - percorso/URL/email invece del
 generico "<str:N caratteri>") e `F1.7.4` seconda fetta (redazione per NOME del parametro - un
@@ -2884,7 +2908,7 @@ verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.2` (parziale - la notifica di
 un'automazione ora porta lo stesso trace_id delle ricevute che l'ha prodotta), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.241/2.241 test, ruff/mypy/compileall verdi. `G1` resta aperto.
+`master` e' pulito, 2.242/2.242 test, ruff/mypy/compileall verdi. `G1` resta aperto.
 
 Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
 sessione (`sys.setswitchinterval()` abbassato + `threading.Barrier`, senza altro aiuto) NON
