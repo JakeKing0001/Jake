@@ -67,12 +67,12 @@ class _AllowAllPolicyEngine(PolicyEngine):
     """PolicyEngine di test che permette sempre - isola i test di replay_one() dalla vera
     classificazione di rischio, per verificare SOLO il comportamento di replay_one() stesso."""
 
-    def decide_automated(self, intent):
+    def decide_automated(self, intent, parameters=None):
         return PolicyDecision.ALLOW
 
 
 class _BlockAllPolicyEngine(PolicyEngine):
-    def decide_automated(self, intent):
+    def decide_automated(self, intent, parameters=None):
         return PolicyDecision.CONFIRM
 
 

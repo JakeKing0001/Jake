@@ -136,9 +136,12 @@ class PlanExecutor:
             # docstring di execute() sul perche'. F1.2.6: *_with_reason() invece di
             # decide_automated() - stessa decisione, ma porta anche la motivazione (un
             # vocabolario chiuso di quattro costanti, mai testo libero - vedi
-            # core/policy_engine.py::POLICY_REASONS) da salvare nel ledger.
+            # core/policy_engine.py::POLICY_REASONS) da salvare nel ledger. F1.2.2 (seconda
+            # fetta): safe_parameters (gia' calcolato sopra, gia' senza segnali di
+            # autorizzazione) passato qui cosi' la capability allowed_filesystem_roots si applica
+            # anche a un piano automatico, non solo a un comando diretto.
             if policy_engine is not None:
-                decision, policy_reason = policy_engine.decide_automated_with_reason(step.intent)
+                decision, policy_reason = policy_engine.decide_automated_with_reason(step.intent, safe_parameters)
             else:
                 decision, policy_reason = PolicyDecision.BLOCK, None
             if decision == PolicyDecision.BLOCK:

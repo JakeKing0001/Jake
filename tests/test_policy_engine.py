@@ -386,18 +386,57 @@ class FilesystemCapabilityTests(unittest.TestCase):
         self.assertEqual(decision, PolicyDecision.BLOCK)
         self.assertEqual(reason, "intent_in_blocked_intents")
 
-    def test_decide_automated_does_not_yet_enforce_filesystem_roots(self):
-        """Dichiarato apertamente: decide_automated() non riceve parametri, quindi non puo'
-        ancora applicare questa capability - vedi il docstring del modulo."""
+    def test_decide_automated_without_parameters_applies_no_restriction(self):
+        """Comportamento invariato per chi non passa `parameters` (es. un vecchio chiamante non
+        ancora aggiornato): nessun percorso da controllare, nessuna restrizione applicabile."""
         engine = PolicyEngine(allowed_filesystem_roots={str(self.allowed_root)})
         decision = engine.decide_automated("DELETE_PATH")
         self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_decide_automated_enforces_filesystem_roots_when_parameters_are_passed(self):
+        """F1.2.2 (seconda fetta): il buco dichiarato apertamente nel modulo - un'automazione
+        poteva mutare un percorso fuori dalle radici consentite perche' decide_automated() non
+        riceveva affatto `parameters` - e' chiuso: PlanExecutor.execute() (l'unico chiamante di
+        produzione) ora passa i parametri del passo."""
+        engine = PolicyEngine(allowed_filesystem_roots={str(self.allowed_root)})
+        decision, reason = engine.decide_automated_with_reason(
+            "DELETE_PATH", {"path": str(self.outside_root / "x.txt")},
+        )
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+        self.assertEqual(reason, "path_outside_allowed_filesystem_roots")
+
+    def test_decide_automated_permits_a_path_inside_an_allowed_root(self):
+        engine = PolicyEngine(allowed_filesystem_roots={str(self.allowed_root)})
+        decision = engine.decide_automated("DELETE_PATH", {"path": str(self.allowed_root / "x.txt")})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_decide_automated_capability_denial_wins_over_confirm(self):
+        """Un'automazione con un DELETE_PATH sia fuori dalle radici consentite SIA gia' in
+        always_confirm_intents deve fermarsi per la capability (BLOCK), non arrivare a CONFIRM -
+        qui nessuno e' comunque pronto a rispondere, ma il motivo salvato nel ledger deve essere
+        quello vero (capability), non un CONFIRM fuorviante che implica "basterebbe confermare"."""
+        engine = PolicyEngine(
+            always_confirm_intents={"DELETE_PATH"}, allowed_filesystem_roots={str(self.allowed_root)},
+        )
+        decision, reason = engine.decide_automated_with_reason(
+            "DELETE_PATH", {"path": str(self.outside_root / "x.txt")},
+        )
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+        self.assertEqual(reason, "path_outside_allowed_filesystem_roots")
 
     def test_explain_reports_the_capability_denial_for_the_interactive_verdict(self):
         engine = PolicyEngine(allowed_filesystem_roots={str(self.allowed_root)})
         result = engine.explain("DELETE_PATH", {"path": str(self.outside_root / "x.txt")})
         self.assertEqual(result["interactive"]["decision"], "block")
         self.assertEqual(result["interactive"]["reason"], "path_outside_allowed_filesystem_roots")
+
+    def test_explain_reports_the_capability_denial_for_the_automated_verdict_too(self):
+        """F1.2.2 (seconda fetta): prima di questo fix, explain()["automated"] avrebbe sempre
+        detto ALLOW qui, nascondendo che l'automazione si sarebbe davvero bloccata."""
+        engine = PolicyEngine(allowed_filesystem_roots={str(self.allowed_root)})
+        result = engine.explain("DELETE_PATH", {"path": str(self.outside_root / "x.txt")})
+        self.assertEqual(result["automated"]["decision"], "block")
+        self.assertEqual(result["automated"]["reason"], "path_outside_allowed_filesystem_roots")
 
 
 if __name__ == "__main__":
