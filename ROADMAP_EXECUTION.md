@@ -1132,7 +1132,8 @@ Dipende da: F1.1 e F1.3.
 Criterio di uscita: una failure end-to-end è ricostruibile senza esporre contenuti privati.
 
 - Stato: `DOING`; `F1.7.1` chiuso; `F1.7.2` chiuso parzialmente (solo la notifica di
-  un'automazione, vedi sotto); `F1.7.4` chiuso parzialmente (percorsi/URL/email, vedi sotto);
+  un'automazione, vedi sotto); `F1.7.4` chiuso parzialmente (percorsi/URL/email per contenuto,
+  ora anche parametri sensibili per NOME - password/pin/token/etc, vedi sotto);
   `F1.7.5` chiuso; `F1.7.6` chiuso parzialmente (failure taxonomy, non ancora rollback rate),
   `F1.7.7` chiuso; `F1.7.8` chiuso (i tre chokepoint - diretto, agente, automatico - tutti
   verificati end-to-end, vedi sotto); resto aperto.
@@ -1192,6 +1193,29 @@ Criterio di uscita: una failure end-to-end è ricostruibile senza esporre conten
   stringa, non sul nome del parametro (un cambio piu' ampio, richiederebbe passare il nome della
   chiave fino a `redact_value()`, oggi puramente ricorsivo su valori). Prova: 2.217/2.217 test,
   ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.7.4` (seconda fetta, redazione per nome del parametro) — 13/09/2026: colma esattamente il
+  gap lasciato aperto sopra. Buco reale, non ipotetico: `skills/security_utils.py::
+  CheckPasswordStrengthSkill` (intent `CHECK_PASSWORD_STRENGTH`) prende un parametro `password`
+  che di solito non somiglia a un percorso/URL/email, quindi un suo fallimento con la
+  registrazione sessioni attiva finiva nel segnaposto generico `<str:N caratteri>` - la LUNGHEZZA
+  ESATTA della password dell'utente scritta su disco, un'informazione che restringe lo spazio di
+  ricerca di un eventuale attacco a forza bruta. Peggio: se un futuro parametro sensibile fosse
+  tipizzato non-stringa (es. un PIN numerico), `redact_value()` lo lasciava passare COMPLETAMENTE
+  INVARIATO (il ramo bool/int/float/None non applicava nessuna redazione). Corretto con un
+  controllo per SOSTANTIVO del nome della chiave (non un nome esatto come
+  `core/config.py::SECRET_KEYS`, un dominio diverso - le credenziali di Config, non i parametri di
+  una skill): un elenco esplicito e deliberatamente enumerato (`password`, `passphrase`, `secret`,
+  `token`, `pin`, `otp`, `api_key`, `apikey`, `credential`, verificato come sottostringa del nome
+  normalizzato, cosi' `admin_password`/`wifi_password` sono protetti allo stesso modo, non solo il
+  nome esatto `password`), applicato PRIMA del controllo di tipo cosi' anche un valore non-stringa
+  ottiene il placeholder fisso `<redatto: parametro sensibile per nome, valore mai scritto>` (mai
+  una lunghezza, mai il valore vero). Riusato automaticamente da `tools/diagnostic_bundle.py`
+  (stessa funzione pubblica, nessuna modifica li' necessaria). Aggiunti 6 nuovi test in
+  `tests/test_session_recorder.py::RedactionByParameterNameTests` (nome esatto, sottostringa,
+  case-insensitivity, valore non-stringa, nome non correlato non impattato, nidificato dentro un
+  altro dict). Non ancora affrontato: altri tipi di dato per CONTENUTO (numero di telefono,
+  indirizzo IP, identificatore di dispositivo - il gap gia' noto lasciato dalla prima fetta).
+  Prova: 2.233/2.233 test, ruff/mypy/compileall verdi su tutti i file toccati.
 - `F1.7.5` — 12/09/2026: "rendere replay sicuro: dry-run predefinito, scope temporaneo e conferma
   per effetti". Buco reale, riprodotto prima del fix - **un bypass completo dell'intera
   architettura di autorizzazione costruita in questa sessione, in uno strumento di debug**.
@@ -2779,7 +2803,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 13/09/2026. Sessione lunga con 22 incrementi completati e verificati (PR #28-#49), la
+Aggiornato 13/09/2026. Sessione lunga con 23 incrementi completati e verificati (PR #28-#50), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -2796,15 +2820,18 @@ timeout di arresto), `F1.8.7` (due buchi da check-then-act non atomico su piu' c
 `DeviceRegistry.claim()` senza lock e `TriggerManager.mark_fired()` con lettura e scrittura come
 due chiamate separate a `MemoryManager` - entrambi corsa reale ma a bassa probabilita' con lo
 scheduler standard, riprodotti in modo affidabile solo forzando deliberatamente l'intreccio esatto
-tra lettura e scrittura). Le due funzionalita' nuove: `F1.2.2` (prima capability vera - radici filesystem
-consentite) e `F1.7.4` (redazione strutturata per tipo di dato - percorso/URL/email invece del
-generico "<str:N caratteri>"). Il resto: `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
+tra lettura e scrittura). Le tre funzionalita' nuove: `F1.2.2` (prima capability vera - radici filesystem
+consentite), `F1.7.4` prima fetta (redazione strutturata per tipo di dato - percorso/URL/email invece del
+generico "<str:N caratteri>") e `F1.7.4` seconda fetta (redazione per NOME del parametro - un
+parametro `password`/`pin`/`token`/etc ora ottiene sempre un placeholder fisso senza lunghezza ne'
+valore, chiudendo anche il caso di un valore non-stringa che prima passava invariato). Il resto:
+`F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.2` (parziale - la notifica di
 un'automazione ora porta lo stesso trace_id delle ricevute che l'ha prodotta), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.227/2.227 test, ruff/mypy/compileall verdi. `G1` resta aperto.
+`master` e' pulito, 2.233/2.233 test, ruff/mypy/compileall verdi. `G1` resta aperto.
 
 Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
 sessione (`sys.setswitchinterval()` abbassato + `threading.Barrier`, senza altro aiuto) NON
@@ -2835,8 +2862,8 @@ intent di sola lettura), `F1.2.3` (intersezione permessi utente/dispositivo/agen
 sessione - oggi solo un allowlist utente, nessuna intersezione), il resto di `F1.4` (una vera
 classe `SecretsVault` versionata, `F1.4.2`-`F1.4.7`), il resto di `F1.7` (il resto di `F1.7.2` -
 undo, mai wired a una ricevuta propria; `F1.7.3` retention differenziata; il resto di `F1.7.4` -
-altri tipi di dato, classificazione per nome del parametro non solo contenuto - `F1.7.8` e'
-chiuso), il resto di `F1.8` (il resto di `F1.8.1` - identita' di canale/sessione vera per due
+altri tipi di dato per contenuto (telefono, IP, id dispositivo) - la classificazione per nome del
+parametro e' ora chiusa; `F1.7.8` e' chiuso), il resto di `F1.8` (il resto di `F1.8.1` - identita' di canale/sessione vera per due
 conferme concorrenti distinte, coda generale per azioni concorrenti non legate a una conferma;
 il resto di `F1.8.4` - drain limitato di un'azione in corso, checkpoint vero, release device
 audio; il resto di `F1.8.5` - diagnosi di un deadlock vero su un lock applicativo, non solo un
