@@ -1,18 +1,22 @@
 """F1.1.8 (Action Contract 2.0, vedi ROADMAP_EXECUTION.md e core/action_ledger.py): contratto
 minimo che ogni ActionReceipt deve rispettare, verificato sia in isolamento
-(validate_action_receipt) sia sui 4 punti reali del codice che oggi costruiscono una ricevuta
-(JakeCore._log_action_outcome/_log_denied_action, TaskAgent._log_step, PlanExecutor._log_step).
-Se in futuro uno di questi punti smettesse di popolare un campo obbligatorio (es. idempotency_key)
-- o ne comparisse un quinto che se ne dimenticasse - questo file fallisce, invece di lasciare che
-una ricevuta incompleta finisca silenziosamente nel ledger append-only."""
+(validate_action_receipt) sia sui 5 punti reali del codice che oggi costruiscono una ricevuta
+(JakeCore._log_action_outcome/_log_denied_action, TaskAgent._log_step, PlanExecutor._log_step,
+core.execution_safety.rollback_effect - il quinto, aggiunto in F1.7.2 quando un rollback ha
+iniziato a produrre una propria ricevuta). Se in futuro uno di questi punti smettesse di popolare
+un campo obbligatorio (es. idempotency_key) - o ne comparisse un sesto che se ne dimenticasse -
+questo file fallisce, invece di lasciare che una ricevuta incompleta finisca silenziosamente nel
+ledger append-only."""
 import time
 import unittest
 import unittest.mock
 
 from core.action_ledger import ACTION_RECEIPT_SCHEMA_VERSION, ActionReceipt, validate_action_receipt
 from core.agent import TaskAgent
+from core.execution_safety import rollback_effect
 from core.jake_core import JakeCore
 from core.plan_executor import PlanExecutor
+from core.policy_engine import PolicyEngine
 
 
 def _valid_receipt(**overrides) -> ActionReceipt:
@@ -65,7 +69,7 @@ def _bare_jake_core() -> JakeCore:
 
 
 class ChokepointsProduceConformingReceiptsTests(unittest.TestCase):
-    """Ognuno dei 4 punti che oggi scrivono nel ledger, esercitato direttamente (non l'intera
+    """Ognuno dei 5 punti che oggi scrivono nel ledger, esercitato direttamente (non l'intera
     pipeline dell'agente/esecutore, gia' coperta altrove) per isolare solo la costruzione della
     ricevuta."""
 
@@ -108,6 +112,21 @@ class ChokepointsProduceConformingReceiptsTests(unittest.TestCase):
                 {"text": "x"}, result="success", verified=True, policy_reason="no_restriction_matched",
             )
         (receipt,), _ = executor.action_ledger.record.call_args
+        validate_action_receipt(receipt)
+
+    def test_rollback_effect(self):
+        """F1.7.2: il quinto chokepoint, aggiunto quando rollback_effect() ha iniziato a
+        produrre una propria ActionReceipt (correlata alla trace_id dell'azione originale)."""
+        class FakeRegistry:
+            def execute(self, intent, parameters=None):
+                return unittest.mock.Mock(success=True)
+
+        ledger = unittest.mock.Mock()
+        rollback_effect(
+            FakeRegistry(), "CREATE_PATH", {"path": "x"}, policy_engine=PolicyEngine(),
+            action_ledger=ledger, trace_id="trace-5", requested_by="agent:general",
+        )
+        (receipt,), _ = ledger.record.call_args
         validate_action_receipt(receipt)
 
 

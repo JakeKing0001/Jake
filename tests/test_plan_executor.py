@@ -424,6 +424,46 @@ class KillSwitchStopsThePlanTests(unittest.TestCase):
         self.assertEqual(len(outcome.rolled_back), 1)
         self.assertFalse(Path(target).exists(), "il rollback doveva cancellare il file creato dal passo 1")
 
+    def test_rollback_writes_a_receipt_with_the_plan_s_trace_id(self):
+        """F1.7.2 ("collegare command, sub-step, verifica, undo e notifica con lo stesso trace
+        id"): il rollback di PlanExecutor ora produce una propria ActionReceipt, correlata alla
+        STESSA trace_id del passo originale - prima non ne produceva nessuna. ActionLedger su
+        file temporaneo esplicito, non il default (il registro vero del progetto)."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            target = str(Path(tmp_dir) / "jake_test_plan_rollback_receipt.txt")
+
+            class KillingRegistry(FakeRegistry):
+                def __init__(self, kill_switch):
+                    super().__init__()
+                    self.kill_switch = kill_switch
+
+                def execute(self, intent, parameters=None):
+                    result = super().execute(intent, parameters)
+                    self.kill_switch.activate()
+                    return result
+
+            from core.kill_switch import KillSwitch
+            kill_switch = KillSwitch()
+            registry = KillingRegistry(kill_switch)
+            plan = Plan(steps=[
+                PlanStep(intent="CREATE_PATH", parameters={"path": target}),
+                PlanStep(intent="ADD_NOTE", parameters={"text": "non deve mai arrivare qui"}),
+            ])
+            ledger = ActionLedger(path=Path(tmp_dir) / "ledger.jsonl")
+            executor = PlanExecutor(registry, action_ledger=ledger)
+            executor.kill_switch = kill_switch
+
+            with unittest.mock.patch("core.plan_executor.log_action"):
+                outcome = executor.execute(plan, policy_engine=PolicyEngine(), requested_by="trigger:automazione")
+
+            self.assertEqual(len(outcome.rolled_back), 1)
+            records = ledger.read_all()
+            create_receipt = next(r for r in records if r["intent"] == "CREATE_PATH")
+            rollback_receipt = next(r for r in records if r["intent"] == "DELETE_PATH")
+            self.assertEqual(rollback_receipt["trace_id"], create_receipt["trace_id"])
+            self.assertEqual(rollback_receipt["requested_by"], "rollback:trigger:automazione")
+            self.assertEqual(rollback_receipt["result"], "success")
+
     def test_already_active_before_the_plan_starts_executes_no_step(self):
         from core.kill_switch import KillSwitch
         kill_switch = KillSwitch()
