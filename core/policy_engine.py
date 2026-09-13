@@ -55,8 +55,25 @@ consentiti - opt-in, vuoto per default, stesso principio di `allowed_filesystem_
 dominio permesso copre anche i suoi sottodomini (`example.com` permette `foo.example.com`),
 simmetrico a come una radice filesystem permette i suoi discendenti.
 
-App/contatto/servizio Home Assistant/rete/durata (le altre capability elencate in ROADMAP.md) e
-l'intersezione con agente/skill/sessione restano completamente aperte."""
+F1.2.2 (terza e quarta capability: app e contatto) - `allowed_apps` restringe `OPEN_APP`,
+`allowed_contacts` restringe `SEND_WHATSAPP`/`SEND_EMAIL`, entrambe opt-in e vuote per default.
+Limite dichiarato apertamente, accettato come compromesso deliberato (decisione dell'utente): a
+differenza di percorso/dominio (valori sintattici, controllabili cosi' come sono), "app" e
+"contatto" sono in realta' risolti a runtime DENTRO la skill - `OpenAppSkill` fa fuzzy matching
+contro le app installate (`core/app_resolver.py`), `SendWhatsAppSkill`/`SendEmailSkill` cercano il
+contatto nella rubrica - un tempo DOPO che `PolicyEngine` ha gia' deciso. Queste due capability
+controllano quindi la stringa GREZZA cosi' com'e' arrivata dal modello (normalizzata solo per
+spazi/maiuscole), non il risultato della risoluzione: una richiesta formulata diversamente da una
+voce dell'elenco consentito (es. "blocco note" quando l'elenco ha "notepad", entrambi risolti
+dallo stesso `AppResolver` alla stessa app) puo' aggirare il controllo. Corretto seguire questa
+strada comunque perche' l'alternativa - dare a `PolicyEngine` una dipendenza diretta su
+`AppResolver`/`ContactBook` per risolvere PRIMA di decidere - e' un cambio architetturale piu'
+ampio, non una fetta stretta; il controllo sulla stringa grezza resta comunque un livello di
+difesa reale contro un uso diretto/letterale (un dispositivo companion che dice esattamente "apri
+Impostazioni" o "manda un whatsapp a Marco Rossi").
+
+Servizio Home Assistant/rete/durata (le altre capability elencate in ROADMAP.md) e l'intersezione
+con agente/skill/sessione restano completamente aperte."""
 import os
 from enum import Enum
 from pathlib import Path
@@ -118,9 +135,16 @@ POLICY_REASON_DEVICE_BLOCKED = "intent_in_device_blocked_intents"
 # fuorviante in un audit del ledger) per lo stesso principio: lo STESSO intent puo' essere
 # permesso o negato a seconda del parametro, non dell'intent da solo.
 POLICY_REASON_WEB_CAPABILITY_DENIED = "domain_outside_allowed_web_domains"
+# F1.2.2 (terza/quarta capability: app e contatto): stesso principio - un valore fuori
+# dall'elenco consentito, non l'intent bloccato in assoluto. Due motivazioni distinte (non una
+# sola "capability denied" generica) cosi' un audit del ledger dice ESATTAMENTE quale controllo
+# ha fermato l'azione, coerente con lo stile gia' usato per filesystem/dominio web.
+POLICY_REASON_APP_CAPABILITY_DENIED = "app_outside_allowed_apps"
+POLICY_REASON_CONTACT_CAPABILITY_DENIED = "contact_outside_allowed_contacts"
 POLICY_REASONS = frozenset({
     POLICY_REASON_BLOCKED, POLICY_REASON_REQUIRE_AUTH, POLICY_REASON_CONFIRM, POLICY_REASON_ALLOWED,
     POLICY_REASON_CAPABILITY_DENIED, POLICY_REASON_DEVICE_BLOCKED, POLICY_REASON_WEB_CAPABILITY_DENIED,
+    POLICY_REASON_APP_CAPABILITY_DENIED, POLICY_REASON_CONTACT_CAPABILITY_DENIED,
 })
 
 # F1.2.2: le quattro mutazioni sono le stesse gia' raggruppate in core/execution_safety.py::
@@ -157,6 +181,28 @@ _FILESYSTEM_PATH_PARAMETER_KEYS = ("path", "destination")
 # READ_FILE_TEXT in F1.2.2 (prima le mutazioni, poi le letture come fetta separata).
 WEB_CAPABILITY_INTENTS = frozenset({"OPEN_URL"})
 _WEB_URL_PARAMETER_KEYS = ("url",)
+
+# F1.2.2 (terza capability: app) - vedi il docstring del modulo per il limite dichiarato
+# (controllo sulla stringa grezza, non sull'app risolta da AppResolver).
+APP_CAPABILITY_INTENTS = frozenset({"OPEN_APP"})
+_APP_NAME_PARAMETER_KEYS = ("app",)
+
+# F1.2.2 (quarta capability: contatto) - SEND_WHATSAPP usa "contact" (nome o numero, vedi
+# skills/contacts.py::SendWhatsAppSkill), SEND_EMAIL usa "to" (indirizzo o nome di un contatto in
+# rubrica) - due nomi di parametro diversi per lo stesso concetto, entrambi controllati per
+# entrambi gli intent senza che questo causi falsi positivi: il controllo si applica solo quando
+# l'intent e' in CONTACT_CAPABILITY_INTENTS, quindi "to" non viene mai guardato per un intent che
+# non ha nulla a che fare con un contatto. Stesso limite di APP_CAPABILITY_INTENTS: stringa
+# grezza, non il contatto risolto dalla rubrica.
+CONTACT_CAPABILITY_INTENTS = frozenset({"SEND_WHATSAPP", "SEND_EMAIL"})
+_CONTACT_PARAMETER_KEYS = ("contact", "to")
+
+
+def _normalized_text(value: str) -> str:
+    # casefold() invece di lower(): un confronto testuale case-insensitive corretto anche per
+    # caratteri non-ASCII (es. la "ß" tedesca), lo stesso principio di str.casefold() nella
+    # documentazione standard di Python per "confronti insensibili al maiuscolo/minuscolo".
+    return value.strip().casefold()
 
 
 def _normalized_for_comparison(path: Path) -> str:
@@ -207,6 +253,7 @@ class PolicyEngine:
         self, auth_gate=None, blocked_intents: set | None = None, always_confirm_intents: set | None = None,
         require_auth_intents: set | None = None, allowed_filesystem_roots: set | list | None = None,
         device_blocked_intents: dict[str | None, set] | None = None, allowed_web_domains: set | list | None = None,
+        allowed_apps: set | list | None = None, allowed_contacts: set | list | None = None,
     ):
         self.auth_gate = auth_gate
         self.blocked_intents = set(blocked_intents or set())
@@ -234,6 +281,12 @@ class PolicyEngine:
         # controllo): i domini sono gia' case-insensitive per definizione (DNS), coerente con
         # _domain_of() che restituisce sempre un hostname minuscolo.
         self._allowed_web_domains = {domain.lower() for domain in (allowed_web_domains or [])}
+        # F1.2.2 (terza/quarta capability: app e contatto): vuoto/None (default) = nessuna
+        # restrizione, stesso principio delle altre capability. Normalizzati con _normalized_text
+        # (stesso confronto che verra' applicato al valore controllato) cosi' "Blocco Note" in
+        # config.json corrisponde a "blocco note" detto dall'utente.
+        self._allowed_apps = {_normalized_text(app) for app in (allowed_apps or [])}
+        self._allowed_contacts = {_normalized_text(contact) for contact in (allowed_contacts or [])}
 
     def register_intent(self, intent: str) -> None:
         """Sincronizza UN intent con la policy corrente, secondo la sua classificazione del
@@ -309,6 +362,10 @@ class PolicyEngine:
             return PolicyDecision.BLOCK, POLICY_REASON_CAPABILITY_DENIED
         if intent in WEB_CAPABILITY_INTENTS and not self._web_capability_allows(parameters):
             return PolicyDecision.BLOCK, POLICY_REASON_WEB_CAPABILITY_DENIED
+        if intent in APP_CAPABILITY_INTENTS and not self._app_capability_allows(parameters):
+            return PolicyDecision.BLOCK, POLICY_REASON_APP_CAPABILITY_DENIED
+        if intent in CONTACT_CAPABILITY_INTENTS and not self._contact_capability_allows(parameters):
+            return PolicyDecision.BLOCK, POLICY_REASON_CONTACT_CAPABILITY_DENIED
         if (
             self.auth_gate is not None
             and getattr(self.auth_gate, "enabled", False)
@@ -338,6 +395,10 @@ class PolicyEngine:
             return PolicyDecision.BLOCK, POLICY_REASON_CAPABILITY_DENIED
         if intent in WEB_CAPABILITY_INTENTS and not self._web_capability_allows(parameters or {}):
             return PolicyDecision.BLOCK, POLICY_REASON_WEB_CAPABILITY_DENIED
+        if intent in APP_CAPABILITY_INTENTS and not self._app_capability_allows(parameters or {}):
+            return PolicyDecision.BLOCK, POLICY_REASON_APP_CAPABILITY_DENIED
+        if intent in CONTACT_CAPABILITY_INTENTS and not self._contact_capability_allows(parameters or {}):
+            return PolicyDecision.BLOCK, POLICY_REASON_CONTACT_CAPABILITY_DENIED
         if intent in self.always_confirm_intents:
             return PolicyDecision.CONFIRM, POLICY_REASON_CONFIRM
         return PolicyDecision.ALLOW, POLICY_REASON_ALLOWED
@@ -382,6 +443,36 @@ class PolicyEngine:
                 continue
             domain = _domain_of(value)
             if not domain or not any(_domain_matches(domain, allowed) for allowed in self._allowed_web_domains):
+                return False
+        return True
+
+    def _app_capability_allows(self, parameters: dict) -> bool:
+        """True se nessuna app e' configurata (default, nessuna restrizione) oppure se il nome
+        dell'app (`_APP_NAME_PARAMETER_KEYS`) e' uno di quelli consentiti - confronto testuale
+        esatto dopo normalizzazione (vedi _normalized_text), NON la risoluzione fuzzy di
+        AppResolver (vedi il docstring del modulo per il limite dichiarato)."""
+        if not self._allowed_apps:
+            return True
+        for key in _APP_NAME_PARAMETER_KEYS:
+            value = parameters.get(key)
+            if not value or not isinstance(value, str):
+                continue
+            if _normalized_text(value) not in self._allowed_apps:
+                return False
+        return True
+
+    def _contact_capability_allows(self, parameters: dict) -> bool:
+        """True se nessun contatto e' configurato (default, nessuna restrizione) oppure se il
+        contatto (`_CONTACT_PARAMETER_KEYS`: "contact" per SEND_WHATSAPP, "to" per SEND_EMAIL) e'
+        uno di quelli consentiti - confronto testuale esatto, NON la risoluzione tramite la
+        rubrica (vedi il docstring del modulo per il limite dichiarato)."""
+        if not self._allowed_contacts:
+            return True
+        for key in _CONTACT_PARAMETER_KEYS:
+            value = parameters.get(key)
+            if not value or not isinstance(value, str):
+                continue
+            if _normalized_text(value) not in self._allowed_contacts:
                 return False
         return True
 
