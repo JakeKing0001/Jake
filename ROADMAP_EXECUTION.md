@@ -1730,8 +1730,11 @@ Criterio di uscita: zero bypass nel corpus security e provenienza mostrata per o
   resto dei modi in cui un'azione sensibile potrebbe derivare da contenuto esterno, es. percorso
   planner o piu' passi intermedi); `F1.5.2` chiuso parzialmente (il marcatore ora sopravvive anche
   oltre l'osservazione dello STESSO turno, propagato nella cronologia a breve termine - vedi
-  sotto; la memoria a lungo termine/NEST restano fuori, gap dichiarato); il resto della sezione
-  (F1.5.5-F1.5.8) resta completamente aperto.
+  sotto; la memoria a lungo termine/NEST restano fuori, gap dichiarato); `F1.5.6` chiuso
+  parzialmente (corpus piccolo e mirato che prova il backstop strutturale su piu' sorgenti/lingue,
+  vedi sotto - non un elenco enorme di varianti letterali, dichiaratamente non significativo senza
+  un modello vero dietro questi test, vedi sotto); il resto della sezione (F1.5.5, F1.5.7-F1.5.8)
+  resta completamente aperto.
 - `F1.5.1` (prima fetta - marcatore strutturale per il contenuto esterno) — 14/09/2026: fase mai
   affrontata prima in questa sessione, prima investigata con un sottoagente di ricerca dedicato
   (stesso principio gia' seguito per F1.6/F1.1.7: capire lo stato reale prima di scrivere codice)
@@ -1854,6 +1857,33 @@ Criterio di uscita: zero bypass nel corpus security e provenienza mostrata per o
   ExternalContentPropagatesIntoHistoryTests` (marcatore in cronologia ma non nella risposta
   restituita, una risposta ordinaria mai marcata, nessuna fuga di stato verso un turno successivo
   scollegato). Prova: 2.458/2.458 test, ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.5.6` (prima fetta - corpus mirato multi-sorgente/multilingue) — 14/09/2026: "costruire un
+  corpus d'attacco multilingue e multimodale". Prima di scrivere codice, chiarito COSA significa
+  davvero "corpus" in questa suite: `tests/test_prompt_injection_attack.py` (gia' esistente, non
+  toccato in questa sessione fino ad ora) non invoca mai un modello VERO - simula il caso PEGGIORE
+  (il modello finto si fa gia' convincere dall'iniezione) e prova che il backstop STRUTTURALE
+  (`PolicyEngine.decide_interactive`, indipendente dal contenuto) blocca comunque l'azione. Un
+  "corpus" di centinaia di varianti letterali di testo iniettato non aggiungerebbe potere di
+  verifica in QUESTO tipo di test (proverebbe solo che la suite sa scrivere stringhe diverse, non
+  che la difesa regge contro un attacco vero) - un vero corpus multilingue per un attacco dal vivo
+  contro il modello reale e' un esercizio di red-team separato, non una suite di unit test
+  deterministica. Scelto quindi un corpus PICCOLO e MIRATO che estende la stessa proprieta' gia'
+  provata (READ_SCREEN, italiano) ad altre due dimensioni reali: sorgente (`CLIPBOARD_READ`/
+  `WEB_SEARCH`/`READ_FILE_TEXT` - le altre skill censite in `core/taint.py::
+  EXTERNAL_CONTENT_INTENTS`, F1.5.1) e lingua (payload in inglese misto, non solo italiano - un
+  vettore reale: una pagina web o un file possono essere scritti in qualunque lingua
+  indipendentemente da quella in cui l'utente parla a Jake). `FakeRegistry` reso parametrico
+  (`source_intent`/`injected_text`, default invariato per i due test gia' esistenti) invece di
+  duplicare la classe per ogni sorgente. Aggiunto 1 nuovo test parametrizzato (`subTest` per
+  sorgente) in `tests/test_prompt_injection_attack.py::PromptInjectionCorpusAcrossSourcesTests` -
+  se una sorgente in piu' venisse aggiunta a `EXTERNAL_CONTENT_INTENTS` in futuro, estendere
+  `INJECTION_CORPUS` basta a estendere la prova, senza una nuova classe di test. Non ancora
+  affrontato: `F1.5.7` (injection indiretta dentro PDF/commenti di codice/testo su immagini/nomi
+  file - nessuno di questi formati e' oggi effettivamente PARSATO da Jake al di la' del testo
+  grezzo, READ_FILE_TEXT legge qualunque file come UTF-8 con errori ignorati; un vero corpus
+  d'attacco per un modello reale, il significato piu' letterale di F1.5.6, resta un esercizio di
+  red-team manuale separato). Prova: 2.473/2.473 test, ruff verde (solo test, nessun file di
+  produzione toccato).
 
 ### F1.6 — Sandbox permanente per skill
 
@@ -3943,7 +3973,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 14/09/2026. Sessione lunga con 57 incrementi completati e verificati (PR #28-#84), la
+Aggiornato 14/09/2026. Sessione lunga con 58 incrementi completati e verificati (PR #28-#85), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -4076,7 +4106,7 @@ non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ul
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.472/2.472 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.473/2.473 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
 invariati, nessuno dei due coperto da "mypy selettivo" in CI - 79 file nella lista selettiva,
 `core/identity.py`/`core/forge_worker.py`/`core/sandboxed_skill_worker.py`/`core/taint.py`
@@ -4152,9 +4182,11 @@ piccole senza un criterio. Ad oggi: il quinto criterio (sandbox) ha le fondament
 (F1.6.8); AppContainer (F1.6.4) e' stato valutato e scartato per ora (pywin32 non lo supporta
 affatto, servirebbero bindings ctypes da zero) - manifest di directory (F1.6.5) e negazione rete
 (F1.6.6, con un'alternativa piu' semplice suggerita - una regola del Windows Firewall scoped al
-worker, invece di AppContainer) restano aperti; il quarto (prompt-injection) ha una
-prima fetta (F1.5.1-F1.5.4) ma nessun corpus d'attacco vero (F1.5.6) ne' test di injection
-indiretta (F1.5.7); il sesto (kill switch) e' ora chiuso per le quattro superfici dichiarate, ma
+worker, invece di AppContainer) restano aperti; il quarto (prompt-injection) ha F1.5.1-F1.5.4
+piu' un piccolo corpus mirato multi-sorgente/multilingue (F1.5.6, il significato letterale di
+"corpus" per un attacco dal vivo contro un modello vero resta un esercizio di red-team manuale
+separato) ma ancora nessun test di injection indiretta (F1.5.7); il sesto (kill switch) e' ora
+chiuso per le quattro superfici dichiarate, ma
 senza kill dell'intero process tree (dichiarato fuori scope, richiederebbe F1.6.3/Job Object); il
 settimo (modalita' privata) e' verificato chiuso (F1.7.8); gli altri tre restano parzialmente
 aperti come dettagliato nelle rispettive sezioni sopra.
