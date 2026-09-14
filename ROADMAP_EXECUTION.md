@@ -1325,9 +1325,11 @@ Dipende da: F1.1 e F1.2.
 Criterio di uscita: tutte le azioni external/destructive/admin hanno prova; l'80% delle azioni
 reversibili dispone di undo testato.
 
-- Stato: `DOING`; `F1.3.1`, `F1.3.3`, `F1.3.6` e `F1.3.8` chiusi, `F1.3.2` esteso a processi E
-  finestre (CLOSE_WINDOW/CLOSE_APP, vedi sotto - non ancora browser/casa, quest'ultima bloccata su
-  una decisione di dipendenza per un client Home Assistant iniettabile), resto aperto.
+- Stato: `DOING`; `F1.3.1`, `F1.3.3`, `F1.3.6` e `F1.3.8` chiusi, `F1.3.2` esteso a processi,
+  finestre E casa (CONTROL_SMART_DEVICE, vedi sotto - la verifica e' dentro la skill stessa, non
+  ancora un verificatore INDIPENDENTE in `INTENT_SAFETY_REGISTRY` come per CLOSE_WINDOW, che
+  resta bloccato sulla stessa decisione di dipendenza per un client Home Assistant iniettabile in
+  `execution_safety.py`; non ancora browser), resto aperto.
 - `F1.3.1` — 11/09/2026: `core/execution_safety.py` aveva tre strutture parallele da tenere
   sincronizzate a mano - `VERIFIABLE_INTENTS` (insieme), l'if/elif di `verify_effect`,
   `ROLLBACK_HANDLERS` + `ROLLBACK_COMPENSATING_INTENT` (due dizionari) - esattamente il pattern
@@ -1458,6 +1460,33 @@ reversibili dispone di undo testato.
   test, ruff/mypy/compileall verdi su tutti i file toccati (mypy: `core/execution_safety.py`
   resta nella lista "selettiva" e pulito; i file `skills/*.py` toccati non erano gia' nella lista
   - non nuovi errori introdotti, verificato individualmente, ma nemmeno mai stati coperti).
+- `F1.3.2` (esteso a casa - CONTROL_SMART_DEVICE) — 14/09/2026: stesso identico pattern del buco
+  gia' trovato e corretto due volte per i processi e una volta per le finestre in questa sessione,
+  ora trovato anche qui - `skills/smart_home.py::ControlSmartDeviceSkill` dichiarava `success=True`
+  subito dopo `client.call_service(...)`, senza controllare che il dispositivo FISICO avesse
+  davvero cambiato stato. L'API REST di Home Assistant e' fire-and-forget quanto `PostMessage`: una
+  chiamata di servizio "accettata" (nessuna eccezione) significa solo che Home Assistant ha
+  ricevuto la richiesta, non che il dispositivo (spento, scollegato, non rispondente) l'abbia
+  eseguita. Diverso da "casa" come discusso finora: qui la correzione e' interamente DENTRO la
+  skill (nuovo `_wait_until_state_matches()`, poll su `client.get_state(entity_id)` fino a
+  `STATE_WAIT_SECONDS`, stesso principio/stessa forma di `_wait_until_window_closed` per
+  CLOSE_WINDOW) - NON richiede iniettare un client Home Assistant in `execution_safety.py` (il
+  blocco dichiarato finora), perche' la skill ha gia' il proprio client. "toggle" non ha un target
+  fisso (dipende dallo stato precedente, non prevedibile con certezza): confermato da un CAMBIO di
+  stato rispetto a quello osservato PRIMA della chiamata, non da un valore atteso specifico - letto
+  esplicitamente PRIMA di `call_service()`, non dopo (un bug d'ordine trovato scrivendo un test con
+  un `FakeClient` che muta lo stesso dict osservato, non a tavolino: leggere lo stato "originale"
+  dopo aver gia' chiamato il servizio avrebbe reso "toggle" impossibile da confermare). Resta
+  aperto, come dichiarato: un verificatore INDIPENDENTE in `INTENT_SAFETY_REGISTRY` (come
+  `_verify_window_closed` per CLOSE_WINDOW) richiederebbe comunque la stessa iniezione di
+  dipendenza mai affrontata - senza di esso, CONTROL_SMART_DEVICE non e' in `VERIFIABLE_INTENTS` e
+  non riceve un `verified=True/False` nel log strutturato/ledger, anche se ora la skill stessa non
+  mente piu' sul successo. Aggiunti 5 nuovi test in `tests/test_smart_home.py::
+  ControlSmartDeviceIndependentVerificationTests` (dispositivo che conferma, dispositivo che non
+  risponde mai, toggle confermato da un cambio di stato, toggle mai confermato, un errore
+  transitorio durante il polling che non fa crashare), `STATE_WAIT_SECONDS`/`_POLL_INTERVAL_
+  SECONDS` ridotti nei test (stesso principio di `CLOSE_WAIT_SECONDS` in F1.3.2 sopra). Prova:
+  2.463/2.463 test, ruff verde (il modulo non e' nel set selettivo di mypy, come le altre skill).
 - `F1.3.8` — 13/09/2026: "esporre undo e prove a HUD/companion tramite eventi versionati".
   Funzionalita' nuova, non un fix - un rollback (`rollback_effect`) o una verifica indipendente
   dell'effetto (F1.3.3, `verify_effect`) erano visibili SOLO nel ledger
@@ -3810,7 +3839,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 14/09/2026. Sessione lunga con 53 incrementi completati e verificati (PR #28-#80), la
+Aggiornato 14/09/2026. Sessione lunga con 54 incrementi completati e verificati (PR #28-#81), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -3943,7 +3972,7 @@ non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ul
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.458/2.458 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.463/2.463 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
 invariati, nessuno dei due coperto da "mypy selettivo" in CI - 79 file nella lista selettiva,
 `core/identity.py`/`core/forge_worker.py`/`core/sandboxed_skill_worker.py`/`core/taint.py`
@@ -4014,11 +4043,12 @@ dominio web/app/contatto/device Home Assistant/rete - sono ora complete, con i r
 gia' dichiarati - FIND_FILE senza `path` esplicito, LIST_SMART_DEVICES escluso, app/contatto/
 device/rete su stringa grezza non risolta),
 `F1.2.3` (resto: prima e seconda capability chiuse - `device_blocked_intents`/
-`agent_blocked_intents` - ma l'intersezione con skill/sessione resta aperta), il resto di `F1.3.2` (processi e finestre
+`agent_blocked_intents` - ma l'intersezione con skill/sessione resta aperta), il resto di `F1.3.2` (processi, finestre e casa
 sono ora coperti - CLOSE_WINDOW ha anche un verificatore indipendente, CLOSE_APP resta corretto
-solo a livello di skill per la complessita' della sua busta dati; browser/casa restano aperti,
-"casa" bloccata su una decisione di dipendenza - iniettare un client Home Assistant in
-`verify_effect()`, oggi una funzione libera senza dipendenze esterne), il resto di `F1.4`
+solo a livello di skill per la complessita' della sua busta dati, CONTROL_SMART_DEVICE resta
+corretto solo a livello di skill (un verificatore indipendente in `INTENT_SAFETY_REGISTRY`
+richiederebbe comunque iniettare un client Home Assistant in `verify_effect()`, oggi una funzione
+libera senza dipendenze esterne - il blocco dichiarato resta); solo browser resta aperto), il resto di `F1.4`
 (`F1.4.1` e `F1.4.2` sono ora CHIUSI/chiusi quanto deciso dall'utente - `SecretsVault` versionata,
 identita' Windows+dispositivo con "profilo Jake"/"speaker profile" dichiaratamente fuori scope;
 restano `F1.4.4`-`F1.4.7`, ciascuno un pezzo di prodotto a se' - passkey/WebAuthn, pairing QR,
