@@ -6,6 +6,7 @@ from core import intent_patterns
 from core.action_contracts import ActionError, ActionProposal, validate_action_error, validate_action_proposal
 from core.action_ledger import ActionLedger, ActionReceipt, authorization_of, idempotency_key_of, new_action_id
 from core.agent import TaskAgent
+from core.agent_checkpoint import AgentCheckpoint, AgentCheckpointStore
 from core.auth_gate import AuthGate
 from core.autonomy_budget import AutonomyBudget
 from core.command import Command
@@ -51,8 +52,8 @@ from skills.kill_switch import KillSwitchSkill, ResetKillSwitchSkill
 from skills.learn import CorrectLastSkill, ForgetLearnedSkill, LearnCommandSkill, ListLearnedSkill
 from skills.model_control import ListModelsSkill, SetModelSkill
 from skills.session_control import (
-    HelpSkill, PauseListeningSkill, PrivateModeSkill, RepeatLastSkill, StartDictationSkill, StopDictationSkill,
-    StopTalkingSkill,
+    HelpSkill, PauseListeningSkill, PrivateModeSkill, RepeatLastSkill, ResumeInterruptedTaskSkill,
+    StartDictationSkill, StopDictationSkill, StopTalkingSkill,
 )
 from skills.notification_mode import GetNotificationModeSkill, SetNotificationModeSkill
 from skills.skill_forge_skills import CreateSkillSkill, DeleteCreatedSkillSkill, ListCreatedSkillsSkill
@@ -103,6 +104,11 @@ class JakeCore:
         # e' disattivato per default. Rispetta comunque la modalita' privata, come tutto il resto.
         self.action_ledger = ActionLedger()
         self.skill_registry.plan_executor.action_ledger = self.action_ledger
+
+        # F1.8.4 ("checkpoint... da cui riprendere"): un solo checkpoint alla volta, salvato dopo
+        # ogni passo dell'agente "general" - vedi core/agent_checkpoint.py per lo scope
+        # deliberatamente stretto (nessuna ripresa automatica, un compito alla volta).
+        self.agent_checkpoints = AgentCheckpointStore()
 
         # Kill switch globale (F1): un solo interruttore condiviso da tutti gli agenti e le
         # automazioni - vedi core/kill_switch.py, skills/kill_switch.py, activate_kill_switch()/
@@ -169,6 +175,10 @@ class JakeCore:
             kill_switch=self.kill_switch,
         )
         self.agent.on_step = self._on_agent_step
+        # F1.8.4 ("checkpoint... da cui riprendere"): solo l'agente "general" per questa prima
+        # fetta (il percorso a comando singolo/voce, non coding/ricerca - vedi core/agent_
+        # checkpoint.py per il perche' dello scope stretto).
+        self.agent.on_step_completed = self._on_agent_step_completed
 
         # Architettura multi-agente (v5.0/5.1/5.2): stesso TaskAgent, configurato con un
         # elenco di strumenti fisso e un prompt diverso per i domini coding/ricerca, invece del
@@ -354,6 +364,7 @@ class JakeCore:
             ("STOP_TALKING", StopTalkingSkill(self)),
             ("PAUSE_LISTENING", PauseListeningSkill(self)),
             ("SET_PRIVATE_MODE", PrivateModeSkill(self)),
+            ("RESUME_INTERRUPTED_TASK", ResumeInterruptedTaskSkill(self)),
             ("KILL_SWITCH", KillSwitchSkill(self)),
             ("RESET_KILL_SWITCH", ResetKillSwitchSkill(self)),
             ("START_DICTATION", StartDictationSkill(self)),
@@ -504,6 +515,31 @@ class JakeCore:
             self.event_bus.publish(HudEvent(EventType.UNDO, {"intent": intent}))
         for intent, verified in verified_steps:
             self.event_bus.publish(HudEvent(EventType.VERIFICATION, {"intent": intent, "verified": verified}))
+
+    def _on_agent_step_completed(self, outcome) -> None:
+        """F1.8.4 ("checkpoint... da cui riprendere"): collegato a `self.agent.on_step_completed`
+        (core/agent.py::TaskAgent) - chiamato dopo OGNI passo che l'agente "general" completa
+        (riuscito o fallito), sovrascrive il checkpoint sul disco con il progresso aggiornato.
+        `outcome.trace_id`/`outcome.request` sono popolati da `TaskAgent.run()` stesso (F1.8.4);
+        solo intent/parametri/esito di ogni passo vengono salvati (mai l'intero `SkillResult` - i
+        dati grezzi di una skill potrebbero contenere contenuto esterno/sensibile che non ha
+        senso duplicare su un secondo file, il ledger e' gia' la fonte di verita' per quello)."""
+        if outcome.trace_id is None or outcome.request is None:
+            return
+        checkpoint = AgentCheckpoint(
+            trace_id=outcome.trace_id, agent_name="general", request=outcome.request,
+            completed_steps=[
+                {
+                    "intent": step.intent, "parameters": step.parameters,
+                    "success": bool(step.result and step.result.success),
+                }
+                for step in outcome.steps
+            ],
+        )
+        try:
+            self.agent_checkpoints.save(checkpoint)
+        except OSError:
+            self.logger.exception("Errore salvando il checkpoint del compito in corso")
 
     def _on_skill_installed(self, draft) -> None:
         # F1: always_confirm_intents/require_auth_intents (vedi sopra) sono popolati una sola
@@ -841,6 +877,11 @@ class JakeCore:
             return message
 
         if outcome.question is not None:
+            # F1.8.4 ("checkpoint"): il compito NON e' interrotto anomalamente - l'agente ha
+            # chiesto qualcosa e _continue_agent() (sotto) ripartira' da capo con la risposta,
+            # costruendo un checkpoint nuovo se necessario. Il checkpoint di QUESTO tentativo non
+            # serve piu'.
+            self.agent_checkpoints.clear()
             self.conversation_state.set_pending_action({
                 "intent": "AGENT_CONTINUE",
                 "parameters": {"request": request, "question": outcome.question},
@@ -850,6 +891,11 @@ class JakeCore:
             self._remember_exchange(remember_text, Command("AGENT", {"request": request}), outcome.question)
             return outcome.question
 
+        # F1.8.4 ("checkpoint"): il compito e' CONCLUSO (risposta finale o nessun piano) - un
+        # checkpoint serve solo per un'interruzione ANOMALA a meta', mai per il normale "e'
+        # finito" (altrimenti una futura RESUME_INTERRUPTED_TASK crederebbe che ci sia ancora
+        # qualcosa da riprendere quando in realta' il compito precedente e' semplicemente finito).
+        self.agent_checkpoints.clear()
         response = outcome.final_answer or self.NO_PLAN
         self._remember_exchange(remember_text, Command("AGENT", {"request": request}), response)
         return response
@@ -861,6 +907,24 @@ class JakeCore:
         question = action["parameters"].get("question", "")
         combined = f"{request}\n(L'utente ha risposto alla domanda \"{question}\" con: {answer_text})"
         return self._run_agent(combined, remember_text=answer_text)
+
+    def _resume_interrupted_task(self, checkpoint: AgentCheckpoint) -> str:
+        """F1.8.4 ("checkpoint... da cui riprendere"): non serve modificare TaskAgent.run() per
+        "riprendere davvero" un compito - il modello vede gia' cosa e' stato fatto (riassunto
+        dentro la richiesta stessa) e decide da solo il prossimo passo, esattamente come farebbe
+        per qualunque altra richiesta. Se `_run_agent()` sceglie di nuovo l'agente "general", un
+        checkpoint NUOVO sostituisce naturalmente questo (stesso meccanismo di on_step_completed,
+        vedi __init__) - nessuna pulizia esplicita necessaria qui."""
+        steps_summary = "; ".join(
+            f"{step['intent']}({step['parameters']}) -> {'riuscito' if step['success'] else 'fallito'}"
+            for step in checkpoint.completed_steps
+        ) or "nessun passo ancora completato"
+        resume_request = (
+            f"{checkpoint.request}\n\n(Questo compito era gia' iniziato e poi interrotto prima di "
+            f"finire, senza colpa dell'utente. Passi gia' completati: {steps_summary}. Continua da "
+            f"dove eri rimasto, senza ripetere questi passi se non e' necessario.)"
+        )
+        return self._run_agent(resume_request, remember_text="riprendi il compito interrotto")
 
     def _match_meta_command(self, text: str) -> Command | None:
         return intent_patterns.match_meta_command(text, has_last_exchange=self.last_exchange is not None)

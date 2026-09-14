@@ -145,3 +145,27 @@ class StopDictationSkill:
             return SkillResult(success=False, data={}, error="VOICE_ONLY")
         self.core.session_hooks.call("stop_dictation")
         return SkillResult(success=True, data={})
+
+
+class ResumeInterruptedTaskSkill:
+    """F1.8.4 ("checkpoint... da cui riprendere"): l'unico modo per riprendere un compito
+    composto interrotto (kill switch, crash, spegnimento improvviso) e' un comando ESPLICITO
+    dell'utente - mai automatico all'avvio (vedi core/agent_checkpoint.py per il perche')."""
+
+    metadata = {
+        "intent": "RESUME_INTERRUPTED_TASK",
+        "description": "Riprende un compito composto (piu' passi) interrotto a meta' - kill switch, crash, "
+        "spegnimento improvviso - dall'ultimo checkpoint salvato. Usalo per 'riprendi il compito interrotto', "
+        "'continua da dove eri rimasto', 'hai finito quello che stavi facendo?'.",
+        "parameters": {},
+    }
+
+    def __init__(self, core):
+        self.core = core
+
+    def execute(self, parameters: dict = None):
+        checkpoint = self.core.agent_checkpoints.load()
+        if checkpoint is None:
+            return SkillResult(success=False, data={}, error="NOT_FOUND")
+        response = self.core._resume_interrupted_task(checkpoint)
+        return SkillResult(success=True, data={"response": response})

@@ -56,6 +56,10 @@ NEVER_FOR_AGENT = {
     # compito composto non avrebbe senso: il kill switch e' un comando diretto dell'utente
     # all'infrastruttura, non uno strumento tra i tanti per portare a termine una richiesta (F1).
     "KILL_SWITCH", "RESET_KILL_SWITCH",
+    # F1.8.4: riprendere un compito interrotto e' un comando diretto dell'utente sul PROPRIO
+    # checkpoint, non un passo che un agente GIA' in esecuzione dovrebbe mai scegliere da solo -
+    # stesso principio di KILL_SWITCH sopra.
+    "RESUME_INTERRUPTED_TASK",
 }
 NONE_ACTION = "NONE"
 
@@ -90,6 +94,12 @@ class AgentOutcome:
     pending_confirmation: dict | None = None  # un passo ha chiesto conferma: si ferma qui
     error: str | None = None
     rolled_back: list[AgentStep] = field(default_factory=list)  # (v3.3) passi annullati dopo un errore fatale
+    # F1.8.4 ("checkpoint... da cui riprendere"): popolati da run() stesso all'inizio - un
+    # checkpoint salvato da on_step_completed(outcome) ha bisogno di sapere QUALE richiesta ha
+    # originato questi passi, non solo i passi stessi (altrimenti un futuro tentativo di ripresa
+    # non saprebbe cosa continuare a fare). Stesso principio di PlanOutcome.trace_id (F1.7.2).
+    trace_id: str | None = None
+    request: str | None = None
 
     @property
     def did_something(self) -> bool:
@@ -143,6 +153,13 @@ class TaskAgent:
         # default) bloccherebbe ogni esecuzione passata da questo ripiego di default.
         self.executor = executor or (lambda intent, parameters: registry.execute(intent, parameters, policy_engine=self.policy_engine))
         self.on_step = None  # callable(step_index, description)
+        # F1.8.4 ("checkpoint... da cui riprendere"): callable(outcome: AgentOutcome), chiamato
+        # DOPO ogni passo (riuscito o fallito) che si aggiunge a outcome.steps - a differenza di
+        # on_step sopra (chiamato PRIMA di eseguire il passo, per un aggiornamento HUD "sto
+        # pensando..."), questo serve a chi vuole salvare un progresso incrementale (JakeCore, per
+        # poter riprendere un compito interrotto - vedi core/agent_checkpoint.py). None per
+        # default: nessun costo per chi non lo collega (i tre quarti dei test di questo modulo).
+        self.on_step_completed = None
         # Specializzazione (v5.0/5.1, Multi-Agent Architecture): un TaskAgent "di dominio" (es.
         # CodingAgent) usa un elenco di strumenti FISSO invece del recupero semantico generico,
         # e una prima riga di prompt diversa da quella di default. Tutto il resto - il ciclo a
@@ -381,7 +398,7 @@ class TaskAgent:
         # comparire come eventi scollegati; se nessuno lo passa (es. un test diretto su
         # TaskAgent), se ne genera uno qui cosi' i passi restano comunque correlati tra loro.
         trace_id = trace_id or new_trace_id()
-        outcome = AgentOutcome()
+        outcome = AgentOutcome(trace_id=trace_id, request=request)
         tools = self._tools(request)
         if not tools:
             outcome.error = "NO_TOOLS"
@@ -575,6 +592,16 @@ class TaskAgent:
             outcome.steps.append(step)
             if self.logger:
                 self.logger.info("Agente passo %d: %s %s -> %s", step_index, intent, parameters, step.observation[:160])
+            if self.on_step_completed is not None:
+                try:
+                    self.on_step_completed(outcome)
+                except Exception:
+                    # F1.8.4 (stesso principio gia' applicato a on_step sopra): un checkpoint che
+                    # non si salva non deve MAI fermare il compito in corso, ma deve lasciare
+                    # traccia - altrimenti "perche' non e' stato salvato il checkpoint?" sarebbe
+                    # indebuggabile quanto lo era un HUD bloccato prima di quella correzione.
+                    if self.logger:
+                        self.logger.exception("Errore nella callback on_step_completed dell'agente")
 
             messages.append({"role": "assistant", "content": json.dumps(payload, ensure_ascii=False)})
             messages.append({
