@@ -2355,8 +2355,9 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
   affrontato);
   `F1.8.2` chiuso per tutti i registri/store condivisi tra thread (ledger, promemoria, todo,
   memoria a lungo termine, centro notifiche, elenco skill registrate, archivio esempi
-  frase->intent, registro dispositivi/handoff); `F1.8.3` chiuso per RUN_COMMAND (il solo subprocess
-  bloccante abbastanza lungo da essere rilevante, vedi sotto); `F1.8.4` chiuso parzialmente
+  frase->intent, registro dispositivi/handoff); `F1.8.3` **chiuso** (RUN_COMMAND, e ora anche la
+  chiamata al modello - vedi sotto; le altre skill con subprocess erano gia' verificate a posto);
+  `F1.8.4` chiuso parzialmente
   (visibilita' dei fallimenti di shutdown, e ora anche il rilascio dei device audio VERIFICATO
   - vedi sotto; non ancora drain/checkpoint veri); `F1.8.5` chiuso
   parzialmente (diagnosi di un thread che non si ferma in tempo per i quattro scheduler in
@@ -2521,13 +2522,45 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
   invece di toccarle di nuovo (nessun output serve comunque quando il risultato e' `KILLED`/
   `TIMEOUT`). Limite noto e dichiarato, non risolto qui: nessun kill dell'intero process tree
   (richiederebbe un Job Object, `F1.6.3`, sandbox permanente per skill forgiate - deliberatamente
-  fuori scope). `F1.8.3` resta aperto per le altre tre superfici elencate dalla roadmap (modello,
-  skill diverse da RUN_COMMAND, automazione): nessun'altra skill ha oggi un subprocess bloccante
-  abbastanza lungo da rendere il controllo "solo tra un passo e il successivo" insufficiente
-  (verificato: le altre skill con subprocess usano timeout brevi o processi che ritornano subito).
-  Aggiunti 5 nuovi test in `tests/test_run_command_skill.py::KillSwitchCancellationTests`, tutti
-  contro processi VERI (nessun mock di subprocess). Prova: 2.144/2.144 test, ruff/mypy (per
-  `core/jake_core.py`, nel set selettivo)/compileall verdi su tutti i file toccati.
+  fuori scope). Al momento di questo passo, `F1.8.3` restava aperto per le altre tre superfici
+  elencate dalla roadmap (modello, skill diverse da RUN_COMMAND, automazione): nessun'altra skill
+  ha oggi un subprocess bloccante abbastanza lungo da rendere il controllo "solo tra un passo e il
+  successivo" insufficiente (verificato: le altre skill con subprocess usano timeout brevi o
+  processi che ritornano subito) - la superficie "modello" e' stata chiusa in un passo successivo,
+  vedi sotto. Aggiunti 5 nuovi test in `tests/test_run_command_skill.py::
+  KillSwitchCancellationTests`, tutti contro processi VERI (nessun mock di subprocess). Prova:
+  2.144/2.144 test, ruff/mypy (per `core/jake_core.py`, nel set selettivo)/compileall verdi su
+  tutti i file toccati.
+- `F1.8.3` (chiusura - "modello") — 14/09/2026: decisione esplicita dell'utente di procedere dopo
+  aver segnalato la tensione con `core/kill_switch.py`: il modulo dichiara ESPLICITAMENTE nel
+  proprio docstring che fermare un agente "A META' PASSO (mentre aspetta la risposta del modello...)
+  non e' sicuro" e che il controllo resta deliberatamente "SOLO tra un passo e il successivo" -
+  non ovviamente un buco, potenzialmente un compromesso voluto. Investigato prima di scrivere
+  codice: `client.chat()` (`core/agent.py::TaskAgent.run()`) e' una singola chiamata HTTP
+  bloccante fino a 60s (`request.urlopen(..., timeout=60)`, `core/ollama_client.py`) - stesso
+  identico pattern del buco RUN_COMMAND sopra (`subprocess.run` bloccante), ma per una chiamata
+  di rete invece di un processo figlio. La distinzione che rende questa correzione SICURA (non un
+  "thread abort violento" come il docstring mette in guardia): non si interrompe nulla a forza -
+  `TaskAgent._chat_or_abandon()` esegue `client.chat()` su un thread separato e ne aspetta il
+  risultato con lo stesso polling di 0.2s gia' usato per RUN_COMMAND, ma se il kill switch scatta
+  MENTRE aspetta, `run()` smette semplicemente di ASCOLTARE quella risposta (solleva una nuova
+  `_ModelCallAbandoned`, distinta da un vero `MODEL_ERROR`) e ritorna `KILLED` subito - nessuno
+  stato di Jake viene toccato a meta', nessuna skill interrotta durante una scrittura. Limite
+  dichiarato, stesso principio del "nessun kill dell'intero process tree" gia' accettato per
+  RUN_COMMAND: la chiamata HTTP abbandonata continua a girare in background (thread daemon) fino
+  al proprio timeout - non esiste un modo pulito di annullare un `urlopen()` gia' in corso da un
+  altro thread senza riscrivere il livello HTTP di `core/ollama_client.py` per esporre il socket
+  sottostante; il suo risultato, quando arriva, viene semplicemente scartato. Aggiornato anche il
+  docstring di `core/kill_switch.py` per documentare onestamente le due eccezioni ora esistenti al
+  principio "solo tra un passo e il successivo" (RUN_COMMAND e il modello), spiegando perche'
+  nessuna delle due e' un abort violento. Con questo, `F1.8.3` e' **chiuso**: tutte e quattro le
+  superfici elencate dalla roadmap (modello, skill, subprocess, automazione) sono coperte o
+  verificate a posto. Aggiunti 3 nuovi test in `tests/test_agent.py::
+  KillSwitchDuringModelCallTests`: un client finto (`SlowOllamaClient`) che resta bloccato finche'
+  un `threading.Event` non viene impostato dimostra che `run()` smette di aspettare ben prima del
+  tetto di sicurezza del test (non solo letto a codice - cronometrato per davvero), una chiamata
+  normale continua a funzionare invariata, un vero `OllamaError` resta distinto da un kill switch
+  scattato. Prova: 2.466/2.466 test, ruff/mypy/compileall verdi su tutti i file toccati.
 - `F1.8.2` (parziale) — 12/09/2026: **buco reale trovato e corretto, riprodotto per davvero**
   (non solo ipotizzato) - `core/action_ledger.py::ActionLedger.record()` apriva il file con un
   `open()` grezzo a ogni chiamata, senza alcuna sincronizzazione tra thread. A differenza di
@@ -3839,7 +3872,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 14/09/2026. Sessione lunga con 54 incrementi completati e verificati (PR #28-#81), la
+Aggiornato 14/09/2026. Sessione lunga con 55 incrementi completati e verificati (PR #28-#82), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -3972,7 +4005,7 @@ non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ul
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.463/2.463 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.466/2.466 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
 invariati, nessuno dei due coperto da "mypy selettivo" in CI - 79 file nella lista selettiva,
 `core/identity.py`/`core/forge_worker.py`/`core/sandboxed_skill_worker.py`/`core/taint.py`
@@ -4028,6 +4061,29 @@ stesso turno agente, propagato nella cronologia a breve termine che ogni turno a
 include - un buco reale trovato eseguendo la suite completa (non solo i file toccati), non solo
 letto a tavolino. `F1.5.5`-`F1.5.8` restano completamente aperti - questa e' la prima fetta di una
 fase grande, non la sua chiusura.
+
+**Aggiornamento 14/09/2026 (F1.3.2 casa, F1.8.3 chiuso, promemoria sul Gate G1)**: dopo F1.5,
+chiuso anche `F1.3.2` per CONTROL_SMART_DEVICE (stesso pattern "dichiara successo senza controllare
+l'effetto reale" gia' trovato due volte per processi/finestre, corretto interamente dentro la
+skill - non serve la stessa decisione di dipendenza gia' bloccata per un verificatore indipendente
+in `execution_safety.py`) e `F1.8.3` per intero (la superficie "modello" del kill switch, con via
+libera esplicito dell'utente dopo aver segnalato la tensione con il docstring di
+`core/kill_switch.py`, che dichiara deliberato il controllo "solo tra un passo e il successivo" -
+la correzione non e' un abort violento, solo smettere di ASPETTARE una risposta gia' in corso).
+Promemoria per chi riprende: la sezione "## 7. F1" ha un **Gate G1** esplicito (sezione "Gate G1 -
+Nucleo fidato") con 7 criteri di uscita letterali - "ogni percorso usa Action Contract 2.0 e
+PolicyEngine", "tutte le azioni ad alto impatto hanno prova e audit", "capability applicate ad
+agenti, skill e device", "prompt-injection suite verde", "plugin ostile contenuto dalla sandbox",
+"kill switch interrompe attivita' e figli entro il budget definito", "modalita' privata non lascia
+contenuti nei nuovi store" - utile come bussola concreta per capire cosa CONTA davvero come
+"F1 abbastanza fatto da sbloccare F2/F3/F4/F8", invece di continuare a cercare fette sempre piu'
+piccole senza un criterio. Ad oggi: il quinto criterio (sandbox) ha le fondamenta ma non
+AppContainer/manifest/rete/quarantena (F1.6.4-F1.6.8); il quarto (prompt-injection) ha una prima
+fetta (F1.5.1-F1.5.4) ma nessun corpus d'attacco vero (F1.5.6) ne' test di injection indiretta
+(F1.5.7); il sesto (kill switch) e' ora chiuso per le quattro superfici dichiarate, ma senza kill
+dell'intero process tree (dichiarato fuori scope, richiederebbe F1.6.3/Job Object); il settimo
+(modalita' privata) e' verificato chiuso (F1.7.8); gli altri tre restano parzialmente aperti come
+dettagliato nelle rispettive sezioni sopra.
 
 Ritmo per chi riprende: un incremento alla volta, ciascuno con test reali (non solo letti a tavolino),
 riprova empirica quando possibile (riprodurre il buco con il codice vecchio prima di dichiararlo

@@ -259,6 +259,83 @@ class KillSwitchStopsTheRunTests(unittest.TestCase):
         self.assertEqual(registry.calls, [])
 
 
+class SlowOllamaClient:
+    """F1.8.3 ("propagare cancellazione dal kill switch a... modello"): chat() resta BLOCCATA
+    finche' `release_event` non viene impostato (o 5s, un tetto di sicurezza per non far restare
+    appeso il thread di sfondo per sempre se qualcosa nel test va storto) - simula una chiamata
+    HTTP reale ancora in corso, cosi' un test puo' attivare il kill switch MENTRE la chiamata e'
+    ancora bloccata e verificare che run() smetta di aspettarla molto prima di quel tetto."""
+
+    def __init__(self, release_event, payload: dict = None):
+        self.release_event = release_event
+        self.payload = payload or {"message": {"content": json.dumps({
+            "thought": "", "action": {"intent": "NONE", "parameters": {}},
+            "final_answer": "Fatto.", "ask_user": "",
+        })}}
+        self.calls = 0
+
+    def chat(self, model, messages, format=None, options=None, timeout=None):
+        self.calls += 1
+        self.release_event.wait(timeout=5)
+        return self.payload
+
+
+class KillSwitchDuringModelCallTests(unittest.TestCase):
+    """F1.8.3 ("modello", l'ultima delle superfici dichiarate aperte): prima di questa
+    correzione, client.chat() era una singola chiamata bloccante fino a 60s - il kill switch,
+    controllato SOLO tra un passo e il successivo, non poteva mai interromperla a meta'. Ora
+    TaskAgent._chat_or_abandon() sonda ogni _MODEL_CALL_POLL_SECONDS (ridotto qui per non
+    aspettare per davvero) e smette di aspettare non appena il kill switch scatta."""
+
+    def test_activating_while_the_model_call_is_still_pending_stops_the_run_quickly(self):
+        import threading
+        import time
+
+        release_event = threading.Event()  # mai impostato qui: chat() resta bloccata
+        self.addCleanup(release_event.set)  # libera il thread di sfondo appeso, per pulizia
+        client = SlowOllamaClient(release_event)
+        registry = FakeRegistry()
+        agent = _agent(registry, client)
+        agent._MODEL_CALL_POLL_SECONDS = 0.02
+
+        def _activate_soon():
+            time.sleep(0.05)
+            agent.kill_switch.activate()
+
+        threading.Thread(target=_activate_soon, daemon=True).start()
+        started = time.monotonic()
+        outcome = agent.run("fai qualcosa di lento")
+        elapsed = time.monotonic() - started
+
+        self.assertEqual(outcome.error, "KILLED")
+        self.assertLess(elapsed, 2.0, "run() doveva smettere di aspettare molto prima del tetto di sicurezza di 5s")
+
+    def test_a_normal_call_that_completes_before_any_kill_signal_still_succeeds(self):
+        import threading
+
+        release_event = threading.Event()
+        release_event.set()  # gia' "risolta": chat() ritorna subito
+        client = SlowOllamaClient(release_event)
+        registry = FakeRegistry()
+        agent = _agent(registry, client)
+
+        outcome = agent.run("fai qualcosa di veloce")
+
+        self.assertIsNone(outcome.error)
+        self.assertEqual(outcome.final_answer, "Fatto.")
+
+    def test_a_real_model_error_is_still_reported_as_model_error_not_killed(self):
+        """L'eccezione _ModelCallAbandoned e' distinta da un vero OllamaError - un errore del
+        modello non deve mai essere scambiato per un kill switch scattato, e viceversa."""
+        registry = FakeRegistry()
+        client = ScriptedOllamaClient([OllamaError("il modello non risponde")])
+        agent = _agent(registry, client)
+
+        outcome = agent.run("fai qualcosa")
+
+        self.assertEqual(outcome.error, "MODEL_ERROR: OllamaError")
+
+
 class OnStepCallbackFailureTests(unittest.TestCase):
     """F1.8.4 (stesso principio gia' applicato a JakeCore.shutdown): on_step e' una notifica
     verso l'esterno (HUD/companion, vedi JakeCore._on_agent_step) - se solleva, il passo
