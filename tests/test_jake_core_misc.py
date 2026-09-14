@@ -97,6 +97,8 @@ def _bare_core(**overrides) -> JakeCore:
     core.skill_forge = mock.MagicMock(is_available=lambda: False)
     core.planner_provider = mock.MagicMock(build_plan=lambda text: None)
     core.plan_executor = mock.MagicMock()
+    # F1.8.4 ("checkpoint"): letto/scritto da _run_agent() - vedi core/jake_core.py.
+    core.agent_checkpoints = overrides.get("agent_checkpoints", mock.MagicMock())
     return core
 
 

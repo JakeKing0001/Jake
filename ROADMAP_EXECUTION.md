@@ -2458,10 +2458,9 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
   memoria a lungo termine, centro notifiche, elenco skill registrate, archivio esempi
   frase->intent, registro dispositivi/handoff); `F1.8.3` **chiuso** (RUN_COMMAND, e ora anche la
   chiamata al modello - vedi sotto; le altre skill con subprocess erano gia' verificate a posto);
-  `F1.8.4` chiuso parzialmente
-  (visibilita' dei fallimenti di shutdown, il rilascio dei device audio VERIFICATO, e ora anche il
-  drain limitato di answer() in corso - vedi sotto; non ancora un vero checkpoint da cui
-  riprendere); `F1.8.5` chiuso
+  `F1.8.4` **chiuso** (visibilita' dei fallimenti di shutdown, rilascio dei device audio
+  VERIFICATO, drain limitato di answer() in corso, e ora anche un vero checkpoint da cui
+  riprendere - vedi sotto: tutti e quattro i pezzi dichiarati dalla voce sono coperti); `F1.8.5` chiuso
   parzialmente (diagnosi di un thread che non si ferma in tempo per i quattro scheduler in
   background, non ancora deadlock su lock applicativi, vedi sotto); `F1.8.6` chiuso (verificato,
   vedi sotto); `F1.8.7` chiuso parzialmente (race su handoff device e su trigger trovate e
@@ -2623,10 +2622,62 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
   non torna mai entro il tetto (ridotto nel test, stesso principio "configurabile solo per i test"
   gia' usato altrove). Scoperti (eseguendo la suite COMPLETA, non solo i file toccati) due
   costruttori "spogli" di `JakeCore` (`JakeCore.__new__`) in `tests/test_jake_core_pipeline.py`/
-  `tests/test_privacy.py` senza i due nuovi attributi - corretti. Non ancora affrontato: un vero
-  checkpoint da cui riprendere (il resto, piu' ampio, di F1.8.4). Aggiunti 3 nuovi test in
+  `tests/test_privacy.py` senza i due nuovi attributi - corretti. Aggiunti 3 nuovi test in
   `tests/test_jake_core_pipeline.py::ShutdownDrainTests`. Prova: 2.476/2.476 test,
   ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.8.4` (chiusura - checkpoint da cui riprendere) — 14/09/2026: decisione esplicita dell'utente
+  ("checkpoint/resume for interrupted tasks") dopo un giro di scoping su quattro alternative
+  (checkpoint, manifest di directory per F1.6.5, chiarire "durata"/"skill"+"sessione" per F1.2,
+  fermarsi qui). Prima di questo, un compito composto interrotto a meta' (kill switch, crash,
+  spegnimento improvviso) andava completamente PERSO: nessuna traccia di "3 passi su 6 gia'
+  riusciti" sopravviveva al riavvio, anche se quei 3 passi avevano gia' avuto un effetto reale
+  (un file creato, un promemoria impostato) gia' scritto nel ledger - l'utente doveva ripetere la
+  richiesta da capo, rischiando di ripetere anche i passi gia' fatti. Scope deliberatamente
+  stretto (dichiarato nel docstring di `core/agent_checkpoint.py`, nuovo modulo): il checkpoint si
+  aggiorna DOPO ogni passo concluso (mai a meta' esecuzione di una skill), nessuna ripresa
+  AUTOMATICA all'avvio (un checkpoint trovato resta inerte finche' l'utente non chiede
+  esplicitamente "riprendi il compito interrotto" - riprendere da soli un'automazione DESTRUCTIVE/
+  ADMIN senza che l'utente lo sappia sarebbe esattamente il tipo di autonomia non richiesta che F1
+  vuole evitare), un solo checkpoint alla volta (sovrascritto, non una coda - un compito composto
+  alla volta e' gia' il modello mentale di `TaskAgent.run()`), solo l'agente "general" per questa
+  prima fetta (non coding/ricerca). Nuovo `core/agent_checkpoint.py` (`AgentCheckpoint`/
+  `AgentCheckpointStore`, `data/agent_checkpoint.json`) con lo STESSO pattern di scrittura atomica
+  gia' usato per `config.json` (F1.4.1: scrivi su un `.tmp` nella stessa cartella, poi
+  `os.replace()` - mai uno stato a meta' anche se il processo muore proprio durante il salvataggio
+  del checkpoint). Nuovo `TaskAgent.on_step_completed(outcome)` (core/agent.py, stesso principio/
+  stessa forma di `on_step` gia' esistente, ma chiamato DOPO ogni passo invece che prima, e con lo
+  stesso "un callback rotto non deve mai fermare il compito, ma va loggato" gia' applicato a
+  `on_step`) - nuovi campi `AgentOutcome.trace_id`/`.request` (popolati da `run()` stesso, stesso
+  principio di `PlanOutcome.trace_id`, F1.7.2) perche' un checkpoint ha bisogno di sapere QUALE
+  richiesta ha originato i passi, non solo i passi stessi. `JakeCore._on_agent_step_completed`
+  salva solo intent/parametri/esito di ogni passo (MAI l'intero `SkillResult` - i dati grezzi di
+  una skill potrebbero contenere contenuto esterno/sensibile che non ha senso duplicare su un
+  secondo file, il ledger resta l'unica fonte di verita' per quello). Checkpoint cancellato quando
+  il compito finisce per QUALUNQUE motivo NORMALE (risposta finale, domanda all'utente) - mai
+  durante una conferma in sospeso (quella non e' un'interruzione anomala, il progresso resta
+  valido). "Ripresa" implementata SENZA toccare la logica interna di `TaskAgent.run()`: una nuova
+  skill `RESUME_INTERRUPTED_TASK` (`skills/session_control.py::ResumeInterruptedTaskSkill`, stesso
+  pattern gia' usato per `PrivateModeSkill` - riceve l'intero `core` nel costruttore) legge il
+  checkpoint e chiama `JakeCore._resume_interrupted_task()`, che costruisce una richiesta NUOVA per
+  l'agente (la richiesta originale piu' un riassunto dei passi gia' fatti) e la passa a
+  `_run_agent()` esistente - il modello vede gia' cosa e' stato fatto e decide da solo il prossimo
+  passo, esattamente come farebbe per qualunque altra richiesta. `RESUME_INTERRUPTED_TASK`
+  classificata `RiskLevel.EXTERNAL_ACTION` (stesso principio di `RUN_WORKFLOW`: "esegue passi non
+  ispezionati qui", ma ogni singolo passo che l'agente ripreso propone resta comunque gated
+  individualmente da `PolicyEngine` come qualunque altro), esclusa da `NEVER_FOR_AGENT` (un agente
+  gia' in corso non deve mai scegliere da solo di riprendere un ALTRO compito interrotto, stesso
+  principio di `KILL_SWITCH`). Aggiunti 8 nuovi test in `tests/test_agent_checkpoint.py` (il
+  modulo puro: round-trip, scrittura atomica, un file corrotto/con campi mancanti trattato come
+  "nessun checkpoint" invece di far crashare l'avvio), 3 in `tests/test_agent.py::
+  OnStepCompletedCallbackTests` (il callback e' chiamato davvero da `TaskAgent.run()`, con
+  l'outcome giusto; un callback rotto non ferma il passo), 6 in `tests/test_jake_core_pipeline.py::
+  AgentCheckpointTests` (salvataggio/pulizia con un `AgentCheckpointStore` VERO su file temporaneo,
+  non mockato - inclusa la prova che una conferma in sospeso NON cancella il checkpoint), 2 in
+  `tests/test_session_control.py` (nuovo file: la skill). Scoperti (eseguendo la suite completa)
+  altri due costruttori "spogli" di `JakeCore` (`tests/test_jake_core_misc.py`, oltre ai due gia'
+  trovati nel passo precedente) senza il nuovo attributo - corretti. `core/agent_checkpoint.py`
+  aggiunto al set selettivo di mypy (80 file). Prova: 2.495/2.495 test, ruff/mypy/compileall verdi
+  su tutti i file toccati.
 - `F1.8.3` (parziale, RUN_COMMAND) — 12/09/2026: "propagare cancellazione dal kill switch a...
   subprocess". Buco reale, riprodotto prima del fix: `kill_switch.is_active()` viene controllato
   solo TRA un passo e il successivo da `TaskAgent`/`PlanExecutor` (vedi `core/kill_switch.py`),
@@ -4004,7 +4055,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 14/09/2026. Sessione lunga con 59 incrementi completati e verificati (PR #28-#86), la
+Aggiornato 14/09/2026. Sessione lunga con 60 incrementi completati e verificati (PR #28-#87), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -4137,11 +4188,11 @@ non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ul
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.476/2.476 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.495/2.495 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
-invariati, nessuno dei due coperto da "mypy selettivo" in CI - 79 file nella lista selettiva,
-`core/identity.py`/`core/forge_worker.py`/`core/sandboxed_skill_worker.py`/`core/taint.py`
-aggiunti). `G1` resta aperto.
+invariati, nessuno dei due coperto da "mypy selettivo" in CI - 80 file nella lista selettiva,
+`core/identity.py`/`core/forge_worker.py`/`core/sandboxed_skill_worker.py`/`core/taint.py`/
+`core/agent_checkpoint.py` aggiunti). `G1` resta aperto.
 
 Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
 sessione (`sys.setswitchinterval()` abbassato + `threading.Barrier`, senza altro aiuto) NON
@@ -4257,8 +4308,8 @@ fuori scope per essere troppo vago (nessun formato standard); `F1.7.8` e' chiuso
 per canale e' ora chiuso, il contesto conversazionale condiviso tra canali e' stato investigato e
 confermato VOLUTO dall'utente (non un buco), resta solo "una coda per azioni concorrenti" non
 legate a una conferma - un concetto letteralmente diverso, gia' in parte coperto da F1.8.2;
-il resto di `F1.8.4` - solo un vero checkpoint da cui riprendere resta aperto (il rilascio dei
-device audio e' VERIFICATO, il drain limitato di `answer()` e' ora chiuso); il resto di `F1.8.5` - diagnosi di un deadlock vero su un lock applicativo, non solo un
+`F1.8.4` e' ora CHIUSO per intero (visibilita' fallimenti, rilascio device audio, drain limitato,
+checkpoint da cui riprendere - tutti e quattro coperti); il resto di `F1.8.5` - diagnosi di un deadlock vero su un lock applicativo, non solo un
 thread esterno lento; il resto di `F1.8.7` - undo, non ancora testabile per race finche' non
 esiste uno store con stato condiviso da annullare, vedi `F1.7.2`; reminder e conferma gia'
 verificati al sicuro, handoff e trigger gia' corretti). Vale la pena anche un altro giro di ricerca mirata di race

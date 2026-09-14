@@ -993,6 +993,62 @@ class AgentNameContextPropagationTests(unittest.TestCase):
         self.assertIsNone(current_agent_name())
 
 
+class OnStepCompletedCallbackTests(unittest.TestCase):
+    """F1.8.4 ("checkpoint... da cui riprendere"): on_step_completed(outcome) e' l'aggancio che
+    JakeCore usa per salvare un checkpoint dopo ogni passo (vedi core/jake_core.py::
+    _on_agent_step_completed) - qui si verifica solo che TaskAgent.run() lo chiami DAVVERO, con
+    l'outcome giusto (trace_id/request popolati, i passi accumulati fin li'), non la logica di
+    salvataggio su disco (quella e' in tests/test_agent_checkpoint.py/test_jake_core_pipeline.py)."""
+
+    def test_called_once_per_completed_step_with_the_growing_outcome(self):
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={"text": "prova"})])
+        client = ScriptedOllamaClient([
+            {"thought": "", "action": {"intent": "ADD_NOTE", "parameters": {"text": "prova"}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto.", "ask_user": ""},
+        ])
+        agent = _agent(registry, client)
+        calls = []
+        agent.on_step_completed = lambda outcome: calls.append(len(outcome.steps))
+
+        outcome = agent.run("aggiungi un appunto", trace_id="fisso-123")
+
+        self.assertEqual(calls, [1], "un solo passo completato in questo run, una sola chiamata")
+        self.assertEqual(outcome.trace_id, "fisso-123")
+        self.assertEqual(outcome.request, "aggiungi un appunto")
+
+    def test_a_broken_callback_does_not_stop_the_step_from_executing(self):
+        """Stesso principio gia' applicato a on_step (F1.8.4): un checkpoint che non si salva
+        non deve MAI fermare il compito in corso."""
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={"text": "prova"})])
+        client = ScriptedOllamaClient([
+            {"thought": "", "action": {"intent": "ADD_NOTE", "parameters": {"text": "prova"}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto.", "ask_user": ""},
+        ])
+        agent = _agent(registry, client)
+        agent.logger = unittest.mock.Mock()
+        agent.on_step_completed = unittest.mock.Mock(side_effect=RuntimeError("boom"))
+
+        outcome = agent.run("aggiungi un appunto")
+
+        self.assertEqual(outcome.final_answer, "Fatto.")
+        self.assertEqual(len(outcome.steps), 1)
+        agent.logger.exception.assert_called_once()
+
+    def test_never_called_when_no_step_completes(self):
+        registry = FakeRegistry()
+        client = ScriptedOllamaClient([
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto subito.", "ask_user": ""},
+        ])
+        agent = _agent(registry, client)
+        agent.on_step_completed = unittest.mock.Mock()
+
+        agent.run("qualcosa di immediato")
+
+        agent.on_step_completed.assert_not_called()
+
+
 class CapabilityTokenEnforcementTests(unittest.TestCase):
     """F1: NEVER_FOR_AGENT/fixed_tools sono, di fatto, il capability token per agente di Jake
     (vedi ROADMAP.md) - ma finora vivevano senza un test dedicato che li blocchi esplicitamente,

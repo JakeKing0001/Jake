@@ -130,6 +130,10 @@ SKILL_RISK: dict[str, RiskLevel] = {
     # -- automazioni: definirle e' reversibile, farle partire eredita il rischio dei passi --
     "SAVE_WORKFLOW": RiskLevel.LOCAL_REVERSIBLE,
     "RUN_WORKFLOW": RiskLevel.EXTERNAL_ACTION,  # esegue passi salvati in precedenza, non ispezionati qui
+    # F1.8.4: riprende un compito composto interrotto rieseguendo l'agente - stesso principio di
+    # RUN_WORKFLOW sopra, i passi che l'agente ripreso decide di fare non sono ispezionati qui
+    # (ma restano comunque gated singolarmente da PolicyEngine come qualunque altro passo).
+    "RESUME_INTERRUPTED_TASK": RiskLevel.EXTERNAL_ACTION,
     "SET_TRIGGER": RiskLevel.LOCAL_REVERSIBLE,
     "LIST_TRIGGERS": RiskLevel.READ_ONLY,
     "DELETE_TRIGGER": RiskLevel.DESTRUCTIVE,
