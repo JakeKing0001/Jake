@@ -72,3 +72,32 @@ def set_current_agent_name(agent_name: str | None) -> contextvars.Token:
 
 def reset_current_agent_name(token: contextvars.Token) -> None:
     _current_agent_name.reset(token)
+
+
+# F1.5.2 (propagare il taint oltre l'osservazione dello STESSO turno, vedi core/agent.py::
+# TaskAgent._observe() per il marcatore stesso): un comando diretto (JakeCore._execute_command,
+# percorso a comando singolo - non l'agente, che gia' marca le proprie osservazioni da solo)
+# che restituisce contenuto esterno (core.taint.EXTERNAL_CONTENT_INTENTS) diventa PAROLA PER
+# PAROLA la risposta mostrata all'utente E la voce salvata in conversation_state (cronologia a
+# breve termine): senza questo, un turno agente FUTURO che include quella cronologia (TaskAgent.
+# run(), ultimi turni via `history`) la vedrebbe come un messaggio "assistant" pienamente
+# fidato - un'autorita' MAGGIORE di una semplice osservazione di strumento nello stesso turno,
+# non minore. Stesso meccanismo/stesse garanzie di isolamento per thread di current_device_id/
+# current_agent_name sopra: impostato da _execute_command() SOLO quando il comando ha davvero
+# restituito contenuto esterno, letto una volta da JakeCore.answer() subito prima di salvare la
+# risposta in cronologia (mai per cio' che l'utente vede/sente - vedi il commento in jake_core.py).
+_current_command_source_intent: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "current_command_source_intent", default=None,
+)
+
+
+def current_command_source_intent() -> str | None:
+    return _current_command_source_intent.get()
+
+
+def set_current_command_source_intent(intent: str | None) -> contextvars.Token:
+    return _current_command_source_intent.set(intent)
+
+
+def reset_current_command_source_intent(token: contextvars.Token) -> None:
+    _current_command_source_intent.reset(token)
