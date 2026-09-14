@@ -521,7 +521,11 @@ Criterio di uscita: il 100% dei percorsi produce lo stesso `ActionReceipt` valid
   reali costruiscono tutti `ActionError`, e i 35 codici bespoke realmente usati dalle ~200 skill
   sono ora censiti in `_KNOWN_RESULT_CATEGORIES`, vedi sotto); resta solo `effect_class`/
   `preconditions`/`expected_effect` di `ActionProposal`, dichiaratamente non calcolabile dai dati
-  esistenti; `F1.1.5` resta aperta.
+  esistenti; `F1.1.5` **chiuso** (versionamento gia' esisteva da sempre - `schema_version`,
+  rifiutato in scrittura se diverso dalla versione corrente; la "migrazione" vera e propria resta
+  dichiaratamente non costruita perche' non e' mai esistita una seconda versione dello schema da
+  cui migrare - costruirla ora sarebbe codice morto speculativo; la "compatibilita' per record
+  precedenti" invece era gia' vera per costruzione e ora e' anche verificata, vedi sotto).
 - `F1.1.6` — 12/09/2026: pilota di adozione dei contratti F1.1.2 su un intent reale per
   ciascun `RiskLevel` (letterale dalla roadmap: "un intent read-only, uno reversibile, uno
   external, uno destructive e uno admin") - `GET_TIME`, `ADD_NOTE`, `CONTROL_SMART_DEVICE`,
@@ -699,6 +703,27 @@ Criterio di uscita: il 100% dei percorsi produce lo stesso `ActionReceipt` valid
   `ActionProposal`/`ActionError`, e nessuna delle ~200 skill costruisce ancora questi contratti
   da sola (restano su `SkillResult`). Il bypass di policy nel rollback e' stato parzialmente
   chiuso, vedi `F1.2.5`.
+- `F1.1.5` (chiusura) — 14/09/2026: "versionare lo schema e aggiungere migrazione/compatibilita'
+  per record precedenti". Investigato prima di scrivere codice: il versionamento esiste gia' da
+  `F1.1.3`/`F1.1.8` (11/09/2026, vedi sopra) - `schema_version`, rifiutato in scrittura se diverso
+  dalla versione corrente (`tests/test_action_contract.py::
+  test_unsupported_schema_version_is_rejected`, gia' esistente). La "migrazione" resta
+  DELIBERATAMENTE non costruita: da quando `schema_version` esiste, e' sempre stato `1` - non
+  c'e' mai stata, in produzione, una seconda versione dello schema da cui migrare, quindi
+  scrivere una trasformazione ora sarebbe codice morto speculativo per una v2 ipotetica, non una
+  migrazione vera. Cio' che restava genuinamente da verificare era l'altra meta' della voce, la
+  "compatibilita' per record precedenti" (una riga scritta PRIMA che `schema_version` esistesse,
+  o comunque priva di quella chiave): gia' vera per costruzione - `ActionLedger.read_all()`/
+  `by_*` non validano mai una riga letta da disco (solo un `ActionReceipt` in COSTRUZIONE passa
+  da `validate_action_receipt`, mai un dict gia' letto), quindi una riga vecchia senza
+  `schema_version` e' sempre stata restituita cosi' com'e', senza eccezioni ne' scarti. Non un
+  buco, ma nemmeno mai stato verificato esplicitamente con un test fino a questo incremento.
+  Aggiunti 2 test in `tests/test_action_ledger.py::PreSchemaVersionRecordCompatibilityTests`
+  (un file scritto A MANO con una riga priva di `schema_version` resta leggibile; una riga
+  vecchia e una nuova, con `schema_version` presente solo sulla seconda, coesistono nello stesso
+  file senza che l'una disturbi la lettura dell'altra). Nessun file di produzione toccato.
+  `F1.1.5` ora **chiuso**. Prova: 2.509/2.509 test, ruff/mypy verdi su
+  `tests/test_action_ledger.py`.
 
 ### F1.2 — Policy kernel e capability
 
@@ -4143,7 +4168,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 14/09/2026. Sessione lunga con 63 incrementi completati e verificati (PR #28-#90), la
+Aggiornato 14/09/2026. Sessione lunga con 64 incrementi completati e verificati (PR #28-#91), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -4286,13 +4311,18 @@ il percorso TaskAgent" - investigato e chiuso senza scrivere nuovo codice: `Plan
 gia' toglie "confirmed"/"authenticated" da OGNI passo di OGNI piano incondizionatamente, prima
 ancora di sapere quale skill verra' eseguita, una protezione piu' forte di quella dell'agente e
 gia' testata a fondo con la skill `DeletePathSkill` VERA - semplicemente mai collegata
-esplicitamente a questa voce della roadmap finora). Il resto:
+esplicitamente a questa voce della roadmap finora), e `F1.1.5` chiusura (il versionamento dello
+schema esisteva gia' da `F1.1.3`/`F1.1.8`, 11/09/2026; la "migrazione" resta deliberatamente non
+costruita - non c'e' mai stata una seconda versione dello schema da cui migrare, sarebbe codice
+morto speculativo - ma la "compatibilita' per record precedenti" era gia' vera per costruzione
+(`read_all()`/`by_*` non validano mai una riga letta da disco) e ora e' anche verificata con 2
+nuovi test che scrivono a mano una riga priva di `schema_version`). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.507/2.507 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.509/2.509 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
 invariati, nessuno dei due coperto da "mypy selettivo" in CI - 80 file nella lista selettiva,
 invariata rispetto all'ultimo incremento: `core/auth_gate.py` era gia' presente). `G1` resta
