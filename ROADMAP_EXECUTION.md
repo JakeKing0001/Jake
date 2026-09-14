@@ -2556,9 +2556,11 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
   riprendere - vedi sotto: tutti e quattro i pezzi dichiarati dalla voce sono coperti); `F1.8.5` chiuso
   parzialmente (diagnosi di un thread che non si ferma in tempo per i quattro scheduler in
   background, non ancora deadlock su lock applicativi, vedi sotto); `F1.8.6` chiuso (verificato,
-  vedi sotto); `F1.8.7` chiuso parzialmente (race su handoff device e su trigger trovate e
-  corrette, vedi sotto; reminder e conferma gia' al sicuro, undo non ancora testabile - vedi
-  sotto).
+  vedi sotto); `F1.8.7` **chiuso** (tutti e cinque gli elementi del testo esaminati: race su
+  handoff device e su trigger trovate e corrette, reminder e conferma gia' al sicuro, undo
+  dichiaratamente non testabile per race - non perche' rimandato, ma perche' `UndoDescriptor`
+  - F1.3.5 - e' solo un contratto dati, non esiste ancora nessuno store con stato condiviso da
+  annullare su cui una race potrebbe verificarsi; vedi sotto).
 - `F1.8.1` (parziale, doppia esecuzione via conferma concorrente) — 12/09/2026: "definire
   ownership della sessione... e una coda per azioni concorrenti". Buco reale, riprodotto per
   davvero prima del fix - `JakeCore.answer()` e' l'UNICO ingresso condiviso sia dal loop voce
@@ -4168,7 +4170,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 14/09/2026. Sessione lunga con 64 incrementi completati e verificati (PR #28-#91), la
+Aggiornato 14/09/2026. Sessione lunga con 65 incrementi completati e verificati (PR #28-#92), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -4316,7 +4318,14 @@ schema esisteva gia' da `F1.1.3`/`F1.1.8`, 11/09/2026; la "migrazione" resta del
 costruita - non c'e' mai stata una seconda versione dello schema da cui migrare, sarebbe codice
 morto speculativo - ma la "compatibilita' per record precedenti" era gia' vera per costruzione
 (`read_all()`/`by_*` non validano mai una riga letta da disco) e ora e' anche verificata con 2
-nuovi test che scrivono a mano una riga priva di `schema_version`). Il resto:
+nuovi test che scrivono a mano una riga priva di `schema_version`), e `F1.8.7` chiusura -
+correzione di stato, non nuovo lavoro (i cinque elementi del testo - reminder, trigger, handoff,
+conferma, undo - erano gia' TUTTI stati esaminati in due incrementi precedenti del 13/09/2026,
+ma la voce era rimasta segnata "parzialmente" perche' "undo non ancora testabile" sembrava un
+lavoro rimandato; e' in realta' un fatto architetturale permanente - `UndoDescriptor` (F1.3.5) e'
+solo un contratto dati, non esiste ancora nessuno store con stato condiviso da annullare su cui
+una race potrebbe avvenire - non qualcosa che resta "da fare" finche' quello store non esistera'.
+Nessun codice cambiato, solo la classificazione dello stato). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
