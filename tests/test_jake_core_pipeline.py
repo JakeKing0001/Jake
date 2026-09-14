@@ -808,26 +808,43 @@ class AgentCheckpointTests(_JakeCoreTestCase):
 
     def test_on_agent_step_completed_saves_a_checkpoint_reflecting_the_steps_so_far(self):
         core = self._core()
-        outcome = AgentOutcome(trace_id="trace-1", request="crea un file e poi aprilo", steps=[self._step()])
+        outcome = AgentOutcome(
+            trace_id="trace-1", request="crea un file e poi aprilo", agent_name="general", steps=[self._step()],
+        )
 
         core._on_agent_step_completed(outcome)
 
         checkpoint = core.agent_checkpoints.load()
         self.assertIsNotNone(checkpoint)
         self.assertEqual(checkpoint.trace_id, "trace-1")
+        self.assertEqual(checkpoint.agent_name, "general")
         self.assertEqual(checkpoint.request, "crea un file e poi aprilo")
         self.assertEqual(checkpoint.completed_steps, [{"intent": "CREATE_PATH", "parameters": {"path": "C:\\x.txt"}, "success": True}])
 
-    def test_on_agent_step_completed_does_nothing_without_trace_id_or_request(self):
+    def test_on_agent_step_completed_does_nothing_without_trace_id_request_or_agent_name(self):
         """Un AgentOutcome costruito senza passare da TaskAgent.run() (es. un test diretto su
         TaskAgent) non deve produrre un checkpoint fuorviante senza una richiesta a cui
         appartiene."""
         core = self._core()
-        outcome = AgentOutcome(steps=[self._step()])  # trace_id/request mai popolati
+        outcome = AgentOutcome(steps=[self._step()])  # trace_id/request/agent_name mai popolati
 
         core._on_agent_step_completed(outcome)
 
         self.assertIsNone(core.agent_checkpoints.load())
+
+    def test_on_agent_step_completed_records_the_real_agent_not_always_general(self):
+        """F1.8.4 (estensione a coding/ricerca): il checkpoint deve riflettere QUALE agente ha
+        prodotto i passi - un checkpoint salvato con l'agente sbagliato riprenderebbe il compito
+        con la persona/gli strumenti fissi sbagliati (core/orchestrator.py)."""
+        core = self._core()
+        outcome = AgentOutcome(
+            trace_id="trace-2", request="correggi il bug in main.py", agent_name="coding", steps=[self._step()],
+        )
+
+        core._on_agent_step_completed(outcome)
+
+        checkpoint = core.agent_checkpoints.load()
+        self.assertEqual(checkpoint.agent_name, "coding")
 
     def test_run_agent_clears_a_preexisting_checkpoint_on_final_answer(self):
         from core.agent_checkpoint import AgentCheckpoint
