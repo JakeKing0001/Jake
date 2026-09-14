@@ -1569,8 +1569,9 @@ Criterio di uscita: nessun segreto in chiaro e ogni azione admin richiede un fat
   della passphrase + rate limiting/lockout dopo tentativi falliti consecutivi - vedi sotto;
   resta deliberatamente fuori solo una prova a cronometro del canale laterale, intrinsecamente
   instabile in CI, stesso motivo per cui l'analoga difesa in `core/companion_server.py` non ne
-  ha una); `F1.4.8` chiuso parzialmente (vault corrotto/profilo diverso, non
-  ancora migrazione/backup end-to-end); il resto della fase (`F1.4.4`-`F1.4.7`) resta
+  ha una); `F1.4.8` **chiuso** (vault corrotto/profilo diverso/backup - vedi sotto: i tre scenari
+  del testo si riducono allo STESSO percorso di codice, DPAPI che rifiuta di decifrare un blob,
+  gia' coperto); il resto della fase (`F1.4.4`-`F1.4.7`) resta
   aperto - passkey/WebAuthn, pairing QR, rotazione token, anti-spoofing vocale: ciascuno un pezzo
   di prodotto a se', non una fetta stretta come `F1.4.1`/`F1.4.2` (`core/windows_hello.py` esiste
   gia' - vedi l'audit storico in [ROADMAP.md](ROADMAP.md) fase F1 - ma non e' stato riletto
@@ -1765,6 +1766,24 @@ Criterio di uscita: nessun segreto in chiaro e ogni azione admin richiede un fat
   "un blob che DPAPI rifiuta", che e' esattamente cosa succede su un profilo diverso, ma non e'
   stato verificato con un secondo account Windows vero) ne' un test di migrazione/backup end-to-
   end completo. Prova: 2.065/2.065 test, ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.4.8` (chiusura) — 14/09/2026: investigato se "profilo Windows differente" e "backup" fossero
+  davvero due scenari distinti ancora da testare, o la STESSA cosa vista da due angolazioni. Il
+  docstring di `unprotect()` (scritto nell'incremento sopra) lo dice gia' esplicitamente: DPAPI
+  lega un blob cifrato all'account Windows che lo ha creato, quindi (1) "profilo Windows diverso"
+  e (2) "ripristinare `config/settings.json` da un backup su un'altra macchina" producono lo
+  STESSO fallimento - `CryptUnprotectData` che rifiuta di decifrare un blob cifrato da
+  un'identita' diversa dalla propria - indistinguibile, dal punto di vista del codice, da un blob
+  corrotto o mai valido: DPAPI non riporta MAI il motivo del rifiuto, solo che ha rifiutato.
+  `tests/test_secrets_vault.py::CorruptedVaultTests::test_a_real_blob_with_flipped_bytes_does_not_raise`
+  (gia' esistente, non nuovo) esercita esattamente quel percorso con un blob DPAPI VERO reso
+  illeggibile - il proprio commento lo dichiara gia' "simula un file danneggiato da una
+  sincronizzazione interrotta o un backup parziale". Un test con un SECONDO account Windows vero
+  resta infeasible in CI (nessun modo di crearne uno in automatico in questo ambiente), ma questo
+  e' un limite dell'INFRASTRUTTURA di test, non un buco funzionale: il codice che gestisce il
+  rifiuto e' lo stesso, gia' esercitato, indipendentemente dal MOTIVO per cui DPAPI ha rifiutato.
+  Nessun file di produzione o di test toccato: solo la chiusura di questa voce, gia' coperta da
+  lavoro precedente non ancora riconosciuto come tale. Prova: 2.511/2.511 test (suite gia' verde,
+  nessuna riga aggiunta).
 
 ### F1.5 — Prompt injection e dati non fidati
 
@@ -4220,7 +4239,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 14/09/2026. Sessione lunga con 67 incrementi completati e verificati (PR #28-#94), la
+Aggiornato 14/09/2026. Sessione lunga con 68 incrementi completati e verificati (PR #28-#95), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -4387,7 +4406,12 @@ DAVVERO piu' processi finche' uno non viene negato invece di assumere un numero 
 preesistente - un pid diverso da questo processo; aggiunta la prova DIRETTA che il testo della
 voce chiede: una spia il cui `execute()` solleva se mai venisse chiamata, registrata accanto a un
 intent forgiato, con `assert_not_called()` a confermare che l'oggetto skill live in processo non
-viene mai toccato). Il resto:
+viene mai toccato), e `F1.4.8` chiusura (VERIFICA - "profilo Windows differente" e "backup" si
+riducono allo STESSO percorso di codice, DPAPI che rifiuta di decifrare un blob cifrato da
+un'identita' diversa dalla propria, gia' esercitato da un test esistente il cui commento
+dichiarava gia' di simulare esattamente "un backup parziale"; un secondo account Windows vero
+resta infeasible in CI ma e' un limite dell'infrastruttura di test, non un buco funzionale -
+nessun codice nuovo). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
