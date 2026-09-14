@@ -2,13 +2,15 @@
 e la fase F1 in ROADMAP.md): a differenza di core/logger.log_action (F0), qui si verifica che
 non ruoti mai e che authorization_of() derivi correttamente lo stato di autorizzazione dagli
 stessi segnali gia' usati altrove, invece di essere dichiarato a mano da chi registra."""
+import json
 import tempfile
 import threading
 import unittest
 from pathlib import Path
 
 from core.action_ledger import (
-    AUTHORIZATION_BLOCKED, AUTHORIZATION_CONFIRMED, AUTHORIZATION_DENIED, AUTHORIZATION_NONE,
+    ACTION_RECEIPT_SCHEMA_VERSION, AUTHORIZATION_BLOCKED, AUTHORIZATION_CONFIRMED,
+    AUTHORIZATION_DENIED, AUTHORIZATION_NONE,
     AUTHORIZATION_PASSPHRASE, AUTHORIZATION_PENDING, AUTHORIZATION_WINDOWS_HELLO,
     ERROR_CATEGORY_CONFLICT, ERROR_CATEGORY_DENIED, ERROR_CATEGORY_INVALID_INPUT, ERROR_CATEGORY_PENDING,
     ERROR_CATEGORY_SUCCESS, ERROR_CATEGORY_TIMEOUT, ERROR_CATEGORY_TRANSIENT,
@@ -349,6 +351,50 @@ class RecordTests(ActionLedgerTestCase):
     def test_private_flag_suppresses_recording(self):
         self.ledger.record(self._receipt(), private=True)
         self.assertEqual(self.ledger.read_all(), [])
+
+
+class PreSchemaVersionRecordCompatibilityTests(ActionLedgerTestCase):
+    """F1.1.5 ("versionare lo schema e aggiungere migrazione/compatibilita' per record
+    precedenti"): schema_version esiste da quando ActionReceipt esiste - non c'e' MAI stata,
+    in produzione, una seconda versione dello schema da cui migrare (validate_action_receipt
+    gia' rifiuta in scrittura una versione diversa da quella attuale, vedi
+    tests/test_action_contract.py::test_unsupported_schema_version_is_rejected - costruire una
+    trasformazione per una v2 che non esiste sarebbe codice morto speculativo). Cio' che resta
+    da verificare e' la "compatibilita' per record precedenti": una riga scritta PRIMA che il
+    campo schema_version esistesse (o comunque priva di quella chiave) deve restare leggibile,
+    non scartata ne' far sollevare un'eccezione - read_all()/by_* non validano mai una riga letta
+    da disco (solo un ActionReceipt in costruzione passa da validate_action_receipt), quindi
+    questo e' gia' vero per costruzione; qui lo si prova con un file scritto a mano, non con
+    ActionLedger.record() (che scriverebbe sempre la versione corrente)."""
+
+    def test_a_record_written_before_schema_version_existed_is_still_read(self):
+        pre_existing_line = json.dumps({
+            "action_id": "old1", "trace_id": "t-old", "ts": 100.0, "intent": "OPEN_APP",
+            "requested_by": "user", "risk_decision": "local_reversible", "authorization": "none",
+            "result": "success", "idempotency_key": "k-old",
+        }, ensure_ascii=False)
+        self.path.write_text(pre_existing_line + "\n", encoding="utf-8")
+
+        records = self.ledger.read_all()
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["action_id"], "old1")
+        self.assertNotIn("schema_version", records[0], "una riga vecchia non ha mai avuto questa chiave")
+
+    def test_an_old_record_and_a_new_one_coexist_in_the_same_file(self):
+        pre_existing_line = json.dumps({
+            "action_id": "old1", "trace_id": "t-old", "ts": 100.0, "intent": "OPEN_APP",
+            "requested_by": "user", "risk_decision": "local_reversible", "authorization": "none",
+            "result": "success", "idempotency_key": "k-old",
+        }, ensure_ascii=False)
+        self.path.write_text(pre_existing_line + "\n", encoding="utf-8")
+
+        self.ledger.record(self._receipt(action_id="new1"))
+        records = self.ledger.read_all()
+
+        self.assertEqual([r["action_id"] for r in records], ["old1", "new1"])
+        self.assertNotIn("schema_version", records[0])
+        self.assertEqual(records[1]["schema_version"], ACTION_RECEIPT_SCHEMA_VERSION)
 
 
 class TruncatedLastLineTests(ActionLedgerTestCase):
