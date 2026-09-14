@@ -1,6 +1,7 @@
 """Test unitari per il Privacy Engine (v5.6): modalita' privata (skills/session_control.py,
 PrivateModeSkill) e politica di retention su richiesta esplicita (skills/privacy.py,
 PurgeOldHistorySkill), incluso l'effetto reale della modalita' privata dentro JakeCore.answer()."""
+import threading
 import unittest
 from unittest import mock
 
@@ -110,6 +111,9 @@ def _bare_core_for_answer(private_mode: bool) -> JakeCore:
     core.private_mode = private_mode
     core.last_response = None
     core.event_bus = EventBus()  # v4.9.1: answer() pubblica USER_MESSAGE/JAKE_MESSAGE qui
+    # F1.8.4 ("drain limitato"): letti/scritti da answer()/shutdown() - vedi core/jake_core.py.
+    core._in_flight_answers = 0
+    core._in_flight_lock = threading.Lock()
     return core
 
 
