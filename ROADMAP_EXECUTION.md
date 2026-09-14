@@ -1758,10 +1758,13 @@ Criterio di uscita: zero bypass nel corpus security e provenienza mostrata per o
 
 - Stato: `DOING`; `F1.5.1` chiuso parzialmente (prima fetta - vedi sotto: un enum con le quattro
   categorie esiste, ma solo `EXTERNAL_CONTENT` e' davvero collegata a un punto di produzione;
-  `USER_DATA`/`INSTRUCTION`/`TOOL_RESULT` restano dichiarate ma non ancora usate); `F1.5.3` chiuso
-  parzialmente (VERIFICA, vedi sotto: confermato che il modello non puo' fabbricare "confirmed"/
-  "authenticated" nei parametri di un passo per aggirare il gate di conferma - non ancora affrontato
-  il resto, piu' ampio, dell'item); `F1.5.4` chiuso parzialmente (la sorgente e' ora mostrata
+  `USER_DATA`/`INSTRUCTION`/`TOOL_RESULT` restano dichiarate ma non ancora usate); `F1.5.3`
+  **chiuso** (VERIFICA su entrambi i percorsi reali che eseguono un'azione a partire da JSON
+  potenzialmente influenzato da contenuto esterno - l'agente a passi, vedi sotto, E il piano
+  fisso/`PlanExecutor`, la cui protezione esisteva gia' da prima di questa sessione ed e' PIU'
+  forte di quella dell'agente - toglie "confirmed"/"authenticated" da OGNI passo incondizionatamente,
+  non solo per le skill che non li dichiarano come parametro proprio; vedi sotto per il dettaglio
+  e il perche' non serve nuovo codice); `F1.5.4` chiuso parzialmente (la sorgente e' ora mostrata
   all'utente quando un passo dell'agente la suggerisce DIRETTAMENTE, vedi sotto - non ancora per il
   resto dei modi in cui un'azione sensibile potrebbe derivare da contenuto esterno, es. percorso
   planner o piu' passi intermedi); `F1.5.2` chiuso parzialmente (il marcatore ora sopravvive anche
@@ -1858,6 +1861,35 @@ Criterio di uscita: zero bypass nel corpus security e provenienza mostrata per o
   F1.5.4 sono state costruite), non un'analisi esaustiva di OGNI modo in cui un'azione privilegiata
   potrebbe derivare da contenuto esterno. Nessun file di produzione toccato (solo test). Prova:
   2.451/2.451 test, ruff verde.
+- `F1.5.3` (chiusura - verificato anche il percorso piano/PlanExecutor) — 14/09/2026: il limite
+  dichiarato sopra ("copre solo il percorso TaskAgent") investigato prima di scrivere altro
+  codice, non assunto: l'altro percorso reale che esegue un'azione a partire da JSON scritto in
+  anticipo (un piano fisso, non un passo alla volta dall'agente) e' `PlanExecutor.execute()`, che
+  raggiunge OGNI skill privilegiata sia per un comando diretto (`JakeCore._try_plan`) sia per
+  un'automazione salvata rieseguita (`RunWorkflowSkill`) sia per un trigger che parte da solo
+  (`TriggerScheduler`) - tutti e tre passano SEMPRE dallo stesso `execute()`, nessun percorso
+  parallelo. Scoperto che la protezione li' esiste gia' da prima di questa sessione (commento
+  gia' presente su `core/policy_engine.py::strip_authorization_signals`, mai collegato pero'
+  esplicitamente a F1.5.3 finora) ed e' STRUTTURALMENTE piu' forte di quella dell'agente: invece
+  di filtrare i parametri alla sola lista dichiarata nei `metadata` della capacita' (che funziona
+  solo perche' nessuna skill dichiara "confirmed"/"authenticated" come proprio parametro, un
+  invariante verificato ma pur sempre un invariante da mantenere), `strip_authorization_signals()`
+  toglie quelle due chiavi da OGNI passo di OGNI piano incondizionatamente, prima ancora di sapere
+  quale skill verra' eseguita - un piano che tentasse di auto-confermarsi o auto-autenticarsi non
+  ha modo di riuscirci indipendentemente da cosa dichiari la skill bersaglio. Gia' testato a fondo
+  con la skill VERA (non una sua reimplementazione) in
+  `tests/test_plan_executor.py::AuthorizationSignalStrippingTests` (nome di classe preesistente -
+  parametro `confirmed`/`authenticated` preimpostato non aggira `DeletePathSkill` reale, la
+  ricevuta nel ledger riflette "pending" non l'autorizzazione fabbricata, altri parametri legittimi
+  dello stesso passo restano intatti) - nessun nuovo test necessario, la copertura empirica gia'
+  esistente rispondeva gia' alla domanda, semplicemente non era ancora stata collegata a questa
+  voce della roadmap. Con questo, i DUE percorsi reali che eseguono un'azione da JSON
+  potenzialmente influenzato da contenuto esterno (agente, piano) sono entrambi verificati; un
+  comando diretto (`_execute_command`) resta fuori da questa analisi non perche' non controllato,
+  ma perche' il suo testo di origine e' per definizione l'istruzione VIVA dell'utente (categoria
+  INSTRUCTION, non EXTERNAL_CONTENT - vedi `core/taint.py`), non contenuto esterno da cui
+  guardarsi. Nessun file di produzione o di test toccato. `F1.5.3` ora **chiuso**. Prova:
+  2.507/2.507 test (suite gia' verde, nessuna riga aggiunta).
 - `F1.5.2` (prima fetta - cronologia a breve termine) — 14/09/2026: "propagare il taint attraverso
   clipboard... file... risultati di ricerca". Buco reale, non solo teorico - il marcatore di
   F1.5.1 protegge SOLO l'osservazione dello STESSO turno agente (`TaskAgent._observe()`), ma un
@@ -4111,7 +4143,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 14/09/2026. Sessione lunga con 62 incrementi completati e verificati (PR #28-#89), la
+Aggiornato 14/09/2026. Sessione lunga con 63 incrementi completati e verificati (PR #28-#90), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -4248,7 +4280,13 @@ companion e ritentare una passphrase diversa a ogni giro, senza alcun limite di 
 raggiunta una soglia, blocca ulteriori tentativi per un periodo fisso SENZA nemmeno
 confrontare, cosi' anche una passphrase corretta viene rifiutata durante il blocco; messaggio
 distinto in `_handle_confirmation()` per non far credere all'utente che l'ULTIMO tentativo
-fosse sbagliato quando in realta' e' il lockout a bloccarlo). Il resto:
+fosse sbagliato quando in realta' e' il lockout a bloccarlo), e `F1.5.3` chiusura - verifica del
+percorso piano/`PlanExecutor` (il limite dichiarato quando la prima fetta fu chiusa - "copre solo
+il percorso TaskAgent" - investigato e chiuso senza scrivere nuovo codice: `PlanExecutor.execute()`
+gia' toglie "confirmed"/"authenticated" da OGNI passo di OGNI piano incondizionatamente, prima
+ancora di sapere quale skill verra' eseguita, una protezione piu' forte di quella dell'agente e
+gia' testata a fondo con la skill `DeletePathSkill` VERA - semplicemente mai collegata
+esplicitamente a questa voce della roadmap finora). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
