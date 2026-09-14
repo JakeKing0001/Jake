@@ -204,12 +204,13 @@ class FakeKillSwitch:
 class FakeLogger:
     def __init__(self):
         self.exceptions = []
+        self.warnings = []  # F1.8.4 ("drain limitato"): registra anche .warning(), non solo .exception()
 
     def info(self, *a, **k):
         pass
 
     def warning(self, *a, **k):
-        pass
+        self.warnings.append(a[0] % a[1:] if len(a) > 1 else (a[0] if a else ""))
 
     def exception(self, *a, **k):
         self.exceptions.append(a)
@@ -253,6 +254,9 @@ def _bare_core(**overrides) -> JakeCore:
     core.system_advisor = overrides.get("system_advisor", mock.MagicMock())
     core.companion_server = overrides.get("companion_server", mock.MagicMock())
     core.retriever = overrides.get("retriever", mock.MagicMock())
+    # F1.8.4 ("drain limitato"): letti/scritti da answer()/shutdown() - vedi core/jake_core.py.
+    core._in_flight_answers = 0
+    core._in_flight_lock = threading.Lock()
     return core
 
 
@@ -898,6 +902,95 @@ class ShutdownTests(_JakeCoreTestCase):
         core.retriever.example_index.save_cache.side_effect = OSError("disco pieno")
         core.shutdown()  # non deve sollevare
         self.assertEqual(len(core.logger.exceptions), 1)
+
+
+class ShutdownDrainTests(_JakeCoreTestCase):
+    """F1.8.4 ("gestire shutdown con drain limitato"): prima di questa correzione, shutdown()
+    procedeva a fermare componenti/salvare cache anche mentre una answer() era ANCORA in corso
+    su un altro thread (tipicamente una richiesta companion, core/companion_server.py e' un
+    ThreadingHTTPServer con un thread per richiesta) - qui verificato con thread VERI in corsa,
+    non solo letto a codice."""
+
+    def test_shutdown_waits_for_an_in_flight_answer_before_stopping_other_components(self):
+        import time
+
+        core = self._core()
+        core.retriever = mock.MagicMock()
+        release_event = threading.Event()
+        order = []
+
+        def _slow_process(text):
+            order.append("answer_started")
+            release_event.wait(timeout=5)
+            order.append("answer_finished")
+            return "ok"
+
+        core._process = _slow_process
+
+        answer_thread = threading.Thread(target=lambda: core.answer("qualcosa"))
+        answer_thread.start()
+        deadline = time.monotonic() + 2
+        while "answer_started" not in order and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertIn("answer_started", order, "answer() non e' mai partita sull'altro thread")
+
+        def _release_soon():
+            time.sleep(0.1)
+            release_event.set()
+
+        threading.Thread(target=_release_soon, daemon=True).start()
+
+        core.shutdown()
+        order.append("shutdown_finished")
+        answer_thread.join(timeout=5)
+
+        self.assertLess(order.index("answer_finished"), order.index("shutdown_finished"),
+                         "shutdown() non doveva completarsi prima che la answer() in corso finisse")
+        self.assertEqual(core.scheduler.stopped, 1, "shutdown() doveva comunque procedere con la chiusura dopo il drain")
+
+    def test_shutdown_does_not_wait_forever_for_a_stuck_answer(self):
+        """Un tetto (F1.8.4._DRAIN_TIMEOUT_SECONDS, ridotto qui per non aspettare per davvero)
+        - non un'attesa indefinita se una answer() non torna mai."""
+        core = self._core()
+        core.retriever = mock.MagicMock()
+        core._DRAIN_TIMEOUT_SECONDS = 0.05
+        core._DRAIN_POLL_SECONDS = 0.01
+        never_release = threading.Event()  # mai impostato: answer() resta bloccata per sempre
+
+        def _stuck_process(text):
+            never_release.wait(timeout=5)
+            return "ok"
+
+        core._process = _stuck_process
+        stuck_thread = threading.Thread(target=lambda: core.answer("qualcosa"), daemon=True)
+        stuck_thread.start()
+        self.addCleanup(never_release.set)  # libera il thread appeso, per pulizia
+        import time
+        time.sleep(0.02)  # da' tempo alla answer() di incrementare il contatore
+
+        core.shutdown()  # non deve bloccarsi per sempre
+
+        self.assertEqual(core.scheduler.stopped, 1, "shutdown() doveva procedere comunque dopo il tetto")
+        self.assertTrue(any("ancora in corso" in msg for msg in core.logger.warnings), "doveva avvisare che una answer() era ancora in corso")
+
+    def test_companion_server_is_stopped_before_the_drain_starts(self):
+        """L'ordine conta: fermare l'accettazione di richieste NUOVE prima di aspettare quelle
+        GIA' in corso, altrimenti una nuova richiesta potrebbe iniziare proprio durante l'attesa."""
+        core = self._core()
+        core.retriever = mock.MagicMock()
+        order = []
+        core.companion_server.stop = mock.MagicMock(side_effect=lambda: order.append("companion_server.stop"))
+        original_drain = core._drain_in_flight_answers
+
+        def _tracked_drain():
+            order.append("drain")
+            return original_drain()
+
+        core._drain_in_flight_answers = _tracked_drain
+
+        core.shutdown()
+
+        self.assertEqual(order, ["companion_server.stop", "drain"])
 
 
 if __name__ == "__main__":

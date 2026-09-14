@@ -1,3 +1,4 @@
+import threading
 import time
 
 from core import fallbacks
@@ -399,6 +400,15 @@ class JakeCore:
         self.last_exchange = None  # {"text", "command", "response"}
         self.last_response = None
         self.last_route = None
+        # F1.8.4 ("gestire shutdown con drain limitato"): conta quante chiamate ad answer() sono
+        # DAVVERO in corso su un ALTRO thread in questo momento (il loop voce e core/companion_
+        # server.py, un ThreadingHTTPServer con un thread per richiesta, condividono la stessa
+        # istanza di JakeCore) - shutdown() aspetta che scenda a zero, entro un tetto, PRIMA di
+        # fermare i componenti/salvare le cache, invece di procedere mentre una richiesta e'
+        # ancora a meta' (che potrebbe usare un componente gia' fermato, o scrivere una cache
+        # DOPO il salvataggio "finale" di shutdown()).
+        self._in_flight_answers = 0
+        self._in_flight_lock = threading.Lock()
 
     # ---- callback di default -------------------------------------------------------------
 
@@ -523,6 +533,19 @@ class JakeCore:
         text = self.normalizer.normalize(raw_text)
         if not text:
             return "Non ho sentito nulla."
+        # F1.8.4 ("drain limitato"): conta questa chiamata come "in corso" da qui a return -
+        # incrementato PRIMA di qualunque lavoro vero (skill/agente/piano), decrementato in un
+        # finally cosi' shutdown() sa sempre quante chiamate stanno ancora usando i componenti
+        # che sta per fermare, anche se questo turno solleva un'eccezione imprevista.
+        with self._in_flight_lock:
+            self._in_flight_answers += 1
+        try:
+            return self._answer_inner(text, raw_text)
+        finally:
+            with self._in_flight_lock:
+                self._in_flight_answers -= 1
+
+    def _answer_inner(self, text: str, raw_text: str) -> str:
         text = self._resolve_pronouns(text)
         # F1.5.2: azzerato PRIMA di processare questo turno, cosi' un valore rimasto da un turno
         # precedente (es. un turno che non passa da _execute_command - chitchat, agente,
@@ -1162,6 +1185,36 @@ class JakeCore:
 
     # ---- chiusura ------------------------------------------------------------------------
 
+    _DRAIN_TIMEOUT_SECONDS = 5.0
+    _DRAIN_POLL_SECONDS = 0.05
+
+    def _drain_in_flight_answers(self) -> None:
+        """F1.8.4 ("gestire shutdown con drain limitato"): aspetta, entro un tetto, che ogni
+        answer() gia' in corso su un ALTRO thread (tipicamente una richiesta companion - core/
+        companion_server.py e' un ThreadingHTTPServer con un thread per richiesta; il loop voce
+        non si sovrappone mai con la propria chiamata a shutdown(), che arriva sempre DOPO che il
+        proprio answer() e' gia' tornato) finisca, PRIMA di fermare gli altri componenti/salvare
+        le cache che quella chiamata potrebbe ancora star usando - altrimenti una richiesta a
+        meta' potrebbe scrivere una cache DOPO il salvataggio "finale" qui sotto, o usare un
+        componente gia' fermato. `companion_server.stop()` e' gia' stato chiamato PRIMA di questo
+        (smette di accettare richieste NUOVE): qui si aspetta solo quelle GIA' in corso. Non
+        blocca per sempre: un tetto di 5s (poi procede comunque, con un avviso nel log) - lo
+        stesso principio "chiedi gentilmente, poi procedi" gia' usato per gli scheduler in
+        background (F1.8.5) e per il worker sandboxato (F1.6)."""
+        deadline = time.monotonic() + self._DRAIN_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            with self._in_flight_lock:
+                if self._in_flight_answers == 0:
+                    return
+            time.sleep(self._DRAIN_POLL_SECONDS)
+        with self._in_flight_lock:
+            remaining = self._in_flight_answers
+        if remaining > 0:
+            self.logger.warning(
+                "Shutdown: %d chiamata/e ad answer() ancora in corso dopo %.1fs, procedo comunque",
+                remaining, self._DRAIN_TIMEOUT_SECONDS,
+            )
+
     def shutdown(self) -> None:
         # F1.8.4 ("gestire shutdown con drain limitato, checkpoint e release dei device"): buco
         # reale - un `except Exception: pass` silenzioso per ognuno di questi passi significava
@@ -1172,10 +1225,19 @@ class JakeCore:
         # avuto modo di scoprire perche'. Ogni passo di chiusura logga ora l'eccezione con il
         # nome del componente prima di continuare con gli altri (non ferma lo shutdown: un
         # componente che non si chiude bene non deve impedire agli altri di provarci).
+        #
+        # companion_server e' fermato PER PRIMO E DA SOLO (non nel loop sotto): smette di
+        # accettare richieste NUOVE prima che _drain_in_flight_answers() aspetti quelle GIA' in
+        # corso - l'ordine conta, altrimenti una richiesta potrebbe iniziare proprio mentre si
+        # aspetta che le altre finiscano, vanificando il senso del drain.
+        try:
+            self.companion_server.stop()
+        except Exception:
+            self.logger.exception("Errore chiudendo companion_server durante lo shutdown")
+        self._drain_in_flight_answers()
         for name, component in (
             ("scheduler", self.scheduler), ("trigger_scheduler", self.trigger_scheduler),
             ("system_advisor", self.system_advisor), ("desktop_context", self.desktop_context),
-            ("companion_server", self.companion_server),
         ):
             try:
                 component.stop()
