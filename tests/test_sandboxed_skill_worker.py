@@ -151,6 +151,67 @@ class ResourceContainmentTests(unittest.TestCase):
             still_alive = worker.invoke("ECHO_TEST", {})
             self.assertTrue(still_alive.success, "il worker deve sopravvivere a una singola chiamata che esagera con la memoria")
 
+    def test_a_forged_skill_cannot_spawn_an_unbounded_number_of_child_processes(self):
+        """F1.6.3 ("aggiungere Job Object per... process tree"): ActiveProcessLimit ferma un
+        fork bomb / uno spawn senza limite, imposto dal KERNEL, non da un controllo applicativo
+        che una skill ostile potrebbe scoprire e aggirare. Il tetto e' volutamente GENEROSO
+        (default 32, qui abbassato per velocita' del test), non il minimo stretto "solo il
+        worker" - vedi il docstring del modulo: quel minimo si e' rivelato troppo stretto per
+        davvero, rompendo l'avvio del worker in questo stesso ambiente di sviluppo (un venv `uv`
+        il cui python.exe rilancia l'interprete vero come figlio, due processi solo per partire).
+        Qui si spawnano piu' figli veri (non una simulazione) finche' uno non viene negato,
+        provando che il tetto esiste per davvero senza assumere quanti processi l'avvio
+        dell'interprete stesso consumi in QUESTO ambiente."""
+        if not _WIN32_AVAILABLE:
+            self.skipTest("pywin32 non disponibile: nessun Job Object da verificare")
+        plugin_source = (
+            "from core.skill_result import SkillResult\n"
+            "import subprocess, sys\n"
+            "class SpawnManyTestSkill:\n"
+            "    metadata = {'intent': 'SPAWN_MANY_TEST', 'description': 'test', 'parameters': {}}\n"
+            "    def execute(self, parameters=None):\n"
+            "        spawned = 0\n"
+            "        hit_limit = False\n"
+            "        for _ in range(10):\n"
+            "            try:\n"
+            "                subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(8)'])\n"
+            "                spawned += 1\n"
+            "            except OSError:\n"
+            "                hit_limit = True\n"
+            "                break\n"
+            "        return SkillResult(success=True, data={'spawned': spawned, 'hit_limit': hit_limit})\n"
+            "class EchoSkill:\n"
+            "    metadata = {'intent': 'ECHO_TEST', 'description': 'test', 'parameters': {}}\n"
+            "    def execute(self, parameters=None):\n"
+            "        return SkillResult(success=True, data={})\n"
+            "def register(registry):\n"
+            "    registry.register_skill('SPAWN_MANY_TEST', SpawnManyTestSkill())\n"
+            "    registry.register_skill('ECHO_TEST', EchoSkill())\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            plugin_path = _write_plugin(Path(tmp_dir), plugin_source)
+            worker = SandboxedSkillWorker(
+                project_root=_PROJECT_ROOT, plugin_paths=[plugin_path],
+                invoke_timeout_seconds=15, max_processes=5,
+            )
+            self.addCleanup(worker.stop)
+            worker.start()
+            if not worker.integrity_restricted:
+                self.skipTest("Job Object non attivo in questo ambiente (ripiego usato)")
+
+            spawn_result = worker.invoke("SPAWN_MANY_TEST", {})
+
+            self.assertTrue(spawn_result.success)
+            self.assertTrue(
+                spawn_result.data["hit_limit"],
+                f"ActiveProcessLimit=5 doveva fermare almeno uno dei 10 tentativi di spawn "
+                f"(ne sono partiti {spawn_result.data['spawned']})",
+            )
+            self.assertLess(spawn_result.data["spawned"], 10)
+
+            still_alive = worker.invoke("ECHO_TEST", {})
+            self.assertTrue(still_alive.success, "il worker deve sopravvivere a uno spawn negato dal limite")
+
 
 class TimeoutTests(unittest.TestCase):
     def test_a_call_that_never_responds_times_out_instead_of_hanging_forever(self):
