@@ -92,6 +92,8 @@ def _format_error(intent: str, result: SkillResult) -> str:
             return "Quando devo ricordartelo? Dimmi ad esempio: tra 10 minuti, oppure alle 18."
         return "Mancano delle informazioni per eseguire questa azione."
     if error == "NOT_FOUND":
+        if intent == "RESUME_INTERRUPTED_TASK":
+            return "Non ho nessun compito interrotto da riprendere."
         if intent in ("LIST_PROCESSES", "CLOSE_APP"):
             return f"Non trovo nessun processo con '{data.get('name', '')}' nel nome."
         if intent == "RUN_WORKFLOW":
@@ -216,6 +218,11 @@ def _format_error(intent: str, result: SkillResult) -> str:
 
 def _format_success(intent: str, result: SkillResult, registry=None) -> str | None:
     data = result.data or {}
+    if intent == "RESUME_INTERRUPTED_TASK":
+        # F1.8.4: la skill ha gia' ottenuto una risposta completa in linguaggio naturale
+        # rieseguendo l'agente (core.agent_checkpoint.AgentCheckpoint) - nessuna formattazione
+        # ulteriore da applicare, a differenza di ogni altro intent qui sotto.
+        return data.get("response", "")
     if intent == "REMEMBER":
         return f"Ok, ricorderò che {data['key']} è {data['value']}."
     if intent == "RECALL":

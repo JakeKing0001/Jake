@@ -28,6 +28,7 @@ files = [
     "core/policy_engine.py",
     "core/plan_executor.py",
     "core/agent.py",
+    "core/agent_checkpoint.py",
     "core/orchestrator.py",
     "core/fallbacks.py",
     "core/auth_gate.py",

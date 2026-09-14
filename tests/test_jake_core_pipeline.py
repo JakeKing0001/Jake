@@ -22,6 +22,7 @@ from unittest import mock
 
 from core.action_ledger import ActionLedger
 from core.agent import AgentOutcome
+from core.agent_checkpoint import AgentCheckpointStore
 from core.auth_gate import AuthGate
 from core.command import Command
 from core.conversation_state import ConversationStateManager
@@ -257,6 +258,11 @@ def _bare_core(**overrides) -> JakeCore:
     # F1.8.4 ("drain limitato"): letti/scritti da answer()/shutdown() - vedi core/jake_core.py.
     core._in_flight_answers = 0
     core._in_flight_lock = threading.Lock()
+    # F1.8.4 ("checkpoint"): stessa cartella temporanea del ledger, mai data/agent_checkpoint.json
+    # vero - vedi core/agent_checkpoint.py.
+    core.agent_checkpoints = overrides.get(
+        "agent_checkpoints", AgentCheckpointStore(path=Path(overrides["ledger_path"]).parent / "agent_checkpoint.json"),
+    )
     return core
 
 
@@ -786,6 +792,90 @@ class RunAgentTests(_JakeCoreTestCase):
         self.assertEqual(response, "Fatto.")
         self.assertIn("cancella il file", orchestrator.calls[0])
         self.assertIn("quello vecchio", orchestrator.calls[0])
+
+
+class AgentCheckpointTests(_JakeCoreTestCase):
+    """F1.8.4 ("checkpoint... da cui riprendere"): un compito composto interrotto a meta' (kill
+    switch, crash) non deve andare completamente perso - vedi core/agent_checkpoint.py per lo
+    scope deliberatamente stretto (un solo checkpoint, nessuna ripresa automatica)."""
+
+    def _step(self, intent="CREATE_PATH", parameters=None, success=True):
+        from core.agent import AgentStep
+        return AgentStep(
+            intent=intent, parameters=parameters or {"path": "C:\\x.txt"}, thought="",
+            result=SkillResult(success=success, data={}),
+        )
+
+    def test_on_agent_step_completed_saves_a_checkpoint_reflecting_the_steps_so_far(self):
+        core = self._core()
+        outcome = AgentOutcome(trace_id="trace-1", request="crea un file e poi aprilo", steps=[self._step()])
+
+        core._on_agent_step_completed(outcome)
+
+        checkpoint = core.agent_checkpoints.load()
+        self.assertIsNotNone(checkpoint)
+        self.assertEqual(checkpoint.trace_id, "trace-1")
+        self.assertEqual(checkpoint.request, "crea un file e poi aprilo")
+        self.assertEqual(checkpoint.completed_steps, [{"intent": "CREATE_PATH", "parameters": {"path": "C:\\x.txt"}, "success": True}])
+
+    def test_on_agent_step_completed_does_nothing_without_trace_id_or_request(self):
+        """Un AgentOutcome costruito senza passare da TaskAgent.run() (es. un test diretto su
+        TaskAgent) non deve produrre un checkpoint fuorviante senza una richiesta a cui
+        appartiene."""
+        core = self._core()
+        outcome = AgentOutcome(steps=[self._step()])  # trace_id/request mai popolati
+
+        core._on_agent_step_completed(outcome)
+
+        self.assertIsNone(core.agent_checkpoints.load())
+
+    def test_run_agent_clears_a_preexisting_checkpoint_on_final_answer(self):
+        from core.agent_checkpoint import AgentCheckpoint
+        core = self._core(orchestrator=FakeOrchestrator(AgentOutcome(final_answer="Fatto.")))
+        core.agent_checkpoints.save(AgentCheckpoint(trace_id="stale", agent_name="general", request="vecchio compito"))
+
+        core._run_agent("qualcosa")
+
+        self.assertIsNone(core.agent_checkpoints.load())
+
+    def test_run_agent_clears_a_preexisting_checkpoint_on_a_clarifying_question(self):
+        from core.agent_checkpoint import AgentCheckpoint
+        core = self._core(orchestrator=FakeOrchestrator(AgentOutcome(question="Quale file?")))
+        core.agent_checkpoints.save(AgentCheckpoint(trace_id="stale", agent_name="general", request="vecchio compito"))
+
+        core._run_agent("qualcosa")
+
+        self.assertIsNone(core.agent_checkpoints.load())
+
+    def test_run_agent_does_not_clear_the_checkpoint_on_a_pending_confirmation(self):
+        """Una conferma in sospeso non e' un'interruzione anomala - il progresso resta valido,
+        non va buttato via solo perche' il compito si e' fermato ad aspettare un si'/no."""
+        from core.agent_checkpoint import AgentCheckpoint
+        outcome = AgentOutcome(pending_confirmation={"intent": "DELETE_PATH", "parameters": {}, "message": "Confermi?"})
+        core = self._core(orchestrator=FakeOrchestrator(outcome))
+        core.agent_checkpoints.save(AgentCheckpoint(trace_id="in-corso", agent_name="general", request="cancella tutto"))
+
+        core._run_agent("qualcosa")
+
+        checkpoint = core.agent_checkpoints.load()
+        self.assertIsNotNone(checkpoint, "il checkpoint non doveva essere cancellato durante una conferma in sospeso")
+        self.assertEqual(checkpoint.trace_id, "in-corso")
+
+    def test_resume_interrupted_task_summarizes_progress_into_a_new_agent_request(self):
+        from core.agent_checkpoint import AgentCheckpoint
+        orchestrator = FakeOrchestrator(AgentOutcome(final_answer="Continuo da li'."))
+        core = self._core(orchestrator=orchestrator)
+        checkpoint = AgentCheckpoint(
+            trace_id="vecchio", agent_name="general", request="crea un file e poi aprilo",
+            completed_steps=[{"intent": "CREATE_PATH", "parameters": {"path": "C:\\x.txt"}, "success": True}],
+        )
+
+        response = core._resume_interrupted_task(checkpoint)
+
+        self.assertEqual(response, "Continuo da li'.")
+        self.assertIn("crea un file e poi aprilo", orchestrator.calls[0])
+        self.assertIn("CREATE_PATH", orchestrator.calls[0])
+        self.assertIn("interrotto", orchestrator.calls[0])
 
 
 class HandleUnknownTests(_JakeCoreTestCase):
