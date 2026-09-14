@@ -10,6 +10,8 @@ strumenti; i risultati dei passi precedenti sono nel contesto del modello.
 Usato per le richieste composte ("e poi", "e aprilo"), per quelle che il classificatore non
 capisce, e quando una skill ha bisogno di un dato ricavabile da un'altra."""
 import json
+import queue
+import threading
 import time
 from dataclasses import dataclass, field
 
@@ -56,6 +58,13 @@ NEVER_FOR_AGENT = {
     "KILL_SWITCH", "RESET_KILL_SWITCH",
 }
 NONE_ACTION = "NONE"
+
+
+class _ModelCallAbandoned(Exception):
+    """F1.8.3 ("propagare cancellazione dal kill switch a... modello"): segnala che il kill
+    switch e' scattato MENTRE run() stava ancora aspettando client.chat() (vedi
+    TaskAgent._chat_or_abandon) - un esito distinto da un vero errore del modello (OllamaError/
+    JSON malformato), da trattare come KILLED, non MODEL_ERROR."""
 
 
 @dataclass
@@ -321,6 +330,50 @@ class TaskAgent:
             text = text[: self.OBSERVATION_MAX_CHARS] + "…"
         return text
 
+    _MODEL_CALL_POLL_SECONDS = 0.2
+
+    def _chat_or_abandon(self, model: str, messages: list, schema: dict, timeout: float) -> dict:
+        """F1.8.3 ("propagare cancellazione dal kill switch a... modello"): client.chat() e' una
+        singola chiamata HTTP bloccante fino a `timeout` secondi - il kill switch, controllato
+        SOLO tra un passo e il successivo (vedi run()), non potrebbe mai interromperla a meta',
+        stesso identico buco gia' trovato e corretto per il subprocess di RUN_COMMAND. Esegue la
+        chiamata su un thread separato e aspetta il risultato con lo stesso polling di 0.2s gia'
+        usato li', ricontrollando il kill switch a ogni giro: se scatta, run() smette di
+        aspettare e solleva _ModelCallAbandoned SUBITO, invece di aspettare fino a `timeout`
+        secondi come prima.
+
+        Limite dichiarato, non risolto qui (stesso principio del "nessun kill dell'intero
+        process tree" gia' accettato per RUN_COMMAND): la chiamata HTTP abbandonata continua a
+        girare in background fino al proprio timeout - non esiste un modo pulito di annullare un
+        urlopen() gia' in corso da un altro thread senza riscrivere il livello HTTP di
+        core/ollama_client.py per esporre il socket sottostante. Il suo risultato, quando arriva,
+        viene semplicemente scartato (il thread e' daemon, non impedisce la chiusura del
+        processo): questa NON e' la stessa cosa di un abort violento a meta' esecuzione di una
+        skill (vedi core/kill_switch.py) - nessuno stato di Jake viene toccato a meta', solo una
+        risposta del modello mai utilizzata viene buttata via."""
+        result_queue: queue.Queue = queue.Queue(maxsize=1)
+
+        def _call() -> None:
+            try:
+                result_queue.put((
+                    "ok",
+                    self.client.chat(model, messages, format=schema, options={"temperature": 0, "num_predict": 300}, timeout=timeout),
+                ))
+            except Exception as exc:
+                result_queue.put(("error", exc))
+
+        threading.Thread(target=_call, daemon=True).start()
+        while True:
+            try:
+                kind, value = result_queue.get(timeout=self._MODEL_CALL_POLL_SECONDS)
+            except queue.Empty:
+                if self.kill_switch.is_active():
+                    raise _ModelCallAbandoned() from None
+                continue
+            if kind == "error":
+                raise value
+            return value
+
     def run(self, request: str, history: list[dict] | None = None, trace_id: str | None = None, private: bool = False) -> AgentOutcome:
         # trace_id/private (F0, log strutturati): chi chiama (JakeCore._run_agent, tramite
         # JakeOrchestrator.run) passa lo stesso trace_id gia' generato per l'intera richiesta,
@@ -364,12 +417,21 @@ class TaskAgent:
                     self.logger.warning("Agente: budget di tempo esaurito dopo %d passi per: %s", len(outcome.steps), request)
                 break
             try:
-                response = self.client.chat(
-                    model, messages, format=self._schema(tools),
-                    options={"temperature": 0, "num_predict": 300}, timeout=60,
-                )
+                response = self._chat_or_abandon(model, messages, self._schema(tools), 60)
                 content = response["message"]["content"]
                 payload = json.loads(content) if isinstance(content, str) else content
+            except _ModelCallAbandoned:
+                # F1.8.3 ("modello"): il kill switch e' scattato MENTRE si aspettava la risposta
+                # del modello - stesso esito degli altri due punti di controllo sopra, non un
+                # MODEL_ERROR (il modello non ha fatto nulla di sbagliato, semplicemente non si
+                # e' piu' aspettata la sua risposta).
+                outcome.error = "KILLED"
+                if self.logger:
+                    self.logger.warning(
+                        "Agente: kill switch attivo durante la chiamata al modello, fermato dopo %d passi per: %s",
+                        len(outcome.steps), request,
+                    )
+                break
             except (OllamaError, KeyError, ValueError, TypeError, json.JSONDecodeError) as exc:
                 outcome.error = f"MODEL_ERROR: {type(exc).__name__}"
                 if self.logger:
