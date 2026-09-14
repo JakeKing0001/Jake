@@ -12,7 +12,9 @@ from core.policy_engine import (
     POLICY_REASON_ALLOWED, POLICY_REASON_BLOCKED, POLICY_REASON_CONFIRM, POLICY_REASON_REQUIRE_AUTH,
     POLICY_REASONS,
 )
-from core.request_context import reset_current_device_id, set_current_device_id
+from core.request_context import (
+    reset_current_device_id, set_current_command_source_intent, set_current_device_id,
+)
 from core.skill_result import SkillResult
 from skills.create_path import CreatePathSkill
 from tests.test_agent import FakeRetriever, ScriptedOllamaClient
@@ -33,6 +35,11 @@ class PolicyLedgerTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
+        # F1.5.2: _execute_command() imposta core.request_context.current_command_source_intent
+        # come effetto collaterale (normalmente ripulito da answer(), mai chiamato qui - execute()
+        # sotto chiama _execute_command() direttamente). Forzato a None dopo ogni test, non un
+        # set+reset (che ripristinerebbe il valore sporco appena impostato).
+        self.addCleanup(set_current_command_source_intent, None)
         self.root = Path(tmp.name)
         self.skill = FakeSkill()
         self.registry = AgentRegistry({
@@ -314,6 +321,8 @@ class _PolicyLedgerFixture(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
+        # F1.5.2: stesso motivo di PolicyLedgerTests.setUp sopra.
+        self.addCleanup(set_current_command_source_intent, None)
         self.root = Path(tmp.name)
         self.skill = FakeSkill()
         self.registry = AgentRegistry({

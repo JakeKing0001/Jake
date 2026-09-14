@@ -29,7 +29,11 @@ from core import orchestrator
 from core.orchestrator import JakeOrchestrator
 from core.policy_engine import POLICY_REASONS, PolicyDecision, PolicyEngine, strip_authorization_signals
 from core.plugin_loader import load_plugins
-from core.request_context import current_device_id
+from core.request_context import (
+    current_command_source_intent, current_device_id, reset_current_command_source_intent,
+    set_current_command_source_intent,
+)
+from core.taint import wrap_external_content
 from core.response_formatter import format_plan_outcome, format_skill_result
 from core.risk import risk_of
 from core.router import Router
@@ -520,6 +524,10 @@ class JakeCore:
         if not text:
             return "Non ho sentito nulla."
         text = self._resolve_pronouns(text)
+        # F1.5.2: azzerato PRIMA di processare questo turno, cosi' un valore rimasto da un turno
+        # precedente (es. un turno che non passa da _execute_command - chitchat, agente,
+        # conferma) non finisce per etichettare per errore la risposta di QUESTO turno.
+        source_intent_token = set_current_command_source_intent(None)
         try:
             response = self._process(text)
         except Exception:
@@ -539,9 +547,16 @@ class JakeCore:
         # modalita' privata non deve lasciare traccia da nessuna parte, ne' su disco ne' altrove.
         self.conversation_state.add_turn("user", text)
         if response != self.EXIT_SENTINEL:
-            self.conversation_state.add_turn("jake", response)
+            # F1.5.2: la versione salvata in cronologia porta il marcatore strutturale quando
+            # questa risposta viene da un comando diretto che ha restituito contenuto esterno
+            # (wrap_external_content e' un no-op se current_command_source_intent() e' None o
+            # non e' un intent censito - vedi core/taint.py). Il valore RESTITUITO all'utente
+            # (`response`, sotto e ovunque altro venga usato) resta invece SENZA marcatore: serve
+            # al modello in un prompt futuro, mai alla persona che legge/ascolta ora.
+            self.conversation_state.add_turn("jake", wrap_external_content(current_command_source_intent(), response))
             if response:
                 self.last_response = response
+        reset_current_command_source_intent(source_intent_token)
         if self.private_mode:
             self.logger.info("Scambio in modalità privata: non registrato.")
         else:
@@ -876,6 +891,10 @@ class JakeCore:
             response = f"{note} {response}"
         if result is not None and result.success:
             self.conversation_state.remember_entities(resolved.intent, resolved.parameters, result.data or {})
+            # F1.5.2: segnala a answer() che QUESTA risposta puo' contenere contenuto esterno
+            # (core/request_context.py per il perche' - letto una volta li', non qui: un comando
+            # diretto e' l'unico percorso, mai l'agente ne' una conferma, che non passano da qui).
+            set_current_command_source_intent(resolved.intent)
         if learn:
             self.learning.observe(text, resolved, result, route=self.router.last_route)
         self._remember_exchange(text, resolved, response)

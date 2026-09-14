@@ -8,8 +8,9 @@ import threading
 import unittest
 
 from core.request_context import (
-    current_agent_name, current_device_id, reset_current_agent_name, reset_current_device_id,
-    set_current_agent_name, set_current_device_id,
+    current_agent_name, current_command_source_intent, current_device_id, reset_current_agent_name,
+    reset_current_command_source_intent, reset_current_device_id, set_current_agent_name,
+    set_current_command_source_intent, set_current_device_id,
 )
 
 
@@ -149,6 +150,37 @@ class AgentNameThreadIsolationTests(unittest.TestCase):
             t.join()
 
         self.assertEqual(observed, {"coding_thread": "coding", "research_thread": "research"})
+
+
+class CommandSourceIntentDefaultTests(unittest.TestCase):
+    """F1.5.2 (propagare il taint oltre l'osservazione dello stesso turno): stesso identico
+    contratto di current_device_id/current_agent_name sopra."""
+
+    def test_default_is_none_when_never_set(self):
+        self.assertIsNone(current_command_source_intent())
+
+
+class CommandSourceIntentSetAndResetTests(unittest.TestCase):
+    def test_set_makes_the_value_visible_on_this_thread(self):
+        token = set_current_command_source_intent("READ_FILE_TEXT")
+        try:
+            self.assertEqual(current_command_source_intent(), "READ_FILE_TEXT")
+        finally:
+            reset_current_command_source_intent(token)
+
+    def test_reset_restores_the_previous_value(self):
+        outer_token = set_current_command_source_intent("READ_FILE_TEXT")
+        inner_token = set_current_command_source_intent("WEB_SEARCH")
+        reset_current_command_source_intent(inner_token)
+        try:
+            self.assertEqual(current_command_source_intent(), "READ_FILE_TEXT")
+        finally:
+            reset_current_command_source_intent(outer_token)
+
+    def test_reset_restores_none_when_nothing_was_set_before(self):
+        token = set_current_command_source_intent("READ_FILE_TEXT")
+        reset_current_command_source_intent(token)
+        self.assertIsNone(current_command_source_intent())
 
 
 if __name__ == "__main__":
