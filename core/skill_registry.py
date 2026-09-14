@@ -30,6 +30,12 @@ from pathlib import Path
 
 
 class SkillRegistry:
+    # F1.6.8: numero di violazioni (SANDBOX_WORKER_TIMEOUT) attribuite allo STESSO plugin prima
+    # di metterlo in quarantena. Non 1 (un singolo timeout puo' capitare per una chiamata di rete
+    # lenta dentro la skill, non necessariamente malevolenza/un bug vero), non un numero grande
+    # (un plugin che continua a far cadere il worker condiviso danneggia anche tutte le altre
+    # skill forgiate, non solo se stesso - vedi _get_or_start_sandbox_worker).
+    _QUARANTINE_THRESHOLD = 3
 
     def __init__(
         self,
@@ -102,6 +108,17 @@ class SkillRegistry:
         # il worker carica i plugin UNA VOLTA all'avvio, quindi un elenco di plugin cambiato dopo
         # richiede un riavvio per essere visto.
         self._sandbox_worker: SandboxedSkillWorker | None = None
+        # F1.6.8 ("terminare e mettere in quarantena plugin che viola limiti o protocollo"):
+        # {plugin_path: conteggio} delle violazioni (SANDBOX_WORKER_TIMEOUT - il worker non ha
+        # risposto in tempo, o e' morto a meta' richiesta, es. terminato dal Job Object per aver
+        # superato memoria/CPU) attribuite a quel plugin. Vuoto per default: nessun plugin ha mai
+        # violato nulla finche' non succede per davvero.
+        self._plugin_violation_counts: dict[str, int] = {}
+        # Popolato quando un plugin raggiunge _QUARANTINE_THRESHOLD violazioni - i suoi intent
+        # smettono di essere eseguibili (SKILL_QUARANTINED) e il plugin viene escluso da un
+        # futuro riavvio del worker, invece di continuare a farlo ripartire con lo stesso
+        # plugin che lo fa cadere in continuazione a ogni chiamata.
+        self._quarantined_plugins: set[str] = set()
 
     def get_skill(self, intent: str):
         return self.skills.get(intent, None)
@@ -243,18 +260,56 @@ class SkillRegistry:
         return skill.execute(parameters)
 
     def _execute_forged(self, intent: str, parameters: dict) -> SkillResult:
+        plugin_path = self._forged_intents.get(intent)
+        if plugin_path is not None and plugin_path in self._quarantined_plugins:
+            return SkillResult(success=False, data={}, error="SKILL_QUARANTINED")
         worker = self._get_or_start_sandbox_worker()
         if worker is None:
             return SkillResult(success=False, data={}, error="SANDBOX_WORKER_UNAVAILABLE")
-        return worker.invoke(intent, parameters)
+        result = worker.invoke(intent, parameters)
+        # F1.6.8: SANDBOX_WORKER_TIMEOUT copre sia "il worker non ha risposto in tempo" sia "il
+        # worker e' morto a meta' richiesta" (es. terminato dal Job Object per aver superato
+        # memoria/CPU, vedi core/sandboxed_skill_worker.py) - entrambi attribuibili a QUESTA
+        # chiamata. SANDBOX_WORKER_UNAVAILABLE non conta: puo' capitare per un ambiente rotto
+        # (pywin32 mancante) che non e' colpa di nessun plugin specifico.
+        if plugin_path is not None and result.error == "SANDBOX_WORKER_TIMEOUT":
+            self._record_plugin_violation(plugin_path)
+        return result
+
+    def _record_plugin_violation(self, plugin_path: str) -> None:
+        count = self._plugin_violation_counts.get(plugin_path, 0) + 1
+        self._plugin_violation_counts[plugin_path] = count
+        if count < self._QUARANTINE_THRESHOLD:
+            return
+        self._quarantined_plugins.add(plugin_path)
+        self.logger.warning(
+            "Plugin %s messo in quarantena dopo %d violazioni (timeout/crash nel worker sandboxato)",
+            plugin_path, count,
+        )
+        # Il worker gia' vivo potrebbe aver caricato il plugin appena messo in quarantena: fermato
+        # e dimenticato, cosi' il PROSSIMO avvio (_get_or_start_sandbox_worker sotto) lo esclude
+        # dall'elenco dei plugin caricati - altrimenti resterebbe servibile fino al prossimo
+        # riavvio naturale del worker.
+        if self._sandbox_worker is not None:
+            self._sandbox_worker.stop()
+            self._sandbox_worker = None
+
+    def clear_quarantine(self, plugin_path: str) -> None:
+        """F1.6.8: rimuove un plugin dalla quarantena - un'azione esplicita (non c'e' modo
+        automatico di 'scontare' le violazioni passate), pensata per un amministratore che ha
+        controllato/corretto il plugin, non per un ripristino silenzioso."""
+        self._quarantined_plugins.discard(plugin_path)
+        self._plugin_violation_counts.pop(plugin_path, None)
 
     def _get_or_start_sandbox_worker(self) -> SandboxedSkillWorker | None:
         if self._sandbox_worker is not None and self._sandbox_worker.is_alive():
             return self._sandbox_worker
         project_root = str(Path(__file__).resolve().parent.parent)
+        # F1.6.8: un plugin in quarantena non viene MAI ricaricato da un worker nuovo, anche se
+        # altri intent forgiati (non in quarantena) lo richiedono nel frattempo.
+        plugin_paths = sorted(set(self._forged_intents.values()) - self._quarantined_plugins)
         worker = SandboxedSkillWorker(
-            project_root=project_root, plugin_paths=sorted(set(self._forged_intents.values())),
-            logger=self.logger,
+            project_root=project_root, plugin_paths=plugin_paths, logger=self.logger,
         )
         try:
             worker.start()
