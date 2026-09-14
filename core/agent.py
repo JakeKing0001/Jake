@@ -100,6 +100,10 @@ class AgentOutcome:
     # non saprebbe cosa continuare a fare). Stesso principio di PlanOutcome.trace_id (F1.7.2).
     trace_id: str | None = None
     request: str | None = None
+    # F1.8.4 (estensione a coding/ricerca): quale dei tre agenti (general/coding/research) ha
+    # prodotto questi passi - un checkpoint salvato per l'agente sbagliato riprenderebbe il
+    # compito con la persona/gli strumenti fissi sbagliati (vedi core/orchestrator.py).
+    agent_name: str | None = None
 
     @property
     def did_something(self) -> bool:
@@ -398,7 +402,7 @@ class TaskAgent:
         # comparire come eventi scollegati; se nessuno lo passa (es. un test diretto su
         # TaskAgent), se ne genera uno qui cosi' i passi restano comunque correlati tra loro.
         trace_id = trace_id or new_trace_id()
-        outcome = AgentOutcome(trace_id=trace_id, request=request)
+        outcome = AgentOutcome(trace_id=trace_id, request=request, agent_name=self.agent_name)
         tools = self._tools(request)
         if not tools:
             outcome.error = "NO_TOOLS"
