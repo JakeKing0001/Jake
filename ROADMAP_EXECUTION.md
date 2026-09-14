@@ -2000,10 +2000,10 @@ Criterio di uscita: un plugin ostile non legge file, rete o processi non dichiar
   kernel); `F1.6.4` **chiuso** (VALUTAZIONE, non implementazione - vedi sotto: AppContainer
   richiederebbe bindings `ctypes` scritti da zero, `pywin32` non lo copre affatto; raccomandazione
   di non procedere ora, con un percorso alternativo piu' semplice suggerito per F1.6.6); `F1.6.8`
-  **chiuso** (quarantena per violazioni ripetute, vedi sotto); `F1.6.5`-`F1.6.6` restano aperti
-  (`F1.6.7`, serializzazione input/output, e' vero per costruzione con il protocollo a righe JSON
-  - un processo separato non puo' condividere oggetti Python live con Jake - ma senza
-  ancora un test avversariale dedicato che lo dimostri). **Il collegamento vero e' ora fatto**:
+  **chiuso** (quarantena per violazioni ripetute, vedi sotto); `F1.6.5`-`F1.6.6` restano aperti;
+  `F1.6.7` **chiuso** (serializzazione input/output, vero per costruzione con il protocollo a
+  righe JSON - un processo separato non puo' condividere oggetti Python live con Jake - e ora
+  anche con un test avversariale dedicato, vedi sotto). **Il collegamento vero e' ora fatto**:
   `SkillRegistry.execute()` instrada davvero una skill forgiata verso il worker sandboxato invece
   di eseguirla in processo (vedi sotto) - non piu' solo un'infrastruttura inerte.
 - `F1.6.1`/`F1.6.2`/`F1.6.3` (fondamenta: worker persistente sandboxato) — 13/09/2026: via libera
@@ -2218,6 +2218,23 @@ Criterio di uscita: un plugin ostile non legge file, rete o processi non dichiar
   `invoke_timeout_seconds` lato Python, gia' presente ma non imposta dal kernel). Prova:
   2.510/2.510 test, ruff/mypy verdi su `core/sandboxed_skill_worker.py`/
   `tests/test_sandboxed_skill_worker.py`.
+- `F1.6.7` (chiusura - test avversariale) — 14/09/2026: "serializzare input/output; nessun oggetto
+  core condiviso col plugin" era gia' vero per costruzione (protocollo a righe JSON su pipe tra
+  due processi separati - non c'e' modo di condividere un oggetto Python live attraverso quel
+  confine), e gia' provato INDIRETTAMENTE da un test preesistente
+  (`test_a_forged_intent_executes_in_a_separate_process_not_this_one`: un `FakeSkill()` registrato
+  in processo accanto al plugin non interferisce, il risultato porta il pid del worker, non
+  quello di questo processo). Mancava pero' la prova DIRETTA che il testo della voce chiede
+  esplicitamente ("audit che nessun oggetto core finisca mai passato al plugin"): aggiunto
+  `tests/test_skill_registry.py::ForgedSkillSandboxWiringTests::
+  test_the_live_in_process_skill_object_is_never_invoked_for_a_forged_intent` - una spia
+  (`unittest.mock.Mock`) il cui `execute()` SOLLEVA immediatamente se mai venisse chiamato,
+  registrata come l'oggetto skill "live" per un intent forgiato; l'esecuzione va comunque a buon
+  fine (routing al worker sandboxato) e `spy.execute.assert_not_called()` lo conferma in modo
+  inequivocabile - una futura regressione che facesse ricadere un intent forgiato sul ramo
+  in-processo per errore fallirebbe qui direttamente, non solo con un pid inspiegabilmente
+  uguale. Nessun file di produzione toccato. `F1.6.7` ora **chiuso**. Prova: 2.511/2.511 test,
+  ruff/mypy verdi su `tests/test_skill_registry.py`.
 
 ### F1.7 — Ledger, replay e osservabilità
 
@@ -4203,7 +4220,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 14/09/2026. Sessione lunga con 66 incrementi completati e verificati (PR #28-#93), la
+Aggiornato 14/09/2026. Sessione lunga con 67 incrementi completati e verificati (PR #28-#94), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -4365,17 +4382,21 @@ l'avvio del worker in questo stesso ambiente di sviluppo - il `python.exe` di qu
 un launcher che rilancia l'interprete vero come processo figlio, 2 processi solo per partire, non
 1 - scoperto isolando `CreateProcess`+Job Object da soli DOPO che l'intera suite del modulo ha
 iniziato a fallire; corretto con un tetto generoso, `max_processes=32`, e un test che spawna
-DAVVERO piu' processi finche' uno non viene negato invece di assumere un numero fisso). Il resto:
+DAVVERO piu' processi finche' uno non viene negato invece di assumere un numero fisso), e
+`F1.6.7` chiusura (era gia' vero per costruzione e gia' provato indirettamente da un test
+preesistente - un pid diverso da questo processo; aggiunta la prova DIRETTA che il testo della
+voce chiede: una spia il cui `execute()` solleva se mai venisse chiamata, registrata accanto a un
+intent forgiato, con `assert_not_called()` a confermare che l'oggetto skill live in processo non
+viene mai toccato). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.510/2.510 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.511/2.511 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
 invariati, nessuno dei due coperto da "mypy selettivo" in CI - 80 file nella lista selettiva,
-invariata rispetto all'ultimo incremento: `core/sandboxed_skill_worker.py` era gia' presente).
-`G1` resta aperto.
+invariata: nessun file nuovo in questo incremento). `G1` resta aperto.
 
 Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
 sessione (`sys.setswitchinterval()` abbassato + `threading.Barrier`, senza altro aiuto) NON
