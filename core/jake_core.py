@@ -175,9 +175,9 @@ class JakeCore:
             kill_switch=self.kill_switch,
         )
         self.agent.on_step = self._on_agent_step
-        # F1.8.4 ("checkpoint... da cui riprendere"): solo l'agente "general" per questa prima
-        # fetta (il percorso a comando singolo/voce, non coding/ricerca - vedi core/agent_
-        # checkpoint.py per il perche' dello scope stretto).
+        # F1.8.4 ("checkpoint... da cui riprendere"): collegato per tutti e tre gli agenti (vedi
+        # sotto per coding_agent/research_agent) - AgentOutcome.agent_name (popolato da run()
+        # stesso) distingue quale dei tre ha prodotto un dato checkpoint.
         self.agent.on_step_completed = self._on_agent_step_completed
 
         # Architettura multi-agente (v5.0/5.1/5.2): stesso TaskAgent, configurato con un
@@ -199,12 +199,14 @@ class JakeCore:
             agent_name="coding", **agent_kwargs,
         )
         self.coding_agent.on_step = self._on_agent_step
+        self.coding_agent.on_step_completed = self._on_agent_step_completed
         self.research_agent = TaskAgent(
             self.skill_registry, self.retriever, self.ollama,
             fixed_tools=list(orchestrator.RESEARCH_TOOLS), persona_line=orchestrator.RESEARCH_PERSONA,
             agent_name="research", **agent_kwargs,
         )
         self.research_agent.on_step = self._on_agent_step
+        self.research_agent.on_step_completed = self._on_agent_step_completed
         self.orchestrator = JakeOrchestrator(self.agent, self.coding_agent, self.research_agent)
 
         self.router = Router(
@@ -517,17 +519,20 @@ class JakeCore:
             self.event_bus.publish(HudEvent(EventType.VERIFICATION, {"intent": intent, "verified": verified}))
 
     def _on_agent_step_completed(self, outcome) -> None:
-        """F1.8.4 ("checkpoint... da cui riprendere"): collegato a `self.agent.on_step_completed`
-        (core/agent.py::TaskAgent) - chiamato dopo OGNI passo che l'agente "general" completa
-        (riuscito o fallito), sovrascrive il checkpoint sul disco con il progresso aggiornato.
-        `outcome.trace_id`/`outcome.request` sono popolati da `TaskAgent.run()` stesso (F1.8.4);
-        solo intent/parametri/esito di ogni passo vengono salvati (mai l'intero `SkillResult` - i
-        dati grezzi di una skill potrebbero contenere contenuto esterno/sensibile che non ha
-        senso duplicare su un secondo file, il ledger e' gia' la fonte di verita' per quello)."""
-        if outcome.trace_id is None or outcome.request is None:
+        """F1.8.4 ("checkpoint... da cui riprendere"): collegato a `on_step_completed` di
+        ciascuno dei tre TaskAgent (general/coding/research, vedi __init__) - chiamato dopo OGNI
+        passo che l'agente completa (riuscito o fallito), sovrascrive il checkpoint sul disco con
+        il progresso aggiornato. `outcome.trace_id`/`.request`/`.agent_name` sono popolati da
+        `TaskAgent.run()` stesso (F1.8.4) - `agent_name` conta DAVVERO qui (non solo "general"
+        come nella prima fetta): un checkpoint salvato con l'agente sbagliato riprenderebbe il
+        compito con la persona/gli strumenti fissi sbagliati (vedi core/orchestrator.py). Solo
+        intent/parametri/esito di ogni passo vengono salvati (mai l'intero `SkillResult` - i dati
+        grezzi di una skill potrebbero contenere contenuto esterno/sensibile che non ha senso
+        duplicare su un secondo file, il ledger e' gia' la fonte di verita' per quello)."""
+        if outcome.trace_id is None or outcome.request is None or outcome.agent_name is None:
             return
         checkpoint = AgentCheckpoint(
-            trace_id=outcome.trace_id, agent_name="general", request=outcome.request,
+            trace_id=outcome.trace_id, agent_name=outcome.agent_name, request=outcome.request,
             completed_steps=[
                 {
                     "intent": step.intent, "parameters": step.parameters,

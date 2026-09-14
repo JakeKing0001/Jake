@@ -2678,6 +2678,26 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
   trovati nel passo precedente) senza il nuovo attributo - corretti. `core/agent_checkpoint.py`
   aggiunto al set selettivo di mypy (80 file). Prova: 2.495/2.495 test, ruff/mypy/compileall verdi
   su tutti i file toccati.
+- `F1.8.4` (checkpoint esteso a coding/ricerca) — 14/09/2026: la prima fetta sopra copriva
+  deliberatamente solo l'agente "general". Estesa a `coding_agent`/`research_agent` collegando
+  `on_step_completed` anche a loro (gia' fatto per `on_step`, lo stesso schema) - ma farlo
+  richiedeva prima sapere QUALE agente ha prodotto un dato passo: `_on_agent_step_completed`
+  salvava sempre `agent_name="general"` a mano, un bug che sarebbe rimasto silenzioso finche'
+  qualcuno non avesse collegato un secondo agente e trovato checkpoint sempre etichettati
+  "general" anche per compiti di coding/ricerca. Aggiunto `AgentOutcome.agent_name` (popolato da
+  `TaskAgent.run()` con `self.agent_name`, stesso principio di `.trace_id`/`.request`) e
+  `_on_agent_step_completed` ora lo LEGGE invece di darlo per scontato (rifiuta di salvare un
+  checkpoint anche se `agent_name` manca, oltre a `trace_id`/`request` gia' controllati prima).
+  Limite dichiarato, non affrontato qui: i tre agenti condividono UN SOLO slot di checkpoint (per
+  design, vedi il docstring di `core/agent_checkpoint.py`) - due richieste concorrenti su DUE
+  agenti diversi (es. voce sul generale, un dispositivo companion su ricerca, nella stessa
+  finestra di pochi secondi) si sovrascriverebbero a vicenda il checkpoint; scenario raro (RUN_
+  TIMEOUT_SECONDS=90 la finestra massima) ma non impossibile, non risolto - una coda o uno slot
+  per agente sarebbe un cambio di design piu' ampio. Aggiunti 2 nuovi test in `tests/test_agent.py::
+  OnStepCompletedCallbackTests` (l'`agent_name` sull'outcome riflette quello VERO dell'agente, non
+  sempre "general") e 2 in `tests/test_jake_core_pipeline.py::AgentCheckpointTests` (un checkpoint
+  per "coding" viene registrato come "coding", non piu' "general"; nessun checkpoint senza
+  `agent_name`). Prova: 2.497/2.497 test, ruff/mypy/compileall verdi su tutti i file toccati.
 - `F1.8.3` (parziale, RUN_COMMAND) — 12/09/2026: "propagare cancellazione dal kill switch a...
   subprocess". Buco reale, riprodotto prima del fix: `kill_switch.is_active()` viene controllato
   solo TRA un passo e il successivo da `TaskAgent`/`PlanExecutor` (vedi `core/kill_switch.py`),
@@ -4055,7 +4075,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 14/09/2026. Sessione lunga con 60 incrementi completati e verificati (PR #28-#87), la
+Aggiornato 14/09/2026. Sessione lunga con 61 incrementi completati e verificati (PR #28-#88), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -4188,7 +4208,7 @@ non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ul
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.495/2.495 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.497/2.497 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
 invariati, nessuno dei due coperto da "mypy selettivo" in CI - 80 file nella lista selettiva,
 `core/identity.py`/`core/forge_worker.py`/`core/sandboxed_skill_worker.py`/`core/taint.py`/

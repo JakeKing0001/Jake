@@ -1016,6 +1016,26 @@ class OnStepCompletedCallbackTests(unittest.TestCase):
         self.assertEqual(calls, [1], "un solo passo completato in questo run, una sola chiamata")
         self.assertEqual(outcome.trace_id, "fisso-123")
         self.assertEqual(outcome.request, "aggiungi un appunto")
+        self.assertEqual(outcome.agent_name, "general")
+
+    def test_outcome_agent_name_reflects_the_real_agent_not_a_fixed_default(self):
+        """F1.8.4 (estensione a coding/ricerca): un agente specializzato (coding_agent/
+        research_agent in JakeCore, stesso TaskAgent con agent_name diverso) deve produrre un
+        outcome con IL PROPRIO nome, non sempre "general"."""
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={"text": "prova"})])
+        client = ScriptedOllamaClient([
+            {"thought": "", "action": {"intent": "ADD_NOTE", "parameters": {"text": "prova"}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto.", "ask_user": ""},
+        ])
+        agent = TaskAgent(
+            registry, FakeRetriever(["ADD_NOTE"]), client, model_provider=lambda: "fake-model",
+            format_result=lambda intent, result: str(result.data), policy_engine=PolicyEngine(), agent_name="coding",
+        )
+
+        outcome = agent.run("correggi il bug")
+
+        self.assertEqual(outcome.agent_name, "coding")
 
     def test_a_broken_callback_does_not_stop_the_step_from_executing(self):
         """Stesso principio gia' applicato a on_step (F1.8.4): un checkpoint che non si salva
