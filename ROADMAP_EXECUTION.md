@@ -2459,8 +2459,9 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
   frase->intent, registro dispositivi/handoff); `F1.8.3` **chiuso** (RUN_COMMAND, e ora anche la
   chiamata al modello - vedi sotto; le altre skill con subprocess erano gia' verificate a posto);
   `F1.8.4` chiuso parzialmente
-  (visibilita' dei fallimenti di shutdown, e ora anche il rilascio dei device audio VERIFICATO
-  - vedi sotto; non ancora drain/checkpoint veri); `F1.8.5` chiuso
+  (visibilita' dei fallimenti di shutdown, il rilascio dei device audio VERIFICATO, e ora anche il
+  drain limitato di answer() in corso - vedi sotto; non ancora un vero checkpoint da cui
+  riprendere); `F1.8.5` chiuso
   parzialmente (diagnosi di un thread che non si ferma in tempo per i quattro scheduler in
   background, non ancora deadlock su lock applicativi, vedi sotto); `F1.8.6` chiuso (verificato,
   vedi sotto); `F1.8.7` chiuso parzialmente (race su handoff device e su trigger trovate e
@@ -2596,6 +2597,36 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
   nuovi test in `tests/test_wake_word_session.py::RunReleasesTheMicrophoneTests`. Prova:
   2.421/2.421 test, ruff verde (il modulo non e' nel set selettivo di mypy - stub `sounddevice`/
   `webrtcvad` incompleti, stesso motivo gia' noto per gli altri file di `core/voice/`).
+- `F1.8.4` (drain limitato) — 14/09/2026: "gestire shutdown con drain limitato". Buco reale, non
+  solo teorico - `JakeCore.answer()` e' l'ingresso condiviso sia dal loop voce sia da
+  `core/companion_server.py` (un `ThreadingHTTPServer`, un thread per richiesta): prima di questa
+  correzione, `shutdown()` procedeva SUBITO a fermare componenti/salvare cache anche se una
+  `answer()` era ANCORA in corso su un thread companion in quel momento - una richiesta a meta'
+  avrebbe potuto usare un componente gia' fermato, o scrivere una cache DOPO il salvataggio
+  "finale" di shutdown(). Corretto con lo stesso principio "chiedi gentilmente, poi procedi
+  comunque entro un tetto" gia' usato per gli scheduler in background (F1.8.5) e per il worker
+  sandboxato (F1.6): un contatore (`_in_flight_answers`, protetto da un `Lock` - incrementato
+  all'ingresso di `answer()`, decrementato in un `finally` cosi' resta corretto anche se il turno
+  solleva un'eccezione imprevista) e un nuovo `_drain_in_flight_answers()` che aspetta, entro
+  `_DRAIN_TIMEOUT_SECONDS` (5s), che scenda a zero prima di procedere - se non ci riesce in tempo,
+  logga un avviso esplicito e procede comunque (nessun blocco indefinito). `answer()` diviso in un
+  involucro sottile (che gestisce solo il contatore) e un nuovo `_answer_inner()` (il corpo
+  originale, invariato) per evitare di reindentare l'intero metodo esistente - stesso principio
+  "cambio minimo, comportamento identico" gia' seguito altrove in questa sessione.
+  `companion_server.stop()` spostato FUORI dal ciclo generico di chiusura componenti e chiamato
+  PER PRIMO, da solo, PRIMA del drain: l'ordine conta - fermare l'accettazione di richieste NUOVE
+  prima di aspettare quelle gia' in corso, altrimenti una richiesta potrebbe iniziare proprio
+  durante l'attesa, vanificando il drain. Verificato con thread VERI in corsa (non solo letto a
+  codice): un `answer()` bloccato su un thread separato, `shutdown()` chiamato dal thread
+  principale mentre e' ancora in corso, dimostrato che `shutdown()` NON si completa prima che
+  l'`answer()` in corso finisca, e che procede comunque (non si blocca per sempre) se una chiamata
+  non torna mai entro il tetto (ridotto nel test, stesso principio "configurabile solo per i test"
+  gia' usato altrove). Scoperti (eseguendo la suite COMPLETA, non solo i file toccati) due
+  costruttori "spogli" di `JakeCore` (`JakeCore.__new__`) in `tests/test_jake_core_pipeline.py`/
+  `tests/test_privacy.py` senza i due nuovi attributi - corretti. Non ancora affrontato: un vero
+  checkpoint da cui riprendere (il resto, piu' ampio, di F1.8.4). Aggiunti 3 nuovi test in
+  `tests/test_jake_core_pipeline.py::ShutdownDrainTests`. Prova: 2.476/2.476 test,
+  ruff/mypy/compileall verdi su tutti i file toccati.
 - `F1.8.3` (parziale, RUN_COMMAND) — 12/09/2026: "propagare cancellazione dal kill switch a...
   subprocess". Buco reale, riprodotto prima del fix: `kill_switch.is_active()` viene controllato
   solo TRA un passo e il successivo da `TaskAgent`/`PlanExecutor` (vedi `core/kill_switch.py`),
@@ -3973,7 +4004,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 14/09/2026. Sessione lunga con 58 incrementi completati e verificati (PR #28-#85), la
+Aggiornato 14/09/2026. Sessione lunga con 59 incrementi completati e verificati (PR #28-#86), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -4106,7 +4137,7 @@ non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ul
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.473/2.473 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.476/2.476 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
 invariati, nessuno dei due coperto da "mypy selettivo" in CI - 79 file nella lista selettiva,
 `core/identity.py`/`core/forge_worker.py`/`core/sandboxed_skill_worker.py`/`core/taint.py`
@@ -4226,8 +4257,8 @@ fuori scope per essere troppo vago (nessun formato standard); `F1.7.8` e' chiuso
 per canale e' ora chiuso, il contesto conversazionale condiviso tra canali e' stato investigato e
 confermato VOLUTO dall'utente (non un buco), resta solo "una coda per azioni concorrenti" non
 legate a una conferma - un concetto letteralmente diverso, gia' in parte coperto da F1.8.2;
-il resto di `F1.8.4` - drain limitato di un'azione in corso, checkpoint vero (il rilascio dei
-device audio e' ora VERIFICATO, non piu' aperto); il resto di `F1.8.5` - diagnosi di un deadlock vero su un lock applicativo, non solo un
+il resto di `F1.8.4` - solo un vero checkpoint da cui riprendere resta aperto (il rilascio dei
+device audio e' VERIFICATO, il drain limitato di `answer()` e' ora chiuso); il resto di `F1.8.5` - diagnosi di un deadlock vero su un lock applicativo, non solo un
 thread esterno lento; il resto di `F1.8.7` - undo, non ancora testabile per race finche' non
 esiste uno store con stato condiviso da annullare, vedi `F1.7.2`; reminder e conferma gia'
 verificati al sicuro, handoff e trigger gia' corretti). Vale la pena anche un altro giro di ricerca mirata di race
