@@ -1993,9 +1993,11 @@ Dipende da: F1.2 e F1.4.
 
 Criterio di uscita: un plugin ostile non legge file, rete o processi non dichiarati nei test d'attacco.
 
-- Stato: `DOING`; `F1.6.1`/`F1.6.2` chiusi, `F1.6.3` chiuso parzialmente (memoria e tempo CPU, non
-  ancora limite sul numero di processi ne' un vero timeout wall-clock imposto dal Job Object
-  stesso); `F1.6.4` **chiuso** (VALUTAZIONE, non implementazione - vedi sotto: AppContainer
+- Stato: `DOING`; `F1.6.1`/`F1.6.2` chiusi, `F1.6.3` chiuso parzialmente (memoria, tempo CPU e ora
+  anche limite sul numero di processi, vedi sotto; non ancora un vero timeout wall-clock imposto
+  dal Job Object stesso - JOB_OBJECT_LIMIT_JOB_TIME e' tempo CPU consumato, non tempo trascorso:
+  quella difesa resta `invoke_timeout_seconds` lato chiamante, gia' presente ma non imposta dal
+  kernel); `F1.6.4` **chiuso** (VALUTAZIONE, non implementazione - vedi sotto: AppContainer
   richiederebbe bindings `ctypes` scritti da zero, `pywin32` non lo copre affatto; raccomandazione
   di non procedere ora, con un percorso alternativo piu' semplice suggerito per F1.6.6); `F1.6.8`
   **chiuso** (quarantena per violazioni ripetute, vedi sotto); `F1.6.5`-`F1.6.6` restano aperti
@@ -2185,6 +2187,37 @@ Criterio di uscita: un plugin ostile non legge file, rete o processi non dichiar
   separato, ancora da scoping). Nessun file di produzione toccato (solo questa valutazione
   documentata) - non una fetta di codice, il deliverable dichiarato dalla voce stessa della
   roadmap ("valutare... documentare compatibilita'").
+- `F1.6.3` (limite sul numero di processi) — 14/09/2026: "aggiungere Job Object per... process
+  tree". `JOB_OBJECT_LIMIT_ACTIVE_PROCESS` non era ancora nei `LimitFlags` del Job Object -
+  aggiunto insieme a `ActiveProcessLimit`, un nuovo parametro `max_processes` sul costruttore di
+  `SandboxedSkillWorker`. Primo tentativo (non finito nel codice): `max_processes=1`, "il worker
+  stesso, mai piu'" (verificato leggendo `forge_worker.py`: nessun `subprocess`/`Popen` al suo
+  interno). Scartato per un motivo EMPIRICO scoperto a proprie spese, non teorico: con
+  `ActiveProcessLimit=1` il worker non partiva PIU', in QUESTO stesso ambiente di sviluppo -
+  l'intera suite di `tests/test_sandboxed_skill_worker.py` (e con essa `test_skill_registry.py`)
+  ha iniziato a fallire con "il worker skill forgiate non ha inviato il segnale di avvio". Isolato
+  il problema chiamando `CreateProcess`+Job Object da soli, fuori da `SandboxedSkillWorker`: il
+  `python.exe` di QUESTO venv (creato da `uv`) e' un piccolo launcher che rilancia l'interprete
+  vero (`C:\Python312\python.exe`) come processo FIGLIO - "Unable to create process" e' l'errore
+  che il launcher stesso scrive sul proprio stdout quando quello spawn viene negato dal Job
+  Object. Avviare l'interprete richiede quindi 2 processi in questo ambiente, non 1 - un numero
+  che varia per distribuzione Python (una venv "vera" ne userebbe solo 1), rendendo un tetto
+  stretto fragile tra ambienti diversi. Cambiato a `max_processes=32` (default): un tetto
+  GENEROSO, non il minimo teorico - non impedisce a una skill di farne partire un paio per un
+  motivo legittimo (oggi nessuna lo fa), ma resta una difesa REALE imposta dal kernel contro un
+  fork bomb o uno spawn senza limite. Aggiunto
+  `tests/test_sandboxed_skill_worker.py::ResourceContainmentTests::
+  test_a_forged_skill_cannot_spawn_an_unbounded_number_of_child_processes` - una skill VERA (non
+  simulata) che tenta di far partire 10 processi figli veri con un worker configurato a
+  `max_processes=5` (per velocita' del test, non il default): prova che ALMENO uno dei 10
+  tentativi viene negato, senza assumere quanti processi l'avvio dell'interprete stesso consumi in
+  un dato ambiente - lo stesso spawn-fino-al-fallimento invece di un numero fisso atteso, per non
+  ripetere l'errore appena trovato. Non ancora affrontato: un vero timeout wall-clock imposto dal
+  Job Object stesso (`JOB_OBJECT_LIMIT_JOB_TIME` e' tempo CPU consumato, non tempo trascorso - una
+  skill bloccata in attesa, non CPU-bound, non lo tocca affatto; quella difesa resta
+  `invoke_timeout_seconds` lato Python, gia' presente ma non imposta dal kernel). Prova:
+  2.510/2.510 test, ruff/mypy verdi su `core/sandboxed_skill_worker.py`/
+  `tests/test_sandboxed_skill_worker.py`.
 
 ### F1.7 — Ledger, replay e osservabilità
 
@@ -4170,7 +4203,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 14/09/2026. Sessione lunga con 65 incrementi completati e verificati (PR #28-#92), la
+Aggiornato 14/09/2026. Sessione lunga con 66 incrementi completati e verificati (PR #28-#93), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -4325,17 +4358,24 @@ ma la voce era rimasta segnata "parzialmente" perche' "undo non ancora testabile
 lavoro rimandato; e' in realta' un fatto architetturale permanente - `UndoDescriptor` (F1.3.5) e'
 solo un contratto dati, non esiste ancora nessuno store con stato condiviso da annullare su cui
 una race potrebbe avvenire - non qualcosa che resta "da fare" finche' quello store non esistera'.
-Nessun codice cambiato, solo la classificazione dello stato). Il resto:
+Nessun codice cambiato, solo la classificazione dello stato), e `F1.6.3` (limite sul numero di
+processi nel Job Object - `JOB_OBJECT_LIMIT_ACTIVE_PROCESS`/`ActiveProcessLimit`, con una svolta
+empirica degna di nota: il primo tentativo, `max_processes=1` "solo il worker", ha rotto DAVVERO
+l'avvio del worker in questo stesso ambiente di sviluppo - il `python.exe` di questo venv `uv` e'
+un launcher che rilancia l'interprete vero come processo figlio, 2 processi solo per partire, non
+1 - scoperto isolando `CreateProcess`+Job Object da soli DOPO che l'intera suite del modulo ha
+iniziato a fallire; corretto con un tetto generoso, `max_processes=32`, e un test che spawna
+DAVVERO piu' processi finche' uno non viene negato invece di assumere un numero fisso). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.509/2.509 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.510/2.510 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
 invariati, nessuno dei due coperto da "mypy selettivo" in CI - 80 file nella lista selettiva,
-invariata rispetto all'ultimo incremento: `core/auth_gate.py` era gia' presente). `G1` resta
-aperto.
+invariata rispetto all'ultimo incremento: `core/sandboxed_skill_worker.py` era gia' presente).
+`G1` resta aperto.
 
 Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
 sessione (`sys.setswitchinterval()` abbassato + `threading.Barrier`, senza altro aiuto) NON

@@ -34,7 +34,23 @@ elegante ma mai silenzioso" gia' in process_sandbox.py:
   due meccanismi complementari, nessuno dei due basta da solo. JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
   garantisce che chiudere l'handle del Job termini comunque il worker anche se la richiesta di
   arresto esplicita (vedi stop()) fallisse per qualunque motivo - una rete di sicurezza in piu',
-  non l'unico meccanismo di arresto.
+  non l'unico meccanismo di arresto. JOB_OBJECT_LIMIT_ACTIVE_PROCESS (F1.6.3, limite sul numero
+  di processi, dichiarato apertamente mancante finche' questo modulo non lo aveva) fissa
+  ActiveProcessLimit a max_processes (default 32) - un tetto GENEROSO, non il minimo stretto
+  "1, solo il worker" tentato in un primo momento e poi scartato per un motivo empirico, non
+  teorico: avviare il worker stesso E' GIA' fallito con ActiveProcessLimit=1 nell'ambiente di
+  sviluppo di questo stesso progetto (un venv creato da `uv`, il cui `python.exe` e' un piccolo
+  launcher che rilancia l'interprete vero come processo FIGLIO - due processi solo per far
+  partire l'interprete, non uno) - riprodotto isolando la chiamata `CreateProcess`+Job Object
+  da sola, PRIMA di scoprire che rompeva ogni test del modulo. Il numero esatto di processi che
+  l'avvio dell'interprete richiede varia per distribuzione Python (una venv "vera", non un
+  launcher, ne userebbe solo 1) - un tetto fisso e stretto sarebbe quindi fragile tra ambienti
+  diversi. 32 resta comunque una difesa REALE, imposta dal kernel: non impedisce a una skill di
+  farne partire un paio per un motivo legittimo (oggi nessuna lo fa), ma ferma con certezza un
+  fork bomb o un ciclo che tenta di far partire processi senza limite - lo stesso principio
+  "negato dal sistema operativo, non solo dichiarato nel codice" gia' seguito per memoria e
+  tempo CPU sopra, con una soglia scelta per tolleranza tra ambienti invece che per il minimo
+  teorico necessario.
 
 Se le API di sicurezza Windows non sono disponibili (pywin32 mancante, ambiente che nega la
 duplicazione del token), il worker gira comunque - come processo normale, senza NESSUNA delle
@@ -85,13 +101,14 @@ class SandboxedSkillWorker:
     def __init__(
         self, project_root: str, plugin_paths: list[str], *,
         memory_limit_bytes: int = 256 * 1024 * 1024, cpu_time_limit_seconds: float = 30.0,
-        invoke_timeout_seconds: float = 20.0, logger=None,
+        invoke_timeout_seconds: float = 20.0, max_processes: int = 32, logger=None,
     ):
         self.project_root = project_root
         self.plugin_paths = list(plugin_paths)
         self.memory_limit_bytes = memory_limit_bytes
         self.cpu_time_limit_seconds = cpu_time_limit_seconds
         self.invoke_timeout_seconds = invoke_timeout_seconds
+        self.max_processes = max_processes
         self.logger = logger
         self.integrity_restricted = False
         # subprocess.Popen (ripiego) o PyHANDLE (CreateProcessAsUser) - Any: i due rami non
@@ -204,12 +221,16 @@ class SandboxedSkillWorker:
         info = win32job.QueryInformationJobObject(job, win32job.JobObjectExtendedLimitInformation)
         info["BasicLimitInformation"]["LimitFlags"] = (
             win32job.JOB_OBJECT_LIMIT_JOB_MEMORY | win32job.JOB_OBJECT_LIMIT_JOB_TIME
-            | win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            | win32job.JOB_OBJECT_LIMIT_ACTIVE_PROCESS | win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
         )
         info["JobMemoryLimit"] = self.memory_limit_bytes
         # PerJobUserTimeLimit e' in unita' da 100 nanosecondi (stesso formato FILETIME usato in
         # tutta l'API Win32 per gli intervalli di tempo).
         info["BasicLimitInformation"]["PerJobUserTimeLimit"] = int(self.cpu_time_limit_seconds * 10_000_000)
+        # F1.6.3: tetto generoso (default 32), non il minimo stretto - vedi il docstring del
+        # modulo sul perche' un limite di 1 ("solo il worker") si e' rivelato troppo stretto
+        # empiricamente, non solo in teoria.
+        info["BasicLimitInformation"]["ActiveProcessLimit"] = self.max_processes
         win32job.SetInformationJobObject(job, win32job.JobObjectExtendedLimitInformation, info)
         return job
 
