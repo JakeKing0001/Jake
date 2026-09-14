@@ -1540,9 +1540,11 @@ Criterio di uscita: nessun segreto in chiaro e ogni azione admin richiede un fat
   e migrazione atomica anche per un segreto GIA' cifrato in formato legacy, non solo uno ancora in
   chiaro - vedi sotto); `F1.4.2` chiuso parzialmente (prima fetta - identita' Windows/dispositivo,
   vedi sotto; "profilo Jake" e "speaker profile" restano dichiaratamente fuori, nessuna
-  infrastruttura esiste per nessuno dei due); `F1.4.3` chiuso parzialmente
-  (irrobustito il confronto della passphrase esistente, non ancora l'audit completo del
-  fallback - vedi sotto); `F1.4.8` chiuso parzialmente (vault corrotto/profilo diverso, non
+  infrastruttura esiste per nessuno dei due); `F1.4.3` **chiuso** (confronto a tempo costante
+  della passphrase + rate limiting/lockout dopo tentativi falliti consecutivi - vedi sotto;
+  resta deliberatamente fuori solo una prova a cronometro del canale laterale, intrinsecamente
+  instabile in CI, stesso motivo per cui l'analoga difesa in `core/companion_server.py` non ne
+  ha una); `F1.4.8` chiuso parzialmente (vault corrotto/profilo diverso, non
   ancora migrazione/backup end-to-end); il resto della fase (`F1.4.4`-`F1.4.7`) resta
   aperto - passkey/WebAuthn, pairing QR, rotazione token, anti-spoofing vocale: ciascuno un pezzo
   di prodotto a se', non una fetta stretta come `F1.4.1`/`F1.4.2` (`core/windows_hello.py` esiste
@@ -1610,6 +1612,40 @@ Criterio di uscita: nessun segreto in chiaro e ogni azione admin richiede un fat
   (rate limiting sui tentativi, lockout dopo N fallimenti - non richiesti esplicitamente da questo
   punto della roadmap, non aggiunti qui per restare in un incremento verificabile). Prova:
   2.188/2.188 test, ruff/mypy/compileall verdi su `core/auth_gate.py` e `tests/test_auth_gate.py`.
+- `F1.4.3` (chiusura - rate limiting/lockout) — 14/09/2026: il pezzo lasciato esplicitamente "non
+  ancora affrontato" nella voce sopra. Investigato PRIMA di scrivere codice, non assunto dal testo
+  della roadmap: `JakeCore._handle_confirmation()` gia' cancella l'intera azione ADMIN dopo UN
+  SOLO tentativo sbagliato ("niente tentativi ripetuti in loop", commento gia' presente li') - un
+  attaccante non puo' quindi ritentare la STESSA richiesta di conferma in ciclo. Ma PUO' comunque
+  far ripartire da capo una nuova azione ADMIN (es. via l'API companion, senza alcun limite di
+  frequenza a nessun livello) e ritentare una passphrase diversa a ogni giro - piu' lento di un
+  classico ciclo "tenta password", ma comunque scriptabile senza throttling: questo e' il buco
+  reale che resta, non teorico. `AuthGate.check()` ora conta i tentativi falliti CONSECUTIVI
+  (`_consecutive_failures`, azzerato da un successo) e, raggiunta `MAX_CONSECUTIVE_FAILURES` (5,
+  esposto come attributo di classe sovrascrivibile per test, stesso principio gia' usato per
+  `ReminderScheduler._stop_timeout_seconds`), apre un lockout di `LOCKOUT_SECONDS` (60) via
+  `time.monotonic()`. Durante il lockout `check()` ritorna sempre False SENZA nemmeno chiamare
+  `hmac.compare_digest` (verificato con un mock che conta le chiamate) - anche la passphrase
+  corretta viene rifiutata finche' non scade: un lockout aggirabile scoprendo per caso la
+  passphrase giusta durante la finestra non sarebbe un lockout vero. Nuovi `is_locked_out()`/
+  `lockout_remaining_seconds()`. `JakeCore._handle_confirmation()` ora mostra un messaggio
+  distinto ("Troppi tentativi falliti: riprova tra N secondi") invece di "Passphrase errata" sia
+  quando il lockout era gia' aperto da un turno precedente sia quando e' QUESTO tentativo a farlo
+  scattare - senza la seconda verifica, l'utente che raggiunge la soglia vedrebbe comunque
+  "passphrase errata" sul tentativo che in realta' ha attivato il blocco, un messaggio fuorviante.
+  Stesso codice ledger `"denied_auth"` in entrambi i casi (e' comunque un diniego di
+  autenticazione, gia' categorizzato) - solo il messaggio all'utente cambia. 9 nuovi test in
+  `tests/test_auth_gate.py::LockoutTests` (soglia, azzeramento su successo, rifiuto anche della
+  passphrase corretta durante il lockout, nessuna chiamata a `compare_digest` durante il lockout,
+  scadenza dopo la durata configurata con `time.monotonic()` mockato - mai il vero orologio, per
+  restare veloce e deterministico - conteggio alla rovescia dei secondi residui, gate disabilitato
+  che non si blocca mai), 2 in `tests/test_jake_core_permissions.py::
+  HandleConfirmationLockoutTests` (messaggio distinto raggiunta la soglia, rifiuto della
+  passphrase corretta su una nuova azione in sospeso dopo il lockout). Non ancora affrontato: la
+  prova a cronometro del canale laterale resta fuori scope per lo stesso motivo della voce sopra.
+  `F1.4.3` ora **chiuso**. Prova: 2.507/2.507 test, ruff/mypy/compileall verdi su
+  `core/auth_gate.py`/`core/jake_core.py`/`tests/test_auth_gate.py`/
+  `tests/test_jake_core_permissions.py`.
 - `F1.4.1` (parziale, scrittura atomica) — 12/09/2026: "consolidare DPAPI in un SecretsVault
   con versione e migrazione atomica". Buco reale, riprodotto prima del fix, PIU' grave del suo
   gemello gia' chiuso in `F1.7.1` per il ledger - `Config._write()` usava
@@ -4075,7 +4111,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 14/09/2026. Sessione lunga con 61 incrementi completati e verificati (PR #28-#88), la
+Aggiornato 14/09/2026. Sessione lunga con 62 incrementi completati e verificati (PR #28-#89), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -4202,17 +4238,27 @@ collegamento vero - chiusura (`SkillRegistry.execute()` instrada davvero un inte
 il worker invece di eseguirlo in processo, verificato confrontando `os.getpid()` dentro la skill
 - deve differire da quello del processo di test, prova che l'esecuzione sia DAVVERO avvenuta
 altrove; il worker si avvia pigramente e si invalida da solo quando una nuova skill forgiata
-arriva dopo che gia' esiste, `JakeCore.shutdown()` lo ferma esplicitamente). Il resto:
+arriva dopo che gia' esiste, `JakeCore.shutdown()` lo ferma esplicitamente), e `F1.4.3`
+chiusura - rate limiting/lockout sulla passphrase admin (l'ultimo pezzo dichiarato
+esplicitamente "non ancora affrontato" quando il confronto a tempo costante fu corretto:
+`_handle_confirmation()` gia' cancellava l'intera azione ADMIN dopo un solo tentativo
+sbagliato, ma nulla impediva di far ripartire da capo una nuova azione ADMIN via l'API
+companion e ritentare una passphrase diversa a ogni giro, senza alcun limite di frequenza;
+`AuthGate.check()` ora conta i tentativi falliti CONSECUTIVI - azzerati da un successo - e,
+raggiunta una soglia, blocca ulteriori tentativi per un periodo fisso SENZA nemmeno
+confrontare, cosi' anche una passphrase corretta viene rifiutata durante il blocco; messaggio
+distinto in `_handle_confirmation()` per non far credere all'utente che l'ULTIMO tentativo
+fosse sbagliato quando in realta' e' il lockout a bloccarlo). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.497/2.497 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.507/2.507 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
 invariati, nessuno dei due coperto da "mypy selettivo" in CI - 80 file nella lista selettiva,
-`core/identity.py`/`core/forge_worker.py`/`core/sandboxed_skill_worker.py`/`core/taint.py`/
-`core/agent_checkpoint.py` aggiunti). `G1` resta aperto.
+invariata rispetto all'ultimo incremento: `core/auth_gate.py` era gia' presente). `G1` resta
+aperto.
 
 Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
 sessione (`sys.setswitchinterval()` abbassato + `threading.Barrier`, senza altro aiuto) NON

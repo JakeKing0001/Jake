@@ -1120,9 +1120,23 @@ class JakeCore:
         # si'/no. Un solo tentativo per turno (come per le conferme normali, che si annullano
         # su qualunque risposta che non sia si'/no): niente tentativi ripetuti in loop.
         if action.get("reason") == "auth_required":
+            # F1.4.3: un lockout attivo (troppi tentativi falliti consecutivi, vedi
+            # core/auth_gate.py) va segnalato con un messaggio diverso da "passphrase errata" -
+            # non e' che QUESTO tentativo sia sbagliato, e' che nessun tentativo verra' nemmeno
+            # controllato finche' il lockout non scade. Controllato sia PRIMA di check() (un
+            # lockout gia' aperto da un turno precedente: check() lo saprebbe gia' rifiutare da
+            # solo, ma senza chiamarlo non sappiamo quale messaggio mostrare) sia DOPO (questo
+            # stesso tentativo puo' essere quello che fa scattare la soglia). Stesso codice
+            # "denied_auth" nel ledger in entrambi i casi (e' comunque un diniego di
+            # autenticazione): il messaggio all'utente e' l'unica differenza visibile.
+            if self.auth_gate.is_locked_out():
+                self._log_denied_action(action, result="denied_auth")
+                return self._lockout_message()
             if self.auth_gate.check(text):
                 return self._finalize_pending_action(action, text)
             self._log_denied_action(action, result="denied_auth")
+            if self.auth_gate.is_locked_out():
+                return self._lockout_message()
             return "Passphrase errata: azione annullata."
 
         if intent_patterns.is_positive_answer(text):
@@ -1133,6 +1147,10 @@ class JakeCore:
         # Ne' si' ne' no: l'utente e' passato ad altro. L'azione e' gia' stata consumata sopra
         # (take_pending_action()/il default di questo metodo), quindi qui basta procedere.
         return self._process(text)
+
+    def _lockout_message(self) -> str:
+        remaining = int(self.auth_gate.lockout_remaining_seconds()) + 1
+        return f"Troppi tentativi falliti: riprova tra {remaining} secondi."
 
     def _log_denied_action(self, action: dict, *, result: str) -> None:
         """F1: una passphrase sbagliata o un "no" a una richiesta di conferma non fanno mai
