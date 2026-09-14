@@ -1872,9 +1872,12 @@ Criterio di uscita: un plugin ostile non legge file, rete o processi non dichiar
 
 - Stato: `DOING`; `F1.6.1`/`F1.6.2` chiusi, `F1.6.3` chiuso parzialmente (memoria e tempo CPU, non
   ancora limite sul numero di processi ne' un vero timeout wall-clock imposto dal Job Object
-  stesso); `F1.6.8` **chiuso** (quarantena per violazioni ripetute, vedi sotto); `F1.6.4`-`F1.6.6`
-  restano aperti (`F1.6.7`, serializzazione input/output, e' vero per costruzione con il protocollo
-  a righe JSON - un processo separato non puo' condividere oggetti Python live con Jake - ma senza
+  stesso); `F1.6.4` **chiuso** (VALUTAZIONE, non implementazione - vedi sotto: AppContainer
+  richiederebbe bindings `ctypes` scritti da zero, `pywin32` non lo copre affatto; raccomandazione
+  di non procedere ora, con un percorso alternativo piu' semplice suggerito per F1.6.6); `F1.6.8`
+  **chiuso** (quarantena per violazioni ripetute, vedi sotto); `F1.6.5`-`F1.6.6` restano aperti
+  (`F1.6.7`, serializzazione input/output, e' vero per costruzione con il protocollo a righe JSON
+  - un processo separato non puo' condividere oggetti Python live con Jake - ma senza
   ancora un test avversariale dedicato che lo dimostri). **Il collegamento vero e' ora fatto**:
   `SkillRegistry.execute()` instrada davvero una skill forgiata verso il worker sandboxato invece
   di eseguirla in processo (vedi sotto) - non piu' solo un'infrastruttura inerte.
@@ -2023,6 +2026,42 @@ Criterio di uscita: un plugin ostile non legge file, rete o processi non dichiar
   `clear_quarantine()` ripristina l'esecuzione normale) - la logica di quarantena isolata dal
   worker vero per non pagare un processo reale per ogni caso, dato che il collegamento vero e' gia'
   provato a parte. Prova: 2.472/2.472 test, ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.6.4` (VALUTAZIONE, non implementazione) — 14/09/2026: "valutare AppContainer per filesystem/
+  rete piu' stretti; documentare compatibilita'". Verificato empiricamente (non assunto dalla
+  documentazione) cosa serve DAVVERO per creare un processo AppContainer su Windows e cosa
+  `pywin32` (l'UNICA dipendenza Win32 gia' usata in tutto il progetto - `win32security`/
+  `win32process`/`win32job`/`win32pipe` gia' alla base di `core/process_sandbox.py`/`core/
+  sandboxed_skill_worker.py`) offre gia' per farlo:
+  - `win32security` non espone `CreateAppContainerProfile` (crea il profilo/SID dell'AppContainer
+    - senza, non esiste nessun AppContainer da assegnare) ne' alcuna funzione per derivare i SID
+    delle capability (rete, filesystem con accesso dichiarato, ecc. - il meccanismo con cui
+    AppContainer concede permessi specifici invece di negare tutto);
+  - `win32process` non espone `InitializeProcThreadAttributeList`/`UpdateProcThreadAttribute` (il
+    meccanismo di `STARTUPINFOEX` con cui un processo AppContainer viene DAVVERO creato - senza,
+    non c'e' modo di passare il SID/le capability a `CreateProcess`, nemmeno avendo gia' un SID
+    valido da altrove).
+  Entrambi i controlli fatti leggendo `dir()` sui moduli VERI installati in questo venv (`pywin32`
+  312), non ipotizzati dalla loro documentazione. Conclusione: un AppContainer VERO richiederebbe
+  bindings `ctypes` scritti da zero per `userenv.dll`/`kernel32.dll` (diverse strutture C da
+  definire a mano - `SECURITY_CAPABILITIES`, `SID_AND_ATTRIBUTES`, `STARTUPINFOEX` - lo stesso
+  genere di lavoro gia' fatto a mano per Low Integrity/Job Object in `sandboxed_skill_worker.py`,
+  ma per una superficie Win32 sensibilmente piu' ampia e meno battuta), non una configurazione
+  aggiuntiva su cima a quanto gia' esiste. **Raccomandazione: non procedere ora.** Il beneficio
+  incrementale rispetto a Low Integrity + Job Object (gia' verificati per davvero questa sessione:
+  nessuna scrittura su oggetti Medium+, memoria/CPU limitati dal kernel) sarebbe soprattutto sulla
+  RETE (F1.6.6) - AppContainer nega la rete per default e la concede solo per capability dichiarate
+  - ma quello stesso obiettivo e' raggiungibile con un meccanismo piu' semplice e gia' pensabile
+  senza AppContainer: una regola del Windows Firewall (WFP) scoped al file eseguibile/PID del
+  worker, negando l'uscita per default e permettendo eccezioni esplicite - non richiede
+  `CreateAppContainerProfile` ne' `STARTUPINFOEX`, "solo" `netsh advfirewall`/l'API COM di
+  Windows Firewall (da valutare a sua volta in un incremento dedicato, non qui: privilegi
+  amministrativi per aggiungere regole, persistenza delle regole tra riavvii, verifica empirica
+  che blocchi per davvero - non ancora investigato). `F1.6.5` (manifest di directory montabili)
+  resta indipendente da questa decisione: non richiede AppContainer, solo un elenco esplicito di
+  percorsi consentiti controllato PRIMA di ogni chiamata che tocca il filesystem (un pezzo
+  separato, ancora da scoping). Nessun file di produzione toccato (solo questa valutazione
+  documentata) - non una fetta di codice, il deliverable dichiarato dalla voce stessa della
+  roadmap ("valutare... documentare compatibilita'").
 
 ### F1.7 — Ledger, replay e osservabilità
 
@@ -3904,7 +3943,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 14/09/2026. Sessione lunga con 56 incrementi completati e verificati (PR #28-#83), la
+Aggiornato 14/09/2026. Sessione lunga con 57 incrementi completati e verificati (PR #28-#84), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -4110,7 +4149,10 @@ agenti, skill e device", "prompt-injection suite verde", "plugin ostile contenut
 contenuti nei nuovi store" - utile come bussola concreta per capire cosa CONTA davvero come
 "F1 abbastanza fatto da sbloccare F2/F3/F4/F8", invece di continuare a cercare fette sempre piu'
 piccole senza un criterio. Ad oggi: il quinto criterio (sandbox) ha le fondamenta e la quarantena
-(F1.6.8) ma non AppContainer/manifest/rete (F1.6.4-F1.6.6); il quarto (prompt-injection) ha una
+(F1.6.8); AppContainer (F1.6.4) e' stato valutato e scartato per ora (pywin32 non lo supporta
+affatto, servirebbero bindings ctypes da zero) - manifest di directory (F1.6.5) e negazione rete
+(F1.6.6, con un'alternativa piu' semplice suggerita - una regola del Windows Firewall scoped al
+worker, invece di AppContainer) restano aperti; il quarto (prompt-injection) ha una
 prima fetta (F1.5.1-F1.5.4) ma nessun corpus d'attacco vero (F1.5.6) ne' test di injection
 indiretta (F1.5.7); il sesto (kill switch) e' ora chiuso per le quattro superfici dichiarate, ma
 senza kill dell'intero process tree (dichiarato fuori scope, richiederebbe F1.6.3/Job Object); il
