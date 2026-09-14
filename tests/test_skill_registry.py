@@ -222,6 +222,28 @@ class ForgedSkillSandboxWiringTests(unittest.TestCase):
         self.assertTrue(result.success, result.error)
         self.assertNotEqual(result.data["pid"], os.getpid())
 
+    def test_the_live_in_process_skill_object_is_never_invoked_for_a_forged_intent(self):
+        """F1.6.7 ("serializzare input/output; nessun oggetto core condiviso col plugin"): vero
+        per costruzione con questo protocollo (un processo separato non puo' condividere oggetti
+        Python live con Jake), ma qui lo si prova in modo diretto e avversariale, non solo per
+        deduzione dal pid diverso (vedi il test sopra) - una spia il cui execute() SOLLEVA se mai
+        venisse chiamato, cosi' un'eventuale futura regressione che facesse cadere un intent
+        forgiato sul ramo in-processo per errore fallirebbe qui in modo inequivocabile, invece di
+        restituire semplicemente un pid sbagliato."""
+        plugin_path = self._write_pid_reporting_plugin("SPY_TEST")
+        spy = mock.Mock()
+        spy.metadata = {"intent": "SPY_TEST", "description": "", "parameters": {}}
+        spy.execute.side_effect = AssertionError(
+            "l'oggetto skill live in processo non deve MAI essere eseguito per un intent forgiato"
+        )
+        self.registry.register_skill("SPY_TEST", spy, plugin_path=plugin_path)
+
+        result = self.registry.execute("SPY_TEST", {}, policy_engine=PolicyEngine())
+
+        self.assertTrue(result.success, result.error)
+        self.assertNotEqual(result.data["pid"], os.getpid())
+        spy.execute.assert_not_called()
+
     def test_a_policy_block_on_a_forged_intent_never_reaches_the_worker(self):
         """L'ordine conta: blocked_intents si controlla PRIMA del routing verso il worker, stesso
         principio fail-closed gia' verificato per le skill in processo."""
