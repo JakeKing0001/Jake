@@ -501,6 +501,56 @@ class HandleConfirmationAuthTests(unittest.TestCase):
         self.assertFalse(kwargs["private"])
 
 
+class HandleConfirmationLockoutTests(unittest.TestCase):
+    """F1.4.3: dopo troppi tentativi di passphrase sbagliati consecutivi, _handle_confirmation
+    deve mostrare un messaggio distinto da "passphrase errata" - vedi core/auth_gate.py sul
+    perche' (non e' che l'ULTIMO tentativo sia sbagliato, e' che nessuno verra' controllato finche'
+    il lockout non scade)."""
+
+    def test_reaching_the_lockout_threshold_shows_a_distinct_message_not_a_wrong_passphrase_one(self):
+        skill = FakeSkill()
+        registry = FakeRegistry({"SET_POWER_PLAN": skill})
+        auth_gate = AuthGate(passphrase="apri sesamo")
+        auth_gate.MAX_CONSECUTIVE_FAILURES = 2
+        core = _bare_core_for_confirmation(registry, auth_gate)
+
+        core.conversation_state.set_pending_action({
+            "intent": "SET_POWER_PLAN", "parameters": {"plan": "balanced", "authenticated": True},
+            "reason": "auth_required", "text": "metti il pc in risparmio energetico",
+        })
+        core._handle_confirmation("sbagliata")
+        core.conversation_state.set_pending_action({
+            "intent": "SET_POWER_PLAN", "parameters": {"plan": "balanced", "authenticated": True},
+            "reason": "auth_required", "text": "metti il pc in risparmio energetico",
+        })
+        response = core._handle_confirmation("sbagliata")
+
+        self.assertNotIn("errata", response.lower())
+        self.assertIn("tentativi", response.lower())
+
+    def test_lockout_rejects_even_the_correct_passphrase_on_a_new_pending_action(self):
+        skill = FakeSkill(SkillResult(success=True, data={"plan": "balanced"}))
+        registry = FakeRegistry({"SET_POWER_PLAN": skill})
+        auth_gate = AuthGate(passphrase="apri sesamo")
+        auth_gate.MAX_CONSECUTIVE_FAILURES = 1
+        core = _bare_core_for_confirmation(registry, auth_gate)
+
+        core.conversation_state.set_pending_action({
+            "intent": "SET_POWER_PLAN", "parameters": {"plan": "balanced", "authenticated": True},
+            "reason": "auth_required", "text": "metti il pc in risparmio energetico",
+        })
+        core._handle_confirmation("sbagliata")
+        core.conversation_state.set_pending_action({
+            "intent": "SET_POWER_PLAN", "parameters": {"plan": "balanced", "authenticated": True},
+            "reason": "auth_required", "text": "metti il pc in risparmio energetico",
+        })
+
+        response = core._handle_confirmation("apri sesamo")
+
+        self.assertEqual(skill.calls, [], "il lockout deve rifiutare anche la passphrase corretta")
+        self.assertIn("tentativi", response.lower())
+
+
 class HandleConfirmationDenialTests(unittest.TestCase):
     """F1: un "no" a una richiesta di conferma normale (non ADMIN/auth_required) e' un diniego
     quanto una passphrase sbagliata, e merita la stessa ricevuta nel ledger - vedi ROADMAP.md,

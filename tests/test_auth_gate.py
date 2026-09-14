@@ -47,6 +47,85 @@ class AuthGateTests(unittest.TestCase):
         compare_digest.assert_called_once_with("qualunque cosa", "apri sesamo")
 
 
+class LockoutTests(unittest.TestCase):
+    """F1.4.3: rate limiting/lockout dopo N tentativi falliti CONSECUTIVI (vedi il docstring del
+    modulo per l'analisi dell'esposizione che questo chiude). time.monotonic() e' sempre mockato
+    qui (mai il vero orologio): un test che dipendesse dal tempo reale per una soglia di 60s
+    sarebbe lento o fragile, lo stesso principio gia' seguito altrove nel progetto per i timeout
+    configurabili."""
+
+    def _gate(self, max_failures=3, lockout_seconds=60.0):
+        gate = AuthGate(passphrase="apri sesamo")
+        gate.MAX_CONSECUTIVE_FAILURES = max_failures
+        gate.LOCKOUT_SECONDS = lockout_seconds
+        return gate
+
+    def test_not_locked_out_before_reaching_the_threshold(self):
+        gate = self._gate(max_failures=3)
+        gate.check("sbagliata")
+        gate.check("sbagliata")
+        self.assertFalse(gate.is_locked_out())
+        self.assertTrue(gate.check("apri sesamo"), "il terzo tentativo era corretto, non deve essere bloccato")
+
+    def test_reaching_the_threshold_locks_out(self):
+        gate = self._gate(max_failures=3)
+        gate.check("sbagliata")
+        gate.check("sbagliata")
+        gate.check("sbagliata")
+        self.assertTrue(gate.is_locked_out())
+
+    def test_lockout_rejects_even_a_correct_passphrase(self):
+        gate = self._gate(max_failures=3)
+        gate.check("sbagliata")
+        gate.check("sbagliata")
+        gate.check("sbagliata")
+
+        self.assertFalse(gate.check("apri sesamo"))
+
+    def test_lockout_does_not_even_compare_while_active(self):
+        gate = self._gate(max_failures=1)
+        gate.check("sbagliata")
+        self.assertTrue(gate.is_locked_out())
+
+        with mock.patch("core.auth_gate.hmac.compare_digest") as compare_digest:
+            gate.check("apri sesamo")
+        compare_digest.assert_not_called()
+
+    def test_a_success_resets_the_consecutive_failure_counter(self):
+        gate = self._gate(max_failures=3)
+        gate.check("sbagliata")
+        gate.check("sbagliata")
+        self.assertTrue(gate.check("apri sesamo"))
+
+        gate.check("sbagliata")
+        gate.check("sbagliata")
+        self.assertFalse(gate.is_locked_out(), "il successo intermedio doveva azzerare il contatore")
+
+    def test_lockout_expires_after_the_configured_duration(self):
+        gate = self._gate(max_failures=1, lockout_seconds=60.0)
+        with mock.patch("core.auth_gate.time.monotonic", return_value=1000.0):
+            gate.check("sbagliata")
+            self.assertTrue(gate.is_locked_out())
+        with mock.patch("core.auth_gate.time.monotonic", return_value=1000.0 + 60.0 + 0.001):
+            self.assertFalse(gate.is_locked_out())
+            self.assertTrue(gate.check("apri sesamo"))
+
+    def test_lockout_remaining_seconds_counts_down_to_zero(self):
+        gate = self._gate(max_failures=1, lockout_seconds=60.0)
+        with mock.patch("core.auth_gate.time.monotonic", return_value=1000.0):
+            gate.check("sbagliata")
+        with mock.patch("core.auth_gate.time.monotonic", return_value=1030.0):
+            self.assertAlmostEqual(gate.lockout_remaining_seconds(), 30.0)
+        with mock.patch("core.auth_gate.time.monotonic", return_value=2000.0):
+            self.assertEqual(gate.lockout_remaining_seconds(), 0.0)
+
+    def test_disabled_gate_never_locks_out(self):
+        gate = AuthGate()
+        gate.MAX_CONSECUTIVE_FAILURES = 1
+        gate.check("qualsiasi cosa")
+        self.assertFalse(gate.is_locked_out(), "senza passphrase configurata check() ritorna sempre False prima di contare nulla")
+
+
 class WindowsHelloTests(unittest.TestCase):
     """F1: windows_hello_verify e' SEMPRE iniettato qui - vedi core/windows_hello.py sul perche'
     un test non deve mai poter chiamare l'API vera di Windows Hello (mostra un prompt reale e
