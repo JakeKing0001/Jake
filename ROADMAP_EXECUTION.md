@@ -1872,12 +1872,12 @@ Criterio di uscita: un plugin ostile non legge file, rete o processi non dichiar
 
 - Stato: `DOING`; `F1.6.1`/`F1.6.2` chiusi, `F1.6.3` chiuso parzialmente (memoria e tempo CPU, non
   ancora limite sul numero di processi ne' un vero timeout wall-clock imposto dal Job Object
-  stesso); `F1.6.4`-`F1.6.8` restano aperti (`F1.6.7`, serializzazione input/output, e' vero per
-  costruzione con il protocollo a righe JSON - un processo separato non puo' condividere oggetti
-  Python live con Jake - ma senza ancora un test avversariale dedicato che lo dimostri). **Il
-  collegamento vero e' ora fatto**: `SkillRegistry.execute()` instrada davvero una skill forgiata
-  verso il worker sandboxato invece di eseguirla in processo (vedi sotto) - non piu' solo
-  un'infrastruttura inerte.
+  stesso); `F1.6.8` **chiuso** (quarantena per violazioni ripetute, vedi sotto); `F1.6.4`-`F1.6.6`
+  restano aperti (`F1.6.7`, serializzazione input/output, e' vero per costruzione con il protocollo
+  a righe JSON - un processo separato non puo' condividere oggetti Python live con Jake - ma senza
+  ancora un test avversariale dedicato che lo dimostri). **Il collegamento vero e' ora fatto**:
+  `SkillRegistry.execute()` instrada davvero una skill forgiata verso il worker sandboxato invece
+  di eseguirla in processo (vedi sotto) - non piu' solo un'infrastruttura inerte.
 - `F1.6.1`/`F1.6.2`/`F1.6.3` (fondamenta: worker persistente sandboxato) — 13/09/2026: via libera
   esplicito dell'utente su un lavoro grande finora rifiutato senza un nuovo via libera. Un Job
   Object (o un AppContainer) si applica a un PROCESSO, non a una singola chiamata di funzione
@@ -1991,6 +1991,38 @@ Criterio di uscita: un plugin ostile non legge file, rete o processi non dichiar
   forgiata lo faccia (nessuna dipendenza iniettata al costruttore, solo `execute(parameters)`),
   ma non c'e' ancora un controllo che lo VIETI esplicitamente se qualcuno ci provasse. Prova:
   2.402/2.402 test, ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.6.8` (quarantena per violazioni ripetute) — 14/09/2026: "terminare e mettere in quarantena
+  plugin che viola limiti o protocollo". Buco reale, non solo teorico - prima di questo, se un
+  plugin forgiato faceva morire il worker sandboxato condiviso (es. superando il limite di memoria
+  del Job Object, F1.6.3) o non rispondeva mai in tempo, `_get_or_start_sandbox_worker()` faceva
+  semplicemente ripartire un worker NUOVO alla chiamata successiva, ricaricando lo STESSO plugin
+  che l'aveva appena fatto cadere - nessun conteggio, nessuna conseguenza, un ciclo che poteva
+  ripetersi all'infinito senza che nulla lo segnalasse ne' lo fermasse. Corretto: `SkillRegistry`
+  ora conta le violazioni (`SANDBOX_WORKER_TIMEOUT` - copre sia "il worker non ha risposto in
+  tempo" sia "e' morto a meta' richiesta", entrambi attribuibili alla chiamata in corso; NON
+  `SANDBOX_WORKER_UNAVAILABLE`, che puo' capitare per un ambiente rotto senza colpa di nessun
+  plugin specifico) per PLUGIN (non per intent: un plugin puo' registrare piu' intent, e' l'unita'
+  di fiducia reale). Al raggiungimento di `_QUARANTINE_THRESHOLD` (3 - non 1, un timeout isolato
+  puo' capitare per una chiamata di rete lenta dentro la skill; non un numero grande, un plugin che
+  fa cadere ripetutamente il worker condiviso danneggia anche le altre skill forgiate) il plugin
+  viene messo in quarantena: i suoi intent rispondono subito `SKILL_QUARANTINED` SENZA mai toccare
+  il worker, e viene escluso dall'elenco `plugin_paths` di qualunque worker futuro (non solo
+  rifiutato al momento della chiamata - non ricaricato nemmeno se il worker deve ripartire per
+  un'altra skill forgiata non in quarantena). Un worker gia' vivo che avesse gia' caricato il
+  plugin appena squalificato viene fermato ed espressamente dimenticato, cosi' il prossimo riavvio
+  lo esclude subito invece di restare servibile fino al prossimo riavvio naturale. Aggiunto anche
+  `clear_quarantine(plugin_path)` - un'azione ESPLICITA (nessuno sconto automatico delle violazioni
+  passate), pensata per un amministratore che ha corretto il plugin, non ancora collegata a nessuna
+  skill/comando utente (l'API esiste, l'esposizione verso l'utente resta un passo successivo).
+  Aggiunti 9 nuovi test: 1 in `tests/test_skill_registry.py::ForgedSkillSandboxWiringTests` (prova
+  di collegamento VERA - un timeout genuino da un worker vero incrementa il conteggio, non solo
+  simulato a mano) e 5 in una nuova classe `ForgedSkillQuarantineTests` (sotto soglia non
+  squalifica, soglia raggiunta squalifica, un intent in quarantena non avvia mai il worker, un
+  plugin in quarantena viene escluso dai `plugin_paths` del prossimo avvio - verificato mockando
+  `SandboxedSkillWorker` per ispezionare l'argomento passato senza pagare un processo vero,
+  `clear_quarantine()` ripristina l'esecuzione normale) - la logica di quarantena isolata dal
+  worker vero per non pagare un processo reale per ogni caso, dato che il collegamento vero e' gia'
+  provato a parte. Prova: 2.472/2.472 test, ruff/mypy/compileall verdi su tutti i file toccati.
 
 ### F1.7 — Ledger, replay e osservabilità
 
@@ -3872,7 +3904,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 14/09/2026. Sessione lunga con 55 incrementi completati e verificati (PR #28-#82), la
+Aggiornato 14/09/2026. Sessione lunga con 56 incrementi completati e verificati (PR #28-#83), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -4005,7 +4037,7 @@ non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ul
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.466/2.466 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.472/2.472 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
 invariati, nessuno dei due coperto da "mypy selettivo" in CI - 79 file nella lista selettiva,
 `core/identity.py`/`core/forge_worker.py`/`core/sandboxed_skill_worker.py`/`core/taint.py`
@@ -4077,13 +4109,13 @@ agenti, skill e device", "prompt-injection suite verde", "plugin ostile contenut
 "kill switch interrompe attivita' e figli entro il budget definito", "modalita' privata non lascia
 contenuti nei nuovi store" - utile come bussola concreta per capire cosa CONTA davvero come
 "F1 abbastanza fatto da sbloccare F2/F3/F4/F8", invece di continuare a cercare fette sempre piu'
-piccole senza un criterio. Ad oggi: il quinto criterio (sandbox) ha le fondamenta ma non
-AppContainer/manifest/rete/quarantena (F1.6.4-F1.6.8); il quarto (prompt-injection) ha una prima
-fetta (F1.5.1-F1.5.4) ma nessun corpus d'attacco vero (F1.5.6) ne' test di injection indiretta
-(F1.5.7); il sesto (kill switch) e' ora chiuso per le quattro superfici dichiarate, ma senza kill
-dell'intero process tree (dichiarato fuori scope, richiederebbe F1.6.3/Job Object); il settimo
-(modalita' privata) e' verificato chiuso (F1.7.8); gli altri tre restano parzialmente aperti come
-dettagliato nelle rispettive sezioni sopra.
+piccole senza un criterio. Ad oggi: il quinto criterio (sandbox) ha le fondamenta e la quarantena
+(F1.6.8) ma non AppContainer/manifest/rete (F1.6.4-F1.6.6); il quarto (prompt-injection) ha una
+prima fetta (F1.5.1-F1.5.4) ma nessun corpus d'attacco vero (F1.5.6) ne' test di injection
+indiretta (F1.5.7); il sesto (kill switch) e' ora chiuso per le quattro superfici dichiarate, ma
+senza kill dell'intero process tree (dichiarato fuori scope, richiederebbe F1.6.3/Job Object); il
+settimo (modalita' privata) e' verificato chiuso (F1.7.8); gli altri tre restano parzialmente
+aperti come dettagliato nelle rispettive sezioni sopra.
 
 Ritmo per chi riprende: un incremento alla volta, ciascuno con test reali (non solo letti a tavolino),
 riprova empirica quando possibile (riprodurre il buco con il codice vecchio prima di dichiararlo

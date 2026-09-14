@@ -213,6 +213,8 @@ class UnclassifiedPluginIntentIsStillGatedTests(PluginLoaderTestCase):
         registry.logger = None
         registry._forged_intents = {}
         registry._sandbox_worker = None
+        registry._plugin_violation_counts = {}
+        registry._quarantined_plugins = set()
 
         loaded = load_plugins(registry, plugins_dir=self.tmp_dir)
         self.assertEqual(loaded, ["plugin_sconosciuto"])

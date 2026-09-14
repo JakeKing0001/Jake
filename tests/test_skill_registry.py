@@ -12,8 +12,10 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from core.policy_engine import PolicyEngine
+from core.sandboxed_skill_worker import SandboxedSkillWorker
 from core.skill_registry import SkillRegistry
 from core.skill_result import SkillResult
 
@@ -39,6 +41,8 @@ def _bare_registry(skills: dict = None) -> SkillRegistry:
     registry.logger = FakeLoggerCapturingWarnings()
     registry._forged_intents = {}  # F1.6: letto da execute()/register_skill()
     registry._sandbox_worker = None
+    registry._plugin_violation_counts = {}  # F1.6.8: letto da _execute_forged()/_record_plugin_violation()
+    registry._quarantined_plugins = set()
     return registry
 
 
@@ -251,6 +255,99 @@ class ForgedSkillSandboxWiringTests(unittest.TestCase):
 
         result = self.registry.execute("SECOND_FORGED", {}, policy_engine=PolicyEngine())
         self.assertTrue(result.success, result.error)
+
+    def test_a_real_timeout_from_the_worker_is_recorded_as_a_violation(self):
+        """F1.6.8 (prova di collegamento vera, non solo la logica isolata sotto): un timeout
+        VERO restituito da un worker VERO (una skill che dorme piu' a lungo del timeout
+        configurato) deve incrementare il conteggio delle violazioni del plugin - non solo
+        simulato passando 'SANDBOX_WORKER_TIMEOUT' a mano."""
+        plugin_path = self._write_sleepy_plugin("SLOW_FORGED", sleep_seconds=2.0)
+        self.registry.register_skill("SLOW_FORGED", FakeSkill(), plugin_path=plugin_path)
+        project_root = str(Path(__file__).resolve().parent.parent)
+        worker = SandboxedSkillWorker(project_root=project_root, plugin_paths=[plugin_path], invoke_timeout_seconds=0.2)
+        worker.start()
+        self.addCleanup(worker.stop)
+        self.registry._sandbox_worker = worker
+
+        result = self.registry.execute("SLOW_FORGED", {}, policy_engine=PolicyEngine())
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "SANDBOX_WORKER_TIMEOUT")
+        self.assertEqual(self.registry._plugin_violation_counts.get(plugin_path), 1)
+
+    def _write_sleepy_plugin(self, intent: str, sleep_seconds: float) -> str:
+        path = Path(self._tmpdir.name) / f"{intent.lower()}.py"
+        path.write_text(
+            "import time\n"
+            "from core.skill_result import SkillResult\n"
+            "class Skill:\n"
+            f"    metadata = {{'intent': '{intent}', 'description': '', 'parameters': {{}}}}\n"
+            "    def execute(self, parameters=None):\n"
+            f"        time.sleep({sleep_seconds})\n"
+            "        return SkillResult(success=True, data={})\n"
+            "def register(registry):\n"
+            f"    registry.register_skill('{intent}', Skill())\n",
+            encoding="utf-8",
+        )
+        return str(path)
+
+
+class ForgedSkillQuarantineTests(unittest.TestCase):
+    """F1.6.8 ("terminare e mettere in quarantena plugin che viola limiti o protocollo") - logica
+    di quarantena isolata dal worker vero (gia' provata collegata per davvero da
+    ForgedSkillSandboxWiringTests.test_a_real_timeout_from_the_worker_is_recorded_as_a_violation):
+    qui si verifica il COMPORTAMENTO della quarantena (soglia, esclusione da un riavvio, ripristino
+    esplicito) senza pagare il costo di un worker/processo vero per ogni caso."""
+
+    def setUp(self):
+        self.registry = _bare_registry({"FLAKY_FORGED": FakeSkill()})
+        self.registry._forged_intents = {"FLAKY_FORGED": "C:\\plugins\\flaky.py"}
+
+    def test_fewer_than_the_threshold_violations_do_not_quarantine(self):
+        for _ in range(SkillRegistry._QUARANTINE_THRESHOLD - 1):
+            self.registry._record_plugin_violation("C:\\plugins\\flaky.py")
+
+        self.assertNotIn("C:\\plugins\\flaky.py", self.registry._quarantined_plugins)
+
+    def test_reaching_the_threshold_quarantines_the_plugin(self):
+        for _ in range(SkillRegistry._QUARANTINE_THRESHOLD):
+            self.registry._record_plugin_violation("C:\\plugins\\flaky.py")
+
+        self.assertIn("C:\\plugins\\flaky.py", self.registry._quarantined_plugins)
+
+    def test_a_quarantined_plugins_intent_is_refused_without_touching_the_worker(self):
+        for _ in range(SkillRegistry._QUARANTINE_THRESHOLD):
+            self.registry._record_plugin_violation("C:\\plugins\\flaky.py")
+
+        result = self.registry.execute("FLAKY_FORGED", {}, policy_engine=PolicyEngine())
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "SKILL_QUARANTINED")
+        self.assertIsNone(self.registry._sandbox_worker, "un intent in quarantena non deve mai avviare il worker")
+
+    def test_a_quarantined_plugin_is_excluded_from_the_next_worker_start(self):
+        self.registry._forged_intents = {
+            "FLAKY_FORGED": "C:\\plugins\\flaky.py", "GOOD_FORGED": "C:\\plugins\\good.py",
+        }
+        for _ in range(SkillRegistry._QUARANTINE_THRESHOLD):
+            self.registry._record_plugin_violation("C:\\plugins\\flaky.py")
+
+        with mock.patch("core.skill_registry.SandboxedSkillWorker") as worker_cls:
+            worker_cls.return_value.start.return_value = None
+            self.registry._get_or_start_sandbox_worker()
+
+        called_plugin_paths = worker_cls.call_args.kwargs["plugin_paths"]
+        self.assertEqual(called_plugin_paths, ["C:\\plugins\\good.py"])
+
+    def test_clear_quarantine_restores_normal_execution(self):
+        for _ in range(SkillRegistry._QUARANTINE_THRESHOLD):
+            self.registry._record_plugin_violation("C:\\plugins\\flaky.py")
+        self.assertIn("C:\\plugins\\flaky.py", self.registry._quarantined_plugins)
+
+        self.registry.clear_quarantine("C:\\plugins\\flaky.py")
+
+        self.assertNotIn("C:\\plugins\\flaky.py", self.registry._quarantined_plugins)
+        self.assertEqual(self.registry._plugin_violation_counts.get("C:\\plugins\\flaky.py"), None)
 
 
 if __name__ == "__main__":
