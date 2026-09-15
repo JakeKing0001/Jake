@@ -2212,6 +2212,27 @@ Criterio di uscita: nessun segreto in chiaro e ogni azione admin richiede un fat
   questa intera sessione): il collegamento vero a `TaskAgent`/`PlanExecutor` -
   `TaskRiskBudget` e' un motore puro, testabile in isolamento. Prova: 2.728/2.728 test, ruff/mypy
   verdi (nuovo file aggiunto al set selettivo mypy, 85 file).
+- `F1.4.4` (fase 9 del piano - adapter AuthProvider) — 16/09/2026: "non sostituire Windows Hello...
+  WebAuthn/passkey come autenticazione opzionale... dietro un adapter, non direttamente nel
+  core". Nuovo `core/auth_provider.py`: `AuthProvider` (ABC, `is_available()`/`verify(reason)`),
+  `WindowsHelloProvider` (avvolge `core/windows_hello.py` gia' esistente - nessuna logica nuova,
+  solo l'adapter) e `PasskeyProvider` (dichiaratamente inerte - `is_available()` sempre `False`,
+  "non serve creare un'app mobile completa per chiudere la parte core", nessun registro di
+  passkey per dispositivo esiste ancora - onesto invece di dichiarare disponibile un fattore che
+  non puo' verificare nulla, stesso principio "mai un valore inventato" di `effect_class_of()`).
+  `core/auth_gate.py::AuthGate` e' la prima INTEGRAZIONE vera, minima e verificabile (non
+  un'app companion): `verify_with_windows_hello()` risolve ora pigramente il proprio callable di
+  default tramite `WindowsHelloProvider().verify` invece di importare direttamente
+  `core.windows_hello.verify` - stesso comportamento osservabile (verificato: tutti i 20 test
+  esistenti, che iniettano sempre `windows_hello_verify` per non toccare mai l'API vera,
+  restano invariati e verdi), solo un livello di adapter in mezzo. Nuovo `verify_with_passkey()`,
+  stesso schema, con un `passkey_provider` iniettabile (default `PasskeyProvider()`) per il
+  fattore OPZIONALE "companion/mobile e operazioni cross-device ad alto impatto" - oggi sempre
+  `False` dato che il provider e' inerte, il punto di estensione e' pero' gia' pronto. Nuovi 11
+  test in `tests/test_auth_provider.py` (Windows Hello mockando `core.windows_hello`, mai
+  l'API vera) e 5 in `tests/test_auth_gate.py` (il nuovo percorso passkey + la prova che il
+  default di Windows Hello passa davvero dall'adapter). Prova: 2.744/2.744 test, ruff/mypy verdi
+  (nuovo file aggiunto al set selettivo mypy, 86 file).
 - `F1.4.2` (prima fetta - identita' Windows/dispositivo) — 13/09/2026: "distinguere identita'
   Windows, profilo Jake, dispositivo e speaker profile". Investigato PRIMA di scrivere codice
   (non assunto dal testo della roadmap): "profilo Jake" non e' un concetto definito da nessuna
@@ -5145,7 +5166,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 16/09/2026. Sessione lunga con 94 incrementi completati e verificati (PR #28-#120), la
+Aggiornato 16/09/2026. Sessione lunga con 95 incrementi completati e verificati (PR #28-#121), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
