@@ -2995,7 +2995,8 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
   affrontato);
   `F1.8.2` chiuso per tutti i registri/store condivisi tra thread (ledger, promemoria, todo,
   memoria a lungo termine, centro notifiche, elenco skill registrate, archivio esempi
-  frase->intent, registro dispositivi/handoff); `F1.8.3` **chiuso** (RUN_COMMAND, e ora anche la
+  frase->intent, registro dispositivi/handoff, e ora anche il risolutore app - vedi sotto);
+  `F1.8.3` **chiuso** (RUN_COMMAND, e ora anche la
   chiamata al modello - vedi sotto; le altre skill con subprocess erano gia' verificate a posto);
   `F1.8.4` **chiuso** (visibilita' dei fallimenti di shutdown, rilascio dei device audio
   VERIFICATO, drain limitato di answer() in corso, e ora anche un vero checkpoint da cui
@@ -3007,6 +3008,49 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
   dichiaratamente non testabile per race - non perche' rimandato, ma perche' `UndoDescriptor`
   - F1.3.5 - e' solo un contratto dati, non esiste ancora nessuno store con stato condiviso da
   annullare su cui una race potrebbe verificarsi; vedi sotto).
+- `F1.8.2` (store non ancora esaminato - risolutore app) — 15/09/2026: dopo aver esaurito due volte
+  le fette facili in F1.2/F1.3/F1.4/F1.6/F1.8.5, tentati (e scartati con motivazione, non
+  implementati) due candidati che sembravano promettenti - un verificatore indipendente in
+  `INTENT_SAFETY_REGISTRY` per le sei skill che cancellano un elemento da uno store interno
+  (`FORGET`/`CLEAR_NOTES`/`DELETE_TODO`/`DELETE_TRIGGER`/`DELETE_REMINDER`/`FORGET_LEARNED`):
+  investigato a fondo (`core/memory_manager.py::forget()`, `core/todo_manager.py::
+  delete_matching()`), scartato perche' richiederebbe la STESSA iniezione di dipendenza esterna in
+  `verify_effect()` gia' esplicitamente rifiutata per Home Assistant (vedi F1.3.2 casa) - e perche'
+  a differenza di CONTROL_SMART_DEVICE/CLOSE_WINDOW (API fire-and-forget che dichiaravano successo
+  senza controllare l'effetto reale), qui il `bool` restituito da ciascuna skill e' gia' derivato
+  da `cursor.rowcount`/una SELECT reale sulla STESSA connessione: non esiste il buco "successo
+  dichiarato ma mai verificato" che ha motivato gli altri verificatori, un secondo controllo
+  ridondante non aggiungerebbe prova indipendente vera; e "diagnosi di un deadlock vero" per
+  `F1.8.5` (resto dichiarato aperto): cercato un caso reale di lock annidati fra i 14 store con
+  `threading.Lock`/`RLock` di `core/`, nessuno trovato (`TriggerManager.mark_fired()` riusa
+  deliberatamente lo stesso `RLock` di `MemoryManager` in modo rientrante, non due lock diversi
+  annidati) - costruire un rilevatore di deadlock generico senza un solo scenario reale su cui
+  puntarlo avrebbe prodotto infrastruttura morta, non una correzione. Tornato quindi alla tecnica
+  che ha gia' prodotto la maggior parte dei buchi reali di questa sessione: cercare in uno store
+  condiviso tra thread non ancora esaminato esplicitamente. Trovato in `core/app_resolver.py::
+  AppResolver.resolve()` - buco reale, non solo teorico: il metodo copia gia' `sources` sotto lock
+  in una variabile locale PRIMA del ciclo che costruisce `candidates`, ma poi sia il tie-break
+  finale (`max(..., key=...)`) sia il nome mostrato nel risultato rileggevano `self._sources`/
+  `self._display_names` dal vivo, FUORI dal lock - non la STESSA istantanea gia' usata per
+  costruire `candidates` poche righe sopra. `discover()`/`refresh()` (chiamabile da un thread
+  diverso, es. l'utente che chiede un refresh mentre una risoluzione e' gia' in corso) sostituisce
+  interamente quei due dizionari sotto lock (mai una mutazione sul posto): un refresh che completa
+  esattamente tra la costruzione di `candidates` e quel punto fa rileggere un dizionario che non
+  corrisponde piu' ai candidati gia' raccolti - un nome presente nell'istantanea usata per
+  candidates puo' non esistere piu' nel dizionario nuovo, dando un tie-break/nome visualizzato
+  incoerente con cio' che e' stato davvero valutato. Riprodotto forzando la sostituzione
+  esattamente in quella finestra (dentro `_similarity()`, chiamata per ogni candidato PRIMA del
+  punto vulnerabile, stesso principio "mutare esattamente nel punto giusto" gia' usato altrove in
+  questa sessione) invece di un vero thread in corsa - qui la finestra e' deterministicamente
+  raggiungibile da un seam, un vero thread non era necessario per provarla. Corretto catturando
+  anche `display_names` sotto lock insieme a `sources` (gia' presente ma solo per un uso, non
+  tutti) e usando le due istantanee locali ovunque nel resto del metodo, mai piu' `self._sources`/
+  `self._display_names` dopo il blocco `with self._lock:`. Aggiunti 2 nuovi test in
+  `tests/test_app_resolver.py::ConcurrentRefreshDuringResolveTests` (nessuna suite di concorrenza
+  esisteva ancora per questo modulo), entrambi verificati FALLIRE contro il codice precedente prima
+  di applicare la correzione. Prova: 2.566/2.566 test, ruff/mypy verdi su
+  `core/app_resolver.py`/`tests/test_app_resolver.py` (80 file nella lista selettiva mypy,
+  invariata - il file era gia' incluso).
 - `F1.8.1` (parziale, doppia esecuzione via conferma concorrente) — 12/09/2026: "definire
   ownership della sessione... e una coda per azioni concorrenti". Buco reale, riprodotto per
   davvero prima del fix - `JakeCore.answer()` e' l'UNICO ingresso condiviso sia dal loop voce
@@ -4616,7 +4660,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 15/09/2026. Sessione lunga con 80 incrementi completati e verificati (PR #28-#106), la
+Aggiornato 15/09/2026. Sessione lunga con 81 incrementi completati e verificati (PR #28-#107), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -5009,3 +5053,28 @@ l'effetto peggiore e' un doppio apprendimento innocuo, non una perdita/corruzion
 aprire un incremento dedicato solo per quello), visto quante ne sono emerse in questa sola
 sessione con la stessa tecnica (`sys.setswitchinterval()` abbassato per forzare la
 sovrapposizione reale).
+
+**Aggiornamento 15/09/2026 (F1.8.2, risolutore app)**: quel "altro giro di ricerca mirata" ha
+trovato un buco vero in `core/app_resolver.py::AppResolver.resolve()` - non incluso nell'elenco
+degli store gia' chiusi da F1.8.2 (mai esaminato prima). Prima di arrivarci, due candidati diversi
+sono stati investigati e SCARTATI con motivazione, non implementati: un verificatore indipendente
+per le sei skill che cancellano un elemento da uno store interno (`FORGET`/`CLEAR_NOTES`/
+`DELETE_TODO`/`DELETE_TRIGGER`/`DELETE_REMINDER`/`FORGET_LEARNED`) avrebbe richiesto la stessa
+iniezione di dipendenza esterna in `verify_effect()` gia' rifiutata per Home Assistant, e comunque
+non avrebbe controllato nulla di indipendente (il `bool` di successo di ciascuna skill e' gia'
+derivato da `cursor.rowcount`/una SELECT reale, non da un'API fire-and-forget come
+CONTROL_SMART_DEVICE); un rilevatore di deadlock generico per il resto di `F1.8.5` e' stato
+scartato per mancanza di un solo scenario reale di lock annidati fra i 14 store con lock di
+`core/` (avrebbe prodotto infrastruttura morta). Il buco vero: `resolve()` catturava gia' `sources`
+sotto lock in una variabile locale, ma il tie-break finale e il nome visualizzato rileggevano
+`self._sources`/`self._display_names` dal vivo, FUORI dal lock - un `refresh()` concorrente
+(sostituisce interi dizionari sotto lock, mai una mutazione sul posto) completato esattamente in
+quella finestra fa rileggere dati che non corrispondono piu' ai candidati gia' raccolti. Riprodotto
+forzando la sostituzione esattamente li' (dentro `_similarity()`, un seam deterministico invece di
+un vero thread in corsa) e verificato che i due nuovi test falliscono davvero contro il codice
+precedente. Corretto catturando anche `display_names` sotto lock e usando entrambe le istantanee
+locali ovunque nel resto del metodo. `F1.8.2` e' ora chiuso anche per questo store. Prova:
+2.566/2.566 test, ruff/mypy verdi. Resta valido il resto dell'elenco sopra (coda per azioni
+concorrenti di F1.8.1, deadlock applicativo reale di F1.8.5, undo di F1.8.7) - nessuno di questi
+tre ha ancora uno scenario reale/infrastruttura su cui costruire senza inventare un problema che
+non esiste.

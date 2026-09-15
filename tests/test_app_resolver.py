@@ -140,6 +140,70 @@ class FuzzyMatchingAgainstDiscoveredAppsTests(unittest.TestCase):
         self.assertIsInstance(resolver.resolve("spotify"), AppMatch)
 
 
+class ConcurrentRefreshDuringResolveTests(unittest.TestCase):
+    """F1.8.7 ("testare race su... strutture condivise tra thread non ancora esaminate"): resolve()
+    catturava gia' sources in una variabile locale sotto lock, ma il tie-break finale
+    (max(..., key=...)) e il nome visualizzato nel risultato rileggevano self._sources/
+    self._display_names dal vivo, FUORI dal lock - non la stessa istantanea gia' usata per
+    costruire candidates poche righe sopra. discover()/refresh() (chiamabile da un altro thread,
+    es. AppResolver.refresh() su richiesta dell'utente mentre una risoluzione e' gia' in corso)
+    SOSTITUISCE interamente quei dizionari sotto lock (non li muta sul posto), quindi un refresh
+    che completa esattamente tra la costruzione di candidates e quel punto faceva rileggere un
+    dizionario che non corrisponde piu' ai candidati gia' raccolti. Riprodotto forzando la
+    sostituzione esattamente in quella finestra (dentro _similarity, chiamata per ogni candidato
+    PRIMA del punto vulnerabile) - stesso principio delle altre corse di questa sessione: mutare
+    esattamente nel punto giusto, non prima, cosi' la prova riguarda la finestra vera."""
+
+    def _resolver_with_apps(self, applications: dict, sources: dict = None, display_names: dict = None) -> AppResolver:
+        resolver = _resolver()
+        resolver._applications = dict(applications)
+        resolver._sources = dict(sources or dict.fromkeys(applications, "start_menu"))
+        resolver._display_names = dict(display_names or {name: name for name in applications})
+        return resolver
+
+    def test_a_refresh_landing_mid_resolve_does_not_change_the_display_name_already_evaluated(self):
+        resolver = self._resolver_with_apps(
+            {"foo bar": "foo.exe"}, sources={"foo bar": "start_menu"},
+            display_names={"foo bar": "FooBar Originale"},
+        )
+        real_similarity = resolver._similarity
+
+        def _mutating_similarity(requested, candidate):
+            score = real_similarity(requested, candidate)
+            # Simula un refresh() concorrente che completa esattamente qui: SOSTITUISCE i
+            # dizionari (come fa davvero discover()), non li muta sul posto.
+            resolver._display_names = {"foo bar": "FooBar Mutato Da Un Refresh Concorrente"}
+            resolver._sources = {}
+            return score
+
+        with mock.patch.object(resolver, "_similarity", side_effect=_mutating_similarity):
+            match = resolver.resolve("foo bar")
+
+        self.assertEqual(match.matched_app, "FooBar Originale")
+
+    def test_a_refresh_landing_mid_resolve_does_not_change_the_path_tie_break_already_evaluated(self):
+        """Due candidati con lo stesso punteggio: uno da 'path' (deprioritizzato nel tie-break),
+        uno no. Se il tie-break rilegge self._sources dal vivo invece dell'istantanea, un refresh
+        concorrente che svuota self._sources fa sparire la deprioritizzazione e il candidato
+        'path' vince quando non dovrebbe."""
+        resolver = self._resolver_with_apps(
+            {"path entry": "path.exe", "menu entry": "menu.exe"},
+            sources={"path entry": "path", "menu entry": "start_menu"},
+        )
+
+        def _tied_similarity(requested, candidate):
+            # Sostituisce self._sources (come discover()) alla prima chiamata, cosi' il resto
+            # del ciclo e il tie-break finale lo vedono gia' vuoto - esattamente cio' che un
+            # refresh() concorrente completato a meta' resolve() produrrebbe.
+            resolver._sources = {}
+            return 0.95  # sopra sia la soglia normale sia PATH_MIN_SCORE per entrambi
+
+        with mock.patch.object(resolver, "_similarity", side_effect=_tied_similarity):
+            match = resolver.resolve("qualunque cosa")
+
+        self.assertEqual(match.launcher, "menu.exe")
+
+
 class PathDiscoveryFaultTests(unittest.TestCase):
     @staticmethod
     def _failing_entries(exception):
