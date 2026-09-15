@@ -760,8 +760,11 @@ Dipende da: F1.1.
 
 Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa dal PolicyEngine.
 
-- Stato: `DOING`; `F1.2.5` parziale per rollback filesystem e ripresa del consenso (questa
-  ultima verificata localmente, in attesa di CI); `F1.2.1` **chiuso** (percorsi 3, 6 e 7 -
+- Stato: `DOING`; `F1.2.5` **chiuso** (rollback filesystem, ripresa del consenso - entrambi gia'
+  in `master` da tempo, la voce "in attesa di CI" qui sotto era rimasta stale - retry gia' coperto
+  separatamente da `F1.3.6`, e ora anche le sotto-azioni generate da workflow, con una prova
+  end-to-end dedicata usando il `PlanExecutor` VERO invece del solo cablaggio, vedi sotto);
+  `F1.2.1` **chiuso** (percorsi 3, 6 e 7 -
   i tre "percorso N" dichiarati aperti sono ora tutti fail-closed, vedi sotto); `F1.2.2` chiuso parzialmente
   (sei capability vere - radici filesystem su ENTRAMBI i percorsi e su sette intent, dominio
   web su OPEN_URL, app su OPEN_APP, contatto su SEND_WHATSAPP/SEND_EMAIL, device Home Assistant su
@@ -1347,10 +1350,33 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   verifica che una busta di conferma non fidata non possa iniettare un valore arbitrario come
   motivazione nel ledger. Prova (rieseguita per intero dopo le correzioni, non solo sui file
   toccati): 2.135/2.135 test, ruff/mypy/compileall verdi.
-- Non ancora affrontato: il resto di `F1.2.1` (percorso 7, `SkillRegistry.execute()` resta un
-  dispatcher senza controllo di policy proprio - vedi sopra); `F1.2.2`-`F1.2.3`; il resto di
-  `F1.2.5` (sotto-azioni di workflow non ancora passate in rassegna allo stesso modo - il retry
-  e' invece coperto separatamente da `F1.3.6`, vedi sotto).
+- Non ancora affrontato (istantanea di questo incremento, 12/09/2026 - il percorso 7 di `F1.2.1`
+  e' stato chiuso in un incremento successivo, vedi lo Stato in cima alla sezione): `F1.2.2`-
+  `F1.2.3`; il resto di `F1.2.5` (sotto-azioni di workflow non ancora passate in rassegna allo
+  stesso modo - il retry e' invece coperto separatamente da `F1.3.6`, vedi sotto - chiuso in un
+  incremento successivo, vedi sotto).
+- `F1.2.5` (chiusura - sotto-azioni di workflow, e correzione di uno stato rimasto stale) —
+  15/09/2026: "applicare policy anche a retry, rollback, fallback e sotto-azioni generate da
+  workflow". Investigato prima di scrivere codice: il rollback e la ripresa del consenso (le due
+  voci datate sopra) erano gia' in `master` da giorni - la frase "in attesa di CI" sullo Stato in
+  cima alla sezione era rimasta stale, mai aggiornata dopo che quella PR era stata unita. Il retry
+  era gia' coperto separatamente da `F1.3.6` (`is_safe_to_auto_retry`). Restavano DAVVERO da
+  verificare solo le "sotto-azioni generate da workflow": confermato che `RunWorkflowSkill`
+  instrada SEMPRE verso `PlanExecutor.execute()` (mai un percorso parallelo), che a sua volta
+  applica gia' `policy_engine.decide_automated_with_reason()` a OGNI passo, workflow incluso -
+  gia' vero per costruzione, gia' provato ESISTENZIALMENTE (F1.5.3, 14/09/2026) che `PlanExecutor`
+  non puo' essere aggirato da un passo con autorizzazione fabbricata. Mancava pero' una prova
+  end-to-end letterale per QUESTA voce specifica: il test preesistente
+  (`test_forwards_the_policy_engine_to_the_executor`) usava un `FakePlanExecutor` che si limita a
+  registrare la chiamata, provando solo il CABLAGGIO (il `policy_engine` vero arriva davvero a
+  `execute()`), non che passarlo per davvero fermi qualcosa. Aggiunto
+  `tests/test_workflow_skills.py::RunWorkflowSkillTests::
+  test_a_blocked_step_inside_a_saved_workflow_is_really_denied_end_to_end` - stessa skill, ma con
+  il `PlanExecutor` VERO (non un doppio) e un registro minimo che registra ogni intent eseguito
+  per davvero: un'automazione salvata con un passo `RUN_COMMAND` bloccato si ferma con
+  `POLICY_BLOCKED` PRIMA di raggiungere la skill (`registry.executed_intents` resta vuoto).
+  Nessun file di produzione toccato. `F1.2.5` ora **chiuso** nella sua interezza. Prova:
+  2.525/2.525 test, ruff/mypy verdi su `tests/test_workflow_skills.py`.
 
 ### F1.3 — Verifica degli effetti e undo
 
@@ -4396,7 +4422,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 15/09/2026. Sessione lunga con 72 incrementi completati e verificati (PR #28-#99), la
+Aggiornato 15/09/2026. Sessione lunga con 73 incrementi completati e verificati (PR #28-#100), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -4600,13 +4626,18 @@ completamente diverso - riprodotto per davvero con una skill lenta seguita da un
 stesso worker; corretto forzando `stop()` su un timeout, con una seconda scoperta empirica mentre
 si scriveva il test - `TerminateProcess` puo' impiegare fino a un secondo per riflettersi in
 `is_alive()`, `stop()` ora lo aspetta esplicitamente invece di fidarsi che sia immediato). Con
-questo, **F1.6 e' chiusa nella sua interezza**. Il resto:
+questo, **F1.6 e' chiusa nella sua interezza**, e `F1.2.5` chiusura - sotto-azioni di workflow
+(investigato prima di scrivere codice: gia' vero per costruzione - `RunWorkflowSkill` instrada
+sempre verso `PlanExecutor.execute()`, che applica gia' la policy a ogni passo - mancava solo una
+prova end-to-end letterale con il `PlanExecutor` VERO invece del solo cablaggio gia' provato;
+trovata anche e corretta una frase "in attesa di CI" rimasta stale nello Stato della sezione da
+giorni, per un lavoro gia' unito in `master`). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.524/2.524 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.525/2.525 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
 invariati, nessuno dei due coperto da "mypy selettivo" in CI - 80 file nella lista selettiva,
 invariata: nessun file nuovo in questo incremento). `G1` resta aperto.
