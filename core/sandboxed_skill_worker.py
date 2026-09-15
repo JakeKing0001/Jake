@@ -280,7 +280,23 @@ class SandboxedSkillWorker:
         """Invia UNA richiesta e attende UNA risposta, con un timeout. Seriale (un `Lock`): il
         protocollo a righe non distingue le risposte per richiesta, quindi due invoke()
         concorrenti si scambierebbero le risposte - accettabile, le skill forgiate sono
-        tipicamente utility semplici e rare, non un percorso ad alta concorrenza."""
+        tipicamente utility semplici e rare, non un percorso ad alta concorrenza.
+
+        F1.6.3 ("timeout wall-clock imposto dal Job Object stesso" - Job Object non ha affatto un
+        limite di tipo wall-clock, solo tempo CPU: l'unico modo reale di imporne uno e' un
+        watchdog esterno che termini il processo, esattamente quello che stop() sotto fa):
+        buco reale trovato, non solo teorico - un timeout NON terminava il worker rimasto
+        indietro, che restava vivo e poteva rispondere in ritardo. La riga di risposta arrivava
+        comunque nella coda condivisa (`self._responses`), pronta per essere consumata dalla
+        chiamata SUCCESSIVA a `invoke()` - riprodotto per davvero: una skill lenta (3s) con
+        `invoke_timeout_seconds=1` faceva tornare `SANDBOX_WORKER_TIMEOUT` come atteso, ma la
+        chiamata successiva a un intent COMPLETAMENTE DIVERSO riceveva la risposta VECCHIA e
+        STALE della skill lenta (`success=True` con i dati sbagliati, non un errore) invece
+        della propria. Corretto forzando l'arresto del worker su un timeout: `stop()` termina il
+        processo a forza (nessuna richiesta di arresto pulito, il worker e' per definizione non
+        rispondente) cosi' `is_alive()` torna `False` e `_get_or_start_sandbox_worker()` (vedi
+        core/skill_registry.py) ne avvia uno nuovo, pulito, alla chiamata successiva - nessuna
+        risposta vecchia puo' piu' sopravvivere in una coda che non esiste piu'."""
         with self._lock:
             if not self.is_alive() or self._stdin_write is None:
                 return SkillResult(success=False, data={}, error="SANDBOX_WORKER_UNAVAILABLE")
@@ -292,6 +308,7 @@ class SandboxedSkillWorker:
                 return SkillResult(success=False, data={}, error="SANDBOX_WORKER_UNAVAILABLE")
             response = self._read_response(timeout=self.invoke_timeout_seconds)
             if response is None:
+                self.stop()
                 return SkillResult(success=False, data={}, error="SANDBOX_WORKER_TIMEOUT")
             return SkillResult(
                 success=bool(response.get("success")), data=response.get("data") or {},
@@ -310,7 +327,17 @@ class SandboxedSkillWorker:
         termina a forza se ancora vivo - stesso schema "prova a chiedere, poi impona" gia' usato
         per i quattro scheduler in background (F1.8.5). Chiudere l'handle del Job Object DOPO
         (JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE) e' una rete di sicurezza in piu', non l'unico
-        meccanismo di arresto."""
+        meccanismo di arresto.
+
+        F1.6.3: dopo `_terminate()` (o dopo la richiesta di arresto pulito) si attende ANCHE che
+        `is_alive()` rifletta davvero la morte del processo, non solo che la chiamata di sistema
+        sia stata fatta - scoperto scrivendo un test che chiamava `is_alive()` SUBITO dopo
+        `stop()` su un worker bloccato in un `time.sleep()` lunghissimo: `TerminateProcess`
+        inizia la terminazione ma `WaitForSingleObject` puo' impiegare fino a circa un secondo
+        per segnalarla per davvero (osservato empiricamente, non documentato da Microsoft come
+        garanzia). Senza questa attesa in piu', un chiamante che controllasse `is_alive()` subito
+        dopo `stop()` (es. `invoke()` sopra, dopo un timeout) potrebbe ancora vedere `True` per
+        un processo gia' condannato."""
         if self._process is None:
             return
         try:
@@ -328,6 +355,9 @@ class SandboxedSkillWorker:
         if self._job is not None:
             self._job.Close()
             self._job = None
+        confirm_deadline = time.monotonic() + 2.0
+        while time.monotonic() < confirm_deadline and self.is_alive():
+            time.sleep(0.05)
 
     def _terminate(self) -> None:
         try:

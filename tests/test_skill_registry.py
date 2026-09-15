@@ -297,6 +297,55 @@ class ForgedSkillSandboxWiringTests(unittest.TestCase):
         self.assertEqual(result.error, "SANDBOX_WORKER_TIMEOUT")
         self.assertEqual(self.registry._plugin_violation_counts.get(plugin_path), 1)
 
+    def test_the_call_right_after_a_real_timeout_gets_a_correct_fresh_answer_not_a_stale_one(self):
+        """F1.6.3 (fix del worker che rimaneva vivo dopo un timeout, vedi core/
+        sandboxed_skill_worker.py::invoke()): prova end-to-end che il percorso reale - non solo
+        il singolo `SandboxedSkillWorker`, vedi tests/test_sandboxed_skill_worker.py per quella
+        parte - si riprende davvero da un timeout. Registra un intent lento (che scade) E uno
+        rapido nello STESSO plugin/worker, fa scadere il primo per davvero, poi invoca il secondo:
+        `_get_or_start_sandbox_worker()` deve accorgersi che il vecchio worker e' morto (terminato
+        dal fix) e avviarne uno nuovo, cosi' il secondo intent riceve la propria risposta VERA
+        (non quella - mai arrivata a questo worker nuovo - della skill lenta di prima)."""
+        plugin_path = self._write_sleepy_and_echo_plugin("SLOW_FORGED", "FAST_FORGED", sleep_seconds=2.0)
+        self.registry.register_skill("SLOW_FORGED", FakeSkill(), plugin_path=plugin_path)
+        self.registry.register_skill("FAST_FORGED", FakeSkill(), plugin_path=plugin_path)
+        project_root = str(Path(__file__).resolve().parent.parent)
+        worker = SandboxedSkillWorker(project_root=project_root, plugin_paths=[plugin_path], invoke_timeout_seconds=0.2)
+        worker.start()
+        self.registry._sandbox_worker = worker
+
+        slow_result = self.registry.execute("SLOW_FORGED", {}, policy_engine=PolicyEngine())
+        self.assertEqual(slow_result.error, "SANDBOX_WORKER_TIMEOUT")
+
+        fresh_result = self.registry.execute("FAST_FORGED", {}, policy_engine=PolicyEngine())
+
+        # setUp() gia' registra self.registry.stop_sandbox_worker in addCleanup - letto a
+        # teardown, quando self.registry._sandbox_worker punta gia' al worker nuovo qui sotto.
+        self.assertTrue(fresh_result.success, fresh_result.error)
+        self.assertEqual(fresh_result.data, {"fast": True})
+        self.assertIsNot(self.registry._sandbox_worker, worker, "doveva essere avviato un worker NUOVO dopo il timeout")
+
+    def _write_sleepy_and_echo_plugin(self, slow_intent: str, fast_intent: str, sleep_seconds: float) -> str:
+        path = Path(self._tmpdir.name) / f"{slow_intent.lower()}.py"
+        path.write_text(
+            "import time\n"
+            "from core.skill_result import SkillResult\n"
+            "class SlowSkill:\n"
+            f"    metadata = {{'intent': '{slow_intent}', 'description': '', 'parameters': {{}}}}\n"
+            "    def execute(self, parameters=None):\n"
+            f"        time.sleep({sleep_seconds})\n"
+            "        return SkillResult(success=True, data={'marker': 'STALE_SLOW_RESPONSE'})\n"
+            "class FastSkill:\n"
+            f"    metadata = {{'intent': '{fast_intent}', 'description': '', 'parameters': {{}}}}\n"
+            "    def execute(self, parameters=None):\n"
+            "        return SkillResult(success=True, data={'fast': True})\n"
+            "def register(registry):\n"
+            f"    registry.register_skill('{slow_intent}', SlowSkill())\n"
+            f"    registry.register_skill('{fast_intent}', FastSkill())\n",
+            encoding="utf-8",
+        )
+        return str(path)
+
     def _write_sleepy_plugin(self, intent: str, sleep_seconds: float) -> str:
         path = Path(self._tmpdir.name) / f"{intent.lower()}.py"
         path.write_text(
