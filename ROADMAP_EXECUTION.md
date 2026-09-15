@@ -517,11 +517,14 @@ Dipende da: G0.
 Criterio di uscita: il 100% dei percorsi produce lo stesso `ActionReceipt` validato.
 
 - Stato: `DOING`; `F1.1.1`, `F1.1.2`, `F1.1.3` (parzialmente), `F1.1.4`, `F1.1.6` (pilota su 5
-  intent) e `F1.1.8` conclusi con evidenza; `F1.1.7` chiusa nella sostanza (i tre chokepoint
-  reali costruiscono tutti `ActionError`, e i 35 codici bespoke realmente usati dalle ~200 skill
-  sono ora censiti in `_KNOWN_RESULT_CATEGORIES`, vedi sotto); resta solo `effect_class`/
-  `preconditions`/`expected_effect` di `ActionProposal`, dichiaratamente non calcolabile dai dati
-  esistenti; `F1.1.5` **chiuso** (versionamento gia' esisteva da sempre - `schema_version`,
+  intent) e `F1.1.8` conclusi con evidenza; `F1.1.7` **chiuso** (i tre chokepoint reali
+  costruiscono tutti `ActionError`, e i 35 codici bespoke realmente usati dalle ~200 skill sono
+  censiti in `_KNOWN_RESULT_CATEGORIES`, vedi sotto; `effect_class`/`preconditions`/
+  `expected_effect` di `ActionProposal` restano deliberatamente `None` - **decisione esplicita
+  dell'utente**, dopo aver verificato che non c'e' altro lavoro meccanico rimasto sotto questa
+  voce: popolarli richiederebbe indovinare un giudizio di prodotto skill per skill, esattamente
+  cio' che il codice stesso rifiuta di fare - non e' piu' classificato come lavoro rimandato,
+  vedi sotto); `F1.1.5` **chiuso** (versionamento gia' esisteva da sempre - `schema_version`,
   rifiutato in scrittura se diverso dalla versione corrente; la "migrazione" vera e propria resta
   dichiaratamente non costruita perche' non e' mai esistita una seconda versione dello schema da
   cui migrare - costruirla ora sarebbe codice morto speculativo; la "compatibilita' per record
@@ -611,6 +614,22 @@ Criterio di uscita: il 100% dei percorsi produce lo stesso `ActionReceipt` valid
   `SkillResult.error` di sempre, solo ora categorizzato onestamente invece di ricadere su
   `uncategorized` ovunque questa stringa gia' fluisce (ledger, dashboard F1.7.6). Prova:
   2.407/2.407 test, ruff/mypy verdi.
+- `F1.1.7` (chiusura) — 15/09/2026: prima di iniziare un presunto "migrare tutti gli intent",
+  riletta la cronologia di questa stessa voce: il primo pezzo aveva gia' stabilito che
+  `ActionProposal`/`ActionError` sono costruiti dal CHIAMANTE (i tre chokepoint), mai dalle skill
+  stesse, e i tre chokepoint reali li costruiscono gia' tutti; il secondo pezzo aveva gia' chiuso
+  la migrazione degli errori bespoke (35 codici). L'unico pezzo dichiarato ancora aperto -
+  `effect_class`/`preconditions`/`expected_effect` di `ActionProposal` - e' pero' un'informazione
+  che il codice stesso (`core/action_contracts.py::ActionProposal`, docstring) rifiuta di
+  inventare: "non derivabili in modo affidabile... assenti, restano `None` invece di un valore
+  inventato". Non esiste quindi nessun lavoro MECCANICO rimasto sotto questa voce - solo un
+  giudizio di prodotto skill per skill che nessuno ha mai chiesto di fare, e che varrebbe la pena
+  fare solo quando esistesse una funzionalita' reale pronta a CONSUMARE quei campi (oggi nessuna
+  li legge). Presentato questo all'utente prima di procedere per non ripetere l'errore di
+  descrivere "migrazione di 200 skill" come lavoro meccanico quando non lo e' - **decisione
+  esplicita dell'utente**: chiudere `F1.1.7` cosi' com'e' invece di forzare un giudizio di
+  prodotto per 200 skill senza una richiesta reale dietro. Nessun file di produzione o di test
+  toccato: solo la classificazione dello stato in questo documento.
 - `F1.1.2` — 12/09/2026: creato `core/action_contracts.py` con i cinque contratti mancanti
   (`ActionProposal`, `ActionContext`, `VerificationEvidence`, `UndoDescriptor`, `ActionError`) -
   `ActionReceipt` esisteva gia' (`core/action_ledger.py`). **Deliberatamente NON collegati** ai
@@ -4239,7 +4258,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 14/09/2026. Sessione lunga con 68 incrementi completati e verificati (PR #28-#95), la
+Aggiornato 15/09/2026. Sessione lunga con 69 incrementi completati e verificati (PR #28-#96), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -4411,7 +4430,13 @@ riducono allo STESSO percorso di codice, DPAPI che rifiuta di decifrare un blob 
 un'identita' diversa dalla propria, gia' esercitato da un test esistente il cui commento
 dichiarava gia' di simulare esattamente "un backup parziale"; un secondo account Windows vero
 resta infeasible in CI ma e' un limite dell'infrastruttura di test, non un buco funzionale -
-nessun codice nuovo). Il resto:
+nessun codice nuovo), e `F1.1.7` chiusura - 15/09/2026 (chiesto all'utente cosa fare dopo aver
+scoperto che l'opzione "migrare tutti gli intent" presentata come possibile lavoro meccanico non
+lo era davvero: i tre chokepoint costruiscono gia' `ActionError`, i 35 codici bespoke erano gia'
+migrati, e l'unico pezzo dichiarato ancora aperto - `effect_class`/`preconditions`/
+`expected_effect` - e' informazione che il codice stesso rifiuta di inventare senza una decisione
+di prodotto skill per skill; **decisione esplicita dell'utente** di chiudere la voce cosi' com'e'
+invece di forzare quel giudizio senza una richiesta reale dietro). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
