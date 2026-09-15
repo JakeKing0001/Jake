@@ -44,9 +44,9 @@ _VERIFICATION_STATUSES = (VERIFICATION_VERIFIED, VERIFICATION_UNVERIFIED, VERIFI
 # di RiskLevel (core/risk.py, "quanto e' grave se va male"), effect_class descrive IL TIPO di
 # effetto ("cosa cambia nel mondo"): un intent READ_ONLY e' sempre "read", ma un intent
 # LOCAL_REVERSIBLE puo' essere "create" (ADD_NOTE), "modify" (RENAME_PATH) o "delete" (DELETE_PATH
-# e' invece DESTRUCTIVE) - i due assi non si derivano l'uno dall'altro in modo affidabile per le
-# ~200 skill non ancora censite, quindi qui resta un campo dichiarato dal chiamante, non
-# calcolato automaticamente da risk_of() (che risponderebbe alla domanda sbagliata).
+# e' invece DESTRUCTIVE) - i due assi non si derivano l'uno dall'altro in modo affidabile, ne'
+# l'uno dal nome dell'intent: serve leggere il comportamento REALE di ogni skill (vedi
+# INTENT_EFFECT_CLASS sotto).
 EFFECT_CLASS_READ = "read"
 EFFECT_CLASS_CREATE = "create"
 EFFECT_CLASS_MODIFY = "modify"
@@ -57,6 +57,241 @@ EFFECT_CLASSES = frozenset({
     EFFECT_CLASS_EXTERNAL,
 })
 
+# F1.1.2 (censimento completo, 15/09/2026): 208 dei 209 intent di core/risk.py::SKILL_RISK,
+# classificati leggendo il comportamento REALE di ogni execute() (non ipotizzato dal nome
+# dell'intent - lo stesso errore che il commento sopra EFFECT_CLASSES avvertiva di evitare).
+# Manca deliberatamente `RESUME_INTERRUPTED_TASK`: riprende un TaskAgent da un checkpoint
+# salvato, e l'agente ripreso decide da solo il prossimo passo (che puo' essere qualunque cosa) -
+# core/risk.py lo classifica gia' EXTERNAL_ACTION con la stessa identica motivazione esplicita
+# ("i passi che l'agente ripreso decide di fare non sono ispezionati qui"); forzare una scelta
+# qui significherebbe indovinare, non censire. RUN_COMMAND/RUN_PYTHON_SCRIPT sono "external" non
+# perche' ovvio dal nome, ma perche' la categoria "external" e' definita apposta per un effetto
+# fuori dal controllo/conoscenza diretta di Jake - un comando/script arbitrario e' l'esempio piu'
+# diretto possibile di quella definizione, non un ripiego per "non so cosa fa". Un intent NON
+# elencato qui (un plugin di terze parti, una skill appena forgiata mai censita) non ha un
+# default "piu' prudente" plausibile tra le cinque classi - a differenza di risk_of(), che
+# ricade su ADMIN come scelta di sicurezza, qui non esiste un ordine di gravita' da cui dedurre
+# un ripiego: `effect_class_of()` restituisce None piuttosto che inventare una classificazione.
+INTENT_EFFECT_CLASS: dict[str, str] = {
+    "ADD_NOTE": EFFECT_CLASS_CREATE,
+    "ADD_TODO": EFFECT_CLASS_CREATE,
+    "ASK_QUESTION": EFFECT_CLASS_READ,
+    "BUILD_SEMANTIC_INDEX": EFFECT_CLASS_CREATE,
+    "CALCULATE": EFFECT_CLASS_READ,
+    "CALCULATE_AGE": EFFECT_CLASS_READ,
+    "CALCULATE_BMI": EFFECT_CLASS_READ,
+    "CALCULATE_DISCOUNT": EFFECT_CLASS_READ,
+    "CALCULATE_PERCENTAGE": EFFECT_CLASS_READ,
+    "CALCULATE_TIP": EFFECT_CLASS_READ,
+    "CANCEL_TIMER": EFFECT_CLASS_DELETE,
+    "CHECK_FILE_HASH": EFFECT_CLASS_READ,
+    "CHECK_PASSWORD_STRENGTH": EFFECT_CLASS_READ,
+    "CHECK_PORT_IN_USE": EFFECT_CLASS_READ,
+    "CHECK_WEBSITE_STATUS": EFFECT_CLASS_READ,
+    "CHITCHAT": EFFECT_CLASS_READ,
+    "CHOOSE_RANDOM": EFFECT_CLASS_READ,
+    "CLEAR_NOTES": EFFECT_CLASS_DELETE,
+    "CLEAR_TEMP_FILES": EFFECT_CLASS_DELETE,
+    "CLICK_ELEMENT": EFFECT_CLASS_MODIFY,
+    "CLICK_MOUSE": EFFECT_CLASS_MODIFY,
+    "CLICK_TEXT": EFFECT_CLASS_MODIFY,
+    "CLIPBOARD_READ": EFFECT_CLASS_READ,
+    "CLIPBOARD_WRITE": EFFECT_CLASS_MODIFY,
+    "CLOSE_APP": EFFECT_CLASS_DELETE,  # termina il processo se non ha finestre visibili, non solo le chiude (diverso da CLOSE_WINDOW)
+    "CLOSE_WINDOW": EFFECT_CLASS_MODIFY,  # solo WM_CLOSE: il processo puo' sopravvivere (diverso da CLOSE_APP)
+    "COMPLETE_TODO": EFFECT_CLASS_MODIFY,
+    "COMPRESS_PATH": EFFECT_CLASS_CREATE,
+    "CONTROL_SMART_DEVICE": EFFECT_CLASS_EXTERNAL,
+    "CONVERT_CASE": EFFECT_CLASS_READ,
+    "CONVERT_CURRENCY": EFFECT_CLASS_READ,
+    "CONVERT_MORSE_CODE": EFFECT_CLASS_READ,
+    "CONVERT_NUMBER_TO_WORDS": EFFECT_CLASS_READ,
+    "CONVERT_ROMAN_NUMERAL": EFFECT_CLASS_READ,
+    "CONVERT_TIMEZONE": EFFECT_CLASS_READ,
+    "CONVERT_UNITS": EFFECT_CLASS_READ,
+    "CORRECT_LAST": EFFECT_CLASS_MODIFY,
+    "COUNT_LINES_OF_CODE": EFFECT_CLASS_READ,
+    "COUNT_WORDS": EFFECT_CLASS_READ,
+    "COUNT_WORDS_IN_FILE": EFFECT_CLASS_READ,
+    "CREATE_PATH": EFFECT_CLASS_CREATE,
+    "CREATE_SKILL": EFFECT_CLASS_CREATE,
+    "DAYS_UNTIL": EFFECT_CLASS_READ,
+    "DELETE_CREATED_SKILL": EFFECT_CLASS_DELETE,
+    "DELETE_PATH": EFFECT_CLASS_DELETE,
+    "DELETE_REMINDER": EFFECT_CLASS_DELETE,
+    "DELETE_TODO": EFFECT_CLASS_DELETE,
+    "DELETE_TRIGGER": EFFECT_CLASS_DELETE,
+    "DESCRIBE_SCREEN": EFFECT_CLASS_READ,
+    "DETECT_LANGUAGE": EFFECT_CLASS_READ,
+    "DUPLICATE_FILE": EFFECT_CLASS_CREATE,
+    "EMPTY_CLIPBOARD": EFFECT_CLASS_DELETE,  # rimuove il contenuto esistente senza sostituirlo (diverso da CLIPBOARD_WRITE)
+    "EMPTY_RECYCLE_BIN": EFFECT_CLASS_DELETE,
+    "EXPORT_NOTES": EFFECT_CLASS_CREATE,
+    "EXTRACT_ARCHIVE": EFFECT_CLASS_CREATE,
+    "EXTRACT_URLS_FROM_TEXT": EFFECT_CLASS_READ,
+    "FIBONACCI": EFFECT_CLASS_READ,
+    "FIND_DUPLICATE_FILES": EFFECT_CLASS_READ,
+    "FIND_FILE": EFFECT_CLASS_READ,
+    "FIND_LARGE_FILES": EFFECT_CLASS_READ,
+    "FLIP_COIN": EFFECT_CLASS_READ,
+    "FLUSH_DNS": EFFECT_CLASS_DELETE,  # rimuove voci di cache DNS esistenti
+    "FOCUS_WINDOW": EFFECT_CLASS_MODIFY,
+    "FORGET": EFFECT_CLASS_DELETE,
+    "FORGET_LEARNED": EFFECT_CLASS_DELETE,
+    "FORMAT_JSON": EFFECT_CLASS_READ,
+    "GCD_LCM": EFFECT_CLASS_READ,
+    "GENERATE_PASSWORD": EFFECT_CLASS_READ,
+    "GENERATE_UUID": EFFECT_CLASS_READ,
+    "GET_ACTIVE_WINDOW": EFFECT_CLASS_READ,
+    "GET_BATTERY_STATUS": EFFECT_CLASS_READ,
+    "GET_BROWSER_HISTORY": EFFECT_CLASS_READ,
+    "GET_CPU_USAGE": EFFECT_CLASS_READ,
+    "GET_DATE": EFFECT_CLASS_READ,
+    "GET_DAY_OF_WEEK": EFFECT_CLASS_READ,
+    "GET_DISK_USAGE": EFFECT_CLASS_READ,
+    "GET_DNS_SERVERS": EFFECT_CLASS_READ,
+    "GET_ENVIRONMENT_VARIABLE": EFFECT_CLASS_READ,
+    "GET_FILE_INFO": EFFECT_CLASS_READ,
+    "GET_FOLDER_SIZE": EFFECT_CLASS_READ,
+    "GET_GPU_INFO": EFFECT_CLASS_READ,
+    "GET_LOCAL_IP": EFFECT_CLASS_READ,
+    "GET_MAC_ADDRESS": EFFECT_CLASS_READ,
+    "GET_MEMORY_USAGE": EFFECT_CLASS_READ,
+    "GET_MOON_PHASE": EFFECT_CLASS_READ,
+    "GET_NEWS": EFFECT_CLASS_READ,
+    "GET_NEXT_HOLIDAY": EFFECT_CLASS_READ,
+    "GET_NOTIFICATION_MODE": EFFECT_CLASS_READ,
+    "GET_PUBLIC_IP": EFFECT_CLASS_READ,
+    "GET_SCREEN_RESOLUTION": EFFECT_CLASS_READ,
+    "GET_SUNRISE_SUNSET": EFFECT_CLASS_READ,
+    "GET_SYSTEM_INFO": EFFECT_CLASS_READ,
+    "GET_TIME": EFFECT_CLASS_READ,
+    "GET_UPTIME": EFFECT_CLASS_READ,
+    "GET_VOLUME_LEVEL": EFFECT_CLASS_READ,
+    "GET_WEATHER": EFFECT_CLASS_READ,
+    "GET_WEEK_NUMBER": EFFECT_CLASS_READ,
+    "GET_WIFI_STATUS": EFFECT_CLASS_READ,
+    "GIT_BRANCH": EFFECT_CLASS_READ,
+    "GIT_DIFF": EFFECT_CLASS_READ,
+    "GIT_LOG": EFFECT_CLASS_READ,
+    "GIT_PULL": EFFECT_CLASS_EXTERNAL,  # porta dentro contenuto da un remoto non controllato da Jake
+    "GIT_STATUS": EFFECT_CLASS_READ,
+    "HELP": EFFECT_CLASS_READ,
+    "HYBRID_SEARCH_FILES": EFFECT_CLASS_READ,
+    "IS_PRIME": EFFECT_CLASS_READ,
+    "KILL_PROCESS_BY_PORT": EFFECT_CLASS_DELETE,
+    "KILL_SWITCH": EFFECT_CLASS_MODIFY,
+    "LEARN_COMMAND": EFFECT_CLASS_CREATE,
+    "LINK_MEMORY": EFFECT_CLASS_CREATE,
+    "LIST_CONTACTS": EFFECT_CLASS_READ,
+    "LIST_CREATED_SKILLS": EFFECT_CLASS_READ,
+    "LIST_DRIVES": EFFECT_CLASS_READ,
+    "LIST_INSTALLED_APPS": EFFECT_CLASS_READ,
+    "LIST_LEARNED": EFFECT_CLASS_READ,
+    "LIST_MODELS": EFFECT_CLASS_READ,
+    "LIST_NOTES": EFFECT_CLASS_READ,
+    "LIST_OPEN_WINDOWS": EFFECT_CLASS_READ,
+    "LIST_PROCESSES": EFFECT_CLASS_READ,
+    "LIST_RECENT_FILES": EFFECT_CLASS_READ,
+    "LIST_REMINDERS": EFFECT_CLASS_READ,
+    "LIST_SMART_DEVICES": EFFECT_CLASS_READ,
+    "LIST_STARTUP_APPS": EFFECT_CLASS_READ,
+    "LIST_TIMERS": EFFECT_CLASS_READ,
+    "LIST_TODOS": EFFECT_CLASS_READ,
+    "LIST_TRIGGERS": EFFECT_CLASS_READ,
+    "LIST_WIFI_NETWORKS": EFFECT_CLASS_READ,
+    "MAGIC_8_BALL": EFFECT_CLASS_READ,
+    "MAXIMIZE_WINDOW": EFFECT_CLASS_MODIFY,
+    "MEDIA_CONTROL": EFFECT_CLASS_MODIFY,
+    "MINIMIZE_ALL_WINDOWS": EFFECT_CLASS_MODIFY,
+    "MINIMIZE_WINDOW": EFFECT_CLASS_MODIFY,
+    "MOVE_MOUSE": EFFECT_CLASS_MODIFY,
+    "MOVE_PATH": EFFECT_CLASS_MODIFY,
+    "OPEN_APP": EFFECT_CLASS_EXTERNAL,
+    "OPEN_INCOGNITO_WINDOW": EFFECT_CLASS_EXTERNAL,
+    "OPEN_IN_EDITOR": EFFECT_CLASS_EXTERNAL,
+    "OPEN_PATH": EFFECT_CLASS_EXTERNAL,
+    "OPEN_SEARCH_RESULT": EFFECT_CLASS_EXTERNAL,
+    "OPEN_URL": EFFECT_CLASS_EXTERNAL,
+    "PAUSE_LISTENING": EFFECT_CLASS_MODIFY,
+    "PING_HOST": EFFECT_CLASS_READ,
+    "PLAY_MEDIA": EFFECT_CLASS_EXTERNAL,
+    "PRESS_KEY": EFFECT_CLASS_MODIFY,
+    "PRINT_FILE": EFFECT_CLASS_EXTERNAL,
+    "PROOFREAD_TEXT": EFFECT_CLASS_READ,
+    "PURGE_OLD_HISTORY": EFFECT_CLASS_DELETE,
+    "RANDOM_FACT": EFFECT_CLASS_READ,
+    "RANDOM_NUMBER": EFFECT_CLASS_READ,
+    "RANDOM_QUOTE": EFFECT_CLASS_READ,
+    "READ_FILE_TEXT": EFFECT_CLASS_READ,
+    "READ_SCREEN": EFFECT_CLASS_READ,
+    "READ_SELECTION": EFFECT_CLASS_READ,
+    "RECALL": EFFECT_CLASS_READ,
+    "REMEMBER": EFFECT_CLASS_CREATE,
+    "RENAME_PATH": EFFECT_CLASS_MODIFY,
+    "REPEAT_LAST": EFFECT_CLASS_READ,
+    "RESEARCH": EFFECT_CLASS_READ,
+    "RESET_KILL_SWITCH": EFFECT_CLASS_MODIFY,
+    "RESIZE_WINDOW": EFFECT_CLASS_MODIFY,
+    "RESTART_EXPLORER": EFFECT_CLASS_MODIFY,
+    "RESTORE_WINDOW": EFFECT_CLASS_MODIFY,
+    "ROCK_PAPER_SCISSORS": EFFECT_CLASS_READ,
+    "ROLL_DICE": EFFECT_CLASS_READ,
+    "RUN_COMMAND": EFFECT_CLASS_EXTERNAL,
+    "RUN_PYTHON_SCRIPT": EFFECT_CLASS_EXTERNAL,
+    "RUN_WORKFLOW": EFFECT_CLASS_EXTERNAL,  # esegue passi salvati in precedenza, non ispezionati qui
+    "SAVE_CONTACT": EFFECT_CLASS_CREATE,
+    "SAVE_WORKFLOW": EFFECT_CLASS_CREATE,
+    "SCROLL": EFFECT_CLASS_MODIFY,
+    "SEARCH_FILES": EFFECT_CLASS_READ,
+    "SEARCH_IN_BROWSER": EFFECT_CLASS_EXTERNAL,
+    "SEARCH_NOTES": EFFECT_CLASS_READ,
+    "SEMANTIC_SEARCH_FILES": EFFECT_CLASS_READ,
+    "SEND_EMAIL": EFFECT_CLASS_EXTERNAL,  # apre mailto:, serve un click umano - non invia da solo
+    "SEND_WHATSAPP": EFFECT_CLASS_EXTERNAL,  # apre wa.me con testo precompilato - non trasmette da solo
+    "SET_BRIGHTNESS": EFFECT_CLASS_MODIFY,
+    "SET_DAILY_REMINDER": EFFECT_CLASS_CREATE,
+    "SET_MODEL": EFFECT_CLASS_MODIFY,
+    "SET_NOTIFICATION_MODE": EFFECT_CLASS_MODIFY,
+    "SET_POWER_PLAN": EFFECT_CLASS_MODIFY,
+    "SET_PRIVATE_MODE": EFFECT_CLASS_MODIFY,
+    "SET_REMINDER": EFFECT_CLASS_CREATE,
+    "SET_TIMER": EFFECT_CLASS_CREATE,
+    "SET_TRIGGER": EFFECT_CLASS_CREATE,
+    "SET_VOLUME": EFFECT_CLASS_MODIFY,
+    "SET_VOLUME_LEVEL": EFFECT_CLASS_MODIFY,
+    "SET_WINDOW_ALWAYS_ON_TOP": EFFECT_CLASS_MODIFY,
+    "SNAP_WINDOW_LEFT": EFFECT_CLASS_MODIFY,
+    "SNAP_WINDOW_RIGHT": EFFECT_CLASS_MODIFY,
+    "SNOOZE_REMINDER": EFFECT_CLASS_MODIFY,
+    "START_DICTATION": EFFECT_CLASS_MODIFY,
+    "START_POMODORO": EFFECT_CLASS_CREATE,  # internamente e' reminder_manager.add(), identico a SET_REMINDER
+    "STOP_DICTATION": EFFECT_CLASS_MODIFY,
+    "STOP_POMODORO": EFFECT_CLASS_DELETE,  # internamente e' reminder_manager.delete_matching(), identico a DELETE_REMINDER
+    "STOP_TALKING": EFFECT_CLASS_MODIFY,
+    "SUMMARIZE_CLIPBOARD": EFFECT_CLASS_READ,  # riassume via Ollama ma NON riscrive il risultato negli appunti
+    "SUMMARIZE_TEXT": EFFECT_CLASS_READ,
+    "SWITCH_NEXT_WINDOW": EFFECT_CLASS_MODIFY,
+    "SYSTEM_POWER": EFFECT_CLASS_EXTERNAL,
+    "TAKE_SCREENSHOT": EFFECT_CLASS_CREATE,
+    "TELL_JOKE": EFFECT_CLASS_READ,
+    "TOGGLE_DARK_MODE": EFFECT_CLASS_MODIFY,
+    "TRACE_ROUTE": EFFECT_CLASS_READ,
+    "TRANSLATE_CLIPBOARD": EFFECT_CLASS_READ,  # traduce via Ollama ma NON riscrive il risultato negli appunti
+    "TRANSLATE_TEXT": EFFECT_CLASS_READ,
+    "TYPE_TEXT": EFFECT_CLASS_MODIFY,
+    "WEB_SEARCH": EFFECT_CLASS_READ,
+}
+
+
+def effect_class_of(intent: str) -> Optional[str]:
+    """Classificazione EFFECT_CLASS_* per un intent gia' censito (INTENT_EFFECT_CLASS sopra),
+    None se non censito - a differenza di risk_of() (core/risk.py, ricade su ADMIN come scelta
+    di sicurezza per default), qui non esiste un default "piu' prudente" plausibile tra le
+    cinque classi: sono una tassonomia del TIPO di effetto, non un ordinamento di gravita'.
+    Inventare una classificazione sarebbe peggio che dichiarare onestamente "non censito"."""
+    return INTENT_EFFECT_CLASS.get(intent)
+
 
 @dataclass
 class ActionProposal:
@@ -65,10 +300,12 @@ class ActionProposal:
     dei contratti condivisi in ROADMAP_EXECUTION.md, sezione 4.2). Oggi questa informazione esiste
     solo in modo implicito e sparso (l'`intent`/`parameters` passati a `PolicyEngine.
     decide_interactive`/`decide_automated`, il rischio ricavato al volo da `risk_of()`): niente la
-    raggruppa in un unico oggetto ispezionabile PRIMA dell'esecuzione. `effect_class` e
-    `preconditions`/`expected_effect` sono facoltativi e dichiarati dal chiamante (non derivabili
-    in modo affidabile per le skill non ancora censite - vedi il commento sopra EFFECT_CLASSES):
-    assenti, restano `None` invece di un valore inventato."""
+    raggruppa in un unico oggetto ispezionabile PRIMA dell'esecuzione. `effect_class` e'
+    facoltativo ma ora derivato AUTOMATICAMENTE da `effect_class_of()` (censimento completo, vedi
+    sopra) quando il chiamante non lo passa esplicitamente - un valore passato esplicitamente
+    vince sempre (`for_intent()` non sovrascrive mai una scelta deliberata del chiamante).
+    `preconditions`/`expected_effect` restano dichiarati dal chiamante, nessun censimento
+    equivalente esiste ancora per loro: assenti, restano `None` invece di un valore inventato."""
 
     intent: str
     parameters: dict
@@ -87,10 +324,15 @@ class ActionProposal:
         """Costruttore comodo che ricava `risk` da `core.risk.risk_of()` invece di richiederlo al
         chiamante - la stessa fonte gia' usata da `SkillRegistry.risk_of()`/`PolicyEngine.
         register_intent()`, cosi' un ActionProposal non puo' dichiarare un rischio diverso da
-        quello che il resto del sistema assegnerebbe allo stesso intent."""
+        quello che il resto del sistema assegnerebbe allo stesso intent. Stesso principio ora
+        anche per `effect_class`: se il chiamante non lo passa (None, il default), viene ricavato
+        da `effect_class_of()` invece di restare sempre None come prima del censimento - se il
+        chiamante lo passa esplicitamente, quella scelta vince sempre (mai sovrascritta)."""
         return cls(
             intent=intent, parameters=dict(parameters or {}), requested_by=requested_by,
-            risk=risk_of(intent).value, effect_class=effect_class, preconditions=preconditions,
+            risk=risk_of(intent).value,
+            effect_class=effect_class if effect_class is not None else effect_class_of(intent),
+            preconditions=preconditions,
             expected_effect=expected_effect,
         )
 
