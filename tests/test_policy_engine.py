@@ -986,5 +986,107 @@ class AgentCapabilityTests(unittest.TestCase):
         self.assertEqual(decision, PolicyDecision.BLOCK)
 
 
+class TimeWindowCapabilityTests(unittest.TestCase):
+    """F1.2.2 (ottava e ultima capability: durata/finestra oraria - decisione esplicita
+    dell'utente su cosa "durata" dovesse significare). A differenza delle altre capability non
+    dipende da `parameters`: si applica all'intent stesso, in base all'ora corrente
+    (`now_provider`, sempre iniettato qui - mai il vero orologio, per restare deterministico)."""
+
+    def _at(self, hour, minute):
+        from datetime import datetime
+
+        return lambda: datetime(2026, 1, 1, hour, minute)
+
+    def test_no_configured_window_means_no_restriction_at_all(self):
+        engine = PolicyEngine(now_provider=self._at(3, 0))
+        decision = engine.decide_interactive("CONTROL_SMART_DEVICE", {})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_inside_the_configured_window_is_allowed(self):
+        engine = PolicyEngine(
+            time_restricted_intents={"CONTROL_SMART_DEVICE": ["06:00-23:00"]}, now_provider=self._at(12, 0),
+        )
+        decision = engine.decide_interactive("CONTROL_SMART_DEVICE", {})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_outside_the_configured_window_is_blocked_with_the_right_reason(self):
+        engine = PolicyEngine(
+            time_restricted_intents={"CONTROL_SMART_DEVICE": ["06:00-23:00"]}, now_provider=self._at(3, 0),
+        )
+        decision, reason = engine.decide_interactive_with_reason("CONTROL_SMART_DEVICE", {})
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+        self.assertEqual(reason, "outside_allowed_time_window")
+
+    def test_window_boundaries_are_inclusive(self):
+        engine_at_start = PolicyEngine(
+            time_restricted_intents={"CONTROL_SMART_DEVICE": ["06:00-23:00"]}, now_provider=self._at(6, 0),
+        )
+        engine_at_end = PolicyEngine(
+            time_restricted_intents={"CONTROL_SMART_DEVICE": ["06:00-23:00"]}, now_provider=self._at(23, 0),
+        )
+        self.assertEqual(engine_at_start.decide_interactive("CONTROL_SMART_DEVICE", {}), PolicyDecision.ALLOW)
+        self.assertEqual(engine_at_end.decide_interactive("CONTROL_SMART_DEVICE", {}), PolicyDecision.ALLOW)
+
+    def test_a_window_crossing_midnight_is_handled_correctly(self):
+        """22:00-02:00: l'inizio e' DOPO la fine nell'orologio a 24 ore - dentro se l'ora e' oltre
+        l'inizio O prima della fine, non tra i due (l'inverso del caso normale)."""
+        inside_late = PolicyEngine(
+            time_restricted_intents={"PLAY_MEDIA": ["22:00-02:00"]}, now_provider=self._at(23, 30),
+        )
+        inside_early = PolicyEngine(
+            time_restricted_intents={"PLAY_MEDIA": ["22:00-02:00"]}, now_provider=self._at(1, 30),
+        )
+        outside = PolicyEngine(
+            time_restricted_intents={"PLAY_MEDIA": ["22:00-02:00"]}, now_provider=self._at(12, 0),
+        )
+        self.assertEqual(inside_late.decide_interactive("PLAY_MEDIA", {}), PolicyDecision.ALLOW)
+        self.assertEqual(inside_early.decide_interactive("PLAY_MEDIA", {}), PolicyDecision.ALLOW)
+        self.assertEqual(outside.decide_interactive("PLAY_MEDIA", {}), PolicyDecision.BLOCK)
+
+    def test_multiple_windows_for_the_same_intent_allow_any_one_of_them(self):
+        engine = PolicyEngine(
+            time_restricted_intents={"CONTROL_SMART_DEVICE": ["06:00-09:00", "18:00-23:00"]},
+            now_provider=self._at(19, 0),
+        )
+        decision = engine.decide_interactive("CONTROL_SMART_DEVICE", {})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_an_unlisted_intent_is_unaffected_by_another_intents_window(self):
+        engine = PolicyEngine(
+            time_restricted_intents={"CONTROL_SMART_DEVICE": ["06:00-23:00"]}, now_provider=self._at(3, 0),
+        )
+        decision = engine.decide_interactive("GET_TIME", {})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+    def test_time_window_applies_on_the_automated_path_too(self):
+        engine = PolicyEngine(
+            time_restricted_intents={"CONTROL_SMART_DEVICE": ["06:00-23:00"]}, now_provider=self._at(3, 0),
+        )
+        decision = engine.decide_automated("CONTROL_SMART_DEVICE")
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+
+    def test_a_blocked_intent_still_wins_over_the_time_window_check(self):
+        engine = PolicyEngine(
+            blocked_intents={"CONTROL_SMART_DEVICE"},
+            time_restricted_intents={"CONTROL_SMART_DEVICE": ["06:00-23:00"]}, now_provider=self._at(12, 0),
+        )
+        decision, reason = engine.decide_interactive_with_reason("CONTROL_SMART_DEVICE", {})
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+        self.assertEqual(reason, "intent_in_blocked_intents")
+
+    def test_a_malformed_window_is_rejected_at_construction_not_silently_ignored(self):
+        """Nega per default vale anche al contrario: una finestra scritta male in config.json
+        deve fermare l'avvio (fail loud), non ridursi silenziosamente a 'nessuna restrizione'."""
+        with self.assertRaises(ValueError):
+            PolicyEngine(time_restricted_intents={"CONTROL_SMART_DEVICE": ["non e' una finestra"]})
+
+    def test_default_now_provider_uses_the_real_clock_when_not_injected(self):
+        """Nessun now_provider passato: PolicyEngine deve comunque funzionare con l'orologio
+        vero, non sollevare per un parametro mancante."""
+        engine = PolicyEngine(time_restricted_intents={"CONTROL_SMART_DEVICE": ["00:00-23:59"]})
+        decision = engine.decide_interactive("CONTROL_SMART_DEVICE", {})
+        self.assertEqual(decision, PolicyDecision.ALLOW)
+
+
 if __name__ == "__main__":
     unittest.main()

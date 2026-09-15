@@ -279,6 +279,13 @@ class JakeCore:
             # companion. Copre solo i tre agenti a passi, non il percorso diretto ne'
             # l'automazione (vedi il docstring di core/policy_engine.py per il limite dichiarato).
             agent_blocked_intents=config.get("agent_blocked_intents", {}) or {},
+            # F1.2.2 (ottava e ultima capability: durata/finestra oraria): {intent:
+            # ["HH:MM-HH:MM", ...]} in config.json, vuoto per default - un utente avanzato puo'
+            # limitare un intent a certe ore del giorno (es. CONTROL_SMART_DEVICE solo 06:00-23:00),
+            # stesso principio "nega per default" delle altre capability. Una finestra scritta
+            # male in config.json solleva subito (PolicyEngine.__init__), non un fallimento
+            # silenzioso all'avvio.
+            time_restricted_intents=config.get("time_restricted_intents", {}) or {},
         )
         # F1.2.5: collegato DOPO la creazione (self.agent/coding_agent/research_agent esistono
         # gia', self.policy_engine no, quando i tre TaskAgent vengono costruiti sopra) - senza

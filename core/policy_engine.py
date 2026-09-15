@@ -120,6 +120,7 @@ governati dalle altre capability/dai blocchi globali.
 Durata (l'ultima capability elencata in ROADMAP.md) e l'intersezione con skill/sessione
 restano completamente aperte."""
 import os
+from datetime import datetime, time as _time
 from enum import Enum
 from pathlib import Path
 from urllib.parse import urlparse
@@ -201,12 +202,18 @@ POLICY_REASON_NETWORK_CAPABILITY_DENIED = "host_outside_allowed_network_hosts"
 # POLICY_REASON_DEVICE_BLOCKED sopra, ma per core.request_context.current_agent_name() invece che
 # per dispositivo companion.
 POLICY_REASON_AGENT_BLOCKED = "intent_in_agent_blocked_intents"
+# F1.2.2 (ottava e ultima capability: durata/finestra oraria, "durata" nel testo della roadmap -
+# decisione esplicita dell'utente su cosa significasse, vedi il docstring del modulo): un intent
+# fuori dalla propria finestra oraria consentita - stesso principio delle altre capability, lo
+# STESSO intent puo' essere permesso o negato a seconda di QUANDO viene chiesto, non e' mai
+# bloccato in assoluto.
+POLICY_REASON_TIME_WINDOW_DENIED = "outside_allowed_time_window"
 POLICY_REASONS = frozenset({
     POLICY_REASON_BLOCKED, POLICY_REASON_REQUIRE_AUTH, POLICY_REASON_CONFIRM, POLICY_REASON_ALLOWED,
     POLICY_REASON_CAPABILITY_DENIED, POLICY_REASON_DEVICE_BLOCKED, POLICY_REASON_WEB_CAPABILITY_DENIED,
     POLICY_REASON_APP_CAPABILITY_DENIED, POLICY_REASON_CONTACT_CAPABILITY_DENIED,
     POLICY_REASON_SMART_DEVICE_CAPABILITY_DENIED, POLICY_REASON_WINDOWS_USER_BLOCKED,
-    POLICY_REASON_NETWORK_CAPABILITY_DENIED, POLICY_REASON_AGENT_BLOCKED,
+    POLICY_REASON_NETWORK_CAPABILITY_DENIED, POLICY_REASON_AGENT_BLOCKED, POLICY_REASON_TIME_WINDOW_DENIED,
 })
 
 # F1.2.2: le quattro mutazioni sono le stesse gia' raggruppate in core/execution_safety.py::
@@ -321,6 +328,35 @@ def _domain_matches(domain: str, allowed: str) -> bool:
     return domain == allowed or domain.endswith("." + allowed)
 
 
+def _parse_time_window(window: str) -> tuple[_time, _time]:
+    """Analizza "HH:MM-HH:MM" in una coppia (inizio, fine). Solleva ValueError con un messaggio
+    chiaro per un formato non valido - FAIL LOUD alla costruzione di PolicyEngine (config.json
+    scritto a mano), non un default silenzioso: una finestra scritta male che venisse ignorata in
+    silenzio si tradurrebbe in "nessuna restrizione", un fail-open pericoloso per una capability di
+    sicurezza, l'opposto di quello che l'utente ha configurato."""
+    try:
+        start_str, end_str = window.split("-", 1)
+        start_h, start_m = (int(part) for part in start_str.strip().split(":", 1))
+        end_h, end_m = (int(part) for part in end_str.strip().split(":", 1))
+        return _time(start_h, start_m), _time(end_h, end_m)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(
+            f"finestra oraria non valida per time_restricted_intents: {window!r} "
+            "(formato atteso: \"HH:MM-HH:MM\")"
+        ) from exc
+
+
+def _time_in_window(current: _time, window: tuple[_time, _time]) -> bool:
+    """True se `current` cade dentro (inizio, fine) - inclusivo su entrambi gli estremi, stesso
+    principio di _is_within_root ("uguale a un limite conta come dentro"). Gestisce una finestra
+    che attraversa la mezzanotte (es. 22:00-02:00, inizio > fine): in quel caso e' "dentro" se
+    current e' oltre l'inizio O prima della fine, non tra i due - l'INVERSO del caso normale."""
+    start, end = window
+    if start <= end:
+        return start <= current <= end
+    return current >= start or current <= end
+
+
 class PolicyEngine:
     """Un'istanza per JakeCore, condivisa PER RIFERIMENTO (non copiata) con tutto cio' che deve
     decidere se un intent puo' eseguire: JakeCore stesso, PlanExecutor (tramite `execute()`),
@@ -334,6 +370,7 @@ class PolicyEngine:
         allowed_apps: set | list | None = None, allowed_contacts: set | list | None = None,
         allowed_smart_devices: set | list | None = None, windows_user_blocked_intents: dict[str, set] | None = None,
         allowed_network_hosts: set | list | None = None, agent_blocked_intents: dict[str | None, set] | None = None,
+        time_restricted_intents: dict[str, list] | None = None, now_provider=None,
     ):
         self.auth_gate = auth_gate
         self.blocked_intents = set(blocked_intents or set())
@@ -385,6 +422,21 @@ class PolicyEngine:
         # principio di allowed_web_domains. Minuscolo qui una volta sola, stesso motivo di
         # allowed_web_domains (host/domini sono case-insensitive per definizione).
         self._allowed_network_hosts = {host.strip().lower() for host in (allowed_network_hosts or [])}
+        # F1.2.2 (ottava capability: durata/finestra oraria) - {intent: ["HH:MM-HH:MM", ...]},
+        # vuoto/None (default) = nessuna restrizione, stesso principio delle altre capability. Un
+        # intent ASSENTE dal dizionario non ha alcuna restrizione oraria (comportamento invariato);
+        # un intent presente con una lista NON vuota e' permesso solo se l'ora corrente cade in
+        # ALMENO UNA delle finestre dichiarate. Le finestre sono validate/analizzate QUI (non a
+        # ogni controllo) - un formato non valido solleva subito, vedi _parse_time_window.
+        self.time_restricted_intents = {
+            intent: [_parse_time_window(window) for window in windows]
+            for intent, windows in (time_restricted_intents or {}).items()
+        }
+        # Iniettabile per i test (stesso principio gia' usato altrove in questo progetto per una
+        # sorgente di tempo/orologio, es. AuthGate/ReminderScheduler): default None, risolto a
+        # datetime.now ogni volta che serve, cosi' un test puo' passare un orologio finto senza
+        # dover aspettare l'ora reale per provare una finestra.
+        self._now_provider = now_provider or datetime.now
 
     def register_intent(self, intent: str) -> None:
         """Sincronizza UN intent con la policy corrente, secondo la sua classificazione del
@@ -472,6 +524,8 @@ class PolicyEngine:
             return PolicyDecision.BLOCK, POLICY_REASON_SMART_DEVICE_CAPABILITY_DENIED
         if intent in NETWORK_CAPABILITY_INTENTS and not self._network_capability_allows(parameters):
             return PolicyDecision.BLOCK, POLICY_REASON_NETWORK_CAPABILITY_DENIED
+        if not self._time_window_allows(intent):
+            return PolicyDecision.BLOCK, POLICY_REASON_TIME_WINDOW_DENIED
         if (
             self.auth_gate is not None
             and getattr(self.auth_gate, "enabled", False)
@@ -513,6 +567,8 @@ class PolicyEngine:
             return PolicyDecision.BLOCK, POLICY_REASON_SMART_DEVICE_CAPABILITY_DENIED
         if intent in NETWORK_CAPABILITY_INTENTS and not self._network_capability_allows(parameters or {}):
             return PolicyDecision.BLOCK, POLICY_REASON_NETWORK_CAPABILITY_DENIED
+        if not self._time_window_allows(intent):
+            return PolicyDecision.BLOCK, POLICY_REASON_TIME_WINDOW_DENIED
         if intent in self.always_confirm_intents:
             return PolicyDecision.CONFIRM, POLICY_REASON_CONFIRM
         return PolicyDecision.ALLOW, POLICY_REASON_ALLOWED
@@ -645,6 +701,18 @@ class PolicyEngine:
             if not domain or not any(_domain_matches(domain, allowed) for allowed in self._allowed_network_hosts):
                 return False
         return True
+
+    def _time_window_allows(self, intent: str) -> bool:
+        """True se `intent` non ha alcuna finestra oraria configurata (default, nessuna
+        restrizione) oppure se l'ora CORRENTE (`self._now_provider()`, iniettabile per i test)
+        cade dentro almeno una delle finestre dichiarate per quell'intent. A differenza delle
+        altre capability, non dipende da `parameters`: la finestra si applica all'AZIONE stessa,
+        non a un valore dentro i suoi parametri."""
+        windows = self.time_restricted_intents.get(intent)
+        if not windows:
+            return True
+        current = self._now_provider().time()
+        return any(_time_in_window(current, window) for window in windows)
 
     # F1.2.6: varianti PUBBLICHE delle due sopra, per chi (PlanExecutor, F1.2.6) ha bisogno di
     # salvare la motivazione nel ledger insieme alla decisione, senza ricalcolarla una seconda
