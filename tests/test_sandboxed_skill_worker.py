@@ -239,7 +239,77 @@ class TimeoutTests(unittest.TestCase):
 
             self.assertFalse(result.success)
             self.assertEqual(result.error, "SANDBOX_WORKER_TIMEOUT")
-            self.assertLess(time.monotonic() - started, 10, "invoke() non deve aspettare piu' del timeout richiesto")
+            # F1.6.3: invoke() ora forza anche l'arresto del worker rimasto indietro (vedi sotto),
+            # che aggiunge fino al timeout di stop() (3s di default) oltre a invoke_timeout_seconds
+            # - il margine resta ampio apposta, non e' un limite stretto sul tempo esatto.
+            self.assertLess(time.monotonic() - started, 10, "invoke() non deve aspettare indefinitamente")
+
+    def test_a_timed_out_worker_is_actually_terminated_not_left_running(self):
+        """F1.6.3 ("timeout wall-clock imposto dal Job Object stesso" - Job Object non ha affatto
+        un tipo di limite wall-clock, solo CPU: l'unico modo reale e' un watchdog esterno che
+        termini il processo). Prima di questa correzione un timeout faceva solo rinunciare il
+        CHIAMANTE, lasciando il worker vero ancora vivo in background."""
+        plugin_source = (
+            "from core.skill_result import SkillResult\n"
+            "import time\n"
+            "class SleepSkill:\n"
+            "    metadata = {'intent': 'SLEEP_TEST', 'description': 'test', 'parameters': {}}\n"
+            "    def execute(self, parameters=None):\n"
+            "        time.sleep(30)\n"
+            "        return SkillResult(success=True, data={})\n"
+            "def register(registry):\n"
+            "    registry.register_skill('SLEEP_TEST', SleepSkill())\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            plugin_path = _write_plugin(Path(tmp_dir), plugin_source)
+            worker = SandboxedSkillWorker(
+                project_root=_PROJECT_ROOT, plugin_paths=[plugin_path], invoke_timeout_seconds=2,
+            )
+            self.addCleanup(worker.stop)
+            worker.start()
+
+            worker.invoke("SLEEP_TEST", {})
+
+            self.assertFalse(worker.is_alive(), "il worker rimasto indietro doveva essere terminato, non lasciato vivo")
+
+    def test_a_second_call_on_the_same_timed_out_worker_is_refused_not_stale(self):
+        """Buco reale riprodotto prima di correggerlo: una risposta arrivata IN RITARDO da una
+        chiamata gia' scaduta per timeout restava nella coda condivisa e veniva consumata dalla
+        chiamata SUCCESSIVA sullo STESSO oggetto worker, per un intent completamente diverso - un
+        caso di corsa scoperto facendo davvero completare la skill lenta (non solo simulato) e
+        verificando cosa la chiamata dopo riceveva per davvero. Dopo la correzione il worker che
+        ha appena scaduto un timeout e' morto per davvero (vedi il test sopra): una SECONDA
+        chiamata sullo STESSO oggetto deve quindi essere rifiutata onestamente
+        (SANDBOX_WORKER_UNAVAILABLE), mai restituire la risposta vecchia della skill lenta - chi
+        chiama (core/skill_registry.py::_get_or_start_sandbox_worker) e' responsabile di costruire
+        un worker NUOVO dopo questo, vedi tests/test_skill_registry.py per quella parte."""
+        plugin_source = (
+            "from core.skill_result import SkillResult\n"
+            "import time\n"
+            "class SlowSkill:\n"
+            "    metadata = {'intent': 'SLOW_TEST', 'description': 'test', 'parameters': {}}\n"
+            "    def execute(self, parameters=None):\n"
+            "        time.sleep(3)\n"
+            "        return SkillResult(success=True, data={'marker': 'STALE_SLOW_RESPONSE'})\n"
+            "def register(registry):\n"
+            "    registry.register_skill('SLOW_TEST', SlowSkill())\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            plugin_path = _write_plugin(Path(tmp_dir), plugin_source)
+            worker = SandboxedSkillWorker(
+                project_root=_PROJECT_ROOT, plugin_paths=[plugin_path], invoke_timeout_seconds=1,
+            )
+            self.addCleanup(worker.stop)
+            worker.start()
+
+            slow_result = worker.invoke("SLOW_TEST", {})
+            self.assertEqual(slow_result.error, "SANDBOX_WORKER_TIMEOUT")
+
+            second_result = worker.invoke("SLOW_TEST", {})
+
+            self.assertFalse(second_result.success)
+            self.assertEqual(second_result.error, "SANDBOX_WORKER_UNAVAILABLE")
+            self.assertNotEqual(second_result.data.get("marker"), "STALE_SLOW_RESPONSE")
 
 
 if __name__ == "__main__":
