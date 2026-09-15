@@ -1964,8 +1964,11 @@ Criterio di uscita: nessun segreto in chiaro e ogni azione admin richiede un fat
   instabile in CI, stesso motivo per cui l'analoga difesa in `core/companion_server.py` non ne
   ha una); `F1.4.8` **chiuso** (vault corrotto/profilo diverso/backup - vedi sotto: i tre scenari
   del testo si riducono allo STESSO percorso di codice, DPAPI che rifiuta di decifrare un blob,
-  gia' coperto); il resto della fase (`F1.4.4`-`F1.4.7`) resta
-  aperto - passkey/WebAuthn, pairing QR, rotazione token, anti-spoofing vocale: ciascuno un pezzo
+  gia' coperto); `F1.4.7` **chiuso** (VERIFICA, non fix - vedi sotto: nessuna infrastruttura di
+  speaker verification/voiceprint esiste da nessuna parte nel progetto, quindi l'avvertimento
+  "non usarlo come unico fattore" e' banalmente soddisfatto per assenza del rischio stesso); il
+  resto della fase (`F1.4.4`-`F1.4.6`) resta
+  aperto - passkey/WebAuthn, pairing QR, rotazione token: ciascuno un pezzo
   di prodotto a se', non una fetta stretta come `F1.4.1`/`F1.4.2` (`core/windows_hello.py` esiste
   gia' - vedi l'audit storico in [ROADMAP.md](ROADMAP.md) fase F1 - ma non e' stato riletto
   contro l'elenco piu' fine di qui).
@@ -2177,6 +2180,21 @@ Criterio di uscita: nessun segreto in chiaro e ogni azione admin richiede un fat
   Nessun file di produzione o di test toccato: solo la chiusura di questa voce, gia' coperta da
   lavoro precedente non ancora riconosciuto come tale. Prova: 2.511/2.511 test (suite gia' verde,
   nessuna riga aggiunta).
+- `F1.4.7` — 15/09/2026: "non usare speaker verification come unico fattore per operazioni
+  sensibili". VERIFICA, non fix - stesso principio gia' applicato ad altre voci di questa
+  sessione (F1.5.3, F1.7.3, F1.8.6): investigato se esiste anche solo un frammento di
+  riconoscimento vocale biometrico (voiceprint, "chi sta parlando") usato come fattore di
+  autenticazione, non ipotizzato. Nessuno: `core/identity.py` dichiara esplicitamente che "speaker
+  profile" "non e' ancora un concetto definito da nessuna parte nel progetto" (F1.4.2, gia'
+  investigato); `core/auth_gate.py::AuthGate.check(attempt: str)` confronta solo TESTO (la
+  trascrizione di una passphrase detta a voce, un fattore "cosa sai" - la modalita' vocale e' solo
+  il canale di INPUT, non l'identita' biometrica di chi parla) contro la passphrase configurata,
+  mai un punteggio di somiglianza vocale; Windows Hello (`core/windows_hello.py`, F1.4.3) usa
+  impronta/volto/PIN del sistema operativo, mai il microfono. L'avvertimento della roadmap e'
+  quindi banalmente soddisfatto per ASSENZA del rischio stesso, non per una mitigazione costruita
+  apposta - se in futuro un riconoscimento vocale biometrico venisse aggiunto, questa voce andrebbe
+  riaperta insieme a quel lavoro, non prima. Nessun file di produzione o di test toccato: solo la
+  chiusura di questa voce.
 
 ### F1.5 — Prompt injection e dati non fidati
 
@@ -4887,7 +4905,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 15/09/2026. Sessione lunga con 87 incrementi completati e verificati (PR #28-#113), la
+Aggiornato 15/09/2026. Sessione lunga con 88 incrementi completati e verificati (PR #28-#114), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -5279,8 +5297,10 @@ richiederebbe comunque iniettare un client Home Assistant in `verify_effect()`, 
 libera senza dipendenze esterne - il blocco dichiarato resta); solo browser resta aperto), il resto di `F1.4`
 (`F1.4.1` e `F1.4.2` sono ora CHIUSI/chiusi quanto deciso dall'utente - `SecretsVault` versionata,
 identita' Windows+dispositivo con "profilo Jake"/"speaker profile" dichiaratamente fuori scope;
-restano `F1.4.4`-`F1.4.7`, ciascuno un pezzo di prodotto a se' - passkey/WebAuthn, pairing QR,
-rotazione token, anti-spoofing vocale - non fette strette come `F1.4.1`/`F1.4.2`), il resto di `F1.7` (`F1.7.2`, `F1.7.3` e
+`F1.4.7` e' ora CHIUSO (verifica: nessuna infrastruttura di speaker verification esiste, quindi
+"non usarla come unico fattore" e' banalmente soddisfatto); restano `F1.4.4`-`F1.4.6`, ciascuno un
+pezzo di prodotto a se' - passkey/WebAuthn, pairing QR, rotazione token - non fette strette come
+`F1.4.1`/`F1.4.2`), il resto di `F1.7` (`F1.7.2`, `F1.7.3` e
 `F1.7.6` sono ora CHIUSI (o chiusi quanto possibile senza una decisione di rimozione attiva) -
 l'undo scrive una ricevuta propria correlata per trace_id, la dashboard mostra un vero rollback
 rate, e le tre categorie di retention sono verificate/coperte (log operativo e memoria gia'
