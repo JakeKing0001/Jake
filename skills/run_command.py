@@ -26,10 +26,25 @@ class RunCommandSkill:
     switch scatta mentre il comando e' ancora vivo, il processo viene terminato e la skill
     restituisce `KILLED` (stessa categoria "annullamento voluto dall'utente" gia' usata dal kill
     switch a livello di agente, vedi `ERROR_CATEGORY_USER_CANCELLED` in core/action_ledger.py).
-    Limite noto e dichiarato, non risolto qui: `process.kill()` termina solo il processo della
-    shell (`shell=True`), non un eventuale albero di sotto-processi che il comando avesse
-    lanciato - un kill dell'intero process tree richiede un Job Object (F1.6.3, sandbox
-    permanente per skill forgiate), un lavoro piu' ampio rimandato deliberatamente."""
+    F1.8.3 (residuo dichiarato, ora chiuso) - kill dell'intero process tree: `process.kill()` da
+    solo termina solo il processo della shell (`shell=True`, cmd.exe), non un eventuale nipote che
+    il comando avesse lanciato (es. "python -c ..." lanciato da cmd.exe e' figlio DI cmd.exe, non
+    di RunCommandSkill). Riprodotto per davvero prima della correzione: un comando che a sua volta
+    lancia un sotto-processo lento restava vivo (verificato con psutil.pid_exists sul PID del
+    nipote) anche dopo che il kill switch aveva gia' fermato cmd.exe. Corretto assegnando il
+    processo appena avviato a un Job Object Windows con JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE (vedi
+    _make_kill_tree_job): un processo assegnato a un job vi aggiunge automaticamente ogni figlio
+    che genera (comportamento di default, a meno che il figlio non chieda esplicitamente
+    CREATE_BREAKAWAY_FROM_JOB - nessun comando lanciato da qui lo fa), quindi terminare il job
+    (win32job.TerminateJobObject) termina l'intero albero in un colpo solo, non solo cmd.exe.
+    Finestra residua nota e accettata, non azzerabile senza riscrivere il lancio con
+    CREATE_SUSPENDED + ripresa manuale del thread (subprocess.Popen non espone l'handle del thread
+    primario per farlo): se cmd.exe genera gia' un figlio nei pochissimi istanti tra Popen() e
+    l'assegnazione al job, quel figlio precocissimo non viene catturato - non il caso rilevante in
+    pratica (cio' che conta e' il processo ancora vivo QUANDO il kill switch scatta, non uno gia'
+    terminato nei primi millisecondi). Un fallimento nella creazione/assegnazione del Job Object
+    (pywin32 assente, OpenProcess negato...) degrada silenziosamente al solo `process.kill()` di
+    prima - mai un'eccezione che interrompe l'esecuzione del comando."""
 
     metadata = {
         "intent": "RUN_COMMAND",
@@ -99,6 +114,7 @@ class RunCommandSkill:
         except Exception:
             return SkillResult(success=False, data={"command": command}, error="OPERATION_FAILED")
 
+        job = self._make_kill_tree_job(process)
         elapsed = 0.0
         while True:
             try:
@@ -106,16 +122,40 @@ class RunCommandSkill:
                 return self._build_result(command, process.returncode, stdout, stderr)
             except subprocess.TimeoutExpired:
                 if self.kill_switch.is_active():
-                    return self._kill_and_abandon(process, command, "KILLED")
+                    return self._kill_and_abandon(process, command, "KILLED", job)
                 elapsed += KILL_SWITCH_POLL_SECONDS
                 if elapsed >= COMMAND_TIMEOUT_SECONDS:
-                    return self._kill_and_abandon(process, command, "TIMEOUT")
+                    return self._kill_and_abandon(process, command, "TIMEOUT", job)
 
-    def _kill_and_abandon(self, process: subprocess.Popen, command: str, error: str) -> SkillResult:
+    @staticmethod
+    def _make_kill_tree_job(process: subprocess.Popen):
+        """Vedi il docstring della classe per il ragionamento completo. Restituisce None (mai
+        un'eccezione) se pywin32 manca o l'assegnazione fallisce per qualunque motivo - chi
+        chiama tratta None esattamente come prima di questa correzione."""
+        try:
+            import win32api
+            import win32con
+            import win32job
+
+            job = win32job.CreateJobObject(None, "")
+            info = win32job.QueryInformationJobObject(job, win32job.JobObjectExtendedLimitInformation)
+            info["BasicLimitInformation"]["LimitFlags"] = win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            win32job.SetInformationJobObject(job, win32job.JobObjectExtendedLimitInformation, info)
+            handle = win32api.OpenProcess(
+                win32con.PROCESS_SET_QUOTA | win32con.PROCESS_TERMINATE, False, process.pid,
+            )
+            win32job.AssignProcessToJobObject(job, handle)
+            return job
+        except Exception:
+            return None
+
+    def _kill_and_abandon(self, process: subprocess.Popen, command: str, error: str, job=None) -> SkillResult:
         # Con shell=True su Windows, process e' cmd.exe: kill() lo termina subito, ma un
         # comando come "python -c ..." gira come NIPOTE (figlio di cmd.exe), non figlio diretto -
-        # kill() non lo tocca (limite noto, vedi il docstring della classe: un kill dell'intero
-        # process tree richiede un Job Object, F1.6.3). Riprodotto per davvero, due volte: la
+        # kill() da solo non lo tocca. Quando job non e' None (vedi _make_kill_tree_job),
+        # win32job.TerminateJobObject termina anche i nipoti in un colpo solo; process.kill()
+        # resta comunque come ripiego se il job non e' disponibile o la sua terminazione fallisce
+        # (mai peggio del comportamento precedente). Riprodotto per davvero, due volte: la
         # prima versione di questo fix chiamava process.communicate() dopo kill() e restava
         # bloccata per l'intera durata del comando; sostituendola con process.wait() + chiusura
         # esplicita delle pipe restava ANCORA bloccata altrettanto a lungo - subprocess.communicate
@@ -127,7 +167,17 @@ class RunCommandSkill:
         # PROCESSO UCCISO (cmd.exe) termini (veloce, indipendente dai suoi discendenti), le pipe
         # restano deliberatamente abbandonate ai thread lettori esistenti invece di essere chiuse
         # in modo sincrono - nessun output serve comunque quando il risultato e' KILLED/TIMEOUT.
-        process.kill()
+        killed_via_job = False
+        if job is not None:
+            try:
+                import win32job
+
+                win32job.TerminateJobObject(job, 1)
+                killed_via_job = True
+            except Exception:
+                killed_via_job = False
+        if not killed_via_job:
+            process.kill()
         process.wait(timeout=5)
         return SkillResult(success=False, data={"command": command}, error=error)
 
