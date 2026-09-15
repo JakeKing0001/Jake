@@ -9,6 +9,7 @@ senza nessuno dei tre: un OPERATION_FAILED transitorio bruciava un passo di ragi
 di essere ritentato, e un errore a meta' compito lasciava sul disco gli effetti collaterali gia'
 fatti senza nessun tentativo di annullarli. Estratta qui cosi' i due esecutori condividono la
 stessa logica invece di poterla far divergere in silenzio, come sarebbe successo copiandola."""
+import ctypes
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -68,7 +69,10 @@ def is_safe_to_auto_retry(intent: str) -> bool:
     delete() della fucina, che tocca anche il registro delle skill, non solo il filesystem).
     RESTART_EXPLORER (aggiunta successiva, stesso Gate G1) e' invece idempotente allo stesso modo
     dei quattro intent filesystem: ri-terminare e riavviare Explorer un'altra volta raggiunge lo
-    stesso stato finale (Explorer in esecuzione), mai un doppio effetto dannoso. Per
+    stesso stato finale (Explorer in esecuzione), mai un doppio effetto dannoso. Stesso discorso
+    per EMPTY_RECYCLE_BIN: EmptyRecycleBinSkill tratta gia' il codice "cestino gia' vuoto" come
+    successo (skills/recycle_bin.py), quindi ri-svuotarlo raggiunge sempre lo stesso stato finale.
+    Per
     tutti gli altri intent, un errore transitorio non viene piu' ritentato automaticamente - piu'
     sicuro ("minimo privilegio"/"negare per default", vedi ROADMAP_EXECUTION.md F1.2.4) che
     rischiare un effetto doppio su una skill mai controllata caso per caso. Una vera enforcement
@@ -183,6 +187,34 @@ def _verify_explorer_running(data: dict) -> bool:
     return False
 
 
+class _SHQUERYRBINFO(ctypes.Structure):
+    """Layout nativo di SHQUERYRBINFO (shell32.dll), stesso ordine/tipi della struct C -
+    cbSize deve essere impostato dal chiamante PRIMA della chiamata (SHQueryRecycleBinW lo usa
+    per riconoscere la versione della struct, stesso pattern di molte API Win32 "sized")."""
+
+    _fields_ = [("cbSize", ctypes.c_ulong), ("i64Size", ctypes.c_int64), ("i64NumItems", ctypes.c_int64)]
+
+
+def _verify_recycle_bin_empty(data: dict) -> bool:
+    """F1.3.2 (Gate G1, secondo criterio): controlla per davvero, con una seconda chiamata
+    all'API nativa (SHQueryRecycleBinW, sola lettura - non SHEmptyRecycleBinW che l'ha gia'
+    svuotato), che il cestino non contenga piu' elementi - invece di fidarsi soltanto del codice
+    di ritorno di SHEmptyRecycleBinW gia' controllato da EmptyRecycleBinSkill (skills/
+    recycle_bin.py). Diverso dagli altri tre verificatori sopra: SHEmptyRecycleBinW e' gia'
+    SINCRONA per contratto documentato (non fire-and-forget come PostMessage/Popen/una chiamata
+    HTTP), quindi qui non c'e' un buco "dichiara successo senza aspettare" da correggere nella
+    skill - solo una seconda prova indipendente in piu', stesso principio di
+    _verify_process_terminated. pointer() invece di byref(): serve .contents per leggere il
+    risultato scritto dalla chiamata (byref() non e' dereferenziabile in Python, solo passabile
+    a una funzione C). Un esito HRESULT diverso da S_OK (0) - querying fallito - conta come NON
+    verificato (fail-closed, stesso principio "negare per default" gia' applicato altrove in
+    questo modulo), mai come "assumo vada bene"."""
+    info = _SHQUERYRBINFO()
+    info.cbSize = ctypes.sizeof(_SHQUERYRBINFO)
+    result = ctypes.windll.shell32.SHQueryRecycleBinW(None, ctypes.pointer(info))
+    return result == 0 and info.i64NumItems == 0
+
+
 @dataclass(frozen=True)
 class RollbackAction:
     """L'inverso naturale di un intent gia' eseguito con successo, e l'intent che DAVVERO esegue
@@ -244,6 +276,10 @@ INTENT_SAFETY_REGISTRY: dict[str, IntentSafetyEntry] = {
     "RESTART_EXPLORER": IntentSafetyEntry(
         verifier=_verify_explorer_running,
         rollback=None,  # riavviare non ha un inverso: non si puo' "de-riavviare" un processo
+    ),
+    "EMPTY_RECYCLE_BIN": IntentSafetyEntry(
+        verifier=_verify_recycle_bin_empty,
+        rollback=None,  # svuotare il cestino e' irreversibile per definizione (SHERB_NOCONFIRMATION)
     ),
     "DELETE_PATH": IntentSafetyEntry(
         verifier=lambda data: not Path(data["path"]).exists(),
