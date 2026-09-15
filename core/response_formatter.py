@@ -24,6 +24,20 @@ def format_plan_outcome(outcome, total_steps: int, registry=None) -> str:
         if outcome.rolled_back:
             undone = ", ".join(o.step.description or o.step.intent for o in outcome.rolled_back)
             lines.append(f"Ho annullato i passi precedenti per sicurezza: {undone}.")
+        # F1.3.7 ("gestire effetti parziali... con spiegazione leggibile"): buco reale, riprodotto
+        # per davvero prima di correggere - un passo completato ma senza un inverso noto (es.
+        # KILL_PROCESS_BY_PORT, "terminare un processo non ha un inverso naturale", vedi
+        # core/execution_safety.py::INTENT_SAFETY_REGISTRY) o il cui tentativo di rollback fallisce
+        # per un altro motivo NON compare in outcome.rolled_back - senza questa riga, il messaggio
+        # sopra elencava solo cio' che era stato annullato, senza mai dire che un ALTRO effetto,
+        # gia' avvenuto per davvero, restava invece silenziosamente attivo: un utente che leggesse
+        # "ho annullato i passi precedenti" poteva ragionevolmente credere che OGNI passo fosse
+        # stato ripristinato, non solo alcuni. StepOutcome.rolled_back (gia' impostato da
+        # PlanExecutor._rollback()) distingue i due gruppi senza bisogno di confrontare oggetti.
+        persisting = [o for o in outcome.completed if not o.rolled_back]
+        if persisting:
+            kept = ", ".join(o.step.description or o.step.intent for o in persisting)
+            lines.append(f"Questi effetti restano invece attivi, non sono riuscito ad annullarli automaticamente: {kept}.")
 
     lines.insert(0, f"Piano interrotto dopo {len(outcome.completed)} passi completati su {total_steps}:")
     return "\n".join(lines)
