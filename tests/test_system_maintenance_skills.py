@@ -60,10 +60,30 @@ class ClearTempFilesTests(unittest.TestCase):
         self.assertTrue((self.tmp_dir / "bloccato.tmp").exists())
 
 
+class _FakeProcess:
+    def __init__(self, name):
+        self.info = {"name": name}
+
+
 class RestartExplorerTests(unittest.TestCase):
+    """F1.3.2 (stesso pattern trovato una quarta volta in questa sessione, dopo processi/
+    finestre/casa): buco reale - subprocess.Popen("explorer.exe") e' fire-and-forget, success=True
+    veniva dichiarato subito dopo senza aspettare che Explorer fosse DAVVERO ripartito."""
+
+    def setUp(self):
+        # EXPLORER_RESTART_WAIT_SECONDS reale sarebbe 10s: qui ridotto perche' il test "mai
+        # ripartito" deve aspettare per davvero il timeout completo prima di riportare il
+        # fallimento, stesso principio gia' usato per CLOSE_WAIT_SECONDS in CloseWindowSkill.
+        patcher = mock.patch.object(RestartExplorerSkill, "EXPLORER_RESTART_WAIT_SECONDS", 0.05)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        interval_patcher = mock.patch.object(RestartExplorerSkill, "_POLL_INTERVAL_SECONDS", 0.01)
+        interval_patcher.start()
+        self.addCleanup(interval_patcher.stop)
+
     def test_success_restarts_explorer(self):
-        with mock.patch("subprocess.run") as run:
-            with mock.patch("subprocess.Popen") as popen:
+        with mock.patch("subprocess.run") as run, mock.patch("subprocess.Popen") as popen:
+            with mock.patch("psutil.process_iter", return_value=[_FakeProcess("explorer.exe")]):
                 result = RestartExplorerSkill().execute({})
         self.assertTrue(result.success)
         run.assert_called_once_with(["taskkill", "/f", "/im", "explorer.exe"], check=True, capture_output=True)
@@ -72,6 +92,16 @@ class RestartExplorerTests(unittest.TestCase):
     def test_a_failure_is_reported_not_raised(self):
         with mock.patch("subprocess.run", side_effect=OSError("boom")):
             result = RestartExplorerSkill().execute({})
+        self.assertEqual(result.error, "OPERATION_FAILED")
+
+    def test_explorer_never_reappearing_reports_operation_failed_not_success(self):
+        """Il caso che prima di questa correzione veniva riportato come successo: taskkill e
+        Popen non sollevano eccezioni, ma Explorer non e' davvero ripartito (es. crash immediato
+        dopo l'avvio)."""
+        with mock.patch("subprocess.run"), mock.patch("subprocess.Popen"):
+            with mock.patch("psutil.process_iter", return_value=[_FakeProcess("notepad.exe")]):
+                result = RestartExplorerSkill().execute({})
+        self.assertFalse(result.success)
         self.assertEqual(result.error, "OPERATION_FAILED")
 
 
