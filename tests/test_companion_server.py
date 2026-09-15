@@ -3,12 +3,16 @@ di NestClient/OllamaClient (dove Jake e' il CLIENTE e si mocka il lato remoto), 
 SERVER: i test avviano un'istanza vera su una porta effimera (127.0.0.1, port=0) e fanno vere
 richieste HTTP con urllib, senza bisogno di un telefono o un secondo dispositivo reale."""
 import json
+import shutil
+import tempfile
 import threading
 import time
 import unittest
+from pathlib import Path
 from urllib import error, request
 
 from core.companion_server import CompanionServer
+from core.device_credential_store import DeviceCredentialStore
 from core.hud_protocol import EventType
 from core.request_context import current_device_id, current_session_id
 from core.version import PROTOCOL_VERSION, VERSION
@@ -330,6 +334,148 @@ class TokenAuthenticationTests(unittest.TestCase):
         status, _ = _get(f"{self.base_url}/non-esiste")
 
         self.assertEqual(status, 401)
+
+
+class PerDeviceTokenAuthenticationTests(unittest.TestCase):
+    """F1.4.6/F1.8.1 (fase 6/10 del piano multi-device): buco reale nel design precedente - il
+    singolo companion_token globale autorizzava la RICHIESTA, ma device_id era sempre letto dal
+    BODY, mai verificato. Un client col token giusto poteva dichiararsi un device_id qualsiasi,
+    incluso quello di un altro dispositivo, e cosi' vedere/confermare la sua azione in sospeso.
+    Un vero DeviceCredentialStore (SQLite temporaneo, DPAPI reale) - non un doppio."""
+
+    def setUp(self):
+        tmp_dir = Path(tempfile.mkdtemp(prefix="jake_companion_server_device_auth_test_"))
+        self.addCleanup(shutil.rmtree, tmp_dir, ignore_errors=True)
+        self.store = DeviceCredentialStore(db_path=tmp_dir / "devices.db")
+        self.addCleanup(self.store.close)
+        self.credential_a = self.store.issue_credential("device-a")
+        self.credential_b = self.store.issue_credential("device-b")
+
+    def _server(self, command_handler=None, token: str | None = None) -> CompanionServer:
+        server = CompanionServer(
+            command_handler=command_handler or (lambda text: "ok"),
+            credential_store=self.store, token=token,
+        )
+        server.start()
+        self.addCleanup(server.stop)
+        return server
+
+    def _auth_header(self, token: str) -> dict:
+        return {"Authorization": f"Bearer {token}"}
+
+    def test_a_valid_per_device_token_is_authorized(self):
+        server = self._server()
+        status, _ = _post(
+            f"http://127.0.0.1:{server.port}/command", {"text": "ciao"},
+            headers=self._auth_header(self.credential_a.token),
+        )
+        self.assertEqual(status, 200)
+
+    def test_an_unknown_token_is_rejected(self):
+        server = self._server()
+        status, _ = _post(
+            f"http://127.0.0.1:{server.port}/command", {"text": "ciao"},
+            headers=self._auth_header("token-mai-emesso"),
+        )
+        self.assertEqual(status, 401)
+
+    def test_a_revoked_per_device_token_is_rejected(self):
+        self.store.revoke("device-a")
+        server = self._server()
+        status, _ = _post(
+            f"http://127.0.0.1:{server.port}/command", {"text": "ciao"},
+            headers=self._auth_header(self.credential_a.token),
+        )
+        self.assertEqual(status, 401)
+
+    def test_the_authenticated_device_id_reaches_the_handler_not_the_bodys(self):
+        """Il caso comune: il client onesto non manda affatto device_id nel body quando ha gia'
+        un token per-dispositivo - l'identita' arriva comunque al gestore."""
+        observed = []
+        server = self._server(command_handler=lambda text: observed.append(current_device_id()) or "ok")
+
+        _post(
+            f"http://127.0.0.1:{server.port}/command", {"text": "ciao"},
+            headers=self._auth_header(self.credential_a.token),
+        )
+
+        self.assertEqual(observed, ["device-a"])
+
+    def test_a_device_cannot_impersonate_another_device_via_the_body(self):
+        """Il buco reale che questa fase chiude: prima della correzione, un device_id nel body
+        avrebbe vinto sempre - qui il token e' di device-a, il body dichiara device-b, deve
+        vincere l'identita' AUTENTICATA."""
+        observed = []
+        server = self._server(command_handler=lambda text: observed.append(current_device_id()) or "ok")
+
+        _post(
+            f"http://127.0.0.1:{server.port}/command", {"text": "ciao", "device_id": "device-b"},
+            headers=self._auth_header(self.credential_a.token),
+        )
+
+        self.assertEqual(observed, ["device-a"], "il device_id nel body non deve mai vincere su quello autenticato")
+
+    def test_a_device_can_claim_itself(self):
+        server = self._server()
+        status, body = _post(
+            f"http://127.0.0.1:{server.port}/devices/device-a/claim", {"name": "Il mio telefono"},
+            headers=self._auth_header(self.credential_a.token),
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(body["active_device"], "device-a")
+
+    def test_a_device_cannot_claim_a_different_device_id(self):
+        """F1.4.6/F1.8.1 ('un altro dispositivo non deve poter confermare per errore una pending
+        action non sua'): reclamare un device_id diverso dal proprio e' esattamente il primo
+        passo per finire poi a leggere/confermare le azioni in sospeso di quell'altro
+        dispositivo (ConversationStateManager e' tenuto per current_device_id())."""
+        server = self._server()
+        status, body = _post(
+            f"http://127.0.0.1:{server.port}/devices/device-b/claim", {"name": "Furto di identita'"},
+            headers=self._auth_header(self.credential_a.token),
+        )
+        self.assertEqual(status, 403)
+        self.assertEqual(body["error"], "device_id_mismatch")
+        self.assertIsNone(server.devices.active_device_id, "il tentativo non deve aver reclamato nulla")
+
+    def test_a_device_cannot_release_a_different_device_id(self):
+        server = self._server()
+        _post(
+            f"http://127.0.0.1:{server.port}/devices/device-b/claim", {},
+            headers=self._auth_header(self.credential_b.token),
+        )
+
+        status, body = _post(
+            f"http://127.0.0.1:{server.port}/devices/device-b/release", {},
+            headers=self._auth_header(self.credential_a.token),
+        )
+
+        self.assertEqual(status, 403)
+        self.assertEqual(body["error"], "device_id_mismatch")
+        self.assertEqual(server.devices.active_device_id, "device-b", "device-b deve restare rivendicato")
+
+    def test_status_endpoint_accepts_a_valid_per_device_token(self):
+        server = self._server()
+        status, body = _get(f"http://127.0.0.1:{server.port}/status", headers=self._auth_header(self.credential_a.token))
+        self.assertEqual(status, 200)
+        self.assertTrue(body["ok"])
+
+    def test_the_legacy_global_token_still_works_alongside_a_credential_store(self):
+        """Retrocompatibilita' deliberata (vedi il docstring del modulo): un dispositivo che non
+        ha ancora fatto il pairing puo' continuare a usare il token globale - percorso legacy,
+        device_id resta quello (eventuale) del body, comportamento invariato."""
+        observed = []
+        server = self._server(
+            command_handler=lambda text: observed.append(current_device_id()) or "ok", token="token-globale",
+        )
+
+        status, _ = _post(
+            f"http://127.0.0.1:{server.port}/command", {"text": "ciao", "device_id": "non-verificato"},
+            headers=self._auth_header("token-globale"),
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(observed, ["non-verificato"], "sul percorso legacy il body resta l'unica fonte, come prima")
 
 
 class NoTokenConfiguredIsBackwardCompatibleTests(CompanionServerTestCase):
