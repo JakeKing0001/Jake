@@ -21,6 +21,7 @@ from core.policy_engine import PolicyEngine
 from core.skill_result import SkillResult
 from skills.create_path import CreatePathSkill
 from skills.delete_path import DeletePathSkill
+from skills.file_utils import ExtractArchiveSkill
 from skills.move_path import MovePathSkill
 from skills.rename_path import RenamePathSkill
 
@@ -35,6 +36,7 @@ class RealSkillRegistry:
             "DELETE_PATH": DeletePathSkill(),
             "MOVE_PATH": MovePathSkill(),
             "RENAME_PATH": RenamePathSkill(),
+            "EXTRACT_ARCHIVE": ExtractArchiveSkill(),
         }
 
     def execute(self, intent, parameters=None, policy_engine=None):
@@ -118,6 +120,83 @@ class RollbackRenamePathTests(unittest.TestCase):
         self.assertTrue(original.exists(), "il rollback doveva ripristinare il nome originale")
         self.assertEqual(original.read_text(), "contenuto")
         self.assertFalse(renamed.exists())
+
+
+class RollbackExtractArchiveTests(unittest.TestCase):
+    """F1 (Gate G1, secondo criterio): EXTRACT_ARCHIVE aggiunto a INTENT_SAFETY_REGISTRY -
+    verificatore che controlla la cartella di destinazione popolata per davvero (non solo
+    esistente: potrebbe gia' esserci vuota da prima per un altro motivo), rollback che riusa
+    DELETE_PATH (gia' verificato sopra) per cancellare cio' che l'estrazione ha creato."""
+
+    def setUp(self):
+        self.tmp_dir = Path(tempfile.mkdtemp(prefix="jake_execution_safety_"))
+        self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
+        self.registry = RealSkillRegistry()
+
+    def _make_zip(self) -> Path:
+        archive_source_dir = self.tmp_dir / "da_comprimere"
+        archive_source_dir.mkdir()
+        (archive_source_dir / "dentro.txt").write_text("contenuto")
+        archive_path = shutil.make_archive(str(self.tmp_dir / "archivio"), "zip", str(archive_source_dir))
+        return Path(archive_path)
+
+    def test_rollback_deletes_the_extracted_destination_folder(self):
+        archive_path = self._make_zip()
+
+        extract_result = self.registry.execute("EXTRACT_ARCHIVE", {"path": str(archive_path)})
+        self.assertTrue(extract_result.success)
+        destination = Path(extract_result.data["destination"])
+        self.assertTrue((destination / "dentro.txt").exists())
+        self.assertTrue(verify_effect("EXTRACT_ARCHIVE", extract_result.data))
+
+        rolled_back = rollback_effect(self.registry, "EXTRACT_ARCHIVE", extract_result.data, policy_engine=PolicyEngine())
+
+        self.assertTrue(rolled_back)
+        self.assertFalse(destination.exists())
+
+    def test_verify_effect_is_false_if_the_destination_was_never_populated(self):
+        """Riproduce il caso che un semplice is_dir() lascerebbe passare per errore: una
+        cartella di destinazione gia' presente ma vuota (creata per un altro motivo, non
+        dall'estrazione) non deve contare come prova che l'estrazione sia avvenuta."""
+        empty_destination = self.tmp_dir / "gia_vuota"
+        empty_destination.mkdir()
+
+        self.assertFalse(verify_effect("EXTRACT_ARCHIVE", {"destination": str(empty_destination)}))
+
+
+class VerifyCreatedSkillFileTests(unittest.TestCase):
+    """F1 (Gate G1, secondo criterio): CREATE_SKILL/DELETE_CREATED_SKILL aggiunti a
+    INTENT_SAFETY_REGISTRY - stesso verificatore filesystem di CREATE_PATH/DELETE_PATH, senza
+    passare dalla vera fucina (core/skill_forge.py, gia' ampiamente testata per conto suo):
+    verify_effect() e' una funzione pura sui dati, non serve altro per provarla."""
+
+    def setUp(self):
+        self.tmp_dir = Path(tempfile.mkdtemp(prefix="jake_execution_safety_"))
+        self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
+
+    def test_create_skill_is_verified_when_the_plugin_file_exists(self):
+        plugin_path = self.tmp_dir / "learned_x.py"
+        plugin_path.write_text("# skill generata")
+        self.assertTrue(verify_effect("CREATE_SKILL", {"path": str(plugin_path)}))
+
+    def test_create_skill_is_not_verified_if_the_file_is_missing(self):
+        self.assertFalse(verify_effect("CREATE_SKILL", {"path": str(self.tmp_dir / "mai_scritto.py")}))
+
+    def test_delete_created_skill_is_verified_when_the_plugin_file_is_gone(self):
+        plugin_path = self.tmp_dir / "learned_x.py"
+        self.assertFalse(plugin_path.exists())
+        self.assertTrue(verify_effect("DELETE_CREATED_SKILL", {"path": str(plugin_path)}))
+
+    def test_delete_created_skill_is_not_verified_if_the_file_is_still_there(self):
+        plugin_path = self.tmp_dir / "learned_x.py"
+        plugin_path.write_text("# non cancellata per davvero")
+        self.assertFalse(verify_effect("DELETE_CREATED_SKILL", {"path": str(plugin_path)}))
+
+    def test_neither_intent_has_a_rollback(self):
+        from core.execution_safety import INTENT_SAFETY_REGISTRY
+
+        self.assertIsNone(INTENT_SAFETY_REGISTRY["CREATE_SKILL"].rollback)
+        self.assertIsNone(INTENT_SAFETY_REGISTRY["DELETE_CREATED_SKILL"].rollback)
 
 
 class RollbackRespectsBlockedIntentsTests(unittest.TestCase):
@@ -307,7 +386,10 @@ class IntentSafetyRegistryConsistencyTests(unittest.TestCase):
         self.assertEqual(set(VERIFIABLE_INTENTS), expected)
         self.assertEqual(
             VERIFIABLE_INTENTS,
-            {"CREATE_PATH", "RENAME_PATH", "MOVE_PATH", "DELETE_PATH", "KILL_PROCESS_BY_PORT", "CLOSE_WINDOW"},
+            {
+                "CREATE_PATH", "RENAME_PATH", "MOVE_PATH", "DELETE_PATH", "KILL_PROCESS_BY_PORT", "CLOSE_WINDOW",
+                "EXTRACT_ARCHIVE", "CREATE_SKILL", "DELETE_CREATED_SKILL",
+            },
         )
 
     def test_every_verifiable_intent_verifier_is_actually_callable(self):
@@ -339,11 +421,11 @@ class CloseWindowVerificationTests(unittest.TestCase):
 
 class IsSafeToAutoRetryTests(unittest.TestCase):
     """F1.3.6 ("impedire retry automatico per azioni non idempotenti senza chiave deduplica"):
-    solo READ_ONLY e i quattro intent filesystem di INTENT_SAFETY_REGISTRY (naturalmente
-    idempotenti - vedi il docstring di is_safe_to_auto_retry) sono sicuri da ritentare alla
-    cieca. Verificato con intent reali del catalogo, non finti, cosi' una riclassificazione
-    futura di risk.py che cambiasse la categoria di uno di questi intent farebbe fallire il
-    test invece di lasciarlo silenziosamente disallineato."""
+    solo READ_ONLY e gli intent di INTENT_SAFETY_REGISTRY (naturalmente idempotenti - vedi il
+    docstring di is_safe_to_auto_retry) sono sicuri da ritentare alla cieca. Verificato con
+    intent reali del catalogo, non finti, cosi' una riclassificazione futura di risk.py che
+    cambiasse la categoria di uno di questi intent farebbe fallire il test invece di lasciarlo
+    silenziosamente disallineato."""
 
     def test_read_only_intent_is_safe_to_retry(self):
         from core.execution_safety import is_safe_to_auto_retry

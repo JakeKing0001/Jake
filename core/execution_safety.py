@@ -56,15 +56,21 @@ def is_safe_to_auto_retry(intent: str) -> bool:
     dopo che la prima scrittura era gia' andata a buon fine per un'altra ragione aggiungerebbe lo
     stesso appunto/contatto due volte. Un intent e' considerato sicuro da ritentare
     automaticamente solo se: (a) e' READ_ONLY (nessun effetto collaterale da poter raddoppiare),
-    oppure (b) e' uno dei quattro intent filesystem in INTENT_SAFETY_REGISTRY (definito piu'
-    sotto in questo stesso modulo) - naturalmente idempotenti per costruzione: ricreare/ri-
-    cancellare/ri-rinominare/ri-spostare lo stesso percorso raggiunge lo stesso stato finale o
-    fallisce in modo pulito (es. PATH_NOT_FOUND), mai un doppio effetto. Per tutti gli altri
-    intent, un errore transitorio non viene piu' ritentato automaticamente - piu' sicuro
-    ("minimo privilegio"/"negare per default", vedi ROADMAP_EXECUTION.md F1.2.4) che rischiare un
-    effetto doppio su una skill mai controllata caso per caso. Una vera enforcement con chiave di
-    idempotenza (gia' tracciata da idempotency_key_of in core/action_ledger.py, non ancora
-    applicata) resta lavoro futuro dichiarato, non questo."""
+    oppure (b) e' in INTENT_SAFETY_REGISTRY (definito piu' sotto in questo stesso modulo) -
+    naturalmente idempotente per costruzione: ricreare/ri-cancellare/ri-rinominare/ri-spostare lo
+    stesso percorso, o ri-estrarre lo stesso archivio sulla stessa destinazione (EXTRACT_ARCHIVE,
+    F1 Gate G1), raggiunge lo stesso stato finale o fallisce in modo pulito (es. PATH_NOT_FOUND),
+    mai un doppio effetto. Le due voci CREATE_SKILL/DELETE_CREATED_SKILL aggiunte insieme a
+    EXTRACT_ARCHIVE non cambiano nulla QUI in pratica - nessuno dei loro codici di errore
+    (MISSING_PARAMETERS/FORGE_FAILED/CONFIRMATION_REQUIRED/NOT_FOUND) e' in RETRYABLE_ERRORS,
+    quindi non diventano mai davvero ritentate - ma restano comunque nel registro per il loro
+    verificatore indipendente, non per l'idempotenza a retry (mai verificata per install()/
+    delete() della fucina, che tocca anche il registro delle skill, non solo il filesystem). Per
+    tutti gli altri intent, un errore transitorio non viene piu' ritentato automaticamente - piu'
+    sicuro ("minimo privilegio"/"negare per default", vedi ROADMAP_EXECUTION.md F1.2.4) che
+    rischiare un effetto doppio su una skill mai controllata caso per caso. Una vera enforcement
+    con chiave di idempotenza (gia' tracciata da idempotency_key_of in core/action_ledger.py, non
+    ancora applicata) resta lavoro futuro dichiarato, non questo."""
     return risk_of(intent) == RiskLevel.READ_ONLY or intent in INTENT_SAFETY_REGISTRY
 
 
@@ -128,6 +134,10 @@ def _rollback_move_path(registry, data, policy_engine):
         "MOVE_PATH", {"path": data["new_path"], "destination": original_dir, "confirmed": True},
         policy_engine=policy_engine,
     )
+
+
+def _rollback_extract_archive(registry, data, policy_engine):
+    registry.execute("DELETE_PATH", {"path": data["destination"], "confirmed": True}, policy_engine=policy_engine)
 
 
 def _verify_process_terminated(data: dict) -> bool:
@@ -212,6 +222,37 @@ INTENT_SAFETY_REGISTRY: dict[str, IntentSafetyEntry] = {
     "DELETE_PATH": IntentSafetyEntry(
         verifier=lambda data: not Path(data["path"]).exists(),
         rollback=None,  # cancellare non ha un inverso naturale
+    ),
+    # F1 (Gate G1, secondo criterio - "tutte le azioni ad alto impatto hanno prova e audit"):
+    # investigati tutti i 20 intent DESTRUCTIVE/ADMIN (core/risk.py). La maggior parte cancella
+    # un elemento da uno STORE INTERNO (FORGET/CLEAR_NOTES/DELETE_TODO/DELETE_TRIGGER/DELETE_
+    # REMINDER/FORGET_LEARNED): scartati deliberatamente - un verificatore li' richiederebbe
+    # iniettare il manager corrispondente in verify_effect(), la stessa dipendenza esterna gia'
+    # rifiutata per Home Assistant (F1.3.2 casa), E il bool di successo che restituiscono e' gia'
+    # derivato da cursor.rowcount/una SELECT reale sulla stessa connessione - non il buco
+    # "successo dichiarato ma mai controllato" che ha motivato gli altri verificatori. Le tre
+    # sotto invece toccano il FILESYSTEM (come CREATE_PATH/DELETE_PATH sopra): una prova
+    # indipendente e senza dipendenze e' possibile allo stesso modo.
+    "EXTRACT_ARCHIVE": IntentSafetyEntry(
+        # is_dir() da solo non basta: la cartella di destinazione (path.with_suffix(""))
+        # potrebbe gia' esistere vuota da prima per un altro motivo - un archivio estratto con
+        # successo la popola sempre di almeno un elemento (anche un archivio vuoto produce la
+        # cartella stessa creata da shutil.unpack_archive, ma qui si vuole la prova che
+        # l'estrazione abbia scritto qualcosa, non solo che la cartella esista).
+        verifier=lambda data: Path(data["destination"]).is_dir() and any(Path(data["destination"]).iterdir()),
+        rollback=RollbackAction(_rollback_extract_archive, "DELETE_PATH"),
+    ),
+    "CREATE_SKILL": IntentSafetyEntry(
+        verifier=lambda data: Path(data["path"]).exists(),
+        # Nessun inverso automatico: DELETE_CREATED_SKILL cerca per somiglianza su nome/intent/
+        # descrizione (fuzzy, non un percorso esatto) e disiscrive anche l'intent dal registro -
+        # comporre qui un rollback che cancella solo il FILE senza passare da forge.delete()
+        # lascerebbe l'intent ancora registrato, uno stato peggiore di non annullare affatto.
+        rollback=None,
+    ),
+    "DELETE_CREATED_SKILL": IntentSafetyEntry(
+        verifier=lambda data: not Path(data["path"]).exists(),
+        rollback=None,  # cancellare una skill non ha un inverso naturale, stesso principio di DELETE_PATH
     ),
 }
 

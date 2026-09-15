@@ -5,9 +5,13 @@ solo testuale: getattr(obj, "nome_pericoloso") invece della chiamata diretta, e 
 classica di sandbox-escape di Python (__class__ -> __bases__/__mro__ -> __subclasses__()).
 Nessuna vera chiamata a Ollama: si testa solo la validazione statica, non propose()."""
 import ast
+import shutil
+import tempfile
 import unittest
+from pathlib import Path
 
-from core.skill_forge import ForgeError, SkillForge
+from core.execution_safety import verify_effect
+from core.skill_forge import ForgeDraft, ForgeError, SkillForge
 
 VALID_PLUGIN = '''
 from core.skill_result import SkillResult
@@ -35,8 +39,17 @@ def register(registry):
 
 
 class FakeRegistry:
+    def __init__(self):
+        self.registered = {}
+
     def list_capabilities(self):
         return []
+
+    def register_skill(self, intent, skill, plugin_path=None):
+        self.registered[intent] = skill
+
+    def unregister_skill(self, intent):
+        self.registered.pop(intent, None)
 
 
 def _forge() -> SkillForge:
@@ -190,6 +203,44 @@ class OsLevelSandboxCatchesWhatTheStaticBlocklistMissesTests(unittest.TestCase):
                 "la skill maligna e' riuscita a scrivere il file canarino: la sandbox a "
                 "integrita' ridotta non ha bloccato la scrittura",
             )
+
+
+class InstallAndDeleteExposeARealVerifiablePathTests(unittest.TestCase):
+    """F1 (Gate G1, secondo criterio - "tutte le azioni ad alto impatto hanno prova e audit"):
+    CREATE_SKILL/DELETE_CREATED_SKILL hanno ora un verificatore in
+    core/execution_safety.py::INTENT_SAFETY_REGISTRY basato sulla chiave "path" del risultato -
+    gia' provato in isolamento in tests/test_execution_safety.py::VerifyCreatedSkillFileTests.
+    Qui si verifica l'altra meta': che install()/delete() (non solo il verificatore) popolino
+    davvero quella chiave con un percorso che esiste/non esiste per davvero sul filesystem, su
+    un plugins_dir reale (temporaneo), non mockato. Nessuna chiamata a Ollama: il draft e'
+    iniettato direttamente in forge.drafts, come install() se lo aspetta gia' pronto."""
+
+    def setUp(self):
+        self.tmp_dir = Path(tempfile.mkdtemp(prefix="jake_skill_forge_install_"))
+        self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
+        self.registry = FakeRegistry()
+        self.forge = SkillForge(self.registry, plugins_dir=self.tmp_dir)
+        self.forge.drafts["d1"] = ForgeDraft(
+            draft_id="d1", request="fai un test", intent="SAMPLE_TEST_SKILL",
+            description="una skill di prova", code=VALID_PLUGIN,
+        )
+
+    def test_install_returns_a_path_that_really_exists_on_disk(self):
+        _draft, path = self.forge.install("d1")
+
+        self.assertTrue(path.exists())
+        self.assertTrue(verify_effect("CREATE_SKILL", {"path": str(path)}))
+
+    def test_delete_returns_the_same_path_install_used_and_it_is_really_gone(self):
+        _draft, installed_path = self.forge.install("d1")
+        self.assertTrue(installed_path.exists())
+
+        info = self.forge.delete("prova")
+
+        self.assertIsNotNone(info)
+        self.assertEqual(info["path"], str(installed_path))
+        self.assertFalse(installed_path.exists())
+        self.assertTrue(verify_effect("DELETE_CREATED_SKILL", info))
 
 
 if __name__ == "__main__":
