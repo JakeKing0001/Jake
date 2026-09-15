@@ -30,11 +30,37 @@ campo di `SkillResult.data` che finisce nell'osservazione dell'agente:
 - `GET_BROWSER_HISTORY` (titoli/URL delle pagine visitate): il titolo di una pagina e' scelto dal
   suo autore, non dall'utente.
 
+F1.5.7 ("injection indiretta... nomi file") - buco reale nel censimento originale, trovato
+rileggendo TUTTI gli intent che toccano `path`/`results`/`files` in `core/agent.py::_observe()`
+(la whitelist di chiavi che finiscono nell'osservazione), non solo i sette gia' censiti sopra: un
+NOME DI FILE e' scelto da chiunque abbia potuto crearlo o farlo scaricare all'utente (un allegato,
+una chiavetta USB, un file sincronizzato) tanto quanto il CONTENUTO di un file - "leggi il file X"
+non e' l'unico modo in cui un nome ostile arriva nel prompt del modello, anche solo ELENCARE dei
+file lo fa. Sei intent in piu':
+- `FIND_FILE` (`data["results"]`, percorsi completi) e `FIND_LARGE_FILES`
+  (`data["files"]`, lista di `{"path", "size_mb"}`): una ricerca locale per nome restituisce
+  percorsi mai passati dall'utente, solo scoperti sul disco;
+- `LIST_RECENT_FILES` (`data["files"]`, nomi dalla cartella "Recenti" di Windows): qualunque file
+  aperto anche una sola volta (non necessariamente dall'utente stesso, es. un file scaricato e
+  aperto per errore) finisce li';
+- `SEARCH_FILES`/`HYBRID_SEARCH_FILES`/`SEMANTIC_SEARCH_FILES` (tutte e tre passano da
+  `core/nest_search.py::run_nest_search()`, `data["results"]` = lista di `{"path", "snippet",
+  "score"}`) - PIU' seria delle altre cinque: `snippet` e' un estratto del CONTENUTO reale del
+  file trovato (dall'indice NEST), non solo il suo nome - lo stesso rischio gia' coperto per
+  READ_FILE_TEXT, ma raggiungibile anche senza mai chiedere di leggere quel file per intero.
+
 Deliberatamente NON incluso (per ora - un punto di partenza stretto, estendibile, non un elenco
 definitivo): le skill che restituiscono dati STRUTTURATI/curati da un'API (`GET_WEATHER`,
 `GET_NEWS`, `GET_CURRENCY_RATE`...) sono un vettore di iniezione molto piu' debole di testo libero
 non filtrato, e `OPEN_SEARCH_RESULT`/`SEARCH_IN_BROWSER` non restituiscono mai il CONTENUTO di
-cio' che aprono (solo un percorso/URL/conferma), quindi non c'e' testo esterno da etichettare li'."""
+cio' che aprono (solo un percorso/URL/conferma), quindi non c'e' testo esterno da etichettare li';
+`GET_FILE_INFO` restituisce dati (dimensione/data) sul percorso GIA' fornito dall'utente nella
+richiesta, non un nome scoperto autonomamente, quindi non aggiunge un nuovo canale; `RECALL`
+(memoria a lungo termine) resta dichiaratamente fuori - un ricordo puo' in teoria essere stato
+scritto in origine a partire da contenuto esterno (una catena a due passi, non diretta come le
+sei sopra), ma servirebbe propagare il marcatore FINO al salvataggio in memoria, lavoro non
+affrontato qui (vedi F1.5.2, gia' dichiarato parziale per la stessa ragione sulla cronologia a
+breve termine)."""
 from enum import Enum
 
 
@@ -48,6 +74,8 @@ class SourceType(str, Enum):
 EXTERNAL_CONTENT_INTENTS = frozenset({
     "CLIPBOARD_READ", "SUMMARIZE_CLIPBOARD", "READ_SCREEN", "READ_FILE_TEXT",
     "WEB_SEARCH", "RESEARCH", "GET_BROWSER_HISTORY",
+    "FIND_FILE", "FIND_LARGE_FILES", "LIST_RECENT_FILES",
+    "SEARCH_FILES", "HYBRID_SEARCH_FILES", "SEMANTIC_SEARCH_FILES",
 })
 
 EXTERNAL_CONTENT_MARKER = "[CONTENUTO ESTERNO"

@@ -2156,7 +2156,9 @@ Criterio di uscita: zero bypass nel corpus security e provenienza mostrata per o
 
 - Stato: `DOING`; `F1.5.1` chiuso parzialmente (prima fetta - vedi sotto: un enum con le quattro
   categorie esiste, ma solo `EXTERNAL_CONTENT` e' davvero collegata a un punto di produzione;
-  `USER_DATA`/`INSTRUCTION`/`TOOL_RESULT` restano dichiarate ma non ancora usate); `F1.5.3`
+  `USER_DATA`/`INSTRUCTION`/`TOOL_RESULT` restano dichiarate ma non ancora usate; censimento
+  `EXTERNAL_CONTENT_INTENTS` esteso il 15/09/2026 da 7 a 13 intent - vedi sotto, buco reale nel
+  censimento originale che tocca anche `F1.5.7`); `F1.5.3`
   **chiuso** (VERIFICA su entrambi i percorsi reali che eseguono un'azione a partire da JSON
   potenzialmente influenzato da contenuto esterno - l'agente a passi, vedi sotto, E il piano
   fisso/`PlanExecutor`, la cui protezione esisteva gia' da prima di questa sessione ed e' PIU'
@@ -2170,8 +2172,10 @@ Criterio di uscita: zero bypass nel corpus security e provenienza mostrata per o
   sotto; la memoria a lungo termine/NEST restano fuori, gap dichiarato); `F1.5.6` chiuso
   parzialmente (corpus piccolo e mirato che prova il backstop strutturale su piu' sorgenti/lingue,
   vedi sotto - non un elenco enorme di varianti letterali, dichiaratamente non significativo senza
-  un modello vero dietro questi test, vedi sotto); il resto della sezione (F1.5.5, F1.5.7-F1.5.8)
-  resta completamente aperto.
+  un modello vero dietro questi test, vedi sotto); il resto della sezione (F1.5.5, F1.5.8) resta
+  completamente aperto, `F1.5.7` chiuso parzialmente (nomi file - vedi sotto; PDF/commenti di
+  codice/testo su immagini restano fuori, nessuno di questi formati e' oggi PARSATO da Jake al di
+  la' del testo grezzo).
 - `F1.5.1` (prima fetta - marcatore strutturale per il contenuto esterno) — 14/09/2026: fase mai
   affrontata prima in questa sessione, prima investigata con un sottoagente di ricerca dedicato
   (stesso principio gia' seguito per F1.6/F1.1.7: capire lo stato reale prima di scrivere codice)
@@ -2350,6 +2354,41 @@ Criterio di uscita: zero bypass nel corpus security e provenienza mostrata per o
   d'attacco per un modello reale, il significato piu' letterale di F1.5.6, resta un esercizio di
   red-team manuale separato). Prova: 2.473/2.473 test, ruff verde (solo test, nessun file di
   produzione toccato).
+- `F1.5.1`/`F1.5.7` (censimento esteso - nomi file) — 15/09/2026: rispondendo all'istruzione
+  esplicita dell'utente di coprire l'intera roadmap senza tralasciare nulla, riletto da capo il
+  censimento originale di `EXTERNAL_CONTENT_INTENTS` (sette intent) confrontandolo con TUTTI gli
+  intent che toccano `path`/`results`/`files` nella whitelist di `TaskAgent._observe()` - non
+  ipotizzato, ogni skill candidata letta per intero. Buco reale trovato: un NOME DI FILE scoperto
+  autonomamente da Jake (non passato dall'utente nella richiesta) e' scelto da chiunque abbia
+  potuto crearlo o farlo scaricare/copiare sul disco (un allegato, una chiavetta USB, un file
+  sincronizzato) tanto quanto il CONTENUTO di un file - "leggi il file X" non e' l'unico modo in
+  cui un nome ostile arriva nel prompt del modello, anche solo ELENCARE dei file lo fa, eppure
+  nessuno degli intent che elencano file era nel censimento originale. Sei intent aggiunti:
+  `FIND_FILE`/`FIND_LARGE_FILES` (percorsi da una ricerca locale sul disco), `LIST_RECENT_FILES`
+  (nomi dalla cartella "Recenti" di Windows - un file aperto anche una sola volta, non
+  necessariamente dall'utente stesso, finisce li'), e i tre intent NEST (`SEARCH_FILES`/
+  `HYBRID_SEARCH_FILES`/`SEMANTIC_SEARCH_FILES`, tutti passano da
+  `core/nest_search.py::run_nest_search()`) - questi ultimi tre PIU' seri degli altri cinque: il
+  campo `snippet` che restituiscono e' un estratto del CONTENUTO reale del file trovato
+  dall'indice semantico, non solo il suo nome - lo stesso rischio gia' coperto per READ_FILE_TEXT,
+  ma raggiungibile anche senza mai chiedere di leggere quel file per intero. Verificati e
+  deliberatamente ESCLUSI durante lo stesso censimento: `GET_FILE_INFO` (il percorso e' gia'
+  fornito dall'utente nella richiesta, non scoperto autonomamente - non aggiunge un canale nuovo),
+  `RECALL` (un ricordo puo' in teoria discendere da contenuto esterno salvato in precedenza, ma e'
+  una catena a due passi che richiederebbe propagare il marcatore fino al salvataggio in memoria -
+  stesso gap gia' dichiarato in F1.5.2 per la memoria a lungo termine/NEST, non affrontato qui).
+  Nessun cambiamento al meccanismo di wrap stesso (`wrap_external_content()` gia' opera sul testo
+  intero indipendentemente da quale campo lo ha prodotto): bastava estendere l'insieme. Beneficio
+  collaterale automatico: `F1.5.4` (mostrare la sorgente all'utente) riusa la STESSA
+  `EXTERNAL_CONTENT_INTENTS` per `last_external_content_source`, quindi copre gia' anche questi sei
+  intent senza bisogno di alcun codice in piu'. Aggiornati i test hardcoded esistenti
+  (`tests/test_taint.py`, `tests/test_agent.py::ExternalContentTaintMarkerTests` con 4 nuovi
+  metodi - uno per FIND_FILE/FIND_LARGE_FILES/LIST_RECENT_FILES, uno parametrizzato per i tre
+  intent NEST) e il corpus di attacco (`tests/test_prompt_injection_attack.py::INJECTION_CORPUS`,
+  una voce rappresentativa in piu' con un payload che simula un nome di file ostile - un solo
+  rappresentante basta per l'intera classe, stesso meccanismo di wrap condiviso da tutti e sei),
+  tutti verificati FALLIRE contro il codice precedente prima della correzione. Prova: 2.587/2.587
+  test, ruff/mypy verdi su tutti i file toccati (`core/taint.py` gia' nel set selettivo).
 
 ### F1.6 — Sandbox permanente per skill
 
@@ -4809,7 +4848,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 15/09/2026. Sessione lunga con 85 incrementi completati e verificati (PR #28-#111), la
+Aggiornato 15/09/2026. Sessione lunga con 86 incrementi completati e verificati (PR #28-#112), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -5159,7 +5198,12 @@ rimasto sembra avere la stessa fetta stretta e meccanica degli undici gia' chius
 (prompt-injection) ha F1.5.1-F1.5.4
 piu' un piccolo corpus mirato multi-sorgente/multilingue (F1.5.6, il significato letterale di
 "corpus" per un attacco dal vivo contro un modello vero resta un esercizio di red-team manuale
-separato) ma ancora nessun test di injection indiretta (F1.5.7); il sesto (kill switch) e' ora
+separato) e da 15/09/2026 anche F1.5.7 parziale (nomi file: censimento
+`EXTERNAL_CONTENT_INTENTS` esteso da 7 a 13 intent - FIND_FILE/FIND_LARGE_FILES/
+LIST_RECENT_FILES/SEARCH_FILES/HYBRID_SEARCH_FILES/SEMANTIC_SEARCH_FILES, questi ultimi tre piu'
+seri perche' restituiscono anche uno snippet del contenuto reale del file, non solo il nome -
+PDF/commenti di codice/testo su immagini restano fuori, nessun formato oltre il testo grezzo e'
+oggi parsato da Jake); il sesto (kill switch) e' ora
 chiuso per le quattro superfici dichiarate, e da 15/09/2026 anche con kill dell'intero process
 tree per RUN_COMMAND (Job Object riutilizzando F1.6.3, gia' costruito nel frattempo - vedi la voce
 datata in F1.8 sopra; resta il limite HTTP gia' dichiarato per la superficie "modello", natura
