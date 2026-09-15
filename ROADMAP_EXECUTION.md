@@ -2038,14 +2038,17 @@ Criterio di uscita: un plugin ostile non legge file, rete o processi non dichiar
   kernel); `F1.6.4` **chiuso** (VALUTAZIONE, non implementazione - vedi sotto: AppContainer
   richiederebbe bindings `ctypes` scritti da zero, `pywin32` non lo copre affatto; raccomandazione
   di non procedere ora, con un percorso alternativo piu' semplice suggerito per F1.6.6); `F1.6.8`
-  **chiuso** (quarantena per violazioni ripetute, vedi sotto); `F1.6.5` **chiuso** (gate a livello
-  APPLICATIVO su `builtins.open`/`os.open`, esplicitamente NON garantito dal kernel - dopo
+  **chiuso** (quarantena per violazioni ripetute, vedi sotto); `F1.6.5`/`F1.6.6` **chiusi**
+  (stesso gate a livello APPLICATIVO su `builtins.open`/`os.open` (F1.6.5) e
+  `socket.socket.connect`/`connect_ex` (F1.6.6), esplicitamente NON garantito dal kernel - dopo
   un'indagine su un token ristretto via `CreateRestrictedToken` che ha incontrato un problema
   Windows irrisolto, **decisione esplicita dell'utente** di procedere comunque con la versione
-  applicativa, dichiarata onestamente come tale, vedi sotto); `F1.6.6` resta aperto; `F1.6.7`
+  applicativa, dichiarata onestamente come tale, vedi sotto); `F1.6.7`
   **chiuso** (serializzazione input/output, vero per costruzione con il protocollo a
   righe JSON - un processo separato non puo' condividere oggetti Python live con Jake - e ora
-  anche con un test avversariale dedicato, vedi sotto). **Il collegamento vero e' ora fatto**:
+  anche con un test avversariale dedicato, vedi sotto). Con questo, l'unico pezzo ancora aperto in
+  tutta la sezione e' il resto di `F1.6.3` (timeout wall-clock, vedi sopra). **Il collegamento
+  vero e' ora fatto**:
   `SkillRegistry.execute()` instrada davvero una skill forgiata verso il worker sandboxato invece
   di eseguirla in processo (vedi sotto) - non piu' solo un'infrastruttura inerte.
 - `F1.6.1`/`F1.6.2`/`F1.6.3` (fondamenta: worker persistente sandboxato) — 13/09/2026: via libera
@@ -2305,6 +2308,47 @@ Criterio di uscita: un plugin ostile non legge file, rete o processi non dichiar
   dentro il manifest e' concesso, uno fuori e' negato, due skill nello stesso worker non si
   scambiano il manifest a vicenda, il caricamento del plugin non e' mai bloccato). Prova:
   2.516/2.516 test, ruff/mypy verdi su `core/forge_worker.py`/`tests/test_forge_worker.py`.
+- `F1.6.6` (gate applicativo su host di rete) — 15/09/2026: "negare rete salvo capability con
+  domini/porte specifici" - stesso principio e stesso limite dichiarato di `F1.6.5` sopra, non una
+  nuova decisione da chiedere: la stessa indagine sul token ristretto vale anche qui (nessun
+  confine kernel-enforced noto e delimitato oggi), e il tentativo precedente di una regola del
+  Windows Firewall (percorso alternativo suggerito quando `F1.6.4` fu chiuso) era gia' stato
+  bloccato dal classificatore di sicurezza di questo ambiente in un incremento precedente ("Security
+  Weaken") - un vincolo esterno gia' noto, non rivalutato qui. Stesso `MANIFEST` (non un secondo
+  manifest separato): una skill puo' dichiarare anche `allowed_hosts` (es.
+  `["api.example.com:443"]`, porta opzionale - assente permette qualunque porta su quell'host).
+  `socket.socket.connect`/`connect_ex` sostituiti (non solo `connect`: alcune librerie usano
+  `connect_ex` su socket non bloccanti) per controllare `(host, porta)` contro
+  `_active_allowed_hosts` prima di permettere la connessione VERA - copre qualunque libreria che
+  converga su `socket.create_connection()` (`urllib`, `http.client`, `requests` se mai installato)
+  per una connessione TCP, il punto in cui quasi tutte le librerie di rete Python finiscono.
+  Corrispondenza per dominio con lo stesso principio "sottodominio copre dominio" gia' usato per
+  `allowed_web_domains` in `core/policy_engine.py` (reimplementato localmente qui, non importato,
+  per non accoppiare l'avvio standalone del worker a un modulo di `core` in piu' del necessario).
+  Limiti dichiarati ESPLICITAMENTE, oltre a quelli gia' veri per il gate sui file (stesso principio
+  applicativo-non-kernel, stesso bypass teorico via `ctypes`): (1) non copre UDP/socket raw; (2) NON
+  copre la risoluzione DNS stessa (`socket.getaddrinfo`) - una skill potrebbe comunque effettuare
+  query DNS verso host arbitrari anche se la connessione TCP verrebbe poi negata, un canale di
+  exfiltrazione a bassa banda dichiarato apertamente come non chiuso, non un obiettivo di questo
+  incremento. Verificato con un worker VERO spawnato e un listener TCP VERO su `127.0.0.1` (porta
+  scelta dal SO, non simulato): una connessione verso l'host dichiarato riesce, una verso un host
+  non dichiarato viene negata con `PermissionError` prima ancora di toccare la rete.
+  Aggiunti 5 nuovi test in `tests/test_forge_worker.py::ManifestHostGateTests` (nessun manifest
+  nega tutto, un host dichiarato e' concesso, uno non dichiarato e' negato, un host senza porta
+  concede qualunque porta su quell'host, un host CON una porta specifica nega le altre porte sullo
+  stesso host) - lo stesso `_run_worker()` gia' aggiornato per F1.6.5 a ripristinare
+  `builtins.open`/`os.open` dopo ogni chiamata ora ripristina ANCHE `socket.socket.connect`/
+  `connect_ex`, per lo stesso identico motivo (altrimenti il gate resterebbe installato per davvero
+  sul processo di test, rompendo silenziosamente qualunque test estraneo che parli con un server
+  reale, es. `tests/test_companion_server.py`). `socket.socket.connect = ...`/`connect_ex = ...`
+  (assegnazione diretta, non `setattr`) fanno scattare "Cannot assign to a method" in mypy -
+  sostituire un metodo di CLASSE (diverso da riassegnare `builtins.open`/`os.open`, semplici
+  funzioni a livello di modulo) - risolto con `setattr(socket.socket, "connect", ...)` (con
+  `# noqa: B010`, dato che ruff preferirebbe l'assegnazione diretta che pero' rompe mypy: le due
+  regole si contraddicono qui, risolto a favore di mypy con una nota esplicita del perche'). Con
+  questo, `F1.6.5`/`F1.6.6` sono entrambi **chiusi**, e l'unico pezzo ancora aperto in tutta la
+  sezione F1.6 e' il timeout wall-clock del Job Object (`F1.6.3`, vedi sopra). Prova:
+  2.521/2.521 test, ruff/mypy verdi su `core/forge_worker.py`/`tests/test_forge_worker.py`.
 - `F1.6.7` (chiusura - test avversariale) — 14/09/2026: "serializzare input/output; nessun oggetto
   core condiviso col plugin" era gia' vero per costruzione (protocollo a righe JSON su pipe tra
   due processi separati - non c'e' modo di condividere un oggetto Python live attraverso quel
@@ -4307,7 +4351,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 15/09/2026. Sessione lunga con 70 incrementi completati e verificati (PR #28-#97), la
+Aggiornato 15/09/2026. Sessione lunga con 71 incrementi completati e verificati (PR #28-#98), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -4495,13 +4539,21 @@ NON kernel-enforced - una skill forgiata e' codice nello stesso processo, potreb
 aggirarlo con `ctypes`/un sottoprocesso esterno; verificato con un worker VERO spawnato, non solo
 in-process; insidia scoperta e corretta prima di committare - i test esistenti chiamavano `main()`
 IN PROCESSO con la suite stessa, lasciando il gate installato per davvero sul processo di test
-senza un ripristino esplicito). Il resto:
+senza un ripristino esplicito), e `F1.6.6` chiusura - stesso gate esteso alla rete (stessa
+decisione, non una nuova richiesta: il tentativo precedente di una regola del Windows Firewall
+per F1.6.6 era gia' stato bloccato dal classificatore di sicurezza di questo ambiente; il
+`MANIFEST` guadagna `allowed_hosts`, `socket.socket.connect`/`connect_ex` sostituiti per
+controllare host/porta prima di ogni connessione TCP vera, verificato con un worker VERO e un
+listener TCP VERO su una porta scelta dal SO; limiti dichiarati - non copre UDP ne' la
+risoluzione DNS stessa; stessa insidia di leak del gate sul processo di test trovata e corretta
+per lo stesso motivo). Con questo, l'unico pezzo ancora aperto in tutta la sezione F1.6 e' il
+timeout wall-clock del Job Object (F1.6.3). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.516/2.516 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.521/2.521 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
 invariati, nessuno dei due coperto da "mypy selettivo" in CI - 80 file nella lista selettiva,
 invariata: `core/forge_worker.py` era gia' presente). `G1` resta aperto.

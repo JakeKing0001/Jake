@@ -51,10 +51,35 @@ ovunque in F1) - una skill che non dichiara nulla nel manifest ma prova comunque
 riceve un `PermissionError` invece di un accesso silenzioso. Il gate e' installato SOLO per la
 finestra di `execute()` (vedi `main()` sotto): il CARICAMENTO del plugin stesso (leggere il file
 .py, gli import a livello di modulo) resta libero, cosi' come qualunque lettura che Jake/Python
-stesso debba fare per funzionare - non e' la skill che gira ancora in quel momento."""
+stesso debba fare per funzionare - non e' la skill che gira ancora in quel momento.
+
+F1.6.6 ("negare rete salvo capability con domini/porte specifici") - stesso identico principio e
+stesso limite dichiarato di F1.6.5 sopra (gate applicativo, non kernel-enforced): investigata
+un'alternativa VERA prima di scrivere questo - una regola del Windows Firewall (WFP) scoped al
+processo/PID del worker era gia' stata suggerita come percorso piu' realistico di AppContainer
+(F1.6.4), ma testarla dal vivo (`netsh advfirewall firewall add rule ...`) e' stata bloccata dal
+classificatore di sicurezza di questo stesso ambiente ("Security Weaken") in un incremento
+precedente - un vincolo esterno, non una scelta. Il manifest guadagna una seconda chiave,
+`allowed_hosts` (stesso oggetto `MANIFEST`, non un secondo manifest separato): `socket.socket.
+connect`/`connect_ex` vengono sostituiti per controllare `(host, porta)` contro l'elenco prima di
+permettere la connessione VERA - copre `urllib`/`http.client`/`requests`(se mai installato)/
+qualunque libreria che finisca per chiamare `socket.create_connection()`, il punto in cui quasi
+ogni libreria di rete Python converge per una connessione TCP. Corrispondenza per dominio
+(sottodominio copre dominio, stesso principio gia' usato per `allowed_web_domains` in
+`core/policy_engine.py` - qui reimplementato localmente, non importato, per non accoppiare
+l'avvio del worker standalone a un modulo di `core` in piu' del necessario) e porta opzionale
+(`"api.example.com"` per qualunque porta, `"api.example.com:443"` solo per quella). Limiti
+dichiarati ESPLICITAMENTE, in aggiunta a quelli gia' veri per il gate sui file: (1) non copre
+UDP/socket raw/`connect_ex` chiamato su un socket non bloccante in modo insolito; (2) NON copre
+la risoluzione DNS stessa (`socket.getaddrinfo`) - una skill potrebbe comunque effettuare
+query DNS verso host arbitrari anche se la connessione TCP verrebbe poi negata, un canale di
+exfiltrazione a bassa banda che questo gate non chiude (dichiarato apertamente, non un obiettivo
+di questo incremento); (3) stesso bypass teorico di F1.6.5 - codice che chiama direttamente
+`ctypes`/una syscall invece delle API `socket` standard."""
 import builtins
 import json
 import os
+import socket
 import sys
 
 # F1.6.5: percorsi assoluti concessi alla CHIAMATA CORRENTE, svuotati per default (nega per
@@ -63,6 +88,11 @@ import sys
 _active_allowed_paths: list[str] = []
 _real_open = builtins.open
 _real_os_open = os.open
+
+# F1.6.6: stesso principio di _active_allowed_paths sopra, per gli host di rete concessi.
+_active_allowed_hosts: list[str] = []
+_real_socket_connect = socket.socket.connect
+_real_socket_connect_ex = socket.socket.connect_ex
 
 
 def _path_is_allowed(path) -> bool:
@@ -88,26 +118,66 @@ def _guarded_os_open(path, *args, **kwargs):
     return _real_os_open(path, *args, **kwargs)
 
 
+def _address_is_allowed(address) -> bool:
+    # Solo indirizzi (host, porta) in stile AF_INET/AF_INET6 sono nell'ambito di questo gate -
+    # vedi il docstring del modulo sui tipi di socket dichiaratamente non coperti.
+    if not (isinstance(address, tuple) and len(address) >= 2):
+        return True
+    host = str(address[0] or "").lower().rstrip(".")
+    port = address[1]
+    for entry in _active_allowed_hosts:
+        entry_host, _, entry_port = entry.partition(":")
+        entry_host = entry_host.lower().rstrip(".")
+        if entry_port and str(port) != entry_port:
+            continue
+        if host == entry_host or host.endswith("." + entry_host):
+            return True
+    return False
+
+
+def _guarded_socket_connect(self, address):
+    if not _address_is_allowed(address):
+        raise PermissionError(f"F1.6.6: host non dichiarato nel manifest della skill: {address}")
+    return _real_socket_connect(self, address)
+
+
+def _guarded_socket_connect_ex(self, address):
+    if not _address_is_allowed(address):
+        raise PermissionError(f"F1.6.6: host non dichiarato nel manifest della skill: {address}")
+    return _real_socket_connect_ex(self, address)
+
+
 def _install_path_gate() -> None:
     """Chiamata una sola volta, DOPO che tutti i plugin sono gia' stati caricati (vedi main()):
-    il caricamento stesso non deve mai passare da questo gate, solo l'esecuzione vera di una
+    il caricamento stesso non deve mai passare da questi gate, solo l'esecuzione vera di una
     skill. `builtins.open` copre anche `pathlib.Path.open/read_text/write_text/read_bytes/
-    write_bytes` (delegano tutti a `io.open`, lo stesso oggetto di `builtins.open` in CPython)."""
+    write_bytes` (delegano tutti a `io.open`, lo stesso oggetto di `builtins.open` in CPython);
+    `socket.socket.connect`/`connect_ex` coprono qualunque libreria che converga su
+    `socket.create_connection()` per una connessione TCP (F1.6.6)."""
     builtins.open = _guarded_open
     os.open = _guarded_os_open
+    # setattr() invece di un'assegnazione diretta: sostituire un METODO di classe (non una
+    # semplice funzione a livello di modulo come builtins.open/os.open sopra) fa scattare
+    # "Cannot assign to a method" in mypy - stesso comportamento a runtime, solo un modo diverso
+    # di scriverlo che mypy non prova a validare contro la firma originale del metodo.
+    setattr(socket.socket, "connect", _guarded_socket_connect)  # noqa: B010 - vedi il commento sopra, serve a mypy
+    setattr(socket.socket, "connect_ex", _guarded_socket_connect_ex)  # noqa: B010
 
 
-def _load_skills(plugin_paths: list) -> tuple[dict, dict]:
+def _load_skills(plugin_paths: list) -> tuple[dict, dict, dict]:
     skills: dict = {}
     manifests: dict = {}  # intent -> lista di percorsi assoluti concessi (F1.6.5)
+    host_manifests: dict = {}  # intent -> lista di host (F1.6.6)
 
     class _Registry:
-        def __init__(self, allowed_paths: list[str]):
+        def __init__(self, allowed_paths: list[str], allowed_hosts: list[str]):
             self._allowed_paths = allowed_paths
+            self._allowed_hosts = allowed_hosts
 
         def register_skill(self, intent, skill):
             skills[intent] = skill
             manifests[intent] = self._allowed_paths
+            host_manifests[intent] = self._allowed_hosts
 
     for plugin_path in plugin_paths:
         try:
@@ -117,13 +187,14 @@ def _load_skills(plugin_paths: list) -> tuple[dict, dict]:
             exec(compile(code, plugin_path, "exec"), spec_module)
             manifest = spec_module.get("MANIFEST") or {}
             allowed_paths = [os.path.abspath(p) for p in manifest.get("allowed_paths", [])]
-            registry = _Registry(allowed_paths)
+            allowed_hosts = list(manifest.get("allowed_hosts", []))
+            registry = _Registry(allowed_paths, allowed_hosts)
             register = spec_module.get("register")
             if register is not None:
                 register(registry)
         except Exception:
             continue  # un plugin rotto al caricamento non deve impedire agli altri di servire
-    return skills, manifests
+    return skills, manifests, host_manifests
 
 
 def _respond(payload: dict) -> None:
@@ -134,9 +205,9 @@ def _respond(payload: dict) -> None:
 def main(project_root: str, plugin_paths: list) -> None:
     if project_root:
         sys.path.insert(0, project_root)
-    skills, manifests = _load_skills(plugin_paths)
-    # F1.6.5: il gate va installato SOLO dopo che il caricamento (sopra) e' finito - vedi il
-    # docstring del modulo sul perche'.
+    skills, manifests, host_manifests = _load_skills(plugin_paths)
+    # F1.6.5/F1.6.6: i gate vanno installati SOLO dopo che il caricamento (sopra) e' finito -
+    # vedi il docstring del modulo sul perche'.
     _install_path_gate()
     _respond({"success": True, "data": {}, "error": None, "ready": True})
 
@@ -157,9 +228,10 @@ def main(project_root: str, plugin_paths: list) -> None:
         if skill is None:
             _respond({"success": False, "data": {}, "error": f"intent sconosciuto al worker: {intent}"})
             continue
-        # F1.6.5: il manifest della skill che sta per girare, mai lasciato impostato dalla
-        # chiamata precedente - svuotato subito dopo (finally sotto), non solo prima di questa.
+        # F1.6.5/F1.6.6: il manifest della skill che sta per girare, mai lasciato impostato
+        # dalla chiamata precedente - svuotato subito dopo (finally sotto), non solo prima.
         _active_allowed_paths[:] = manifests.get(intent, [])
+        _active_allowed_hosts[:] = host_manifests.get(intent, [])
         try:
             result = skill.execute(parameters)
             _respond({"success": bool(result.success), "data": dict(result.data or {}), "error": result.error})
@@ -167,6 +239,7 @@ def main(project_root: str, plugin_paths: list) -> None:
             _respond({"success": False, "data": {}, "error": f"{type(exc).__name__}: {exc}"})
         finally:
             _active_allowed_paths.clear()
+            _active_allowed_hosts.clear()
 
 
 if __name__ == "__main__":
