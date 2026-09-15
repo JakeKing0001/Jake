@@ -2042,6 +2042,41 @@ Criterio di uscita: nessun segreto in chiaro e ogni azione admin richiede un fat
   stesso principio "prima il contratto, poi l'adozione" di F1.1.2. Nuovi 31 test in
   `tests/test_device_identity.py`. Prova: 2.625/2.625 test, ruff/mypy verdi (nuovo file aggiunto
   al set selettivo mypy, 81 file).
+- `F1.4.6` (fase 2 del piano - registro persistente e token per-dispositivo) — 16/09/2026: nuovo
+  `core/device_credential_store.py`, SQLite dedicato (`data/jake_devices.db`, separato da
+  `data/jake_memory.db` - credenziali sono dati di sicurezza, non conversazionali), stesso schema
+  di sincronizzazione (RLock, `check_same_thread=False`) gia' usato da `core/reminder_manager.py`/
+  `core/todo_manager.py` per lo stesso motivo (`core/companion_server.py` gira su
+  `ThreadingHTTPServer`, una richiesta per thread). Sostituisce concettualmente il singolo
+  `companion_token` globale (`core/config.py`) con una credenziale PER dispositivo - il
+  collegamento vero a `companion_server.py` resta un passo successivo dichiarato (fase 6+), qui
+  solo lo storage. `issue_credential(device_id)`: genera `secrets.token_urlsafe(32)` (primo token
+  generato da Jake stesso in questo progetto - `companion_token` esistente e' scelto e incollato
+  dall'utente), lo cifra a riposo con lo STESSO `SecretsVault`/DPAPI gia' usato per
+  `admin_passphrase`/`home_assistant_token`, porta il dispositivo ad `ACTIVE`; su un device_id
+  gia' noto RUOTA la credenziale esistente senza toccare le altre (F1.4.6, "ruotato SENZA
+  revocare gli altri" - verificato con un test dedicato: ruotare `d2` non tocca la credenziale
+  ancora valida di `d1`). `verify_token(token)`: **non ricifra il valore presentato per
+  confrontarlo** - `CryptProtectData` non e' deterministico (due cifrature dello stesso testo in
+  chiaro producono byte diversi, gia' verificato da `tests/test_secrets_vault.py`, un confronto
+  sul ciphertext darebbe sempre falso) - decifra invece ogni credenziale nota e confronta in
+  chiaro con `hmac.compare_digest`, stesso principio a tempo costante di
+  `core/auth_gate.py::AuthGate.check`; un confronto per dispositivo noto, non indicizzato, scelta
+  deliberata per il numero di dispositivi personali attesi (una manciata, non un'ottimizzazione
+  prematura per migliaia). `revoke(device_id)` e una credenziale che scade naturalmente portano
+  ENTRAMBI il dispositivo a `PAIRING_REQUIRED` (mai un quarto stato "revoked" mostrato al
+  dispositivo, letteralmente come richiesto dalla specifica - `DeviceCredential.revoked_at`
+  distingue comunque, per chi consulta la credenziale, una revoca esplicita da una scadenza
+  naturale, per l'audit) - la transizione per scadenza e' verificata con un test che fa scadere
+  per davvero una credenziale vera (tempo iniettabile, non mockato a un livello piu' alto) e
+  presenta IL token scaduto, non un token qualsiasi (un test parallelo prova che un token
+  estraneo non tocca MAI lo stato di un dispositivo che non c'entra). Nessun fallback automatico
+  a un token globale (F1.4.6, verificato esplicitamente: un dispositivo senza credenziale non
+  verifica MAI, con nessun token). Persistenza vera attraverso un riavvio dello store verificata
+  con un test dedicato (chiude e riapre lo store su file, non solo tra due istanze in memoria
+  nello stesso processo). Nuovi 34 test in `tests/test_device_credential_store.py`, tutti con
+  DPAPI reale (non mockato - stesso principio di `test_secrets_vault.py`). Prova: 2.659/2.659
+  test, ruff/mypy verdi (nuovo file aggiunto al set selettivo mypy, 82 file).
 - `F1.4.2` (prima fetta - identita' Windows/dispositivo) — 13/09/2026: "distinguere identita'
   Windows, profilo Jake, dispositivo e speaker profile". Investigato PRIMA di scrivere codice
   (non assunto dal testo della roadmap): "profilo Jake" non e' un concetto definito da nessuna
@@ -4975,7 +5010,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 15/09/2026. Sessione lunga con 89 incrementi completati e verificati (PR #28-#115), la
+Aggiornato 16/09/2026. Sessione lunga con 90 incrementi completati e verificati (PR #28-#116), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
