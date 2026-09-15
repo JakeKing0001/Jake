@@ -1535,7 +1535,11 @@ reversibili dispone di undo testato.
   ancora un verificatore INDIPENDENTE in `INTENT_SAFETY_REGISTRY` come per CLOSE_WINDOW, che
   resta bloccato sulla stessa decisione di dipendenza per un client Home Assistant iniettabile in
   `execution_safety.py`; non ancora browser); `F1.3.4`/`F1.3.5` restano aperti, mai affrontati
-  (infrastruttura nuova sostanziale, non una fetta stretta collegabile a qualcosa gia' esistente).
+  (infrastruttura nuova sostanziale, non una fetta stretta collegabile a qualcosa gia' esistente);
+  `INTENT_SAFETY_REGISTRY` esteso il 15/09/2026 a EXTRACT_ARCHIVE/CREATE_SKILL/DELETE_CREATED_SKILL
+  (vedi sotto, per il secondo criterio del Gate G1) - gli altri 15 intent DESTRUCTIVE/ADMIN restano
+  fuori con motivazione dichiarata (store interno gia' auto-verificato via cursor.rowcount, o
+  natura non verificabile come SYSTEM_POWER).
 - `F1.3.1` — 11/09/2026: `core/execution_safety.py` aveva tre strutture parallele da tenere
   sincronizzate a mano - `VERIFIABLE_INTENTS` (insieme), l'if/elif di `verify_effect`,
   `ROLLBACK_HANDLERS` + `ROLLBACK_COMPENSATING_INTENT` (due dizionari) - esattamente il pattern
@@ -1784,6 +1788,57 @@ reversibili dispone di undo testato.
   resta "attivo") seguito da un errore del modello che innesca il rollback, e il caso di controllo
   in cui OGNI passo riuscito viene annullato (nessuna riga "restano attivi" deve comparire).
   Prova: 2.564/2.564 test, ruff/mypy verdi su `core/agent.py`/`tests/test_agent.py`.
+- `F1.3.1` (estensione - EXTRACT_ARCHIVE/CREATE_SKILL/DELETE_CREATED_SKILL) — 15/09/2026: dopo aver
+  chiuso il residuo di `F1.8.3` (vedi F1.8 sopra), tornato sul secondo criterio del Gate G1 ("tutte
+  le azioni ad alto impatto hanno prova e audit") con un'indagine sistematica invece di continuare
+  a cercare a caso: elencati programmaticamente tutti i 20 intent `DESTRUCTIVE`/`ADMIN` di
+  `core/risk.py`, non solo riletti a memoria. La maggior parte (FORGET/CLEAR_NOTES/DELETE_TODO/
+  DELETE_TRIGGER/DELETE_REMINDER/FORGET_LEARNED - un elemento di uno STORE INTERNO) e' stata
+  investigata e SCARTATA con motivazione, non implementata (vedi la voce F1.8.2 datata 15/09/2026
+  sopra per il ragionamento completo: richiederebbe la stessa iniezione di dipendenza esterna gia'
+  rifiutata per Home Assistant, e il bool di successo che restituiscono e' gia' derivato da
+  `cursor.rowcount`/una SELECT reale, non il buco "successo dichiarato ma mai controllato" che ha
+  motivato gli altri verificatori). Tre pero' toccano il FILESYSTEM, come CREATE_PATH/DELETE_PATH
+  gia' nel registro, dove una prova indipendente senza dipendenze esterne e' possibile allo stesso
+  modo: `EXTRACT_ARCHIVE` (verificatore: la cartella di destinazione esiste E non e' vuota - non
+  solo `is_dir()`, che lascerebbe passare una cartella gia' presente ma vuota da prima per un altro
+  motivo; rollback: riusa `DELETE_PATH` per cancellare cio' che l'estrazione ha creato, stesso
+  schema di `_rollback_create_path`), `CREATE_SKILL` e `DELETE_CREATED_SKILL` (entrambi solo
+  verificatore, nessun rollback: comporre un annullamento che cancella solo il FILE senza passare
+  da `forge.delete()` lascerebbe l'intent ancora registrato nello `SkillRegistry`, uno stato
+  peggiore di non annullare affatto - deliberatamente non tentato). Le due skill della fucina non
+  esponevano il percorso COMPLETO nel proprio risultato (solo `"file": path.name`, il nome senza
+  cartella - `plugins_dir` e' iniettabile per costruzione, non un valore fisso assumibile in un
+  verificatore indipendente): aggiunta la chiave `"path"` sia a `CreateSkillSkill.execute()` sia a
+  `core/skill_forge.py::SkillForge.delete()` (che gia' calcolava quel percorso esatto un'istruzione
+  prima di cancellarlo - nessun rischio di disallineamento, e' la STESSA variabile). Effetto
+  collaterale consapevole, non accidentale: `EXTRACT_ARCHIVE` ora e' anche RITENTATO automaticamente
+  su un `OPERATION_FAILED` transitorio (appartenenza a `INTENT_SAFETY_REGISTRY` = idempotente per
+  `is_safe_to_auto_retry`, F1.3.6) - corretto, ri-estrarre lo stesso archivio sulla stessa
+  destinazione raggiunge lo stesso stato finale; `CREATE_SKILL`/`DELETE_CREATED_SKILL` invece non
+  cambiano comportamento in pratica, perche' nessuno dei loro codici di errore
+  (`MISSING_PARAMETERS`/`FORGE_FAILED`/`CONFIRMATION_REQUIRED`/`NOT_FOUND`) e' in
+  `RETRYABLE_ERRORS` - documentato esplicitamente nel docstring di `is_safe_to_auto_retry` invece di
+  lasciarlo un effetto collaterale implicito. Aggiornato anche il test hardcoded
+  `IntentSafetyRegistryConsistencyTests` (elenca l'insieme atteso a mano apposta, per farlo fallire
+  se il registro cambia senza che qualcuno se ne accorga). Nuovi
+  `tests/test_execution_safety.py::RollbackExtractArchiveTests`/`VerifyCreatedSkillFileTests` (9
+  test, con un vero archivio .zip reale per EXTRACT_ARCHIVE, non simulato) e
+  `tests/test_skill_forge.py::InstallAndDeleteExposeARealVerifiablePathTests` (2 test, un vero
+  `SkillForge` con `plugins_dir` temporaneo reale - non solo il verificatore in isolamento, anche
+  che `install()`/`delete()` popolino davvero quella chiave), tutti verificati FALLIRE contro il
+  codice precedente prima di applicare la correzione. Con questo, il secondo criterio del Gate G1
+  copre 3 intent in piu' (9 totali su 20 DESTRUCTIVE/ADMIN, piu' CLOSE_WINDOW che non e' in
+  quell'elenco) - i restanti 11 (RUN_COMMAND/RUN_PYTHON_SCRIPT/SYSTEM_POWER/SET_POWER_PLAN/
+  CLOSE_APP/EMPTY_RECYCLE_BIN/CLEAR_TEMP_FILES/RESTART_EXPLORER/PURGE_OLD_HISTORY, oltre ai sei
+  store interni gia' scartati) restano deliberatamente fuori scope per questo incremento - alcuni
+  (EMPTY_RECYCLE_BIN via SHQueryRecycleBinW, RESTART_EXPLORER che sembra condividere lo stesso
+  pattern "dichiara successo senza controllare l'effetto reale" gia' trovato tre volte per
+  processi/finestre/casa) meritano un'indagine dedicata separata, non aggiunti qui per non far
+  gonfiare lo scope di questo incremento oltre il previsto. Prova: 2.576/2.576 test, ruff verde,
+  mypy verde sui file nel set selettivo (`core/execution_safety.py`/`core/skill_forge.py` gia'
+  inclusi; `skills/skill_forge_skills.py` non lo era - un errore preesistente e non correlato,
+  verificato individualmente).
 
 ### F1.4 — Identità, autenticazione e segreti
 
@@ -4694,7 +4749,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 15/09/2026. Sessione lunga con 82 incrementi completati e verificati (PR #28-#108), la
+Aggiornato 15/09/2026. Sessione lunga con 83 incrementi completati e verificati (PR #28-#109), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -5032,7 +5087,14 @@ piccole senza un criterio. Ad oggi: il quinto criterio (sandbox) ha le fondament
 (F1.6.8); AppContainer (F1.6.4) e' stato valutato e scartato per ora (pywin32 non lo supporta
 affatto, servirebbero bindings ctypes da zero) - manifest di directory (F1.6.5) e negazione rete
 (F1.6.6, con un'alternativa piu' semplice suggerita - una regola del Windows Firewall scoped al
-worker, invece di AppContainer) restano aperti; il quarto (prompt-injection) ha F1.5.1-F1.5.4
+worker, invece di AppContainer) restano aperti; il secondo (prova e audit per le azioni ad alto
+impatto) copre da 15/09/2026 9 dei 20 intent DESTRUCTIVE/ADMIN (CREATE_PATH/RENAME_PATH/MOVE_PATH/
+DELETE_PATH/KILL_PROCESS_BY_PORT/EXTRACT_ARCHIVE/CREATE_SKILL/DELETE_CREATED_SKILL, piu'
+CLOSE_WINDOW che non e' DESTRUCTIVE/ADMIN ma ha comunque un verificatore) - vedi la voce datata in
+F1.3 sopra per quali degli altri 11 sono stati scartati con motivazione (store interni gia' auto-
+verificati) e quali restano da investigare (EMPTY_RECYCLE_BIN/RESTART_EXPLORER, sospettati dello
+stesso pattern "successo dichiarato senza controllo" gia' trovato tre volte altrove, ma non ancora
+verificati); il quarto (prompt-injection) ha F1.5.1-F1.5.4
 piu' un piccolo corpus mirato multi-sorgente/multilingue (F1.5.6, il significato letterale di
 "corpus" per un attacco dal vivo contro un modello vero resta un esercizio di red-team manuale
 separato) ma ancora nessun test di injection indiretta (F1.5.7); il sesto (kill switch) e' ora
