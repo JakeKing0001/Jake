@@ -10,11 +10,13 @@ import unittest
 from core.action_contracts import (
     EFFECT_CLASS_CREATE,
     EFFECT_CLASSES,
+    INTENT_EFFECT_CLASS,
     ActionContext,
     ActionError,
     ActionProposal,
     UndoDescriptor,
     VerificationEvidence,
+    effect_class_of,
     validate_action_context,
     validate_action_error,
     validate_action_proposal,
@@ -26,7 +28,7 @@ from core.action_ledger import (
     VERIFICATION_UNVERIFIED, VERIFICATION_VERIFIED,
 )
 from core.execution_safety import RETRYABLE_ERRORS
-from core.risk import RiskLevel
+from core.risk import SKILL_RISK, RiskLevel
 
 
 class ActionProposalTests(unittest.TestCase):
@@ -74,6 +76,69 @@ class ActionProposalTests(unittest.TestCase):
         proposal = ActionProposal.for_intent("CREATE_PATH", {}, "user", effect_class=EFFECT_CLASS_CREATE)
         validate_action_proposal(proposal)  # non deve sollevare
         self.assertIn(proposal.effect_class, EFFECT_CLASSES)
+
+    def test_for_intent_auto_derives_effect_class_from_the_census(self):
+        """F1.1.2 (censimento completo, 15/09/2026): quando il chiamante non passa effect_class,
+        for_intent() lo ricava da effect_class_of() invece di lasciarlo sempre None - CREATE_PATH
+        e' censito come 'create' leggendo skills/create_path.py."""
+        proposal = ActionProposal.for_intent("CREATE_PATH", {"path": "x"}, "user")
+        self.assertEqual(proposal.effect_class, EFFECT_CLASS_CREATE)
+
+    def test_an_explicit_effect_class_is_never_overridden_by_the_census(self):
+        """Anche se DELETE_PATH e' censito come 'delete', un chiamante che passa esplicitamente
+        un altro valore valido resta padrone della propria scelta - for_intent() non la sovrascrive
+        mai, stesso principio gia' vero per il caso pre-censimento."""
+        proposal = ActionProposal.for_intent("DELETE_PATH", {}, "user", effect_class=EFFECT_CLASS_CREATE)
+        self.assertEqual(proposal.effect_class, EFFECT_CLASS_CREATE)
+
+
+class IntentEffectClassCensusTests(unittest.TestCase):
+    """F1.1.2 (censimento completo, 15/09/2026): INTENT_EFFECT_CLASS copre 208 dei 209 intent di
+    core/risk.py::SKILL_RISK, letti dal comportamento REALE di ogni skill (non ipotizzato dal
+    nome). Manca deliberatamente solo RESUME_INTERRUPTED_TASK - vedi il commento sopra
+    INTENT_EFFECT_CLASS per il perche'. Questi test proteggono l'INTEGRITA' del censimento
+    (nessun intent fantasma, nessun valore fuori dalle cinque classi valide), non la correttezza
+    di ogni singola classificazione (verificata a campione leggendo il codice durante la
+    revisione, non riverificabile automaticamente qui senza duplicare quella lettura)."""
+
+    def test_every_census_key_is_a_real_registered_intent(self):
+        """Nessuna voce del censimento deve riferirsi a un intent che non esiste davvero in
+        SKILL_RISK - un errore di battitura qui produrrebbe silenziosamente un intent fantasma
+        mai raggiungibile da effect_class_of() per l'intent vero."""
+        phantom_intents = set(INTENT_EFFECT_CLASS) - set(SKILL_RISK)
+        self.assertEqual(phantom_intents, set())
+
+    def test_every_registered_intent_is_censused_except_the_one_declared_gap(self):
+        """RESUME_INTERRUPTED_TASK e' l'UNICA eccezione dichiarata (riprende un TaskAgent da un
+        checkpoint: l'agente ripreso decide da solo il prossimo passo, nessun effetto dominante
+        stabile legato all'intent stesso) - qualunque altro intent mancante sarebbe un buco nel
+        censimento, non una scelta deliberata."""
+        uncensused = set(SKILL_RISK) - set(INTENT_EFFECT_CLASS)
+        self.assertEqual(uncensused, {"RESUME_INTERRUPTED_TASK"})
+
+    def test_every_census_value_is_a_valid_effect_class(self):
+        for intent, value in INTENT_EFFECT_CLASS.items():
+            with self.subTest(intent=intent):
+                self.assertIn(value, EFFECT_CLASSES)
+
+    def test_effect_class_of_returns_none_for_an_uncensused_intent(self):
+        """A differenza di risk_of() (ricade su ADMIN come scelta di sicurezza), qui non esiste
+        un default 'piu' prudente' plausibile tra le cinque classi - vedi il commento sopra
+        effect_class_of()."""
+        self.assertIsNone(effect_class_of("RESUME_INTERRUPTED_TASK"))
+        self.assertIsNone(effect_class_of("UN_INTENT_MAI_ESISTITO"))
+
+    def test_effect_class_of_matches_the_census_for_a_few_representative_intents(self):
+        """Un campione, non un giro esaustivo di tutti i 208 (gia' coperto dagli altri test
+        sopra) - dimostra che effect_class_of() legge davvero dal dizionario, non da una copia
+        separata che potrebbe disallinearsi."""
+        cases = {
+            "GET_TIME": "read", "ADD_NOTE": "create", "RENAME_PATH": "modify",
+            "DELETE_PATH": "delete", "RUN_COMMAND": "external",
+        }
+        for intent, expected in cases.items():
+            with self.subTest(intent=intent):
+                self.assertEqual(effect_class_of(intent), expected)
 
 
 class ActionContextTests(unittest.TestCase):

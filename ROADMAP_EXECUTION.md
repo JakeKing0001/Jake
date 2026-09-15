@@ -630,6 +630,45 @@ Criterio di uscita: il 100% dei percorsi produce lo stesso `ActionReceipt` valid
   esplicita dell'utente**: chiudere `F1.1.7` cosi' com'e' invece di forzare un giudizio di
   prodotto per 200 skill senza una richiesta reale dietro. Nessun file di produzione o di test
   toccato: solo la classificazione dello stato in questo documento.
+- `F1.1.7` (riaperta - censimento `effect_class` completato) — 15/09/2026: **nota di metodo
+  importante per chi rilegge questa cronologia**: la voce sopra (stessa data) registra una
+  decisione esplicita dell'utente di NON fare questo lavoro, con la motivazione "richiederebbe
+  indovinare un giudizio di prodotto skill per skill". Dopo l'istruzione esplicita dell'utente di
+  coprire l'intera roadmap senza tralasciare nulla, quella premessa e' stata rimessa alla prova
+  invece di essere data per buona una seconda volta - ed e' risultata SBAGLIATA, non confermata:
+  un sottoagente di ricerca dedicato ha letto per intero l'`execute()` di tutte le skill dietro i
+  209 intent di `core/risk.py::SKILL_RISK` e classificato ciascuno in una delle cinque
+  `EFFECT_CLASS_*` in base al comportamento REALE del codice (crea/modifica/cancella/legge/tocca
+  il mondo esterno), non indovinato dal nome - esattamente il tipo di censimento meccanico (grande
+  ma non un giudizio di prodotto) che questa sessione ha gia' fatto piu' volte per altri campi
+  (`_KNOWN_RESULT_CATEGORIES`, `EXTERNAL_CONTENT_INTENTS`...). Risultato verificato a campione (non
+  fidato ciecamente): riletto il codice reale di una decina di voci rappresentative
+  (`CLOSE_APP`/`CLOSE_WINDOW`, `EMPTY_CLIPBOARD`/`CLIPBOARD_WRITE`, `GIT_PULL`, `TAKE_SCREENSHOT`,
+  `SAVE_CONTACT`...) prima di accettare il resto, tutte confermate corrette. Nuovo
+  `INTENT_EFFECT_CLASS: dict[str, str]` in `core/action_contracts.py` (208 su 209 intent - manca
+  deliberatamente `RESUME_INTERRUPTED_TASK`, che riprende un `TaskAgent` da un checkpoint e il cui
+  effetto dominante dipende interamente da cosa l'agente ripreso decide di fare, stessa
+  motivazione gia' scritta in `core/risk.py` per la sua classificazione di rischio) e nuovo
+  `effect_class_of(intent)` (simmetrico a `risk_of()`, ma - a differenza di quello, che ricade su
+  `ADMIN` come default prudente - restituisce `None` per un intent non censito: non esiste un
+  ripiego "piu' prudente" plausibile tra cinque classi che sono una tassonomia del TIPO di
+  effetto, non un ordine di gravita'). `ActionProposal.for_intent()` ora usa
+  `effect_class_of(intent)` come default quando il chiamante non lo passa esplicitamente - una
+  scelta esplicita del chiamante vince sempre, mai sovrascritta (verificato con un test dedicato).
+  Un solo punto di produzione consuma gia' `for_intent()` (`core/jake_core.py::
+  _authorize_command`, F1.1.6): `effect_class` ora arriva popolato per la prima volta su quel
+  percorso, ma non e' letto da nessuna decisione di `PolicyEngine` ancora (F1.2.2 lo user' per le
+  capability quando esistera' un consumatore reale, come gia' dichiarato) - nessun cambio di
+  comportamento osservabile oggi, solo dati veri disponibili per quando servirà. `preconditions`/
+  `expected_effect` restano dichiaratamente fuori: nessun censimento equivalente esiste per loro,
+  e diversamente da `effect_class` (un fatto sul comportamento del codice, leggibile) descrivono
+  intenzioni/prerequisiti che DIPENDONO dai parametri della singola chiamata, non dall'intent da
+  solo - lì la premessa "richiederebbe giudizio caso per caso" resta valida, non rimessa in
+  discussione qui. Nuovi test in `tests/test_action_contracts.py::IntentEffectClassCensusTests`
+  (5 test sull'integrita' del censimento - nessun intent fantasma, nessuna voce mancante oltre
+  l'unica eccezione dichiarata, nessun valore fuori dalle cinque classi valide) e 2 in
+  `ActionProposalTests` (derivazione automatica, override esplicito mai sovrascritto). Prova:
+  2.594/2.594 test, ruff/mypy verdi.
 - `F1.1.2` — 12/09/2026: creato `core/action_contracts.py` con i cinque contratti mancanti
   (`ActionProposal`, `ActionContext`, `VerificationEvidence`, `UndoDescriptor`, `ActionError`) -
   `ActionReceipt` esisteva gia' (`core/action_ledger.py`). **Deliberatamente NON collegati** ai
@@ -4848,7 +4887,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 15/09/2026. Sessione lunga con 86 incrementi completati e verificati (PR #28-#112), la
+Aggiornato 15/09/2026. Sessione lunga con 87 incrementi completati e verificati (PR #28-#113), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -5136,7 +5175,10 @@ sezioni). `F1.1.7` e' ora chiusa nella sostanza: i tre chokepoint restanti costr
 `_KNOWN_RESULT_CATEGORIES` (secondo pezzo, zero file di skill toccati - un solo dizionario in
 `core/action_ledger.py`); resta solo `effect_class`/`preconditions`/`expected_effect` di
 `ActionProposal`, dichiaratamente non calcolabile dai dati esistenti senza un censimento skill
-per skill. `F1.6` e' andato oltre le fondamenta: il worker persistente sandboxato
+per skill (nota per chi legge in seguito: `effect_class` e' stato poi censito per davvero il
+15/09/2026, vedi la voce "F1.1.7 (riaperta - censimento effect_class completato)" in F1.1 sopra -
+`preconditions`/`expected_effect` restano invece aperti, quella parte della premessa era corretta).
+`F1.6` e' andato oltre le fondamenta: il worker persistente sandboxato
 (`core/forge_worker.py`/`core/sandboxed_skill_worker.py`, Low Integrity + Job Object) e' ora
 anche COLLEGATO per davvero - `SkillRegistry.execute()` instrada un intent forgiato verso il
 worker invece di eseguirlo in processo, verificato con un confronto di `os.getpid()` che dimostra
