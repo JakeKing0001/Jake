@@ -765,11 +765,12 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   separatamente da `F1.3.6`, e ora anche le sotto-azioni generate da workflow, con una prova
   end-to-end dedicata usando il `PlanExecutor` VERO invece del solo cablaggio, vedi sotto);
   `F1.2.1` **chiuso** (percorsi 3, 6 e 7 -
-  i tre "percorso N" dichiarati aperti sono ora tutti fail-closed, vedi sotto); `F1.2.2` chiuso parzialmente
-  (sei capability vere - radici filesystem su ENTRAMBI i percorsi e su sette intent, dominio
+  i tre "percorso N" dichiarati aperti sono ora tutti fail-closed, vedi sotto); `F1.2.2`
+  **chiuso** (SETTE capability - radici filesystem su ENTRAMBI i percorsi e su sette intent, dominio
   web su OPEN_URL, app su OPEN_APP, contatto su SEND_WHATSAPP/SEND_EMAIL, device Home Assistant su
   CONTROL_SMART_DEVICE, rete su PING_HOST/TRACE_ROUTE/CHECK_WEBSITE_STATUS (le ultime tre su
-  stringa grezza, non risolta - limite dichiarato) - vedi sotto; resta aperta solo "durata"); `F1.2.4`
+  stringa grezza, non risolta - limite dichiarato), e ora anche l'ottava e ultima - "durata",
+  **decisione esplicita dell'utente**: finestra oraria - vedi sotto); `F1.2.4`
   chiuso per il percorso planner (vedi sotto); `F1.2.6` e `F1.2.7` chiusi (vedi sotto); `F1.2.3`
   chiuso parzialmente (QUATTRO delle cinque dimensioni testuali - "utente, dispositivo, agente,
   skill e sessione" - sono gia' intersecate su ENTRAMBI i percorsi con "vince il piu' restrittivo":
@@ -1409,6 +1410,32 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   `POLICY_BLOCKED` PRIMA di raggiungere la skill (`registry.executed_intents` resta vuoto).
   Nessun file di produzione toccato. `F1.2.5` ora **chiuso** nella sua interezza. Prova:
   2.525/2.525 test, ruff/mypy verdi su `tests/test_workflow_skills.py`.
+- `F1.2.2` (ottava e ultima capability: durata/finestra oraria) — 15/09/2026: "durata" era rimasta
+  l'unica delle otto capability testuali senza un significato definito - **decisione esplicita
+  dell'utente**, presentata con candidati concreti invece di una domanda aperta (per non ripetere
+  il rischio gia' segnalato di indovinare qualcosa che potrebbe sembrare sicurezza senza esserlo):
+  una finestra oraria - un intent e' permesso solo durante certe ore del giorno (es.
+  `CONTROL_SMART_DEVICE` solo 06:00-23:00), un "quando" parallelo alle altre sette capability
+  "dove" gia' costruite. Stesso principio "nega per default" (`time_restricted_intents`, vuoto per
+  default = nessuna restrizione) e stesso ordine di controllo (subito dopo le altre capability,
+  prima di REQUIRE_AUTH/CONFIRM) su ENTRAMBI i percorsi. Diversa dalle altre capability in un
+  aspetto: non dipende da `parameters`, ma dal MOMENTO in cui l'intent viene chiesto - nuovo
+  `now_provider` iniettabile (default `datetime.now`, stesso principio "sorgente di tempo
+  iniettabile per i test" gia' usato per `AuthGate`/gli scheduler in background). Formato
+  `"HH:MM-HH:MM"`, con gestione esplicita di una finestra che attraversa la mezzanotte (es.
+  "22:00-02:00": dentro se l'ora e' oltre l'inizio O prima della fine, l'inverso del caso
+  normale). Una finestra scritta male in `config.json` solleva `ValueError` alla COSTRUZIONE di
+  `PolicyEngine` (fail loud) invece di ridursi silenziosamente a "nessuna restrizione" - un fail-
+  open pericoloso per una capability di sicurezza sarebbe l'opposto di quello che l'utente ha
+  configurato. Aggiunti 11 nuovi test in
+  `tests/test_policy_engine.py::TimeWindowCapabilityTests` (nessuna finestra configurata =
+  nessuna restrizione, dentro/fuori la finestra, confini inclusivi, attraversamento mezzanotte,
+  piu' finestre per lo stesso intent basta rientrare in una, un intent non elencato resta
+  inalterato, applicato su entrambi i percorsi, `blocked_intents` vince comunque, una finestra
+  malformata solleva alla costruzione, l'orologio vero funziona quando `now_provider` non e'
+  iniettato). Prova: 2.536/2.536 test, ruff/mypy verdi su `core/policy_engine.py`/
+  `core/jake_core.py`/`tests/test_policy_engine.py`. Con questo, `F1.2.2` e' **chiuso** nella sua
+  interezza (tutte e otto le capability).
 
 ### F1.3 — Verifica degli effetti e undo
 
@@ -4454,7 +4481,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 15/09/2026. Sessione lunga con 74 incrementi completati e verificati (PR #28-#101), la
+Aggiornato 15/09/2026. Sessione lunga con 75 incrementi completati e verificati (PR #28-#102), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -4670,13 +4697,18 @@ meccanismo piu' vecchio del modulo; "utente" e' gia' `windows_user_blocked_inten
 stessa identita', mai incrociata esplicitamente con questa voce. QUATTRO delle cinque dimensioni
 sono quindi gia' intersecate; resta genuinamente aperta solo "sessione", non indovinata per lo
 stesso motivo di "durata" in F1.2.2 - nessuna infrastruttura di identita' di sessione esiste nel
-progetto). Il resto:
+progetto), e `F1.2.2` chiusura - ottava capability: durata/finestra oraria (**decisione esplicita
+dell'utente**, presentata con candidati concreti: un intent permesso solo in certe ore del giorno,
+`time_restricted_intents`, stesso principio "nega per default"; diversa dalle altre capability -
+dipende dal momento, non dai parametri - nuovo `now_provider` iniettabile; una finestra malformata
+solleva alla costruzione, fail loud invece di un fail-open silenzioso). Con questo, `F1.2.2` e'
+**chiuso** nella sua interezza. Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.525/2.525 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.536/2.536 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
 invariati, nessuno dei due coperto da "mypy selettivo" in CI - 80 file nella lista selettiva,
 invariata: nessun file nuovo in questo incremento). `G1` resta aperto.
