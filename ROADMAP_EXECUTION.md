@@ -1759,6 +1759,31 @@ reversibili dispone di undo testato.
   per non aver introdotto rumore. Nessun cambio a `PlanExecutor` (il campo che serviva esisteva
   gia'). Prova: 2.562/2.562 test, ruff/mypy verdi su `core/response_formatter.py`/
   `tests/test_response_formatter.py`.
+- `F1.3.7` (estensione - stesso buco anche sul percorso agente) — 15/09/2026: dopo aver corretto
+  il percorso piano, controllato se lo STESSO tipo di buco esistesse anche altrove nel modulo
+  appena esaminato a fondo (`core/response_formatter.py`, che non aveva alcuna suite di test
+  dedicata prima di oggi) - nessun secondo caso trovato li' (solo `format_plan_outcome()` gestisce
+  un esito composito multi-passo). Il buco vero si nascondeva pero' un livello sopra:
+  `TaskAgent._rollback()` (`core/agent.py`) ha lo STESSO identico schema di
+  `PlanExecutor._rollback()` - tenta di annullare ogni passo RIUSCITO, ma un intent senza un
+  inverso noto (es. `KILL_PROCESS_BY_PORT`) o il cui rollback fallisce non entra mai in
+  `outcome.rolled_back`. Il `final_answer` costruito subito dopo diceva pero' solo "Ho annullato
+  per sicurezza: {elenco}" - stesso buco, stessa causa, percorso diverso (l'agente costruisce il
+  proprio messaggio finale direttamente, non passa da `response_formatter.py`).
+
+  Corretto con la stessa simmetria: una riga "Questi effetti restano invece attivi, non sono
+  riuscito ad annullarli automaticamente: {elenco}" accanto (o al posto di) quella
+  dell'annullamento. Differenza tecnica dal fix gemello: `AgentStep` (a differenza di
+  `StepOutcome` in `plan_executor.py`) non ha gia' un campo `rolled_back` proprio - il confronto
+  tra "tutti i passi riusciti" e "quelli davvero annullati" usa `id()`, non l'uguaglianza per
+  valore (un dataclass normale come `AgentStep`: due passi con campi identici per caso non devono
+  sembrare "lo stesso passo" solo perche' `__eq__` li considera uguali). Aggiunti 2 nuovi test in
+  `tests/test_agent.py::PartialRollbackHonestyTests`, con un vero `TaskAgent`/registry/client
+  scriptato (non mockato a un livello piu' alto): uno scenario reale `CREATE_PATH` (annullato per
+  davvero, verificato che il file torni a non esistere) + `KILL_PROCESS_BY_PORT` (nessun inverso,
+  resta "attivo") seguito da un errore del modello che innesca il rollback, e il caso di controllo
+  in cui OGNI passo riuscito viene annullato (nessuna riga "restano attivi" deve comparire).
+  Prova: 2.564/2.564 test, ruff/mypy verdi su `core/agent.py`/`tests/test_agent.py`.
 
 ### F1.4 — Identità, autenticazione e segreti
 
@@ -4591,7 +4616,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 15/09/2026. Sessione lunga con 79 incrementi completati e verificati (PR #28-#105), la
+Aggiornato 15/09/2026. Sessione lunga con 80 incrementi completati e verificati (PR #28-#106), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -4844,15 +4869,20 @@ stato annullato, senza mai dire che un ALTRO effetto gia' avvenuto restava silen
 attivo - un utente poteva credere "i passi precedenti" (plurale) tutti ripristinati, quando solo
 alcuni lo erano. Corretto con una riga simmetrica ("questi effetti restano invece attivi...") che
 usa `StepOutcome.rolled_back` gia' esistente; nuovo `tests/test_response_formatter.py` (nessuna
-suite dedicata esisteva, il modulo era sempre mockato altrove), 6 test. Il resto:
+suite dedicata esisteva, il modulo era sempre mockato altrove), 6 test - e lo STESSO identico buco
+trovato anche sul percorso AGENTE (`TaskAgent._rollback()`, `core/agent.py`, stesso schema, causa
+identica, messaggio costruito in un punto diverso perche' l'agente non passa da
+`response_formatter.py`): corretto con la stessa simmetria, usando `id()` per confrontare i passi
+invece dell'uguaglianza per valore (`AgentStep` non ha gia' un campo `rolled_back` proprio come
+`StepOutcome`), 2 nuovi test con un vero `TaskAgent`/registry/client scriptato. Il resto:
 `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.562/2.562 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.564/2.564 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
 invariati, nessuno dei due coperto da "mypy selettivo" in CI - 80 file nella lista selettiva,
-invariata: `core/response_formatter.py` era gia' presente). `G1` resta aperto.
+invariata: nessun file nuovo in questo incremento). `G1` resta aperto.
 
 Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
 sessione (`sys.setswitchinterval()` abbassato + `threading.Barrier`, senza altro aiuto) NON

@@ -631,10 +631,27 @@ class TaskAgent:
             if not outcome.final_answer:
                 outcome.final_answer = self._summarize_steps(outcome)
             outcome.rolled_back = self._rollback(outcome.steps, trace_id, private)
+            # F1.3.7 ("gestire effetti parziali... con spiegazione leggibile"): stesso identico
+            # buco gia' trovato e corretto per PlanExecutor/format_plan_outcome - un passo
+            # RIUSCITO ma SENZA un inverso noto (es. KILL_PROCESS_BY_PORT, "terminare un processo
+            # non ha un inverso naturale") o il cui rollback fallisce non entra mai in
+            # outcome.rolled_back: senza questa riga il messaggio menzionava solo cio' che era
+            # stato annullato, lasciando intendere (mai detto esplicitamente) che il resto fosse
+            # a posto. id() per il confronto, non l'uguaglianza per valore di AgentStep (dataclass
+            # normale: due passi con campi identici per caso non devono sembrare "lo stesso passo").
+            rolled_back_ids = {id(step) for step in outcome.rolled_back}
+            persisting = [
+                step for step in outcome.steps
+                if step.result is not None and step.result.success and id(step) not in rolled_back_ids
+            ]
             if outcome.rolled_back:
                 undone = ", ".join((step.thought or step.intent.replace("_", " ").lower()) for step in outcome.rolled_back)
                 prefix = f"{outcome.final_answer} " if outcome.final_answer else ""
                 outcome.final_answer = f"{prefix}Ho annullato per sicurezza: {undone}."
+            if persisting:
+                kept = ", ".join((step.thought or step.intent.replace("_", " ").lower()) for step in persisting)
+                prefix = f"{outcome.final_answer} " if outcome.final_answer else ""
+                outcome.final_answer = f"{prefix}Questi effetti restano invece attivi, non sono riuscito ad annullarli automaticamente: {kept}."
 
         return outcome
 
