@@ -3349,6 +3349,40 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
   tetto di sicurezza del test (non solo letto a codice - cronometrato per davvero), una chiamata
   normale continua a funzionare invariata, un vero `OllamaError` resta distinto da un kill switch
   scattato. Prova: 2.466/2.466 test, ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.8.3` (residuo del limite dichiarato - kill dell'intero process tree) — 15/09/2026: dopo aver
+  chiuso `F1.8.2` per il risolutore app (vedi sopra), il residuo "nessun kill dell'intero process
+  tree" lasciato aperto sia dalla chiusura RUN_COMMAND sia da quella "modello" e' stato riletto
+  contro cio' che ora esiste davvero nel progetto - `F1.6.3` (Job Object per il worker sandboxato
+  permanente delle skill forgiate) e' stato costruito e chiuso PIU' TARDI nella stessa sessione di
+  quando questo limite era stato dichiarato "fuori scope perche' richiede F1.6.3": la premessa che
+  lo rimandava non e' piu' vera. Per RUN_COMMAND (non per la chiamata al modello - quella resta un
+  limite HTTP diverso, nessun processo figlio da contenere) il pezzo utile e' molto piu' stretto
+  del worker sandboxato completo: nessuna Low Integrity, nessun limite di memoria/CPU/numero
+  processi, solo `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` su un Job Object assegnato al processo appena
+  avviato da `subprocess.Popen` (non un `CreateProcessAsUser` a mano come nel worker). Riprodotto
+  per davvero PRIMA della correzione con un vero albero di processi (cmd.exe -> parent.py ->
+  child.py, il "nipote" e' child.py, figlio di parent.py, non di cmd.exe): il PID del nipote,
+  letto da un file marker che scrive da solo, restava vivo (`psutil.pid_exists`) ben oltre il kill
+  switch che aveva gia' fermato cmd.exe. Nuovo `RunCommandSkill._make_kill_tree_job()`: crea il Job
+  Object e vi assegna il processo subito dopo `Popen()` (un processo assegnato a un job vi aggiunge
+  automaticamente ogni figlio che genera, comportamento di default salvo `CREATE_BREAKAWAY_FROM_JOB`
+  esplicito - nessun comando lanciato da qui lo chiede); `_kill_and_abandon()` ora chiama
+  `win32job.TerminateJobObject` quando il job e' disponibile (termina l'intero albero in un colpo),
+  con `process.kill()` come ripiego se la creazione/assegnazione del job fallisce per qualunque
+  motivo (pywin32 assente, permessi negati...) - mai peggio del comportamento precedente. Finestra
+  residua nota e accettata, non azzerata: un figlio generato da cmd.exe nei pochissimi istanti tra
+  `Popen()` e l'assegnazione al job (prima di `CREATE_SUSPENDED`, che `subprocess.Popen` non
+  espone in modo da poter riprendere poi il thread) non verrebbe catturato - non il caso rilevante
+  in pratica, dato che conta il processo ancora vivo QUANDO il kill switch scatta, non uno gia'
+  terminato nei primi millisecondi. Aggiunto `tests/test_run_command_skill.py::
+  ProcessTreeKillTests` (1 test, processi veri non mock), verificato FALLIRE contro il codice
+  precedente prima di applicare la correzione. Con questo, il sesto criterio del Gate G1 ("kill
+  switch interrompe attivita' e figli entro il budget definito") copre anche i figli indiretti di
+  RUN_COMMAND, non solo il processo diretto - resta comunque il limite HTTP gia' dichiarato per la
+  chiamata al modello (nessun processo li' da contenere, natura diversa del limite). Prova:
+  2.567/2.567 test, ruff verde, mypy verde sui file nel set selettivo (skills/run_command.py non
+  era gia' incluso - un errore preesistente e non correlato verificato individualmente, invariato
+  rispetto a prima di questa correzione).
 - `F1.8.2` (parziale) — 12/09/2026: **buco reale trovato e corretto, riprodotto per davvero**
   (non solo ipotizzato) - `core/action_ledger.py::ActionLedger.record()` apriva il file con un
   `open()` grezzo a ogni chiamata, senza alcuna sincronizzazione tra thread. A differenza di
@@ -4660,7 +4694,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 15/09/2026. Sessione lunga con 81 incrementi completati e verificati (PR #28-#107), la
+Aggiornato 15/09/2026. Sessione lunga con 82 incrementi completati e verificati (PR #28-#108), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -5002,8 +5036,14 @@ worker, invece di AppContainer) restano aperti; il quarto (prompt-injection) ha 
 piu' un piccolo corpus mirato multi-sorgente/multilingue (F1.5.6, il significato letterale di
 "corpus" per un attacco dal vivo contro un modello vero resta un esercizio di red-team manuale
 separato) ma ancora nessun test di injection indiretta (F1.5.7); il sesto (kill switch) e' ora
-chiuso per le quattro superfici dichiarate, ma
-senza kill dell'intero process tree (dichiarato fuori scope, richiederebbe F1.6.3/Job Object); il
+chiuso per le quattro superfici dichiarate, e da 15/09/2026 anche con kill dell'intero process
+tree per RUN_COMMAND (Job Object riutilizzando F1.6.3, gia' costruito nel frattempo - vedi la voce
+datata in F1.8 sopra; resta il limite HTTP gia' dichiarato per la superficie "modello", natura
+diversa, nessun processo li' da contenere); nota anche che F1.6.5/F1.6.6 (manifest di
+directory/negazione rete) descritti "aperti" qui sopra sono in realta' gia' stati chiusi in un
+passo successivo a quando questo paragrafo e' stato scritto (14/09/2026) - vedi le rispettive voci
+datate in F1.6; il quinto criterio del Gate G1 (sandbox) e' quindi piu' avanti di quanto questo
+paragrafo, mai aggiornato dopo, lasci intendere; il
 settimo (modalita' privata) e' verificato chiuso (F1.7.8); gli altri tre restano parzialmente
 aperti come dettagliato nelle rispettive sezioni sopra.
 
