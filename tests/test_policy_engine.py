@@ -19,7 +19,8 @@ from unittest import mock
 from core.auth_gate import AuthGate
 from core.policy_engine import PolicyDecision, PolicyEngine, strip_authorization_signals
 from core.request_context import (
-    reset_current_agent_name, reset_current_device_id, set_current_agent_name, set_current_device_id,
+    reset_current_agent_name, reset_current_device_id, reset_current_session_id, set_current_agent_name,
+    set_current_device_id, set_current_session_id,
 )
 
 
@@ -1086,6 +1087,83 @@ class TimeWindowCapabilityTests(unittest.TestCase):
         engine = PolicyEngine(time_restricted_intents={"CONTROL_SMART_DEVICE": ["00:00-23:59"]})
         decision = engine.decide_interactive("CONTROL_SMART_DEVICE", {})
         self.assertEqual(decision, PolicyDecision.ALLOW)
+
+
+class SessionCapabilityTests(unittest.TestCase):
+    """F1.2.3 (intersezione, quinta e ultima dimensione - decisione esplicita dell'utente su cosa
+    "sessione" dovesse significare): stesso identico principio di AgentCapabilityTests sopra, ma
+    per core.request_context.current_session_id() - l'id di una CONNESSIONE companion (nuovo a
+    ogni DeviceRegistry.claim(), vedi core/device_registry.py), non l'identita' persistente del
+    dispositivo."""
+
+    def setUp(self):
+        self._tokens = []
+        self.addCleanup(self._reset_all)
+
+    def _reset_all(self):
+        for token in reversed(self._tokens):
+            reset_current_session_id(token)
+
+    def _in_session(self, session_id):
+        self._tokens.append(set_current_session_id(session_id))
+
+    def test_no_session_blocked_intents_configured_means_no_restriction(self):
+        engine = PolicyEngine()
+        self._in_session("sess-1")
+        self.assertEqual(engine.decide_interactive("SYSTEM_POWER", {}), PolicyDecision.ALLOW)
+
+    def test_an_intent_blocked_for_a_session_is_blocked_only_for_that_session(self):
+        engine = PolicyEngine(session_blocked_intents={"sess-1": {"SYSTEM_POWER"}})
+
+        self._in_session("sess-1")
+        self.assertEqual(engine.decide_interactive("SYSTEM_POWER", {}), PolicyDecision.BLOCK)
+
+    def test_the_same_intent_is_still_allowed_for_a_different_session(self):
+        engine = PolicyEngine(session_blocked_intents={"sess-1": {"SYSTEM_POWER"}})
+
+        self._in_session("sess-2")
+        self.assertEqual(engine.decide_interactive("SYSTEM_POWER", {}), PolicyDecision.ALLOW)
+
+    def test_the_same_intent_is_still_allowed_outside_any_session(self):
+        engine = PolicyEngine(session_blocked_intents={"sess-1": {"SYSTEM_POWER"}})
+        # Nessun set_current_session_id chiamato: voce locale o automazione (None).
+        self.assertEqual(engine.decide_interactive("SYSTEM_POWER", {}), PolicyDecision.ALLOW)
+
+    def test_session_block_reports_a_distinct_reason_from_the_global_block(self):
+        engine = PolicyEngine(session_blocked_intents={"sess-1": {"SYSTEM_POWER"}})
+        self._in_session("sess-1")
+
+        decision, reason = engine.decide_interactive_with_reason("SYSTEM_POWER", {})
+
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+        self.assertEqual(reason, "intent_in_session_blocked_intents")
+
+    def test_session_block_wins_over_confirmation(self):
+        engine = PolicyEngine(
+            always_confirm_intents={"SYSTEM_POWER"}, session_blocked_intents={"sess-1": {"SYSTEM_POWER"}},
+        )
+        self._in_session("sess-1")
+
+        decision = engine.decide_interactive("SYSTEM_POWER", {"confirmed": True})
+
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+
+    def test_a_global_block_still_applies_regardless_of_session_capability(self):
+        engine = PolicyEngine(blocked_intents={"SYSTEM_POWER"}, session_blocked_intents={"sess-1": {"RENAME_PATH"}})
+        self._in_session("sess-1")
+
+        decision, reason = engine.decide_interactive_with_reason("SYSTEM_POWER", {})
+
+        self.assertEqual(decision, PolicyDecision.BLOCK)
+        self.assertEqual(reason, "intent_in_blocked_intents")
+
+    def test_session_capability_applies_on_the_automated_path_too(self):
+        engine = PolicyEngine(session_blocked_intents={"sess-1": {"SYSTEM_POWER"}})
+        self._in_session("sess-1")
+
+        decision = engine.decide_automated("SYSTEM_POWER")
+
+        self.assertEqual(decision, PolicyDecision.BLOCK)
 
 
 if __name__ == "__main__":

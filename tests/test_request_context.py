@@ -8,9 +8,10 @@ import threading
 import unittest
 
 from core.request_context import (
-    current_agent_name, current_command_source_intent, current_device_id, reset_current_agent_name,
-    reset_current_command_source_intent, reset_current_device_id, set_current_agent_name,
-    set_current_command_source_intent, set_current_device_id,
+    current_agent_name, current_command_source_intent, current_device_id, current_session_id,
+    reset_current_agent_name, reset_current_command_source_intent, reset_current_device_id,
+    reset_current_session_id, set_current_agent_name, set_current_command_source_intent,
+    set_current_device_id, set_current_session_id,
 )
 
 
@@ -150,6 +151,66 @@ class AgentNameThreadIsolationTests(unittest.TestCase):
             t.join()
 
         self.assertEqual(observed, {"coding_thread": "coding", "research_thread": "research"})
+
+
+class SessionIdDefaultTests(unittest.TestCase):
+    """F1.2.3 (intersezione, capability per SESSIONE): stesso identico contratto di
+    current_device_id sopra, ma per l'id di una CONNESSIONE companion (vedi il docstring del
+    modulo per la differenza dal device_id persistente)."""
+
+    def test_default_is_none_when_never_set(self):
+        self.assertIsNone(current_session_id())
+
+
+class SessionIdSetAndResetTests(unittest.TestCase):
+    def test_set_makes_the_value_visible_on_this_thread(self):
+        token = set_current_session_id("sess-abc123")
+        try:
+            self.assertEqual(current_session_id(), "sess-abc123")
+        finally:
+            reset_current_session_id(token)
+
+    def test_reset_restores_the_previous_value(self):
+        outer_token = set_current_session_id("sess-abc123")
+        inner_token = set_current_session_id("sess-def456")
+        reset_current_session_id(inner_token)
+        try:
+            self.assertEqual(current_session_id(), "sess-abc123")
+        finally:
+            reset_current_session_id(outer_token)
+
+    def test_reset_restores_none_when_nothing_was_set_before(self):
+        token = set_current_session_id("sess-abc123")
+        reset_current_session_id(token)
+        self.assertIsNone(current_session_id())
+
+
+class SessionIdThreadIsolationTests(unittest.TestCase):
+    def test_concurrent_threads_never_see_each_others_session_id(self):
+        observed = {}
+        barrier = threading.Barrier(2)
+
+        def _handle_request(name, session_id, delay_before_read):
+            token = set_current_session_id(session_id)
+            try:
+                barrier.wait()
+                if delay_before_read:
+                    import time
+                    time.sleep(0.02)
+                observed[name] = current_session_id()
+            finally:
+                reset_current_session_id(token)
+
+        threads = [
+            threading.Thread(target=_handle_request, args=("phone", "sess-phone", True)),
+            threading.Thread(target=_handle_request, args=("tablet", "sess-tablet", False)),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(observed, {"phone": "sess-phone", "tablet": "sess-tablet"})
 
 
 class CommandSourceIntentDefaultTests(unittest.TestCase):

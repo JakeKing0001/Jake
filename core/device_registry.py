@@ -4,8 +4,19 @@ dispositivo (v5.8) - e' "attivo" in questo momento, quello che deve rispondere o
 e gestisce l'handoff quando un altro dispositivo reclama la sessione (es. ci si sposta dal PC al
 telefono). Pura logica in memoria: niente rete qui, la usa core/companion_server.py, che gira su
 ThreadingHTTPServer - claim()/release() arrivano quindi da thread diversi, uno per richiesta HTTP
-(F1.8.7)."""
+(F1.8.7).
+
+F1.2.3 (intersezione, capability per SESSIONE - "utente, dispositivo, agente, skill e sessione",
+decisione esplicita dell'utente su cosa "sessione" dovesse significare): claim() genera ora anche
+un session_id NUOVO a ogni chiamata, distinto dal device_id persistente - ogni volta che un
+dispositivo companion si (ri)connette (l'app va in background e poi torna, una perdita di rete,
+un riavvio) e' una CONNESSIONE diversa, anche per lo stesso device_id di prima. Vedi
+core/request_context.py::current_session_id per come viaggia lungo la catena di chiamate, e
+core/policy_engine.py per la capability che lo usa per restringere i permessi ALLA sessione
+corrente, non al dispositivo per sempre."""
 import threading
+
+from core.logger import new_trace_id
 
 
 class DeviceRegistry:
@@ -39,13 +50,16 @@ class DeviceRegistry:
         if name and existing.get("name") != name:
             existing["name"] = name
 
-    def claim(self, device_id: str, name: str = "") -> str | None:
-        """device_id diventa il dispositivo attivo. Restituisce l'id del dispositivo
-        precedentemente attivo (da avvisare dell'handoff, vedi EventType.DEVICE_HANDOFF), o None
-        se non c'era nessuno attivo o era gia' lui stesso a reclamare di nuovo."""
+    def claim(self, device_id: str, name: str = "") -> tuple[str | None, str]:
+        """device_id diventa il dispositivo attivo. Restituisce (id del dispositivo
+        precedentemente attivo - da avvisare dell'handoff, vedi EventType.DEVICE_HANDOFF, o None
+        se non c'era nessuno attivo o era gia' lui stesso a reclamare di nuovo -, un NUOVO
+        session_id per questa connessione - F1.2.3, vedi il docstring del modulo: generato a OGNI
+        chiamata, anche per lo stesso device_id di prima)."""
         with self._lock:
             self._register_locked(device_id, name)
-            return self._swap_active_device_locked(device_id)
+            previous = self._swap_active_device_locked(device_id)
+            return previous, new_trace_id()
 
     def _swap_active_device_locked(self, device_id: str) -> str | None:
         previous = self._active_device_id

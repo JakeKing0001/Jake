@@ -10,7 +10,7 @@ from urllib import error, request
 
 from core.companion_server import CompanionServer
 from core.hud_protocol import EventType
-from core.request_context import current_device_id
+from core.request_context import current_device_id, current_session_id
 from core.version import PROTOCOL_VERSION, VERSION
 
 
@@ -163,6 +163,30 @@ class CommandEndpointTests(CompanionServerTestCase):
 
         self.assertEqual(observed, {"phone1": "dal telefono", "tablet1": "dal tablet"})
 
+    def test_session_id_in_the_body_is_visible_to_the_handler_via_request_context(self):
+        """F1.2.3 (capability per SESSIONE): stesso identico principio di device_id sopra, ma per
+        l'id di una CONNESSIONE companion (quello restituito da /claim, vedi
+        DeviceHandoffEndpointTests sotto)."""
+        observed = []
+        server = CompanionServer(command_handler=lambda text: observed.append(current_session_id()) or "ok")
+        server.start()
+        self.addCleanup(server.stop)
+
+        status, body = _post(f"http://127.0.0.1:{server.port}/command", {"text": "ciao", "session_id": "sess-1"})
+
+        self.assertEqual(status, 200)
+        self.assertEqual(observed, ["sess-1"])
+
+    def test_missing_session_id_leaves_the_context_at_its_default(self):
+        observed = []
+        server = CompanionServer(command_handler=lambda text: observed.append(current_session_id()) or "ok")
+        server.start()
+        self.addCleanup(server.stop)
+
+        _post(f"http://127.0.0.1:{server.port}/command", {"text": "ciao"})
+
+        self.assertEqual(observed, [None])
+
     def test_handle_command_does_not_publish_events_itself(self):
         """USER_MESSAGE/JAKE_MESSAGE sono responsabilita' del command_handler (JakeCore.answer
         nel caso reale, vedi tests/test_jake_core_event_bus.py), non del server: altrimenti,
@@ -196,6 +220,18 @@ class DeviceHandoffEndpointTests(CompanionServerTestCase):
         self.assertEqual(event.type, EventType.DEVICE_HANDOFF)
         self.assertEqual(event.payload, {"from": "pc", "to": "telefono"})
         self.assertEqual(self.server.devices.active_device_id, "telefono")
+
+    def test_claim_returns_a_session_id_the_client_can_reuse_in_command(self):
+        """F1.2.3 (capability per SESSIONE): il client deve poter leggere il session_id dalla
+        risposta di /claim per poi rimandarlo in /command (vedi CommandEndpointTests sopra)."""
+        status, body = _post(f"{self.base_url}/devices/telefono/claim", {})
+        self.assertEqual(status, 200)
+        self.assertTrue(body["session_id"])
+
+    def test_claiming_the_same_device_twice_returns_two_different_session_ids(self):
+        _, first_body = _post(f"{self.base_url}/devices/telefono/claim", {})
+        _, second_body = _post(f"{self.base_url}/devices/telefono/claim", {})
+        self.assertNotEqual(first_body["session_id"], second_body["session_id"])
 
     def test_release_frees_the_active_device(self):
         _post(f"{self.base_url}/devices/pc/claim", {})

@@ -31,11 +31,21 @@ un futuro codice intermedio legga per errore un valore che non gli compete. `Non
 significa "nessun agente a passi in corso su questo thread" - il caso normale per un comando
 diretto (JakeCore._resolve_and_execute chiamato senza passare da TaskAgent) o un'automazione
 (PlanExecutor, un attore diverso, deliberatamente non coperto da questa dimensione - vedi il
-docstring di core/policy_engine.py per il limite dichiarato)."""
+docstring di core/policy_engine.py per il limite dichiarato).
+
+F1.2.3 (intersezione, capability per SESSIONE) - decisione esplicita dell'utente su cosa
+"sessione" dovesse significare: un'istanza di CONNESSIONE di un dispositivo companion, distinta
+dalla sua identita' PERSISTENTE (`device_id`, sopra). Un dispositivo che si disconnette/
+riconnette (l'app va in background e poi torna, una perdita di rete, un riavvio) genera un nuovo
+session_id a ogni `DeviceRegistry.claim()` (core/device_registry.py), anche per lo stesso
+device_id di prima - un permesso scoped alla sessione vale solo finche' QUELLA connessione resta
+viva, non per il dispositivo per sempre. Stesso meccanismo/stesse garanzie di isolamento per
+thread di current_device_id sopra."""
 import contextvars
 
 _current_device_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("current_device_id", default=None)
 _current_agent_name: contextvars.ContextVar[str | None] = contextvars.ContextVar("current_agent_name", default=None)
+_current_session_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("current_session_id", default=None)
 
 
 def current_device_id() -> str | None:
@@ -72,6 +82,24 @@ def set_current_agent_name(agent_name: str | None) -> contextvars.Token:
 
 def reset_current_agent_name(token: contextvars.Token) -> None:
     _current_agent_name.reset(token)
+
+
+def current_session_id() -> str | None:
+    """L'id della sessione di CONNESSIONE companion (non il device_id persistente, vedi il
+    docstring del modulo) che ha originato la richiesta in corso su QUESTO thread, o None se non
+    impostato (comando vocale locale, automazione in background, o una richiesta companion senza
+    session_id nel body)."""
+    return _current_session_id.get()
+
+
+def set_current_session_id(session_id: str | None) -> contextvars.Token:
+    """Imposta il session_id per il resto dell'esecuzione su QUESTO thread. Restituisce un Token
+    da passare a reset_current_session_id() per ripristinare il valore precedente."""
+    return _current_session_id.set(session_id)
+
+
+def reset_current_session_id(token: contextvars.Token) -> None:
+    _current_session_id.reset(token)
 
 
 # F1.5.2 (propagare il taint oltre l'osservazione dello STESSO turno, vedi core/agent.py::

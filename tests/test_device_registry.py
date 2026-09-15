@@ -50,19 +50,36 @@ class ClaimTests(unittest.TestCase):
 
     def test_claiming_returns_none_when_nothing_was_active_before(self):
         registry = DeviceRegistry()
-        self.assertIsNone(registry.claim("phone1"))
+        previous, _ = registry.claim("phone1")
+        self.assertIsNone(previous)
 
     def test_claiming_returns_the_previously_active_device_for_handoff(self):
         registry = DeviceRegistry()
         registry.claim("pc")
-        previous = registry.claim("phone1")
+        previous, _ = registry.claim("phone1")
         self.assertEqual(previous, "pc")
         self.assertEqual(registry.active_device_id, "phone1")
 
     def test_claiming_the_same_device_again_returns_none_not_itself(self):
         registry = DeviceRegistry()
         registry.claim("phone1")
-        self.assertIsNone(registry.claim("phone1"))
+        previous, _ = registry.claim("phone1")
+        self.assertIsNone(previous)
+
+    def test_claim_returns_a_new_session_id(self):
+        """F1.2.3 (intersezione, capability per SESSIONE): claim() genera ora anche un session_id,
+        distinto dal device_id, per ogni connessione."""
+        registry = DeviceRegistry()
+        _, session_id = registry.claim("phone1")
+        self.assertTrue(session_id)
+
+    def test_claiming_the_same_device_twice_returns_two_different_session_ids(self):
+        """Ogni (ri)connessione e' una sessione NUOVA, anche per lo stesso device_id di prima -
+        vedi il docstring del modulo per il perche'."""
+        registry = DeviceRegistry()
+        _, first_session = registry.claim("phone1")
+        _, second_session = registry.claim("phone1")
+        self.assertNotEqual(first_session, second_session)
 
     def test_claim_also_registers_the_device_with_its_name(self):
         registry = DeviceRegistry()
@@ -148,7 +165,7 @@ class ConcurrentClaimTests(unittest.TestCase):
 
         def _claim(device_id):
             barrier.wait()
-            previous = registry.claim(device_id, device_id)
+            previous, _ = registry.claim(device_id, device_id)
             with results_lock:
                 results.append((device_id, previous))
 
