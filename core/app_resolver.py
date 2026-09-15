@@ -172,6 +172,7 @@ class AppResolver:
         with self._lock:
             items = list(applications.items())
             sources = dict(self._sources)
+            display_names = dict(self._display_names)
         for name, launcher in items:
             score = self._similarity(normalized_name, name)
             minimum = self.PATH_MIN_SCORE if sources.get(name) == "path" else self.threshold
@@ -180,10 +181,18 @@ class AppResolver:
         if not candidates:
             return None
 
-        score, name, launcher = max(candidates, key=lambda candidate: (candidate[0], self._sources.get(candidate[1]) != "path"))
+        # F1.8.7 (stesso principio "un'istantanea sola, non due letture in tempi diversi" gia'
+        # applicato altrove in questa sessione): sources/display_names vengono da QUI, non da
+        # self._sources/self._display_names riletti dal vivo - un refresh()/discover() concorrente
+        # tra il ciclo sopra e questo punto potrebbe altrimenti sostituire quei dizionari con una
+        # scoperta piu' recente che non corrisponde piu' ai candidati gia' raccolti sopra (un nome
+        # presente nell'istantanea usata per candidates potrebbe non esistere piu' nel dizionario
+        # nuovo), producendo un tie-break/nome visualizzato incoerente con cio' che e' stato
+        # davvero valutato.
+        score, name, launcher = max(candidates, key=lambda candidate: (candidate[0], sources.get(candidate[1]) != "path"))
         return AppMatch(
             requested=app_name,
-            matched_app=self._display_names.get(name, name),
+            matched_app=display_names.get(name, name),
             score=score,
             launcher=launcher,
         )
