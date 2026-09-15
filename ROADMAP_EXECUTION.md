@@ -1967,11 +1967,81 @@ Criterio di uscita: nessun segreto in chiaro e ogni azione admin richiede un fat
   gia' coperto); `F1.4.7` **chiuso** (VERIFICA, non fix - vedi sotto: nessuna infrastruttura di
   speaker verification/voiceprint esiste da nessuna parte nel progetto, quindi l'avvertimento
   "non usarlo come unico fattore" e' banalmente soddisfatto per assenza del rischio stesso); il
-  resto della fase (`F1.4.4`-`F1.4.6`) resta
-  aperto - passkey/WebAuthn, pairing QR, rotazione token: ciascuno un pezzo
-  di prodotto a se', non una fetta stretta come `F1.4.1`/`F1.4.2` (`core/windows_hello.py` esiste
-  gia' - vedi l'audit storico in [ROADMAP.md](ROADMAP.md) fase F1 - ma non e' stato riletto
-  contro l'elenco piu' fine di qui).
+  resto della fase (`F1.4.4`-`F1.4.6`) e' ora `DOING` con una **decisione di prodotto esplicita
+  e completa dell'utente** (15/09/2026, vedi sotto per il piano completo in 10 fasi che copre
+  anche F1.5.8/F1.8.1) invece di restare bloccato in attesa - passkey/WebAuthn dietro adapter,
+  pairing QR con `PairingChallenge`/`DeviceIdentity`/`DeviceCredential`/`DeviceRegistry` separati,
+  token per-dispositivo revocabile/ruotabile ogni 90 giorni, multi-device come requisito esplicito.
+  `core/windows_hello.py` esiste gia' - vedi l'audit storico in [ROADMAP.md](ROADMAP.md) fase F1 -
+  ma non era stato riletto contro l'elenco piu' fine di qui prima di questa decisione.
+- **Decisione di prodotto completa (F1.4.4/F1.4.5/F1.4.6/F1.5.8/F1.8.1)** — 15/09/2026: dopo
+  aver riportato all'utente perche' questi cinque punti restavano bloccati (ciascuno richiedeva
+  una decisione che solo lui poteva prendere), l'utente ha risposto con una specifica di prodotto
+  completa e concreta invece di lasciare la scelta a Jake. Riassunto fedele (non parafrasato in
+  modo lossy - i numeri esatti contano):
+  - **F1.4.6 (token per-dispositivo)**: Jake deve supportare multi-device. Niente piu' un
+    `companion_token` globale condiviso. Ogni dispositivo: `device_id`, credenziale propria,
+    revocabile singolarmente, ruotabile SENZA revocare gli altri, rotazione automatica ogni 90
+    giorni, alla scadenza/revoca il dispositivo torna a `PAIRING_REQUIRED`, NESSUN fallback
+    automatico a un token globale, il core deve poter mostrare elenco/ultimo accesso/stato/revoca.
+    Token bearer per-dispositivo cifrati a riposo con DPAPI. Niente OAuth complesso per ora.
+  - **F1.4.5 (pairing QR)**: core genera una challenge temporanea -> payload QR con solo dati
+    NON sensibili -> il companion scansiona e invia la challenge al core -> il core chiede
+    conferma esplicita sul PC -> solo dopo approvazione viene creato un `device_id` e una
+    credenziale specifica. Challenge one-time-use, scade dopo 5 minuti, il replay deve fallire,
+    un pairing rifiutato non crea alcun device. Tipi separati: `PairingChallenge`,
+    `DeviceIdentity`, `DeviceCredential`, `DeviceRegistry`.
+  - **F1.4.4 (passkey/WebAuthn)**: NON sostituisce Windows Hello (resta l'autenticazione locale
+    primaria per azioni ADMIN sul PC) - WebAuthn/passkey e' un fattore OPZIONALE per companion/
+    mobile e operazioni cross-device ad alto impatto, dietro un adapter (`AuthProvider` ->
+    `WindowsHelloProvider`/`PasskeyProvider`/futuri), non nel core direttamente. Per ora bastano
+    interfacce/contratti/integrazione minima verificabile, non un'app mobile completa.
+  - **F1.5.8 (escalation concatenata)**: definizione di prodotto data esplicitamente - "una
+    sequenza di azioni costituisce escalation quando una catena di step, presa complessivamente,
+    produce un effetto piu' rischioso di quello autorizzato dalla richiesta originale
+    dell'utente". `TaskRiskBudget` per task, con almeno: rischio massimo autorizzato, risorse gia'
+    toccate, sorgenti di dati esterni, dati sensibili letti, effetti esterni gia' prodotti - uno
+    step che supera il rischio autorizzato richiede nuova conferma/autenticazione. Combinazioni
+    minime da coprire: leggere dati privati -> inviarli fuori; clipboard/file/schermo -> email/
+    messaggio/web upload; download -> execute; creare file/script -> execute; accesso credenziali
+    -> trasmissione esterna; disabilitare sicurezza -> eseguire azioni privilegiate. Risk budget +
+    regole esplicite di defense-in-depth, non solo una blacklist.
+  - **F1.8.1 (coda azioni)**: dato il multi-device, serve vera ownership di sessione e una coda
+    minima. Ogni richiesta: `session_id`, `device_id`, `request_id`, `actor/user`, `source`,
+    `resource_keys` (es. `filesystem:<path>`, `app:<name>`, `window:<id>`, `browser:<profile/
+    tab>`, `device:<id>`, `system:power`, `audio:output`). Azioni read-only compatibili possono
+    essere parallele; azioni mutative sulla STESSA risorsa vanno serializzate. Le conferme
+    appartengono alla sessione/dispositivo che le ha create - un altro dispositivo non deve poter
+    confermare per errore una pending action non sua, salvo handoff esplicito. Prima una coda/
+    resource-locking semplice e testabile, non uno scheduler distribuito.
+  - **Regole generali su tutti e cinque**: niente bypass di `PolicyEngine`; ogni decisione
+    sensibile nel ledger; ogni credenziale cifrata a riposo; ogni token/device revocabile; ogni
+    operazione cross-device con `device_id`+`session_id`; testare replay/race/token revocato/
+    token scaduto/device sconosciuto/conferma dal device sbagliato; mai aumentare i privilegi di
+    una skill/device come effetto collaterale; retrocompatibilita' dove possibile;
+    `ROADMAP_EXECUTION.md` aggiornato solo con stato reale verificato (non con lavoro presunto).
+  - **Ordine di implementazione concordato** (seguito rigorosamente, un incremento verificato
+    alla volta, non tutto in un colpo): 1) identita' di sessione/dispositivo, 2) device registry,
+    3) token per-dispositivo, 4) pairing challenge + payload QR, 5) revoca/rotazione, 6) conferma
+    legata alla sessione, 7) coda per risorsa, 8) risk budget concatenato, 9) adapter passkey,
+    10) test end-to-end multi-device. Le singole voci datate sotto (stessa data o successive)
+    tracciano l'avanzamento reale fase per fase - questa voce e' il PIANO, non una chiusura.
+- `F1.4.6` (fase 1 del piano - contratti identita'/credenziale/pairing) — 15/09/2026: nuovo
+  `core/device_identity.py`, deliberatamente SEPARATO da `core/device_registry.py` (che resta il
+  registro EFFIMERO dell'handoff vocale/HUD - "chi parla ora", una responsabilita' diversa da
+  "chi e' autorizzato", mai state confuse in un solo tipo). Tre dataclass + `validate_*()` nello
+  stesso stile di `core/action_contracts.py` (F1.1.2, che questo modulo rispecchia
+  deliberatamente): `DeviceStatus` (`pairing_required`/`active`/`revoked` - tre soli valori, non
+  un'enumerazione libera, stesso principio di `EFFECT_CLASSES`), `DeviceIdentity` (device_id,
+  name, status, created_at, last_seen_at), `DeviceCredential` (device_id, token, issued_at,
+  expires_at, revoked_at - `is_valid()` falso se revocata O scaduta, mai un booleano "expired"
+  separato che potrebbe disallinearsi dall'orologio), `PairingChallenge` (challenge_id, created_
+  at, expires_at, used - `is_usable()` stesso schema di `UndoDescriptor.is_usable()` gia'
+  esistente: una challenge consumata o scaduta non torna mai utilizzabile, la difesa contro il
+  replay richiesto dalla specifica). Solo contratti puri, nessuno storage/collegamento ancora -
+  stesso principio "prima il contratto, poi l'adozione" di F1.1.2. Nuovi 31 test in
+  `tests/test_device_identity.py`. Prova: 2.625/2.625 test, ruff/mypy verdi (nuovo file aggiunto
+  al set selettivo mypy, 81 file).
 - `F1.4.2` (prima fetta - identita' Windows/dispositivo) — 13/09/2026: "distinguere identita'
   Windows, profilo Jake, dispositivo e speaker profile". Investigato PRIMA di scrivere codice
   (non assunto dal testo della roadmap): "profilo Jake" non e' un concetto definito da nessuna
@@ -4905,7 +4975,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 15/09/2026. Sessione lunga con 88 incrementi completati e verificati (PR #28-#114), la
+Aggiornato 15/09/2026. Sessione lunga con 89 incrementi completati e verificati (PR #28-#115), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
