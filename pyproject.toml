@@ -20,6 +20,7 @@ files = [
     "core/event_bus.py",
     "core/device_registry.py",
     "core/device_identity.py",
+    "core/device_credential_store.py",
     "core/hud_protocol.py",
     "core/risk.py",
     "core/logger.py",
