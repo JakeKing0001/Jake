@@ -2038,8 +2038,12 @@ Criterio di uscita: un plugin ostile non legge file, rete o processi non dichiar
   kernel); `F1.6.4` **chiuso** (VALUTAZIONE, non implementazione - vedi sotto: AppContainer
   richiederebbe bindings `ctypes` scritti da zero, `pywin32` non lo copre affatto; raccomandazione
   di non procedere ora, con un percorso alternativo piu' semplice suggerito per F1.6.6); `F1.6.8`
-  **chiuso** (quarantena per violazioni ripetute, vedi sotto); `F1.6.5`-`F1.6.6` restano aperti;
-  `F1.6.7` **chiuso** (serializzazione input/output, vero per costruzione con il protocollo a
+  **chiuso** (quarantena per violazioni ripetute, vedi sotto); `F1.6.5` **chiuso** (gate a livello
+  APPLICATIVO su `builtins.open`/`os.open`, esplicitamente NON garantito dal kernel - dopo
+  un'indagine su un token ristretto via `CreateRestrictedToken` che ha incontrato un problema
+  Windows irrisolto, **decisione esplicita dell'utente** di procedere comunque con la versione
+  applicativa, dichiarata onestamente come tale, vedi sotto); `F1.6.6` resta aperto; `F1.6.7`
+  **chiuso** (serializzazione input/output, vero per costruzione con il protocollo a
   righe JSON - un processo separato non puo' condividere oggetti Python live con Jake - e ora
   anche con un test avversariale dedicato, vedi sotto). **Il collegamento vero e' ora fatto**:
   `SkillRegistry.execute()` instrada davvero una skill forgiata verso il worker sandboxato invece
@@ -2256,6 +2260,51 @@ Criterio di uscita: un plugin ostile non legge file, rete o processi non dichiar
   `invoke_timeout_seconds` lato Python, gia' presente ma non imposta dal kernel). Prova:
   2.510/2.510 test, ruff/mypy verdi su `core/sandboxed_skill_worker.py`/
   `tests/test_sandboxed_skill_worker.py`.
+- `F1.6.5` (gate applicativo su percorsi file) — 15/09/2026: "montare soltanto directory
+  dichiarate nel manifest". Indagine dedicata PRIMA di scrivere codice, per non ripetere il
+  destino di `F1.6.4` (AppContainer, gia' scartato): un vero confine imposto dal KERNEL
+  richiederebbe AppContainer (gia' escluso - `pywin32` non espone affatto `CreateAppContainerProfile`)
+  o un token ristretto via `CreateRestrictedToken`. Diverso da AppContainer: `pywin32` ESPONE
+  `CreateRestrictedToken` per davvero, verificato costruendo un token ristretto vero - ma
+  `CreateProcessAsUser` con quel token fallisce con `ERROR_PRIVILEGE_NOT_HELD` (1314), un problema
+  Windows che avrebbe richiesto tempo indefinito da investigare senza garanzia di successo (non un
+  vicolo cieco dimostrato come AppContainer, ma nemmeno una via nota e delimitata). Presentato
+  questo all'utente con tre strade (investire altro tempo nel token ristretto, lasciare la voce
+  aperta, o costruire un gate applicativo dichiarato onestamente come tale) - **decisione esplicita
+  dell'utente**: procedere con il gate applicativo. Le scritture erano gia' in gran parte contenute
+  da Integrita' Low (nulla sul filesystem concede scrittura Low per default): il buco reale che
+  resta e' sulle LETTURE, senza alcuna restrizione oltre ai permessi NTFS gia' concessi
+  all'account che esegue Jake. Implementato in `core/forge_worker.py` (non nel chiamante - il
+  worker e' gia' un processo separato, nessuna nuova plumbing tra processi necessaria): un plugin
+  puo' dichiarare `MANIFEST = {"allowed_paths": [...]}` a livello di modulo; `builtins.open`/
+  `os.open` vengono sostituiti con versioni che controllano il percorso richiesto contro
+  `_active_allowed_paths` (impostato da `main()` subito prima di OGNI `skill.execute()`, in base al
+  manifest dell'intent che sta per girare, e svuotato subito dopo in un `finally` - mai lasciato
+  "aperto" tra una chiamata e l'altra o ereditato da una skill diversa che condivide lo stesso
+  worker). Nega per default: nessun `MANIFEST` dichiarato significa NESSUN accesso a file durante
+  `execute()`. Il gate si installa SOLO dopo che `_load_skills()` ha gia' finito di caricare tutti
+  i plugin - il caricamento del file .py stesso (che usa `open()` per leggersi) resta libero,
+  cosi' come qualunque lettura che Jake/Python debba fare per funzionare. Limite dichiarato
+  ESPLICITAMENTE, non implicito: e' un controllo A LIVELLO APPLICATIVO, non imposto dal kernel come
+  Integrita' Low/Job Object - una skill forgiata e' codice Python arbitrario nello STESSO processo,
+  quindi potrebbe in teoria aggirarlo chiamando `ctypes`/una syscall diretta/un sottoprocesso
+  esterno (`cmd /c type`); ferma un accesso non dichiarato fatto con le API Python normali
+  (`open()`, e per estensione `pathlib.Path.open()`/`read_text()`/`write_text()`, che delegano a
+  `io.open` - lo stesso oggetto di `builtins.open` in CPython), non un attacco deliberato e
+  sofisticato. Verificato con un worker VERO spawnato (non solo in-process): un percorso dentro il
+  manifest si legge, uno fuori viene negato con `PermissionError`, `integrity_restricted=True`
+  confermato. **Insidia scoperta e corretta prima di committare**: i test esistenti di
+  `tests/test_forge_worker.py` chiamano `main()` IN PROCESSO con questa stessa suite (non in un
+  sottoprocesso vero) - senza ripristinare esplicitamente `builtins.open`/`os.open` dopo ogni
+  chiamata, il gate sarebbe rimasto installato per DAVVERO sul processo di test, rompendo
+  silenziosamente ogni `open()` successivo in test completamente estranei eseguiti dopo (scoperto
+  rileggendo `_run_worker()` prima di aggiungere nuovi test, non dalla suite che fallisce). Corretto
+  avvolgendo ogni chiamata a `main()` in un `try/finally` che ripristina `forge_worker._real_open`/
+  `_real_os_open`. Aggiunti 5 nuovi test in
+  `tests/test_forge_worker.py::ManifestPathGateTests` (nessun manifest nega tutto, un percorso
+  dentro il manifest e' concesso, uno fuori e' negato, due skill nello stesso worker non si
+  scambiano il manifest a vicenda, il caricamento del plugin non e' mai bloccato). Prova:
+  2.516/2.516 test, ruff/mypy verdi su `core/forge_worker.py`/`tests/test_forge_worker.py`.
 - `F1.6.7` (chiusura - test avversariale) — 14/09/2026: "serializzare input/output; nessun oggetto
   core condiviso col plugin" era gia' vero per costruzione (protocollo a righe JSON su pipe tra
   due processi separati - non c'e' modo di condividere un oggetto Python live attraverso quel
@@ -4258,7 +4307,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 15/09/2026. Sessione lunga con 69 incrementi completati e verificati (PR #28-#96), la
+Aggiornato 15/09/2026. Sessione lunga con 70 incrementi completati e verificati (PR #28-#97), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -4436,16 +4485,26 @@ lo era davvero: i tre chokepoint costruiscono gia' `ActionError`, i 35 codici be
 migrati, e l'unico pezzo dichiarato ancora aperto - `effect_class`/`preconditions`/
 `expected_effect` - e' informazione che il codice stesso rifiuta di inventare senza una decisione
 di prodotto skill per skill; **decisione esplicita dell'utente** di chiudere la voce cosi' com'e'
-invece di forzare quel giudizio senza una richiesta reale dietro). Il resto:
+invece di forzare quel giudizio senza una richiesta reale dietro), e `F1.6.5` chiusura - gate
+applicativo su percorsi file (indagine su un token ristretto via `CreateRestrictedToken` -
+`pywin32` LO espone, a differenza di AppContainer, ma `CreateProcessAsUser` con quel token fallisce
+con `ERROR_PRIVILEGE_NOT_HELD`, un problema Windows non risolto senza tempo indefinito da
+investire; **decisione esplicita dell'utente** di procedere comunque con un gate a livello
+applicativo su `builtins.open`/`os.open` in `core/forge_worker.py`, dichiarato onestamente come
+NON kernel-enforced - una skill forgiata e' codice nello stesso processo, potrebbe in teoria
+aggirarlo con `ctypes`/un sottoprocesso esterno; verificato con un worker VERO spawnato, non solo
+in-process; insidia scoperta e corretta prima di committare - i test esistenti chiamavano `main()`
+IN PROCESSO con la suite stessa, lasciando il gate installato per davvero sul processo di test
+senza un ripristino esplicito). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.511/2.511 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.516/2.516 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
 invariati, nessuno dei due coperto da "mypy selettivo" in CI - 80 file nella lista selettiva,
-invariata: nessun file nuovo in questo incremento). `G1` resta aperto.
+invariata: `core/forge_worker.py` era gia' presente). `G1` resta aperto.
 
 Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
 sessione (`sys.setswitchinterval()` abbassato + `threading.Barrier`, senza altro aiuto) NON
