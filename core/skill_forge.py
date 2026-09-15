@@ -419,6 +419,11 @@ class SkillForge:
         if best is None or best_score == 0:
             return None
         path = self.plugins_dir / best["file"]
+        # F1.3 (execution_safety.INTENT_SAFETY_REGISTRY, verificatore per DELETE_CREATED_SKILL):
+        # il percorso completo va nel risultato PRIMA di eliminare il file, cosi' un verificatore
+        # indipendente (Path(data["path"]).exists()) puo' controllare per davvero che il file sia
+        # sparito - "file" da solo (il nome, senza cartella) non basta a ricostruirlo altrove.
+        best = {**best, "path": str(path)}
         path.unlink(missing_ok=True)
         if best["intent"] and hasattr(self.registry, "unregister_skill"):
             self.registry.unregister_skill(best["intent"])

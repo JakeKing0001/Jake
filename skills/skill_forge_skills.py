@@ -1,4 +1,9 @@
-"""Skill che espongono la fucina (v3.0): creare, elencare, eliminare capacita' auto-generate."""
+"""Skill che espongono la fucina (v3.0): creare, elencare, eliminare capacita' auto-generate.
+
+F1.3 (execution_safety.INTENT_SAFETY_REGISTRY, verificatore per CREATE_SKILL/DELETE_CREATED_
+SKILL): "path" in aggiunta a "file" (solo il nome, non basta a ricostruire il percorso completo
+altrove - plugins_dir e' iniettabile, non un valore fisso da poter assumere in un verificatore
+indipendente) - vedi core/execution_safety.py."""
 from core.skill_forge import ForgeError
 from core.skill_result import SkillResult
 
@@ -30,7 +35,7 @@ class CreateSkillSkill:
                 return SkillResult(success=False, data={"message": str(exc)}, error="FORGE_FAILED")
             return SkillResult(success=True, data={
                 "intent": draft.intent, "description": draft.description,
-                "examples": draft.examples, "file": path.name,
+                "examples": draft.examples, "file": path.name, "path": str(path),
             })
 
         try:
