@@ -7,14 +7,17 @@ la nota in tests/__init__.py): usa SkillRegistry.__new__ per un oggetto "spoglio
 attributi che register_skill() legge (skills, logger), stesso approccio gia' usato per JakeCore
 in tests/test_jake_core_permissions.py."""
 import os
+import shutil
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from core.policy_engine import PolicyEngine
+from core.resource_lock import ResourceLockManager
 from core.sandboxed_skill_worker import SandboxedSkillWorker
 from core.skill_registry import SkillRegistry
 from core.skill_result import SkillResult
@@ -43,6 +46,7 @@ def _bare_registry(skills: dict = None) -> SkillRegistry:
     registry._sandbox_worker = None
     registry._plugin_violation_counts = {}  # F1.6.8: letto da _execute_forged()/_record_plugin_violation()
     registry._quarantined_plugins = set()
+    registry._resource_locks = ResourceLockManager()  # F1.8.1: letto da execute() per le 4 mutazioni filesystem
     return registry
 
 
@@ -183,6 +187,152 @@ class PolicyGateTests(unittest.TestCase):
 
         self.assertIsNone(registry.execute("NON_ESISTE", {}))
         self.assertIsNone(registry.execute("NON_ESISTE", {}, policy_engine=PolicyEngine()))
+
+
+class FilesystemMutationResourceLockTests(unittest.TestCase):
+    """F1.8.1 (ultimo pezzo, "una coda per azioni concorrenti"): buco reale riprodotto
+    empiricamente PRIMA di questo fix (due thread veri, non ipotizzato) - le quattro skill di
+    mutazione filesystem (stesso gruppo di F1.2.2) fanno tutte un controllo-poi-agisci non
+    atomico. Due MOVE_PATH concorrenti, sorgenti diverse ma stesso NOME file verso la STESSA
+    cartella di destinazione, superavano ENTRAMBI il controllo "il file di destinazione non
+    esiste ancora" prima che uno dei due lo creasse davvero: entrambi riportavano `success=True`,
+    ma uno dei due file spariva silenziosamente sovrascritto dall'altro, senza alcun
+    `ALREADY_EXISTS` ne' altro errore. Ora serializzato per resource key
+    (`core/resource_lock.py::ResourceLockManager`, il meccanismo gia' costruito e testato in
+    isolamento nella fase 7 del piano multi-device di F1.4 ma mai collegato prima d'ora a un
+    chokepoint di produzione reale)."""
+
+    def setUp(self):
+        self.tmp_dir = Path(tempfile.mkdtemp(prefix="jake_resource_lock_test_"))
+        self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
+
+    def test_two_concurrent_move_path_to_the_same_destination_never_lose_a_file(self):
+        from skills.move_path import MovePathSkill
+
+        source_a = self.tmp_dir / "a.txt"
+        source_a.write_text("contenuto A")
+        source_b_dir = self.tmp_dir / "sub"
+        source_b_dir.mkdir()
+        source_b = source_b_dir / "a.txt"  # stesso NOME file di source_a, cartella diversa
+        source_b.write_text("contenuto B")
+        dest_dir = self.tmp_dir / "dest"
+        dest_dir.mkdir()
+
+        registry = _bare_registry({"MOVE_PATH": MovePathSkill()})
+        policy_engine = PolicyEngine()
+        start_barrier = threading.Barrier(2)
+        real_move = shutil.move
+
+        def slow_move(src, dst):
+            # Tiene il lock impegnato abbastanza a lungo da forzare DAVVERO l'altro thread ad
+            # attendere sul lock (non solo a "vincere per fortuna" dello scheduler): la prova che
+            # serve non e' che i due thread partano insieme, ma che il secondo resti bloccato
+            # finche' il primo non ha finito l'INTERA sequenza controllo+azione.
+            time.sleep(0.1)
+            return real_move(src, dst)
+
+        results: list[SkillResult] = []
+        results_lock = threading.Lock()
+
+        def _move(source: Path):
+            start_barrier.wait(timeout=5)
+            result = registry.execute(
+                "MOVE_PATH", {"path": str(source), "destination": str(dest_dir), "confirmed": True},
+                policy_engine=policy_engine,
+            )
+            with results_lock:
+                results.append(result)
+
+        threads = [threading.Thread(target=_move, args=(source,)) for source in (source_a, source_b)]
+        with mock.patch("shutil.move", slow_move):
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=5)
+
+        successes = [r for r in results if r.success]
+        failures = [r for r in results if not r.success]
+        self.assertEqual(len(successes), 1, "solo UNA delle due mosse concorrenti deve riuscire, mai entrambe")
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(
+            failures[0].error, "ALREADY_EXISTS",
+            "il secondo tentativo deve fallire onestamente (il lock lo fa ripartire dopo il primo), non sovrascrivere in silenzio",
+        )
+        surviving_sources = [path for path in (source_a, source_b) if path.exists()]
+        self.assertEqual(len(surviving_sources), 1, "il sorgente della mossa fallita non deve mai sparire")
+        self.assertEqual((dest_dir / "a.txt").read_text(), "contenuto A" if surviving_sources[0] == source_b else "contenuto B")
+
+    def test_resource_lock_keys_are_empty_for_non_filesystem_intents(self):
+        registry = _bare_registry()
+        self.assertEqual(registry._resource_lock_keys("ADD_NOTE", {"text": "x"}), ())
+        self.assertEqual(registry._resource_lock_keys("CREATE_PATH", None), ())
+        self.assertEqual(registry._resource_lock_keys("CREATE_PATH", {}), ())
+
+    def test_resource_lock_keys_normalize_case_and_resolve_relative_paths(self):
+        """Due grafie diverse dello STESSO percorso (case diverso su Windows, o un percorso
+        relativo/assoluto equivalente) devono produrre la STESSA resource key - altrimenti il
+        lock non serializzerebbe davvero le due chiamate."""
+        registry = _bare_registry()
+        target = self.tmp_dir / "File.txt"
+
+        keys_lower = registry._resource_lock_keys("DELETE_PATH", {"path": str(target).lower()})
+        keys_upper = registry._resource_lock_keys("DELETE_PATH", {"path": str(target).upper()})
+
+        self.assertEqual(keys_lower, keys_upper)
+        self.assertEqual(len(keys_lower), 1)
+
+    def test_resource_lock_keys_for_move_path_cover_both_source_and_destination(self):
+        registry = _bare_registry()
+        keys = registry._resource_lock_keys(
+            "MOVE_PATH", {"path": str(self.tmp_dir / "a.txt"), "destination": str(self.tmp_dir / "dest")},
+        )
+        self.assertEqual(len(keys), 2)
+
+    def test_an_unrelated_resource_key_is_never_blocked_by_a_slow_filesystem_mutation(self):
+        """Il lock e' per RESOURCE KEY, non un lock unico globale sul filesystem: un MOVE_PATH
+        lento su una cartella non deve mai bloccare un CREATE_PATH concorrente su una cartella
+        completamente indipendente."""
+        from skills.create_path import CreatePathSkill
+        from skills.move_path import MovePathSkill
+
+        source = self.tmp_dir / "lento.txt"
+        source.write_text("x")
+        slow_dest = self.tmp_dir / "slow_dest"
+        slow_dest.mkdir()
+        unrelated_new_file = self.tmp_dir / "unrelated" / "nuovo.txt"
+        unrelated_new_file.parent.mkdir()
+
+        registry = _bare_registry({"MOVE_PATH": MovePathSkill(), "CREATE_PATH": CreatePathSkill()})
+        policy_engine = PolicyEngine()
+        started_slow_move = threading.Event()
+        release_slow_move = threading.Event()
+        real_move = shutil.move
+
+        def slow_move(src, dst):
+            started_slow_move.set()
+            release_slow_move.wait(timeout=5)
+            return real_move(src, dst)
+
+        create_result: list[SkillResult] = []
+
+        def _slow_move_thread():
+            with mock.patch("shutil.move", slow_move):
+                registry.execute(
+                    "MOVE_PATH", {"path": str(source), "destination": str(slow_dest), "confirmed": True},
+                    policy_engine=policy_engine,
+                )
+
+        move_thread = threading.Thread(target=_slow_move_thread)
+        move_thread.start()
+        self.assertTrue(started_slow_move.wait(timeout=5), "il MOVE_PATH lento non e' mai partito")
+
+        create_result.append(registry.execute(
+            "CREATE_PATH", {"path": str(unrelated_new_file)}, policy_engine=policy_engine,
+        ))
+        release_slow_move.set()
+        move_thread.join(timeout=5)
+
+        self.assertTrue(create_result[0].success, "una risorsa indipendente non deve mai attendere il lock di un'altra")
 
 
 class ForgedSkillSandboxWiringTests(unittest.TestCase):

@@ -23,10 +23,13 @@ from core.reminder_manager import ReminderManager
 from core.todo_manager import TodoManager
 from core.risk import risk_of
 from core.logger import get_logger
+from core.resource_lock import ResourceLockManager
 from core.sandboxed_skill_worker import SandboxedSkillWorker
 from core.skill_result import SkillResult
 from copy import deepcopy
 from pathlib import Path
+import contextlib
+import os
 
 
 class SkillRegistry:
@@ -62,6 +65,9 @@ class SkillRegistry:
         self.trigger_manager = TriggerManager(self.memory_manager, self.workflow_manager)
         self.reminder_manager = reminder_manager or ReminderManager()
         self.todo_manager = TodoManager()
+        # F1.8.1 (ultimo pezzo, "una coda per azioni concorrenti"): vedi _resource_lock_keys() più
+        # sotto per quali intent lo usano davvero e perché.
+        self._resource_locks = ResourceLockManager()
 
         # Client Ollama condiviso (v3.0: 127.0.0.1, keep_alive lungo) e rubrica.
         self.ollama_client = OllamaClient()
@@ -206,6 +212,14 @@ class SkillRegistry:
 
     PATH_PARAMETERS = ("path", "destination")
 
+    # F1.8.1 (ultimo pezzo, "una coda per azioni concorrenti"): le quattro skill di mutazione
+    # filesystem gia' raggruppate insieme per F1.2.2 (stessa capability, stessi due parametri
+    # PATH_PARAMETERS) condividono tutte un controllo-poi-agisci non atomico (`target.exists()`
+    # poi `mkdir`/`rename`/`shutil.move`/`unlink` alcune righe piu' sotto, MAI sotto lock) - vedi
+    # _resource_lock_keys() sotto per il buco reale riprodotto empiricamente (non ipotizzato) e il
+    # perche' del limite dichiarato sul parametro "destination".
+    _FILESYSTEM_MUTATION_INTENTS = frozenset({"CREATE_PATH", "RENAME_PATH", "MOVE_PATH", "DELETE_PATH"})
+
     def unregister_skill(self, intent: str) -> bool:
         return self.skills.pop(intent, None) is not None
 
@@ -254,10 +268,71 @@ class SkillRegistry:
         # _forged_intents, e il docstring del modulo core/sandboxed_skill_worker.py per il
         # perche' (un Job Object/l'integrita' Low si applicano a un PROCESSO, non a una singola
         # chiamata dentro il processo di Jake).
+        lock_keys = self._resource_lock_keys(intent, parameters)
+
         if intent in self._forged_intents:
+            if lock_keys:
+                with self._acquire_all_writes(lock_keys):
+                    return self._execute_forged(intent, parameters or {})
             return self._execute_forged(intent, parameters or {})
 
+        if lock_keys:
+            with self._acquire_all_writes(lock_keys):
+                return skill.execute(parameters)
         return skill.execute(parameters)
+
+    def _resource_lock_keys(self, intent: str, parameters: dict | None) -> tuple[str, ...]:
+        """Le resource key da serializzare per QUESTA chiamata - vuoto per ogni intent che non è
+        una delle quattro mutazioni filesystem (nessun cambio di comportamento per gli altri ~200
+        intent, lock creati pigramente solo quando davvero richiesti).
+
+        Buco reale riprodotto empiricamente prima di scrivere questo fix (due thread veri, `Path.
+        exists()` rallentato ad arte nella finestra esatta tra il controllo e l'azione, stesso
+        principio "mutare esattamente nel punto giusto" già usato altrove in questa sessione): due
+        `MOVE_PATH` concorrenti con sorgenti diverse ma stesso nome file verso la STESSA cartella
+        di destinazione superano ENTRAMBI il controllo "il file di destinazione non esiste ancora"
+        prima che uno dei due lo crei - risultato, ENTRAMBI riportano `success=True`, ma uno dei
+        due file sparisce silenziosamente sovrascritto dall'altro, senza alcun `ALREADY_EXISTS` e
+        senza errore di sorta. Lock per RESOURCE KEY (non un lock unico globale sul filesystem,
+        che serializzerebbe anche mutazioni su percorsi completamente indipendenti) tramite
+        `core/resource_lock.py::ResourceLockManager`, il meccanismo già costruito e testato in
+        isolamento (fase 7 del piano multi-device, F1.4) ma mai ancora collegato a un chokepoint
+        di produzione reale prima di questo incremento.
+
+        Stesso identico limite già accettato per la capability filesystem di F1.2.2
+        (`PolicyEngine._filesystem_capability_allows`): "destination" è la CARTELLA indicata dal
+        chiamante, non il percorso finale con il nome del file già appeso (calcolarlo
+        duplicherebbe la logica interna della skill, es. `destination_dir / source.name` di
+        `MovePathSkill`) - una serializzazione dell'intera cartella di destinazione, più larga del
+        necessario ma mai più stretta, quindi comunque corretta per il buco sopra. Stesso limite
+        anche per `RENAME_PATH`: `new_name` non è tra `PATH_PARAMETERS`, quindi due `RENAME_PATH`
+        con `path` diversi ma stesso `new_name` nella stessa cartella non vengono serializzati tra
+        loro - un residuo dichiarato apertamente, non nascosto, della stessa forma già accettata
+        altrove in questa sessione (es. `allowed_apps`/`allowed_contacts` sulla stringa grezza)."""
+        if intent not in self._FILESYSTEM_MUTATION_INTENTS or not parameters:
+            return ()
+        keys = []
+        for name in self.PATH_PARAMETERS:
+            value = parameters.get(name)
+            if not isinstance(value, str) or not value.strip():
+                continue
+            try:
+                resolved = Path(value).expanduser().resolve()
+            except (OSError, ValueError):
+                continue
+            keys.append(f"filesystem:{os.path.normcase(str(resolved))}")
+        return tuple(sorted(set(keys)))
+
+    @contextlib.contextmanager
+    def _acquire_all_writes(self, resource_keys: tuple[str, ...]):
+        """Acquisisce più lock in ordine ORDINATO (già garantito da `_resource_lock_keys`, che
+        restituisce `sorted(set(...))`) per evitare il classico deadlock che si otterrebbe se due
+        chiamate concorrenti (es. un MOVE_PATH e il suo inverso) bloccassero le stesse due
+        resource key in ordine opposto."""
+        with contextlib.ExitStack() as stack:
+            for key in resource_keys:
+                stack.enter_context(self._resource_locks.acquire_write(key))
+            yield
 
     def _execute_forged(self, intent: str, parameters: dict) -> SkillResult:
         plugin_path = self._forged_intents.get(intent)
