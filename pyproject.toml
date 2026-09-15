@@ -22,6 +22,7 @@ files = [
     "core/device_identity.py",
     "core/device_credential_store.py",
     "core/pairing_service.py",
+    "core/resource_lock.py",
     "core/hud_protocol.py",
     "core/risk.py",
     "core/logger.py",
