@@ -1536,10 +1536,10 @@ reversibili dispone di undo testato.
   resta bloccato sulla stessa decisione di dipendenza per un client Home Assistant iniettabile in
   `execution_safety.py`; non ancora browser); `F1.3.4`/`F1.3.5` restano aperti, mai affrontati
   (infrastruttura nuova sostanziale, non una fetta stretta collegabile a qualcosa gia' esistente);
-  `INTENT_SAFETY_REGISTRY` esteso il 15/09/2026 a EXTRACT_ARCHIVE/CREATE_SKILL/DELETE_CREATED_SKILL
-  e poi a RESTART_EXPLORER (vedi sotto, per il secondo criterio del Gate G1 - RESTART_EXPLORER
-  aveva anche il quarto buco "successo dichiarato senza controllo" gia' trovato tre volte in
-  questa sessione, corretto direttamente nella skill) - gli altri 14 intent DESTRUCTIVE/ADMIN
+  `INTENT_SAFETY_REGISTRY` esteso il 15/09/2026 a EXTRACT_ARCHIVE/CREATE_SKILL/DELETE_CREATED_SKILL,
+  RESTART_EXPLORER (aveva anche il quarto buco "successo dichiarato senza controllo" gia' trovato
+  tre volte in questa sessione, corretto direttamente nella skill) e infine EMPTY_RECYCLE_BIN
+  (vedi sotto, per il secondo criterio del Gate G1) - gli altri 13 intent DESTRUCTIVE/ADMIN
   restano fuori con motivazione dichiarata (store interno gia' auto-verificato via cursor.rowcount,
   o natura non verificabile come SYSTEM_POWER).
 - `F1.3.1` — 11/09/2026: `core/execution_safety.py` aveva tre strutture parallele da tenere
@@ -1868,6 +1868,37 @@ reversibili dispone di undo testato.
   test, ruff verde, mypy verde sui file selettivi (`skills/system_maintenance.py` non e' nella
   lista - stesso errore preesistente e non correlato di `skills/skill_forge_skills.py` sopra,
   verificato individualmente).
+- `F1.3.1` (estensione - EMPTY_RECYCLE_BIN) — 15/09/2026: ultimo candidato rimasto dalla voce
+  precedente. Diverso dai quattro verificatori appena aggiunti: qui non c'era nessun buco
+  "dichiara successo senza controllare l'effetto" da correggere nella skill -
+  `SHEmptyRecycleBinW` (`skills/recycle_bin.py::EmptyRecycleBinSkill`) e' documentata come
+  SINCRONA (a differenza di `PostMessage`/`subprocess.Popen`/una chiamata HTTP fire-and-forget),
+  e la skill gia' distingue correttamente il codice "cestino gia' vuoto" da un vero fallimento.
+  Aggiunto comunque un SECONDO controllo indipendente in `INTENT_SAFETY_REGISTRY`
+  (`_verify_recycle_bin_empty`), stesso principio di `_verify_process_terminated`: una seconda
+  chiamata nativa di sola lettura (`SHQueryRecycleBinW`, mai `SHEmptyRecycleBinW` che svuoterebbe
+  di nuovo) legge `i64NumItems` dalla struct `SHQUERYRBINFO` e conferma che sia davvero zero.
+  Usa `ctypes.pointer()` invece di `ctypes.byref()`: serve poter leggere `.contents` dopo la
+  chiamata (`byref()` non e' dereferenziabile in Python, solo passabile a una funzione C) - una
+  scelta di implementazione dichiaratamente per la testabilita', non solo stilistica. Un HRESULT
+  diverso da S_OK (query fallita) conta come NON verificato (fail-closed), mai come "assumo vada
+  bene". Nuovi 3 test in `tests/test_execution_safety.py::EmptyRecycleBinVerificationTests`
+  (mockando `SHQueryRecycleBinW` con un `side_effect` che scrive nella struct puntata, incluso il
+  caso HRESULT-fallito), tutti verificati FALLIRE contro il codice precedente. Aggiornato anche
+  `IsSafeToAutoRetryTests::test_destructive_intent_outside_the_registry_is_not_safe_to_retry`, che
+  usava proprio EMPTY_RECYCLE_BIN come esempio di intent DESTRUCTIVE fuori registro - sostituito
+  con CLEAR_TEMP_FILES (ancora fuori, deliberatamente: verificare "%TEMP% e' vuoto" darebbe falsi
+  negativi per file temporanei ricreati da processi in esecuzione nel frattempo, non un controllo
+  affidabile come gli altri). Con questo, il secondo criterio del Gate G1 copre 11 dei 20 intent
+  DESTRUCTIVE/ADMIN (piu' CLOSE_WINDOW) - i restanti 9 (RUN_COMMAND/RUN_PYTHON_SCRIPT/
+  SYSTEM_POWER/SET_POWER_PLAN/CLOSE_APP/CLEAR_TEMP_FILES/PURGE_OLD_HISTORY, oltre ai sei store
+  interni gia' scartati - CLOSE_APP gia' scartato in F1.3.2 per complessita' della busta dati)
+  restano fuori scope: nessun candidato rimasto sembra avere la stessa fetta stretta e
+  meccanica degli otto appena chiusi, ciascuno richiederebbe un design di prodotto a se' (es. cosa
+  significa "successo" per RUN_COMMAND, un comando qualsiasi) o e' intrinsecamente non
+  verificabile (SYSTEM_POWER: il sistema e' spento/in sospensione quando si controllerebbe).
+  Prova: 2.583/2.583 test, ruff/mypy verdi su tutti i file toccati (entrambi gia' nel set
+  selettivo).
 
 ### F1.4 — Identità, autenticazione e segreti
 
@@ -4778,7 +4809,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 15/09/2026. Sessione lunga con 84 incrementi completati e verificati (PR #28-#110), la
+Aggiornato 15/09/2026. Sessione lunga con 85 incrementi completati e verificati (PR #28-#111), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -5117,12 +5148,14 @@ piccole senza un criterio. Ad oggi: il quinto criterio (sandbox) ha le fondament
 affatto, servirebbero bindings ctypes da zero) - manifest di directory (F1.6.5) e negazione rete
 (F1.6.6, con un'alternativa piu' semplice suggerita - una regola del Windows Firewall scoped al
 worker, invece di AppContainer) restano aperti; il secondo (prova e audit per le azioni ad alto
-impatto) copre da 15/09/2026 10 dei 20 intent DESTRUCTIVE/ADMIN (CREATE_PATH/RENAME_PATH/MOVE_PATH/
+impatto) copre da 15/09/2026 11 dei 20 intent DESTRUCTIVE/ADMIN (CREATE_PATH/RENAME_PATH/MOVE_PATH/
 DELETE_PATH/KILL_PROCESS_BY_PORT/EXTRACT_ARCHIVE/CREATE_SKILL/DELETE_CREATED_SKILL/
-RESTART_EXPLORER, piu' CLOSE_WINDOW che non e' DESTRUCTIVE/ADMIN ma ha comunque un verificatore) -
-vedi le voci datate in F1.3 sopra per quali degli altri 10 sono stati scartati con motivazione
-(store interni gia' auto-verificati) e quali restano da investigare (EMPTY_RECYCLE_BIN, un
-verificatore via SHQueryRecycleBinW sembra fattibile ma non ancora costruito); il quarto
+RESTART_EXPLORER/EMPTY_RECYCLE_BIN, piu' CLOSE_WINDOW che non e' DESTRUCTIVE/ADMIN ma ha comunque
+un verificatore) - vedi le voci datate in F1.3 sopra per quali dei restanti 9 sono stati scartati
+con motivazione (sei store interni gia' auto-verificati, CLOSE_APP per complessita' della busta
+dati, CLEAR_TEMP_FILES perche' un controllo "e' vuota" darebbe falsi negativi con processi che
+ricreano file nel frattempo, SYSTEM_POWER intrinsecamente non verificabile) - nessun candidato
+rimasto sembra avere la stessa fetta stretta e meccanica degli undici gia' chiusi; il quarto
 (prompt-injection) ha F1.5.1-F1.5.4
 piu' un piccolo corpus mirato multi-sorgente/multilingue (F1.5.6, il significato letterale di
 "corpus" per un attacco dal vivo contro un modello vero resta un esercizio di red-team manuale

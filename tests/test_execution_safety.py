@@ -9,6 +9,7 @@ diverso, un parametro mancante...) verrebbe scoperto. Prima di questi test, MOVE
 RENAME_PATH non avevano MAI un test end-to-end per il proprio rollback
 (core/execution_safety.py, INTENT_SAFETY_REGISTRY): solo CREATE_PATH era verificato, e solo
 passando dall'agente intero (tests/test_agent.py::RollbackAfterFatalErrorTests)."""
+import ctypes
 import shutil
 import tempfile
 import unittest
@@ -388,7 +389,7 @@ class IntentSafetyRegistryConsistencyTests(unittest.TestCase):
             VERIFIABLE_INTENTS,
             {
                 "CREATE_PATH", "RENAME_PATH", "MOVE_PATH", "DELETE_PATH", "KILL_PROCESS_BY_PORT", "CLOSE_WINDOW",
-                "EXTRACT_ARCHIVE", "CREATE_SKILL", "DELETE_CREATED_SKILL", "RESTART_EXPLORER",
+                "EXTRACT_ARCHIVE", "CREATE_SKILL", "DELETE_CREATED_SKILL", "RESTART_EXPLORER", "EMPTY_RECYCLE_BIN",
             },
         )
 
@@ -444,6 +445,43 @@ class RestartExplorerVerificationTests(unittest.TestCase):
             self.assertFalse(verify_effect("RESTART_EXPLORER", {}))
 
 
+class EmptyRecycleBinVerificationTests(unittest.TestCase):
+    """F1.3.2 (Gate G1, secondo criterio): verifica indipendente, con una seconda chiamata a
+    SHQueryRecycleBinW (sola lettura - non SHEmptyRecycleBinW, gia' invocata dalla skill), che
+    il cestino non contenga piu' elementi. Diverso dagli altri tre verificatori: SHEmptyRecycleBinW
+    e' gia' sincrona per contratto documentato, quindi qui non c'e' un buco "dichiara successo
+    senza aspettare" nella skill - solo una seconda prova indipendente in piu'."""
+
+    @staticmethod
+    def _fake_query(num_items: int, hresult: int = 0):
+        def _query(root_path, info_ptr):
+            info_ptr.contents.i64NumItems = num_items
+            return hresult
+        return _query
+
+    def test_recycle_bin_reported_empty_verifies_as_true(self):
+        with unittest.mock.patch.object(
+            ctypes.windll.shell32, "SHQueryRecycleBinW", side_effect=self._fake_query(0),
+        ):
+            self.assertTrue(verify_effect("EMPTY_RECYCLE_BIN", {}))
+
+    def test_recycle_bin_still_containing_items_verifies_as_false(self):
+        """Il caso che, senza questo verificatore, resterebbe invisibile: SHEmptyRecycleBinW ha
+        dichiarato successo ma - per un motivo qualsiasi - il cestino non e' davvero vuoto."""
+        with unittest.mock.patch.object(
+            ctypes.windll.shell32, "SHQueryRecycleBinW", side_effect=self._fake_query(3),
+        ):
+            self.assertFalse(verify_effect("EMPTY_RECYCLE_BIN", {}))
+
+    def test_a_failed_query_verifies_as_false_not_as_an_assumed_success(self):
+        """Fail-closed: un HRESULT diverso da S_OK non deve mai contare come "va bene", stesso
+        principio "negare per default" gia' applicato altrove in questo modulo."""
+        with unittest.mock.patch.object(
+            ctypes.windll.shell32, "SHQueryRecycleBinW", side_effect=self._fake_query(0, hresult=-1),
+        ):
+            self.assertFalse(verify_effect("EMPTY_RECYCLE_BIN", {}))
+
+
 class IsSafeToAutoRetryTests(unittest.TestCase):
     """F1.3.6 ("impedire retry automatico per azioni non idempotenti senza chiave deduplica"):
     solo READ_ONLY e gli intent di INTENT_SAFETY_REGISTRY (naturalmente idempotenti - vedi il
@@ -472,7 +510,7 @@ class IsSafeToAutoRetryTests(unittest.TestCase):
     def test_destructive_intent_outside_the_registry_is_not_safe_to_retry(self):
         from core.execution_safety import is_safe_to_auto_retry
 
-        self.assertFalse(is_safe_to_auto_retry("EMPTY_RECYCLE_BIN"))
+        self.assertFalse(is_safe_to_auto_retry("CLEAR_TEMP_FILES"))
 
 
 class ExecuteWithRetryRespectsIdempotenceTests(unittest.TestCase):
