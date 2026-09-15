@@ -1530,11 +1530,12 @@ Dipende da: F1.1 e F1.2.
 Criterio di uscita: tutte le azioni external/destructive/admin hanno prova; l'80% delle azioni
 reversibili dispone di undo testato.
 
-- Stato: `DOING`; `F1.3.1`, `F1.3.3`, `F1.3.6` e `F1.3.8` chiusi, `F1.3.2` esteso a processi,
+- Stato: `DOING`; `F1.3.1`, `F1.3.3`, `F1.3.6`, `F1.3.7` e `F1.3.8` chiusi, `F1.3.2` esteso a processi,
   finestre E casa (CONTROL_SMART_DEVICE, vedi sotto - la verifica e' dentro la skill stessa, non
   ancora un verificatore INDIPENDENTE in `INTENT_SAFETY_REGISTRY` come per CLOSE_WINDOW, che
   resta bloccato sulla stessa decisione di dipendenza per un client Home Assistant iniettabile in
-  `execution_safety.py`; non ancora browser), resto aperto.
+  `execution_safety.py`; non ancora browser); `F1.3.4`/`F1.3.5` restano aperti, mai affrontati
+  (infrastruttura nuova sostanziale, non una fetta stretta collegabile a qualcosa gia' esistente).
 - `F1.3.1` — 11/09/2026: `core/execution_safety.py` aveva tre strutture parallele da tenere
   sincronizzate a mano - `VERIFIABLE_INTENTS` (insieme), l'if/elif di `verify_effect`,
   `ROLLBACK_HANDLERS` + `ROLLBACK_COMPENSATING_INTENT` (due dizionari) - esattamente il pattern
@@ -1725,6 +1726,39 @@ reversibili dispone di undo testato.
   `tests/test_plan_executor.py::IndependentVerificationTests`, 1 in
   `tests/test_jake_core_misc.py::DefaultNotificationCallbacksTests` (percorso trigger end-to-end).
   Prova: 2.367/2.367 test, ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.3.7` (chiusura) — 15/09/2026: "gestire effetti parziali e rollback parziale con spiegazione
+  leggibile". Investigato PRIMA di scrivere codice: `core/response_formatter.py::
+  format_plan_outcome()` gia' costruisce un messaggio per un piano fermato a meta' ("Piano
+  interrotto dopo N passi completati su M", "fallito: ...", "Ho annullato i passi precedenti per
+  sicurezza: ...") - non riconosciuto finora come la copertura di QUESTA voce.
+
+  **Buco reale trovato indagando, riprodotto per davvero prima di correggere**: `PlanExecutor.
+  _rollback()` tenta di annullare OGNI passo completato, ma un intent SENZA un inverso noto (es.
+  `KILL_PROCESS_BY_PORT`, "terminare un processo non ha un inverso naturale" -
+  `core/execution_safety.py::INTENT_SAFETY_REGISTRY`) o il cui tentativo di rollback fallisce per
+  un altro motivo non entra MAI in `outcome.rolled_back` - `format_plan_outcome()` elencava pero'
+  SOLO quella lista, senza mai dire che un ALTRO effetto, gia' avvenuto per davvero (es. un
+  processo VERAMENTE terminato), restava invece silenziosamente attivo. Costruito uno scenario
+  vero (`CREATE_PATH` + `KILL_PROCESS_BY_PORT` completati, un terzo passo che fallisce): il
+  messaggio prodotto diceva "Ho annullato i passi precedenti per sicurezza: crea il file." - senza
+  UNA parola sul processo terminato, che un utente poteva ragionevolmente credere ripristinato
+  insieme al resto ("i passi precedenti", plurale).
+
+  Corretto aggiungendo una riga simmetrica: `StepOutcome.rolled_back` (gia' impostato da
+  `_rollback()`, nessun nuovo campo necessario) distingue per OGNI passo completato se e' stato
+  DAVVERO annullato o no, senza bisogno di confrontare oggetti - "Questi effetti restano invece
+  attivi, non sono riuscito ad annullarli automaticamente: {elenco}." compare ora accanto alla
+  riga "Ho annullato...", o DA SOLA quando NESSUN passo completato aveva un inverso noto (il caso
+  estremo: `outcome.rolled_back` resta vuoto, ma l'utente deve comunque sapere che gli effetti
+  restano attivi, non solo che il piano si e' fermato). Nessuna riga quando tutto e' stato
+  annullato con successo, o quando nulla era stato completato - comportamento invariato in
+  entrambi i casi. Nuovo `tests/test_response_formatter.py` (nessuna suite dedicata esisteva
+  finora - il modulo era esercitato solo indirettamente, sempre mockato nei test di jake_core.py):
+  6 test, incluso lo scenario esatto del buco riprodotto, il caso estremo "nulla annullabile", e i
+  percorsi gia' corretti (successo completo, pausa per conferma, fallimento immediato) verificati
+  per non aver introdotto rumore. Nessun cambio a `PlanExecutor` (il campo che serviva esisteva
+  gia'). Prova: 2.562/2.562 test, ruff/mypy verdi su `core/response_formatter.py`/
+  `tests/test_response_formatter.py`.
 
 ### F1.4 — Identità, autenticazione e segreti
 
@@ -4557,7 +4591,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 15/09/2026. Sessione lunga con 78 incrementi completati e verificati (PR #28-#104), la
+Aggiornato 15/09/2026. Sessione lunga con 79 incrementi completati e verificati (PR #28-#105), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -4802,15 +4836,23 @@ voce, che aveva gia' scritto il test di bypass mancante, `PolicyGateTests` - mai
 esplicitamente a questa voce ne' incluso nella riga di Stato in cima alla sezione, che non
 menzionava affatto `F1.2.8`; correzione anche di un residuo stale nell'elenco "il resto" qui
 sotto, che menzionava ancora `F1.2.6` - chiuso da giorni - come se fosse ancora aperto). **Con
-questo, l'intera sezione F1.2 (Policy kernel e capability) e' chiusa.** Il resto:
+questo, l'intera sezione F1.2 (Policy kernel e capability) e' chiusa,** e `F1.3.7` ("gestire
+effetti parziali e rollback parziale con spiegazione leggibile") - buco reale trovato indagando,
+riprodotto per davvero: un passo completato ma senza un inverso noto (es. `KILL_PROCESS_BY_PORT`)
+non entra mai in `outcome.rolled_back`, ma `format_plan_outcome()` elencava solo cio' che era
+stato annullato, senza mai dire che un ALTRO effetto gia' avvenuto restava silenziosamente
+attivo - un utente poteva credere "i passi precedenti" (plurale) tutti ripristinati, quando solo
+alcuni lo erano. Corretto con una riga simmetrica ("questi effetti restano invece attivi...") che
+usa `StepOutcome.rolled_back` gia' esistente; nuovo `tests/test_response_formatter.py` (nessuna
+suite dedicata esisteva, il modulo era sempre mockato altrove), 6 test. Il resto:
 `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.556/2.556 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.562/2.562 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
 invariati, nessuno dei due coperto da "mypy selettivo" in CI - 80 file nella lista selettiva,
-invariata: nessun file nuovo in questo incremento). `G1` resta aperto.
+invariata: `core/response_formatter.py` era gia' presente). `G1` resta aperto.
 
 Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
 sessione (`sys.setswitchinterval()` abbassato + `threading.Barrier`, senza altro aiuto) NON
