@@ -52,6 +52,8 @@ sarebbe un lockout vero."""
 import hmac
 import time
 
+from core.auth_provider import AuthProvider, PasskeyProvider, WindowsHelloProvider
+
 
 class AuthGate:
     # F1.4.3: soglia e durata del lockout dopo tentativi falliti consecutivi. Valori di
@@ -62,14 +64,23 @@ class AuthGate:
     MAX_CONSECUTIVE_FAILURES = 5
     LOCKOUT_SECONDS = 60.0
 
-    def __init__(self, passphrase: str | None = None, windows_hello_enabled: bool = False, windows_hello_verify=None):
+    def __init__(
+        self, passphrase: str | None = None, windows_hello_enabled: bool = False, windows_hello_verify=None,
+        passkey_provider: AuthProvider | None = None,
+    ):
         self.passphrase = passphrase.strip() if passphrase else None
         self.windows_hello_enabled = bool(windows_hello_enabled)
         # Iniettabile per i test (vedi core/windows_hello.py sul perche' verify() non deve MAI
         # essere lasciata chiamare l'API vera in un test automatico): di default None, risolto
-        # pigramente alla prima chiamata reale cosi' importare questo modulo non importa mai
-        # winsdk quando Windows Hello e' disattivato (il caso comune).
+        # pigramente alla prima chiamata reale (tramite WindowsHelloProvider, F1.4.4 - vedi
+        # core/auth_provider.py) cosi' importare questo modulo non importa mai winsdk quando
+        # Windows Hello e' disattivato (il caso comune).
         self._windows_hello_verify = windows_hello_verify
+        # F1.4.4: fattore OPZIONALE per operazioni cross-device ad alto impatto (companion/
+        # mobile) - default a PasskeyProvider(), onestamente inerte finche' non esiste un vero
+        # registro di passkey (vedi core/auth_provider.py). Iniettabile per gli stessi motivi di
+        # windows_hello_verify sopra: un test/futuro provider reale non deve mai passare da qui.
+        self.passkey_provider = passkey_provider or PasskeyProvider()
         self._consecutive_failures = 0
         self._locked_until = 0.0
 
@@ -117,7 +128,15 @@ class AuthGate:
         if not self.windows_hello_enabled:
             return False
         if self._windows_hello_verify is None:
-            from core.windows_hello import verify as _real_verify
-
-            self._windows_hello_verify = _real_verify
+            self._windows_hello_verify = WindowsHelloProvider().verify
         return self._windows_hello_verify(reason)
+
+    def verify_with_passkey(self, reason: str) -> bool:
+        """F1.4.4: stesso schema di verify_with_windows_hello sopra, ma per il fattore OPZIONALE
+        "companion/mobile e operazioni cross-device ad alto impatto" - tramite l'adapter
+        AuthProvider (core/auth_provider.py), mai una chiamata diretta a un SDK specifico da
+        questa classe. False se il provider dichiara di non essere disponibile: oggi sempre,
+        finche' PasskeyProvider resta onestamente inerte (vedi il suo docstring)."""
+        if not self.passkey_provider.is_available():
+            return False
+        return self.passkey_provider.verify(reason)

@@ -24,6 +24,7 @@ files = [
     "core/pairing_service.py",
     "core/resource_lock.py",
     "core/task_risk_budget.py",
+    "core/auth_provider.py",
     "core/hud_protocol.py",
     "core/risk.py",
     "core/logger.py",
