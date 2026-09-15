@@ -254,6 +254,7 @@ def _bare_core(**overrides) -> JakeCore:
     core.kill_switch = overrides.get("kill_switch", FakeKillSwitch())
     core.system_advisor = overrides.get("system_advisor", mock.MagicMock())
     core.companion_server = overrides.get("companion_server", mock.MagicMock())
+    core.device_credential_store = overrides.get("device_credential_store", mock.MagicMock())
     core.retriever = overrides.get("retriever", mock.MagicMock())
     # F1.8.4 ("drain limitato"): letti/scritti da answer()/shutdown() - vedi core/jake_core.py.
     core._in_flight_answers = 0
