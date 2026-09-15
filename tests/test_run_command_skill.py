@@ -8,10 +8,15 @@ F1: buco reale trovato e corretto in questa sessione. Un comando che fallisce pe
 (codice di uscita diverso da zero) veniva comunque riportato come success=True - l'utente se ne
 accorgeva leggendo "codice N" nella risposta testuale, ma il campo strutturato result.success,
 di cui si fidano il ledger di audit e la dashboard (successi/fallimenti per skill), mentiva."""
+import os
+import sys
+import tempfile
 import threading
 import time
 import unittest
 from unittest import mock
+
+import psutil
 
 from core.kill_switch import KillSwitch
 from core.response_formatter import format_skill_result
@@ -155,6 +160,68 @@ class KillSwitchCancellationTests(unittest.TestCase):
 
         self.assertEqual(result.error, "TIMEOUT")
         self.assertLess(elapsed, 2.0)
+
+
+class ProcessTreeKillTests(unittest.TestCase):
+    """F1.8.3 (residuo dichiarato, ora chiuso): process.kill() da solo termina solo cmd.exe, non
+    un eventuale NIPOTE che il comando lanciasse (es. un sotto-processo avviato a sua volta dal
+    comando eseguito). Riprodotto per davvero con un vero albero cmd.exe -> parent.py ->
+    child.py (il "nipote" e' child.py, figlio di parent.py, non di cmd.exe): prima della
+    correzione restava vivo (psutil.pid_exists sul suo PID reale, letto da un file marker) anche
+    a lungo dopo che il kill switch aveva gia' fermato cmd.exe. Processi VERI, non mock - e'
+    proprio la propagazione della terminazione a un discendente non diretto a essere la parte
+    interessante da verificare."""
+
+    def _write_process_tree_scripts(self, tmp_dir: str) -> tuple[str, str]:
+        marker_path = os.path.join(tmp_dir, "child_pid.txt")
+        child_script = os.path.join(tmp_dir, "child.py")
+        parent_script = os.path.join(tmp_dir, "parent.py")
+        with open(child_script, "w", encoding="utf-8") as f:
+            f.write(
+                "import os, time\n"
+                f"with open(r'{marker_path}', 'w') as marker:\n"
+                "    marker.write(str(os.getpid()))\n"
+                "time.sleep(30)\n"
+            )
+        with open(parent_script, "w", encoding="utf-8") as f:
+            f.write(
+                "import subprocess, sys, time\n"
+                f"subprocess.Popen([sys.executable, r'{child_script}'])\n"
+                "time.sleep(30)\n"
+            )
+        return parent_script, marker_path
+
+    def test_killing_the_shell_process_also_kills_a_grandchild_it_spawned(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            parent_script, marker_path = self._write_process_tree_scripts(tmp_dir)
+            command = f'"{sys.executable}" "{parent_script}"'
+
+            skill = RunCommandSkill()
+            skill.kill_switch = KillSwitch()
+            result_holder = {}
+
+            def _run():
+                result_holder["result"] = skill.execute({"command": command, "confirmed": True})
+
+            thread = threading.Thread(target=_run)
+            thread.start()
+
+            deadline = time.time() + 10
+            while not os.path.isfile(marker_path) and time.time() < deadline:
+                time.sleep(0.05)
+            self.assertTrue(os.path.isfile(marker_path), "il nipote non ha scritto il proprio PID in tempo")
+            with open(marker_path, encoding="utf-8") as marker:
+                child_pid = int(marker.read().strip())
+            self.assertTrue(psutil.pid_exists(child_pid), "il nipote dovrebbe essere vivo prima del kill switch")
+
+            skill.kill_switch.activate()
+            thread.join(timeout=10)
+
+            self.assertEqual(result_holder["result"].error, "KILLED")
+            deadline = time.time() + 5
+            while psutil.pid_exists(child_pid) and time.time() < deadline:
+                time.sleep(0.05)
+            self.assertFalse(psutil.pid_exists(child_pid), "il nipote e' rimasto vivo dopo il kill switch")
 
 
 if __name__ == "__main__":
