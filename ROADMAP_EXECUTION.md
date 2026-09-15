@@ -2031,11 +2031,11 @@ Dipende da: F1.2 e F1.4.
 
 Criterio di uscita: un plugin ostile non legge file, rete o processi non dichiarati nei test d'attacco.
 
-- Stato: `DOING`; `F1.6.1`/`F1.6.2` chiusi, `F1.6.3` chiuso parzialmente (memoria, tempo CPU e ora
-  anche limite sul numero di processi, vedi sotto; non ancora un vero timeout wall-clock imposto
-  dal Job Object stesso - JOB_OBJECT_LIMIT_JOB_TIME e' tempo CPU consumato, non tempo trascorso:
-  quella difesa resta `invoke_timeout_seconds` lato chiamante, gia' presente ma non imposta dal
-  kernel); `F1.6.4` **chiuso** (VALUTAZIONE, non implementazione - vedi sotto: AppContainer
+- Stato: `DOING`; `F1.6.1`/`F1.6.2` **chiusi**, `F1.6.3` **chiuso** (memoria, tempo CPU, limite sul
+  numero di processi, e ora anche un vero watchdog wall-clock - vedi sotto: Job Object non ha
+  affatto un tipo di limite wall-clock, solo CPU, quindi l'unico modo reale e' un watchdog esterno
+  che termini il processo, non un flag in piu' da aggiungere al Job Object); `F1.6.4` **chiuso**
+  (VALUTAZIONE, non implementazione - vedi sotto: AppContainer
   richiederebbe bindings `ctypes` scritti da zero, `pywin32` non lo copre affatto; raccomandazione
   di non procedere ora, con un percorso alternativo piu' semplice suggerito per F1.6.6); `F1.6.8`
   **chiuso** (quarantena per violazioni ripetute, vedi sotto); `F1.6.5`/`F1.6.6` **chiusi**
@@ -2046,8 +2046,8 @@ Criterio di uscita: un plugin ostile non legge file, rete o processi non dichiar
   applicativa, dichiarata onestamente come tale, vedi sotto); `F1.6.7`
   **chiuso** (serializzazione input/output, vero per costruzione con il protocollo a
   righe JSON - un processo separato non puo' condividere oggetti Python live con Jake - e ora
-  anche con un test avversariale dedicato, vedi sotto). Con questo, l'unico pezzo ancora aperto in
-  tutta la sezione e' il resto di `F1.6.3` (timeout wall-clock, vedi sopra). **Il collegamento
+  anche con un test avversariale dedicato, vedi sotto). Con questo, **l'intera sezione F1.6 e'
+  chiusa**. **Il collegamento
   vero e' ora fatto**:
   `SkillRegistry.execute()` instrada davvero una skill forgiata verso il worker sandboxato invece
   di eseguirla in processo (vedi sotto) - non piu' solo un'infrastruttura inerte.
@@ -2366,6 +2366,51 @@ Criterio di uscita: un plugin ostile non legge file, rete o processi non dichiar
   in-processo per errore fallirebbe qui direttamente, non solo con un pid inspiegabilmente
   uguale. Nessun file di produzione toccato. `F1.6.7` ora **chiuso**. Prova: 2.511/2.511 test,
   ruff/mypy verdi su `tests/test_skill_registry.py`.
+- `F1.6.3` (chiusura - watchdog wall-clock, e un buco reale trovato indagandolo) — 15/09/2026:
+  "aggiungere Job Object per... timeout". Investigato prima di scrivere codice: Job Object su
+  Windows non ha affatto un tipo di limite wall-clock - `JOB_OBJECT_LIMIT_JOB_TIME`/
+  `PerJobUserTimeLimit` (gia' impostato per F1.6.3) e' tempo CPU CONSUMATO, non tempo trascorso,
+  e non esiste un `LimitFlag` equivalente per il tempo trascorso. L'unico modo reale di imporre un
+  timeout wall-clock e' quindi un watchdog ESTERNO che termini il processo dopo N secondi - non
+  un flag in piu' da aggiungere al Job Object, ma un comportamento da costruire lato Python.
+  `invoke_timeout_seconds` esisteva gia' (lato chiamante), ma faceva solo RINUNCIARE il chiamante
+  (`SANDBOX_WORKER_TIMEOUT`) senza mai terminare il worker rimasto indietro.
+
+  **Buco reale trovato indagando, non solo teorico**: riprodotto per davvero che questo lasciava
+  un worker VIVO e ancora in esecuzione dopo un timeout, e che la sua risposta - se arrivava piu'
+  tardi - restava nella coda condivisa (`self._responses`) pronta per essere consumata dalla
+  chiamata SUCCESSIVA a `invoke()`, per un intent COMPLETAMENTE DIVERSO: una skill lenta (3s) con
+  `invoke_timeout_seconds=1` faceva tornare correttamente `SANDBOX_WORKER_TIMEOUT`, ma la chiamata
+  dopo (sullo STESSO oggetto worker) riceveva la risposta VECCHIA della skill lenta -
+  `success=True` con i dati sbagliati, non un errore. Questo contraddiceva anche un'assunzione
+  scritta nella voce `F1.6.8` (quarantena, 14/09/2026): "se un plugin... non rispondeva mai in
+  tempo, `_get_or_start_sandbox_worker()` faceva semplicemente ripartire un worker NUOVO" - vero
+  solo per un worker CADUTO (Job Object che lo termina per memoria/CPU), non per un worker
+  semplicemente LENTO ma ancora vivo, dove `is_alive()` restava `True` e lo stesso worker
+  (rimasto indietro) veniva riusato.
+
+  Corretto in `SandboxedSkillWorker.invoke()`: su un timeout, chiama ora `self.stop()` prima di
+  restituire `SANDBOX_WORKER_TIMEOUT` - termina a forza il worker non rispondente (nessuna
+  richiesta di arresto pulito, per definizione non risponde), cosi' `is_alive()` torna `False` e
+  `_get_or_start_sandbox_worker()` (gia' corretto per il caso "caduto") ne avvia uno nuovo, pulito,
+  alla chiamata successiva - nessuna risposta vecchia puo' piu' sopravvivere in una coda che non
+  esiste piu'. **Seconda scoperta empirica mentre si scriveva il test**: `TerminateProcess` avvia
+  la terminazione ma `WaitForSingleObject` puo' impiegare fino a circa un secondo per segnalarla
+  per davvero (non documentato da Microsoft come garanzia, osservato scrivendo un test che
+  controllava `is_alive()` SUBITO dopo `stop()` su un worker bloccato in un `time.sleep()`
+  lunghissimo) - `stop()` ora attende fino a 2s in piu', dopo aver terminato/chiuso il Job Object,
+  che `is_alive()` rifletta davvero la morte del processo prima di tornare, invece di fidarsi che
+  la chiamata di sistema abbia gia' avuto effetto immediato.
+
+  Aggiunti 2 test in `tests/test_sandboxed_skill_worker.py::TimeoutTests` (il worker rimasto
+  indietro e' DAVVERO terminato, non solo abbandonato; una seconda chiamata sullo stesso worker
+  dopo un timeout viene rifiutata onestamente - `SANDBOX_WORKER_UNAVAILABLE` - mai con la risposta
+  vecchia) e 1 in `tests/test_skill_registry.py::ForgedSkillSandboxWiringTests` (prova end-to-end:
+  un intent lento che scade seguito da un intent VELOCE diverso nello stesso worker/plugin riceve
+  la propria risposta vera, non quella della skill lenta - verificato anche che
+  `_get_or_start_sandbox_worker()` avvii per davvero un'istanza NUOVA). Prova: 2.524/2.524 test,
+  ruff/mypy verdi su `core/sandboxed_skill_worker.py`/`tests/test_sandboxed_skill_worker.py`/
+  `tests/test_skill_registry.py`. Con questo, **F1.6 e' chiusa nella sua interezza**.
 
 ### F1.7 — Ledger, replay e osservabilità
 
@@ -4351,7 +4396,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 15/09/2026. Sessione lunga con 71 incrementi completati e verificati (PR #28-#98), la
+Aggiornato 15/09/2026. Sessione lunga con 72 incrementi completati e verificati (PR #28-#99), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -4546,17 +4591,25 @@ per F1.6.6 era gia' stato bloccato dal classificatore di sicurezza di questo amb
 controllare host/porta prima di ogni connessione TCP vera, verificato con un worker VERO e un
 listener TCP VERO su una porta scelta dal SO; limiti dichiarati - non copre UDP ne' la
 risoluzione DNS stessa; stessa insidia di leak del gate sul processo di test trovata e corretta
-per lo stesso motivo). Con questo, l'unico pezzo ancora aperto in tutta la sezione F1.6 e' il
-timeout wall-clock del Job Object (F1.6.3). Il resto:
+per lo stesso motivo), e `F1.6.3` chiusura - watchdog wall-clock (investigato PRIMA di scrivere
+codice: Job Object non ha affatto un tipo di limite wall-clock, solo CPU - l'unico modo reale e'
+un watchdog esterno che termini il processo; **buco reale trovato indagandolo**, non solo
+teorico - un timeout non terminava mai il worker rimasto indietro, la cui risposta in ritardo
+restava nella coda condivisa pronta per essere consumata dalla chiamata SUCCESSIVA, per un intent
+completamente diverso - riprodotto per davvero con una skill lenta seguita da una veloce sullo
+stesso worker; corretto forzando `stop()` su un timeout, con una seconda scoperta empirica mentre
+si scriveva il test - `TerminateProcess` puo' impiegare fino a un secondo per riflettersi in
+`is_alive()`, `stop()` ora lo aspetta esplicitamente invece di fidarsi che sia immediato). Con
+questo, **F1.6 e' chiusa nella sua interezza**. Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.521/2.521 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.524/2.524 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
 invariati, nessuno dei due coperto da "mypy selettivo" in CI - 80 file nella lista selettiva,
-invariata: `core/forge_worker.py` era gia' presente). `G1` resta aperto.
+invariata: nessun file nuovo in questo incremento). `G1` resta aperto.
 
 Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
 sessione (`sys.setswitchinterval()` abbassato + `threading.Barrier`, senza altro aiuto) NON
