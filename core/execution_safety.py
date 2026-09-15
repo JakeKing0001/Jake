@@ -65,7 +65,10 @@ def is_safe_to_auto_retry(intent: str) -> bool:
     (MISSING_PARAMETERS/FORGE_FAILED/CONFIRMATION_REQUIRED/NOT_FOUND) e' in RETRYABLE_ERRORS,
     quindi non diventano mai davvero ritentate - ma restano comunque nel registro per il loro
     verificatore indipendente, non per l'idempotenza a retry (mai verificata per install()/
-    delete() della fucina, che tocca anche il registro delle skill, non solo il filesystem). Per
+    delete() della fucina, che tocca anche il registro delle skill, non solo il filesystem).
+    RESTART_EXPLORER (aggiunta successiva, stesso Gate G1) e' invece idempotente allo stesso modo
+    dei quattro intent filesystem: ri-terminare e riavviare Explorer un'altra volta raggiunge lo
+    stesso stato finale (Explorer in esecuzione), mai un doppio effetto dannoso. Per
     tutti gli altri intent, un errore transitorio non viene piu' ritentato automaticamente - piu'
     sicuro ("minimo privilegio"/"negare per default", vedi ROADMAP_EXECUTION.md F1.2.4) che
     rischiare un effetto doppio su una skill mai controllata caso per caso. Una vera enforcement
@@ -161,6 +164,25 @@ def _verify_window_closed(data: dict) -> bool:
     return not win32gui.IsWindow(data["hwnd"])
 
 
+def _verify_explorer_running(data: dict) -> bool:
+    """F1.3.2 (stesso pattern trovato una quarta volta in questa sessione): controlla per
+    davvero che almeno un processo explorer.exe esista, invece di fidarsi del successo
+    dichiarato da RestartExplorerSkill (che dalla correzione in skills/system_maintenance.py
+    attende gia' lei stessa la ricomparsa del processo prima di dichiarare successo - questo e'
+    un secondo controllo indipendente, non l'unico, stesso principio delle due funzioni sopra).
+    Ignora `data` (sempre {} - RESTART_EXPLORER non ha un PID da riportare, a differenza di
+    KILL_PROCESS_BY_PORT: non si conosce in anticipo quale sara' il nuovo processo)."""
+    import psutil
+
+    for process in psutil.process_iter(["name"]):
+        try:
+            if (process.info.get("name") or "").lower() == "explorer.exe":
+                return True
+        except psutil.Error:
+            continue
+    return False
+
+
 @dataclass(frozen=True)
 class RollbackAction:
     """L'inverso naturale di un intent gia' eseguito con successo, e l'intent che DAVVERO esegue
@@ -218,6 +240,10 @@ INTENT_SAFETY_REGISTRY: dict[str, IntentSafetyEntry] = {
     "CLOSE_WINDOW": IntentSafetyEntry(
         verifier=_verify_window_closed,
         rollback=None,  # non si puo' "riaprire" una finestra nello stato esatto di prima
+    ),
+    "RESTART_EXPLORER": IntentSafetyEntry(
+        verifier=_verify_explorer_running,
+        rollback=None,  # riavviare non ha un inverso: non si puo' "de-riavviare" un processo
     ),
     "DELETE_PATH": IntentSafetyEntry(
         verifier=lambda data: not Path(data["path"]).exists(),

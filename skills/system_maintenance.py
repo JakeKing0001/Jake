@@ -2,10 +2,34 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import winreg
 from pathlib import Path
 
 from core.skill_result import SkillResult
+
+
+def _wait_until_explorer_running(wait_seconds: float, poll_interval: float = 0.1) -> bool:
+    """F1.3.2 (stesso pattern gia' trovato e corretto tre volte in questa sessione per
+    processi/finestre/casa - vedi skills/window_control.py::_wait_until_window_closed):
+    subprocess.Popen("explorer.exe") e' fire-and-forget quanto PostMessage(WM_CLOSE) - non
+    dice se Explorer sia DAVVERO ripartito, solo che il tentativo di avviarlo non ha sollevato
+    un'eccezione immediata. Attende fino a wait_seconds che almeno un processo explorer.exe
+    compaia (psutil, nessuna dipendenza da un PID specifico: qui non se ne conosce uno prima
+    di riavviarlo, a differenza di KillProcessByPortSkill)."""
+    import psutil
+
+    deadline = time.monotonic() + wait_seconds
+    while True:
+        for process in psutil.process_iter(["name"]):
+            try:
+                if (process.info.get("name") or "").lower() == "explorer.exe":
+                    return True
+            except psutil.Error:
+                continue
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(poll_interval)
 
 
 class ClearTempFilesSkill:
@@ -47,6 +71,15 @@ class ClearTempFilesSkill:
 
 
 class RestartExplorerSkill:
+    """F1.3.2: prima di questa correzione, success=True veniva restituito subito dopo
+    subprocess.Popen("explorer.exe"), senza aspettare che Explorer fosse DAVVERO ripartito -
+    vedi _wait_until_explorer_running sopra per il ragionamento completo."""
+
+    EXPLORER_RESTART_WAIT_SECONDS = 10.0
+    # Reso configurabile SOLO per i test, stesso principio gia' usato per CLOSE_WAIT_SECONDS
+    # in skills/close_window.py - il comportamento di produzione non cambia.
+    _POLL_INTERVAL_SECONDS = 0.1
+
     metadata = {
         "intent": "RESTART_EXPLORER",
         "description": "Riavvia Esplora risorse di Windows (utile se il desktop o la barra delle applicazioni si bloccano).",
@@ -59,7 +92,10 @@ class RestartExplorerSkill:
             subprocess.Popen("explorer.exe")
         except Exception:
             return SkillResult(success=False, data={}, error="OPERATION_FAILED")
-        return SkillResult(success=True, data={})
+
+        if _wait_until_explorer_running(self.EXPLORER_RESTART_WAIT_SECONDS, self._POLL_INTERVAL_SECONDS):
+            return SkillResult(success=True, data={})
+        return SkillResult(success=False, data={}, error="OPERATION_FAILED")
 
 
 class FlushDnsSkill:
