@@ -771,8 +771,17 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   CONTROL_SMART_DEVICE, rete su PING_HOST/TRACE_ROUTE/CHECK_WEBSITE_STATUS (le ultime tre su
   stringa grezza, non risolta - limite dichiarato) - vedi sotto; resta aperta solo "durata"); `F1.2.4`
   chiuso per il percorso planner (vedi sotto); `F1.2.6` e `F1.2.7` chiusi (vedi sotto); `F1.2.3`
-  chiuso parzialmente (prima capability - dispositivo - e ora anche la seconda - agente - vedi
-  sotto; l'intersezione con skill/sessione resta aperta).
+  chiuso parzialmente (QUATTRO delle cinque dimensioni testuali - "utente, dispositivo, agente,
+  skill e sessione" - sono gia' intersecate su ENTRAMBI i percorsi con "vince il piu' restrittivo":
+  dispositivo/agente (le capability costruite sotto), utente (`windows_user_blocked_intents`,
+  F1.4.2 - la stessa identita' "utente" di cui parla questa voce, solo costruita e datata sotto
+  quell'altro numero), skill (`blocked_intents`, il controllo PIU' vecchio e fondamentale del
+  modulo, verificato leggendo `_decide_interactive_reasoned`/`_decide_automated_reasoned`: e'
+  gia' il PRIMO controllo su entrambi i percorsi, prima di device/utente/agente - non serviva
+  costruire nulla di nuovo, andava solo riconosciuto come questa dimensione, vedi sotto). Resta
+  genuinamente aperta solo "sessione" - nessuna infrastruttura di identita' di sessione esiste nel
+  progetto, e il significato non e' definito da nessuna parte: non indovinato qui, per lo stesso
+  principio gia' seguito per "durata" in F1.2.2).
 - `F1.2.2` (parziale, prima capability: radici filesystem) — 12/09/2026: "definire capability per
   filesystem root, app, contatto, dominio web, device, servizio Home Assistant, rete e durata" -
   la prima delle otto, scelta perche' e' l'unica gia' collegabile senza dover prima costruire
@@ -1194,6 +1203,29 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   non il default "general" - a dimostrare che il valore osservato e' davvero quello dell'agente in
   esecuzione, non una costante), e il contextvar torna a `None` subito dopo il passo. Prova:
   2.436/2.436 test, ruff/mypy/compileall verdi su tutti i file toccati.
+- `F1.2.3` (riconoscimento - "skill" e "utente" erano gia' coperti) — 15/09/2026: prima di
+  chiedere di nuovo all'utente cosa significhi "sessione" (l'ultima delle cinque dimensioni
+  dichiarata ambigua), riletto il testo con attenzione: "intersecare permessi di utente,
+  dispositivo, agente, skill e sessione" sono CINQUE parole, ma la voce sopra (14/09/2026) parla
+  gia' di "la seconda delle QUATTRO dimensioni" - un'inconsistenza nel testo storico stesso, mai
+  investigata. Verificato leggendo `core/policy_engine.py::_decide_interactive_reasoned`/
+  `_decide_automated_reasoned` riga per riga: "skill" (l'intent stesso, `blocked_intents`) e' gia'
+  il PRIMISSIMO controllo su ENTRAMBI i percorsi, prima di dispositivo/utente/agente - non una
+  nuova capability da costruire, ma il meccanismo piu' vecchio e fondamentale del modulo (esisteva
+  gia' prima di questa intera fase F1), semplicemente mai riconosciuto esplicitamente come "la
+  dimensione skill" di questa voce. "Utente" e' anch'esso gia' coperto -
+  `windows_user_blocked_intents`, costruito e datato sotto `F1.4.2` (13/09/2026, "distinguere
+  identita' Windows... dispositivo") ma e' la STESSA identita' "utente" di cui parla il testo di
+  QUESTA voce, solo mai incrociata esplicitamente con essa finora. Con questo, QUATTRO delle
+  cinque dimensioni sono intersecate, sullo stesso ordine di priorita', su entrambi i percorsi.
+  Resta genuinamente aperta solo "sessione": nessuna infrastruttura di identita' di sessione
+  esiste in questo progetto (verificato: nessuna classe `Session`/`session_id`/`current_session`
+  in `core/*.py` a parte `session_recorder.py`/`session_hooks.py`, che sono tutt'altro), e il suo
+  significato non e' definito da nessuna parte nella roadmap - non indovinato qui, per lo stesso
+  principio gia' applicato a "durata" in F1.2.2 (una definizione sbagliata potrebbe sembrare
+  sicurezza senza esserlo per davvero). Nessun file di produzione o di test toccato: solo la
+  classificazione dello stato in questo documento. Prova: 2.525/2.525 test (suite gia' verde,
+  nessuna riga aggiunta).
 - `F1.2.4` — 12/09/2026: `core/planner_provider.py::_build_output_schema()` chiedeva a Ollama
   passi con `"parameters": {"type": "object"}` SENZA alcuna restrizione sulle chiavi - la causa
   originale del bug corretto in F1.2.5 (un passo poteva arrivare gia' con `"confirmed": true`
@@ -4422,7 +4454,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 15/09/2026. Sessione lunga con 73 incrementi completati e verificati (PR #28-#100), la
+Aggiornato 15/09/2026. Sessione lunga con 74 incrementi completati e verificati (PR #28-#101), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -4631,7 +4663,14 @@ questo, **F1.6 e' chiusa nella sua interezza**, e `F1.2.5` chiusura - sotto-azio
 sempre verso `PlanExecutor.execute()`, che applica gia' la policy a ogni passo - mancava solo una
 prova end-to-end letterale con il `PlanExecutor` VERO invece del solo cablaggio gia' provato;
 trovata anche e corretta una frase "in attesa di CI" rimasta stale nello Stato della sezione da
-giorni, per un lavoro gia' unito in `master`). Il resto:
+giorni, per un lavoro gia' unito in `master`), e `F1.2.3` riconoscimento - "skill"/"utente" erano
+gia' coperti (rilettura attenta prima di richiedere di nuovo chiarimenti sull'ultima dimensione
+ambigua: "skill" e' gia' il primissimo controllo di `PolicyEngine`, `blocked_intents`, il
+meccanismo piu' vecchio del modulo; "utente" e' gia' `windows_user_blocked_intents`, F1.4.2 -
+stessa identita', mai incrociata esplicitamente con questa voce. QUATTRO delle cinque dimensioni
+sono quindi gia' intersecate; resta genuinamente aperta solo "sessione", non indovinata per lo
+stesso motivo di "durata" in F1.2.2 - nessuna infrastruttura di identita' di sessione esiste nel
+progetto). Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
