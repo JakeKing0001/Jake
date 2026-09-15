@@ -24,7 +24,26 @@ stessi privilegi dell'utente - inclusa la possibilita' di rivendicare la session
 (/devices/<id>/claim) senza autorizzazione. Il token (config.json: companion_token, cifrato a
 riposo via DPAPI come admin_passphrase, vedi core/config.py SECRET_KEYS) e' opt-in: se non
 configurato, il comportamento resta invariato (nessun controllo, come prima di questa fase) -
-chi ha gia' un uso locale/fidato del server non vede alcun cambiamento."""
+chi ha gia' un uso locale/fidato del server non vede alcun cambiamento.
+
+F1.4.6/F1.8.1 (fase 6/10 del piano multi-device - decisione di prodotto esplicita dell'utente,
+vedi ROADMAP_EXECUTION.md sezione F1.4): buco reale nel design SOPRA, non solo teorico -
+`device_id`/`session_id` erano SEMPRE letti dal BODY della richiesta (`body.get("device_id")`),
+mai verificati contro nulla. Il singolo `companion_token` globale autorizza la RICHIESTA, non
+dice CHI la sta facendo: qualunque client col token giusto poteva dichiararsi un `device_id`
+qualsiasi (incluso quello di un ALTRO dispositivo gia' accoppiato) e cosi' vedere/confermare la
+sua azione in sospeso (`ConversationStateManager._pending_actions`, gia' tenuta per-canale da
+F1.8.1, ma "canale" = `current_device_id()` AUTO-DICHIARATO, non autenticato). `credential_store`
+(opzionale, `core/device_credential_store.py`, fase 2) chiude il buco quando presente: un token
+Bearer che verifica per-dispositivo produce un `device_id` AUTENTICATO che l'handler usa al posto
+di quello nel body - un client non puo' piu' impersonare un dispositivo diverso dal proprio
+semplicemente scrivendolo nella richiesta. Il vecchio `token` globale resta supportato
+(retrocompatibilita' per chi non ha ancora fatto il pairing di alcun dispositivo): in quel caso
+il comportamento e' IDENTICO a prima (device_id dal body, non autenticato) - un limite noto e
+dichiarato del percorso legacy, non una regressione introdotta qui. Nessun fallback automatico
+nella direzione opposta: un token per-dispositivo REVOCATO/SCADUTO non ripiega mai sul token
+globale, anche se quello e' ancora configurato (F1.4.6, "non deve esistere fallback automatico a
+un token globale")."""
 import hmac
 import json
 import queue
@@ -32,6 +51,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import cast
 
+from core.device_credential_store import DeviceCredentialStore
 from core.device_registry import DeviceRegistry
 from core.event_bus import EventBus
 from core.hud_protocol import EventType, HudEvent
@@ -50,11 +70,13 @@ class CompanionServer:
     server.py). port=0 (default) lascia scegliere una porta libera al sistema operativo.
 
     token (F1, opt-in): se impostato, ogni richiesta deve presentare "Authorization: Bearer
-    <token>", altrimenti riceve 401 - vedi il docstring del modulo."""
+    <token>", altrimenti riceve 401 - vedi il docstring del modulo. credential_store (F1.4.6,
+    fase 6, opt-in): se presente, un Bearer token che verifica per-dispositivo autentica la
+    richiesta E produce un device_id fidato, invece di quello auto-dichiarato nel body."""
 
     def __init__(
         self, event_bus: EventBus | None = None, command_handler=None, host: str = DEFAULT_HOST, port: int = 0,
-        token: str | None = None,
+        token: str | None = None, credential_store: DeviceCredentialStore | None = None,
     ):
         self.event_bus = event_bus or EventBus()
         self.command_handler = command_handler or (lambda text: "")
@@ -62,6 +84,7 @@ class CompanionServer:
         self.host = host
         self.port = port
         self.token = token
+        self.credential_store = credential_store
         self._httpd: "_Server | None" = None
 
     @property
@@ -109,6 +132,11 @@ class _Server(ThreadingHTTPServer):
 
 
 class _Handler(BaseHTTPRequestHandler):
+    # F1.4.6 (fase 6): default di classe, non solo impostato in do_GET/do_POST - una rete di
+    # sicurezza se un metodo lo leggesse prima che quelli girino (oggi non succede: BaseHTTPRequest
+    # Handler chiama do_GET/do_POST dal proprio __init__), mai un AttributeError inatteso.
+    _authenticated_device_id: str | None = None
+
     def log_message(self, format, *args):  # silenzia il log di default di http.server
         pass
 
@@ -118,22 +146,43 @@ class _Handler(BaseHTTPRequestHandler):
 
     # ---- autenticazione (F1, opt-in - vedi il docstring del modulo) ----------------------
 
-    def _is_authorized(self) -> bool:
-        """Vero se non e' configurato nessun token (comportamento invariato) o se la richiesta
-        presenta il token giusto in 'Authorization: Bearer <token>'. hmac.compare_digest invece
-        di '==': un confronto normale su stringhe non e' a tempo costante, e anche su una rete
-        locale non c'e' motivo di regalare un canale laterale temporale a chi indovina un
-        token un carattere alla volta."""
+    def _authenticate(self) -> tuple[bool, str | None]:
+        """(autorizzata, device_id AUTENTICATO o None). device_id e' popolato solo quando
+        credential_store verifica per davvero il token presentato - MAI dedotto dal body, che
+        resta un campo auto-dichiarato (vedi _handle_command/_handle_claim/_handle_release, che
+        lo usano SOLO quando questo e' None, il percorso legacy). Ordine dei controlli: prima il
+        token per-dispositivo (piu' forte, produce un'identita'), poi il token globale legacy
+        (autorizza ma non identifica), infine "nessun token configurato" (comportamento
+        invariato per chi non ne ha impostato nessuno dei due). hmac.compare_digest per il
+        confronto col token globale: un confronto normale su stringhe non e' a tempo costante, e
+        anche su una rete locale non c'e' motivo di regalare un canale laterale temporale a chi
+        indovina un token un carattere alla volta (device_credential_store.verify_token() applica
+        gia' da sola lo stesso principio ai token per-dispositivo).
+
+        Buco reale trovato E riprodotto (non solo temuto) scrivendo il test di questa fase:
+        `credential_store` presente ma un token per-dispositivo che non verifica (sbagliato,
+        revocato, mai emesso) NON deve mai ricadere silenziosamente su "nessun token configurato
+        = aperto a chiunque" - solo perche' `self.companion.token` (il token GLOBALE legacy,
+        un campo indipendente) e' None. Un `credential_store` configurato significa che
+        l'autenticazione per-dispositivo e' IN USO: "aperto a chiunque" resta valido SOLO se
+        nemmeno un `credential_store` e' stato passato al server."""
+        header = self.headers.get("Authorization", "")
+        presented = header[len("Bearer "):] if header.startswith("Bearer ") else None
+        credential_store = self.companion.credential_store
+        if credential_store is not None and presented:
+            device_id = credential_store.verify_token(presented)
+            if device_id is not None:
+                return True, device_id
         token = self.companion.token
         if not token:
-            return True
-        header = self.headers.get("Authorization", "")
-        return hmac.compare_digest(header, f"Bearer {token}")
+            return credential_store is None, None
+        return hmac.compare_digest(header, f"Bearer {token}"), None
 
     # ---- routing ------------------------------------------------------------------------
 
     def do_GET(self):
-        if not self._is_authorized():
+        authorized, self._authenticated_device_id = self._authenticate()
+        if not authorized:
             return self._json_response(401, {"error": "unauthorized"})
         if self.path == "/status":
             return self._json_response(200, {
@@ -149,7 +198,8 @@ class _Handler(BaseHTTPRequestHandler):
         return None
 
     def do_POST(self):
-        if not self._is_authorized():
+        authorized, self._authenticated_device_id = self._authenticate()
+        if not authorized:
             # Drena comunque il body: byte non letti nel buffer di ricezione quando la
             # connessione si chiude fanno rispondere con un RST su Windows invece di una FIN
             # pulita (lo stesso flake intermittente [WinError 10053] gia' descritto e risolto
@@ -166,6 +216,14 @@ class _Handler(BaseHTTPRequestHandler):
             return self._handle_release(device_id)
         self._json_response(404, {"error": "not_found"})
         return None
+
+    def _device_id_mismatch(self, url_device_id: str) -> bool:
+        """Vero se questa richiesta e' autenticata per-dispositivo (F1.4.6, fase 6) E il
+        device_id nell'URL non e' quello del token presentato - un dispositivo autenticato come
+        se stesso non deve poter agire (claim/release) a nome di un ALTRO device_id solo perche'
+        lo scrive nel path. Sempre falso quando non c'e' un'identita' autenticata (percorso
+        legacy/nessun token): comportamento invariato per chi non ha ancora fatto il pairing."""
+        return self._authenticated_device_id is not None and self._authenticated_device_id != url_device_id
 
     # ---- endpoint -----------------------------------------------------------------------
 
@@ -186,7 +244,13 @@ class _Handler(BaseHTTPRequestHandler):
         # ThreadingHTTPServer non riusa i thread tra richieste (ognuna ne crea uno nuovo, che
         # parte gia' dal default), resettare resta la scelta corretta a prescindere dai dettagli
         # di implementazione di chi gestisce le richieste.
-        device_id = (body.get("device_id") or "").strip() or None
+        # F1.4.6 (fase 6): quando la richiesta e' autenticata per-dispositivo (token verificato
+        # da credential_store, vedi _authenticate()), il device_id AUTENTICATO vince SEMPRE su
+        # quello nel body - un client non puo' piu' impersonare un altro dispositivo scrivendone
+        # semplicemente l'id nella richiesta. Il body resta l'unica fonte solo sul percorso
+        # legacy (nessun token per-dispositivo verificato), comportamento invariato per chi non
+        # ha ancora fatto il pairing di alcun dispositivo.
+        device_id = self._authenticated_device_id or (body.get("device_id") or "").strip() or None
         device_token = set_current_device_id(device_id)
         # F1.2.3 (capability per SESSIONE): session_id opzionale nel body - lo stesso ricevuto da
         # /claim in risposta. Stesso schema/stesse garanzie di device_id sopra.
@@ -202,6 +266,12 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _handle_claim(self, device_id: str):
         body = self._read_json_body()
+        # F1.4.6 (fase 6): un dispositivo autenticato con un token per-dispositivo puo'
+        # reclamare SOLO se stesso - non gli id di altri dispositivi gia' accoppiati, anche se
+        # possiede comunque un token valido (il proprio). Nessun controllo sul percorso legacy
+        # (nessuna identita' autenticata da confrontare), comportamento invariato.
+        if self._device_id_mismatch(device_id):
+            return self._json_response(403, {"error": "device_id_mismatch"})
         name = body.get("name", "")
         # F1.2.3 (capability per SESSIONE): session_id e' NUOVO a ogni claim(), anche per lo
         # stesso device_id di prima - il client lo deve rimandare in /command (campo opzionale
@@ -211,6 +281,7 @@ class _Handler(BaseHTTPRequestHandler):
         if previous:
             self.companion.event_bus.publish(HudEvent(EventType.DEVICE_HANDOFF, {"from": previous, "to": device_id}))
         self._json_response(200, {"active_device": device_id, "session_id": session_id})
+        return None
 
     def _handle_release(self, device_id: str):
         # _read_json_body() scarta il risultato (release non ha ancora parametri), ma va
@@ -221,8 +292,13 @@ class _Handler(BaseHTTPRequestHandler):
         # byte del body arrivano rispetto alla chiusura) - il flake descritto nella roadmap F0,
         # riprodotto qui in ~10% delle richieste su 400+ esecuzioni finche' non si legge il body.
         self._read_json_body()
+        # F1.4.6 (fase 6): stesso principio di _handle_claim - un dispositivo autenticato non
+        # deve poter rilasciare un device_id che non e' il proprio.
+        if self._device_id_mismatch(device_id):
+            return self._json_response(403, {"error": "device_id_mismatch"})
         released = self.companion.devices.release(device_id)
         self._json_response(200, {"released": released})
+        return None
 
     def _stream_events(self):
         self.send_response(200)

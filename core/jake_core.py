@@ -13,6 +13,7 @@ from core.command import Command
 from core.companion_server import CompanionServer
 from core.context_summarizer import ContextSummarizer
 from core.desktop_context import DesktopContextTracker
+from core.device_credential_store import DeviceCredentialStore
 from core.event_bus import EventBus
 from core.execution_safety import ActionExecution
 from core.hud_protocol import EventType, HudEvent
@@ -137,10 +138,15 @@ class JakeCore:
         # il server resta come prima di questa fase (nessuna autenticazione), per non cambiare
         # comportamento a chi ha gia' un uso locale/fidato. Cifrato a riposo via DPAPI come
         # admin_passphrase (core/config.py, SECRET_KEYS).
+        # F1.4.6 (fase 6 del piano multi-device): credential_store e' costruito SEMPRE (costa
+        # solo l'apertura di un file SQLite, nessun I/O di rete) - permette a companion_server di
+        # autenticare per-dispositivo appena il primo pairing avviene, senza bisogno di un
+        # riavvio di Jake per "attivare" la funzionalita'.
+        self.device_credential_store = DeviceCredentialStore()
         self.companion_server = CompanionServer(
             event_bus=self.event_bus, command_handler=self.answer,
             port=int(config.get("companion_server_port", 8765) or 8765),
-            token=config.get("companion_token"),
+            token=config.get("companion_token"), credential_store=self.device_credential_store,
         )
         if bool(config.get("companion_server_enabled", False)):
             self.companion_server.start()
@@ -1357,3 +1363,10 @@ class JakeCore:
             self.skill_registry.stop_sandbox_worker()
         except Exception:
             self.logger.exception("Errore fermando il worker sandboxato per le skill forgiate durante lo shutdown")
+        # F1.4.6 (fase 6): chiude la connessione SQLite del registro credenziali - stesso
+        # principio degli altri passi sopra, un fallimento qui non deve impedire al resto dello
+        # shutdown di proseguire.
+        try:
+            self.device_credential_store.close()
+        except Exception:
+            self.logger.exception("Errore chiudendo device_credential_store durante lo shutdown")

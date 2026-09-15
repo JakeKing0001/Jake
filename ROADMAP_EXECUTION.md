@@ -2100,6 +2100,50 @@ Criterio di uscita: nessun segreto in chiaro e ogni azione admin richiede un fat
   chiede lui stesso, stesso principio di `execution_safety.decide_automated`. Nuovi 22 test in
   `tests/test_pairing_service.py`, con un vero `DeviceCredentialStore` (non un doppio). Prova:
   2.681/2.681 test, ruff/mypy verdi (nuovo file aggiunto al set selettivo mypy, 83 file).
+- `F1.4.6`/`F1.8.1` (fase 6 del piano - autenticazione per-dispositivo su companion_server) —
+  16/09/2026: **buco reale, non solo teorico** - `core/companion_server.py` leggeva SEMPRE
+  `device_id`/`session_id` dal BODY della richiesta, mai verificati contro nulla: il singolo
+  `companion_token` globale autorizzava la RICHIESTA, non diceva CHI la stesse facendo. Un client
+  col token giusto poteva dichiararsi il `device_id` di un ALTRO dispositivo gia' accoppiato e
+  cosi' vedere/confermare la sua azione in sospeso (`ConversationStateManager._pending_actions`,
+  gia' tenuta per-canale da F1.8.1, ma "canale" = `current_device_id()` auto-dichiarato, mai
+  autenticato) - esattamente il rischio descritto dalla specifica ("un altro dispositivo non deve
+  poter confermare per errore una pending action non sua"). Nuovo `_authenticate()` in
+  `core/companion_server.py` (sostituisce `_is_authorized()`): quando `credential_store`
+  (`core/device_credential_store.py`, fase 2, ora passato da `JakeCore.__init__`) verifica per
+  davvero il Bearer token presentato, il `device_id` AUTENTICATO che ne deriva vince SEMPRE su
+  quello nel body - un client non puo' piu' impersonare un dispositivo diverso dal proprio
+  scrivendone semplicemente l'id nella richiesta (verificato con un test che presenta il token di
+  `device-a` e dichiara nel body `device_id="device-b"`: arriva `device-a`, mai `device-b`).
+  `/devices/<id>/claim` e `/devices/<id>/release` rifiutano ora con 403 `device_id_mismatch` se
+  l'id nell'URL non e' quello del token autenticato - stesso identico principio, chiude anche
+  questi due endpoint. **Secondo buco reale, trovato SCRIVENDO il test di questa fase, non nel
+  codice originale**: la prima versione di `_authenticate()` faceva ricadere silenziosamente su
+  "nessun token configurato = aperto a chiunque" ogni volta che un `credential_store` era
+  presente ma il token per-dispositivo presentato non verificava (sbagliato, revocato, mai
+  emesso) - un server con SOLO `credential_store` configurato (nessun `companion_token` legacy)
+  restava di fatto aperto a chiunque per qualunque richiesta senza un token per-dispositivo
+  valido, l'opposto esatto dell'intento. Riprodotto per davvero (due test hanno fallito con
+  status 200 invece di 401 prima della correzione), corretto: "aperto a chiunque" resta valido
+  SOLO se nemmeno un `credential_store` e' stato passato al server - la sua sola presenza segnala
+  che l'autenticazione per-dispositivo e' IN USO. Retrocompatibilita' deliberata: il vecchio
+  `companion_token` globale resta supportato in parallelo (percorso legacy, device_id dal body
+  come prima) per chi non ha ancora fatto il pairing di alcun dispositivo - nessun fallback nella
+  direzione opposta (un token per-dispositivo scaduto/revocato non ripiega mai sul token globale,
+  F1.4.6 "non deve esistere fallback automatico a un token globale"). `JakeCore.__init__` ora
+  costruisce `self.device_credential_store` (SEMPRE, costa solo l'apertura di un file SQLite) e
+  lo passa a `CompanionServer`; `shutdown()` lo chiude nello stesso blocco try/log degli altri
+  componenti (F1.8.4). **Terzo buco trovato durante l'integrazione**: `_bare_core()` in
+  `tests/test_jake_core_pipeline.py` costruisce un `JakeCore` bypassando `__init__`
+  (`JakeCore.__new__`), quindi non aveva mai l'attributo `device_credential_store` - `shutdown()`
+  falliva con un `AttributeError` silenziosamente catturato e loggato, facendo fallire due test
+  che contano il numero ESATTO di eccezioni loggate durante lo shutdown; corretto aggiungendo
+  `core.device_credential_store = overrides.get(..., mock.MagicMock())` allo stesso builder,
+  verificato che nessun altro file di test con lo stesso pattern (`JakeCore.__new__`) chiami mai
+  `shutdown()` (9 file controllati, zero occorrenze). Nuovi 10 test in
+  `tests/test_companion_server.py::PerDeviceTokenAuthenticationTests`, tutti con un vero
+  `DeviceCredentialStore` (DPAPI reale) e richieste HTTP vere (non simulate) contro un server su
+  porta effimera. Prova: 2.691/2.691 test, ruff/mypy verdi su tutti i file toccati.
 - `F1.4.2` (prima fetta - identita' Windows/dispositivo) — 13/09/2026: "distinguere identita'
   Windows, profilo Jake, dispositivo e speaker profile". Investigato PRIMA di scrivere codice
   (non assunto dal testo della roadmap): "profilo Jake" non e' un concetto definito da nessuna
@@ -5033,7 +5077,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 16/09/2026. Sessione lunga con 91 incrementi completati e verificati (PR #28-#117), la
+Aggiornato 16/09/2026. Sessione lunga con 92 incrementi completati e verificati (PR #28-#118), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
