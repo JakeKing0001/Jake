@@ -723,6 +723,98 @@ class UnknownParameterNeverReachesTheExecutorTests(unittest.TestCase):
         self.assertNotIn("action", parameters_seen_by_executor)
 
 
+class PartialRollbackHonestyTests(unittest.TestCase):
+    """F1.3.7 ("gestire effetti parziali e rollback parziale con spiegazione leggibile"): stesso
+    identico buco gia' trovato e corretto per PlanExecutor/format_plan_outcome - qui sul percorso
+    AGENTE. TaskAgent._rollback() tenta di annullare ogni passo RIUSCITO, ma un intent senza un
+    inverso noto (es. KILL_PROCESS_BY_PORT, "terminare un processo non ha un inverso naturale")
+    non entra mai in outcome.rolled_back; il final_answer menzionava solo cio' che era stato
+    annullato, senza mai dire che un ALTRO effetto gia' avvenuto restava silenziosamente attivo."""
+
+    class _CreateAndKillRegistry:
+        _CAPABILITIES = [
+            {"intent": "CREATE_PATH", "description": "Crea un file.", "parameters": {
+                "path": {"type": "string", "required": True, "description": "Percorso."},
+            }},
+            {"intent": "KILL_PROCESS_BY_PORT", "description": "Termina il processo su una porta.", "parameters": {
+                "port": {"type": "integer", "required": True, "description": "Porta."},
+            }},
+        ]
+
+        def __init__(self, target_path: str):
+            self.target_path = target_path
+            self.calls = []
+
+        def list_capabilities(self):
+            return self._CAPABILITIES
+
+        def execute(self, intent, parameters=None, policy_engine=None):
+            parameters = parameters or {}
+            self.calls.append((intent, dict(parameters)))
+            if intent == "CREATE_PATH":
+                Path(self.target_path).touch()
+                return SkillResult(success=True, data={"path": self.target_path})
+            if intent == "KILL_PROCESS_BY_PORT":
+                return SkillResult(success=True, data={"port": parameters.get("port"), "pid": 999999999})
+            if intent == "DELETE_PATH":
+                Path(parameters["path"]).unlink(missing_ok=True)
+                return SkillResult(success=True, data={"path": parameters["path"]})
+            raise AssertionError(intent)
+
+    def test_a_step_without_a_known_inverse_is_reported_as_still_active(self):
+        tmp_dir = Path(tempfile.mkdtemp(prefix="jake_agent_partial_rollback_"))
+        self.addCleanup(shutil.rmtree, tmp_dir, ignore_errors=True)
+        target = tmp_dir / "nuovo_file.txt"
+
+        registry = self._CreateAndKillRegistry(str(target))
+        client = ScriptedOllamaClient([
+            {"thought": "Creo il file", "action": {"intent": "CREATE_PATH", "parameters": {"path": str(target)}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "Termino il processo", "action": {"intent": "KILL_PROCESS_BY_PORT", "parameters": {"port": 8080}},
+             "final_answer": "", "ask_user": ""},
+            OllamaError("simulato: il modello non risponde piu'"),
+        ])
+        agent = TaskAgent(
+            registry, None, client, model_provider=lambda: "fake-model",
+            format_result=lambda intent, result: str(result.data),
+            fixed_tools=["CREATE_PATH", "KILL_PROCESS_BY_PORT"],
+            policy_engine=PolicyEngine(),
+        )
+
+        outcome = agent.run("crea un file e termina il processo sulla porta 8080")
+
+        self.assertEqual(outcome.error, "MODEL_ERROR: OllamaError")
+        self.assertEqual(len(outcome.rolled_back), 1)
+        self.assertFalse(target.exists(), "CREATE_PATH doveva essere annullato per davvero")
+        self.assertIn("Ho annullato per sicurezza", outcome.final_answer)
+        self.assertIn("restano invece attivi", outcome.final_answer)
+        self.assertIn("termino il processo", outcome.final_answer.lower())
+
+    def test_when_every_successful_step_is_rolled_back_nothing_is_reported_as_persisting(self):
+        tmp_dir = Path(tempfile.mkdtemp(prefix="jake_agent_full_rollback_"))
+        self.addCleanup(shutil.rmtree, tmp_dir, ignore_errors=True)
+        target = tmp_dir / "nuovo_file.txt"
+
+        registry = self._CreateAndKillRegistry(str(target))
+        client = ScriptedOllamaClient([
+            {"thought": "Creo il file", "action": {"intent": "CREATE_PATH", "parameters": {"path": str(target)}},
+             "final_answer": "", "ask_user": ""},
+            OllamaError("simulato: il modello non risponde piu'"),
+        ])
+        agent = TaskAgent(
+            registry, None, client, model_provider=lambda: "fake-model",
+            format_result=lambda intent, result: str(result.data),
+            fixed_tools=["CREATE_PATH", "KILL_PROCESS_BY_PORT"],
+            policy_engine=PolicyEngine(),
+        )
+
+        outcome = agent.run("crea un file")
+
+        self.assertEqual(len(outcome.rolled_back), 1)
+        self.assertIn("Ho annullato per sicurezza", outcome.final_answer)
+        self.assertNotIn("restano invece attivi", outcome.final_answer, "tutto e' stato annullato: nulla resta da segnalare")
+
+
 class StructuredLoggingTests(unittest.TestCase):
     """F0: ogni passo dell'agente scrive un record in jake_actions.jsonl (core/logger.log_
     action), condividendo un solo trace_id per tutta la run - vedi anche tests/test_logger.py
