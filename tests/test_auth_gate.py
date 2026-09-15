@@ -158,6 +158,55 @@ class WindowsHelloTests(unittest.TestCase):
         self.assertTrue(gate.check("apri sesamo"))
         self.assertTrue(gate.verify_with_windows_hello("qualunque cosa"))
 
+    def test_default_windows_hello_verify_goes_through_the_auth_provider_adapter(self):
+        """F1.4.4: quando nessun windows_hello_verify e' iniettato, la risoluzione pigra ora
+        passa da WindowsHelloProvider (core/auth_provider.py) invece di importare
+        core.windows_hello.verify direttamente - stesso comportamento osservabile, un livello di
+        adapter in mezzo. Verificato mockando il modulo vero, mai chiamando l'API reale."""
+        with mock.patch("core.windows_hello.verify", return_value=True) as fake_verify:
+            gate = AuthGate(windows_hello_enabled=True)
+            result = gate.verify_with_windows_hello("Spegni il computer")
+        self.assertTrue(result)
+        fake_verify.assert_called_once_with("Spegni il computer")
+
+
+class PasskeyTests(unittest.TestCase):
+    """F1.4.4: fattore OPZIONALE per operazioni cross-device ad alto impatto - stesso schema di
+    WindowsHelloTests, ma per verify_with_passkey/passkey_provider."""
+
+    def test_verify_with_passkey_is_false_by_default(self):
+        """Nessun passkey_provider iniettato: usa il PasskeyProvider() reale, onestamente
+        inerte (core/auth_provider.py) - mai un crash, mai un successo inventato."""
+        gate = AuthGate()
+        self.assertFalse(gate.verify_with_passkey("qualunque cosa"))
+
+    def test_verify_with_passkey_returns_false_when_the_provider_is_not_available(self):
+        provider = mock.MagicMock()
+        provider.is_available.return_value = False
+        gate = AuthGate(passkey_provider=provider)
+
+        self.assertFalse(gate.verify_with_passkey("qualunque cosa"))
+        provider.verify.assert_not_called()
+
+    def test_verify_with_passkey_forwards_to_an_available_provider(self):
+        provider = mock.MagicMock()
+        provider.is_available.return_value = True
+        provider.verify.return_value = True
+        gate = AuthGate(passkey_provider=provider)
+
+        result = gate.verify_with_passkey("Elimina il file")
+
+        self.assertTrue(result)
+        provider.verify.assert_called_once_with("Elimina il file")
+
+    def test_verify_with_passkey_reflects_a_false_result_from_an_available_provider(self):
+        provider = mock.MagicMock()
+        provider.is_available.return_value = True
+        provider.verify.return_value = False
+        gate = AuthGate(passkey_provider=provider)
+
+        self.assertFalse(gate.verify_with_passkey("qualunque cosa"))
+
 
 if __name__ == "__main__":
     unittest.main()
