@@ -2077,6 +2077,29 @@ Criterio di uscita: nessun segreto in chiaro e ogni azione admin richiede un fat
   nello stesso processo). Nuovi 34 test in `tests/test_device_credential_store.py`, tutti con
   DPAPI reale (non mockato - stesso principio di `test_secrets_vault.py`). Prova: 2.659/2.659
   test, ruff/mypy verdi (nuovo file aggiunto al set selettivo mypy, 82 file).
+- `F1.4.5` (fase 4 del piano - servizio di pairing) — 16/09/2026: nuovo `core/pairing_service.py`.
+  Challenge EFFIMERE in memoria (non persistite - una richiesta di pairing non completata entro
+  `CHALLENGE_TTL_SECONDS` non ha senso sopravviva a un riavvio, stesso principio gia' applicato a
+  `core/device_registry.py`). `start_pairing()`: `challenge_id` via `secrets.token_urlsafe(16)`,
+  scadenza a 5 minuti esatti (F1.4.5, verificato con un test dedicato). `qr_payload(challenge)`:
+  SOLO `challenge_id`/`expires_at` - verificato esplicitamente che non contenga mai un token o
+  una credenziale (F1.4.5, "il payload contiene solo dati non sensibili"). `approve(challenge_id,
+  device_name="")`: None (nessun dispositivo creato) se la challenge non esiste, e' gia' stata
+  consumata o e' scaduta - MAI un fallback che la accetti comunque; il `device_id` nasce QUI,
+  generato da Jake con `secrets.token_hex(8)`, mai scelto dal chiamante o dal dispositivo stesso
+  (impedisce a un dispositivo di proporre un device_id gia' usato da un altro, o con un
+  significato speciale). `reject(challenge_id)`: consuma comunque la challenge, mai riprovabile
+  dopo un rifiuto. Sia `approve()` sia `reject()` sono IDEMPOTENTI verso il replay: una seconda
+  chiamata sulla stessa challenge (gia' consumata) restituisce sempre None/False e non crea MAI
+  un secondo dispositivo (F1.4.5, "replay della challenge deve fallire" - verificato chiamando
+  `approve()` due volte di seguito sulla stessa challenge e controllando che
+  `credential_store.list_devices()` ne contenga esattamente uno, non zero ne' due). Il
+  collegamento vero agli endpoint HTTP di `core/companion_server.py` (dove `approve()`/`reject()`
+  incontrerebbero la conferma reale dell'utente sul PC) resta un passo successivo dichiarato
+  (fasi 6+), qui solo il servizio - `approve()` presuppone gia' ottenuta quella conferma, non la
+  chiede lui stesso, stesso principio di `execution_safety.decide_automated`. Nuovi 22 test in
+  `tests/test_pairing_service.py`, con un vero `DeviceCredentialStore` (non un doppio). Prova:
+  2.681/2.681 test, ruff/mypy verdi (nuovo file aggiunto al set selettivo mypy, 83 file).
 - `F1.4.2` (prima fetta - identita' Windows/dispositivo) — 13/09/2026: "distinguere identita'
   Windows, profilo Jake, dispositivo e speaker profile". Investigato PRIMA di scrivere codice
   (non assunto dal testo della roadmap): "profilo Jake" non e' un concetto definito da nessuna
@@ -5010,7 +5033,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 16/09/2026. Sessione lunga con 90 incrementi completati e verificati (PR #28-#116), la
+Aggiornato 16/09/2026. Sessione lunga con 91 incrementi completati e verificati (PR #28-#117), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
