@@ -2144,6 +2144,36 @@ Criterio di uscita: nessun segreto in chiaro e ogni azione admin richiede un fat
   `tests/test_companion_server.py::PerDeviceTokenAuthenticationTests`, tutti con un vero
   `DeviceCredentialStore` (DPAPI reale) e richieste HTTP vere (non simulate) contro un server su
   porta effimera. Prova: 2.691/2.691 test, ruff/mypy verdi su tutti i file toccati.
+- `F1.8.1` (fase 7 del piano - coda/lock per resource key) — 16/09/2026: nuovo
+  `core/resource_lock.py::ResourceLockManager`, un vero readers-writer lock per resource key
+  ("il primo lettore blocca nuovi scrittori, l'ultimo lettore li sblocca") - non un `RLock`
+  semplice, che serializzerebbe anche i lettori tra loro, contraddicendo "azioni read-only
+  compatibili possono essere parallele". Un lock per OGNI resource key, creato pigramente e mai
+  ripulito (il numero di resource key distinte usate da un utente personale nel tempo resta
+  piccolo). Verificato con thread VERI, non solo letto a codice (stesso principio gia' seguito
+  per le race condition di F1.8.7): due scrittori sulla STESSA resource key non si sovrappongono
+  mai (misurato con un contatore di concorrenza di picco, non solo "non e' esploso"); scrittori
+  su resource key DIVERSE non si bloccano a vicenda (provato con una `threading.Barrier(2)` che
+  andrebbe in timeout se si serializzassero); piu' lettori sulla stessa resource key procedono
+  insieme (stessa tecnica, `Barrier(3)`); uno scrittore aspetta OGNI lettore in corso, non solo
+  il primo ad arrivare (il caso che un contatore ingenuo lascerebbe passare per errore - due
+  lettori sincronizzati con una `Barrier`, lo scrittore non deve mai intrufolarsi tra il primo e
+  il secondo); un lettore aspetta uno scrittore in corso; il lock si rilascia comunque se il
+  blocco `with` solleva un'eccezione (per entrambe le direzioni). Limite noto e ACCETTATO, non
+  nascosto (vedi il docstring della classe): l'algoritmo classico "primo lettore blocca, ultimo
+  sblocca" puo' far attendere indefinitamente uno scrittore se i lettori si susseguono senza mai
+  lasciare la risorsa libera (starvation dello scrittore) - per un assistente personale con un
+  numero di dispositivi/richieste concorrenti ridotto, il rischio che questa fase deve coprire e'
+  DUE azioni mutative concorrenti sulla stessa risorsa, non l'equita' di scheduling tra tante; una
+  coda equa resta lavoro futuro dichiarato se mai servisse. Deliberatamente NON affrontato qui
+  (passo successivo dichiarato, stesso principio "prima il meccanismo, poi l'adozione" gia'
+  seguito per `ActionProposal`/`DeviceIdentity`): quale `resource_key` derivare da un dato intent/
+  parametri (gli esempi della specifica - `filesystem:<path>`, `app:<name>`, `window:<id>`,
+  `browser:<profile/tab>`, `device:<id>`, `system:power`, `audio:output` - coprono 209 intent con
+  forme di parametri diverse, un censimento a se', dello stesso ordine di grandezza di
+  `INTENT_EFFECT_CLASS`) ne' il collegamento ai quattro chokepoint reali. Nuovi 10 test in
+  `tests/test_resource_lock.py`. Prova: 2.701/2.701 test, ruff/mypy verdi (nuovo file aggiunto al
+  set selettivo mypy, 84 file).
 - `F1.4.2` (prima fetta - identita' Windows/dispositivo) — 13/09/2026: "distinguere identita'
   Windows, profilo Jake, dispositivo e speaker profile". Investigato PRIMA di scrivere codice
   (non assunto dal testo della roadmap): "profilo Jake" non e' un concetto definito da nessuna
@@ -5077,7 +5107,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 16/09/2026. Sessione lunga con 92 incrementi completati e verificati (PR #28-#118), la
+Aggiornato 16/09/2026. Sessione lunga con 93 incrementi completati e verificati (PR #28-#119), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
