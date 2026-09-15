@@ -771,7 +771,9 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   CONTROL_SMART_DEVICE, rete su PING_HOST/TRACE_ROUTE/CHECK_WEBSITE_STATUS (le ultime tre su
   stringa grezza, non risolta - limite dichiarato), e ora anche l'ottava e ultima - "durata",
   **decisione esplicita dell'utente**: finestra oraria - vedi sotto); `F1.2.4`
-  chiuso per il percorso planner (vedi sotto); `F1.2.6` e `F1.2.7` chiusi (vedi sotto); `F1.2.3`
+  **chiuso** (percorso planner - vedi sotto - e ora anche il percorso agente, gia' coperto dallo
+  stesso filtro per-intent usato per F1.5.3 ma mai testato esplicitamente per QUESTO scenario,
+  vedi sotto); `F1.2.6` e `F1.2.7` chiusi (vedi sotto); `F1.2.3`
   **chiuso** (tutte e cinque le dimensioni testuali - "utente, dispositivo, agente, skill e
   sessione" - sono ora intersecate su ENTRAMBI i percorsi con "vince il piu' restrittivo":
   dispositivo/agente (le capability costruite sotto), utente (`windows_user_blocked_intents`,
@@ -781,7 +783,12 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   gia' il PRIMO controllo su entrambi i percorsi, prima di device/utente/agente - non serviva
   costruire nulla di nuovo, andava solo riconosciuto come questa dimensione), e ora anche
   "sessione" - **decisione esplicita dell'utente**: l'id di una CONNESSIONE companion, distinto
-  dal device_id persistente - vedi sotto).
+  dal device_id persistente - vedi sotto); `F1.2.8` **chiuso** (l'unico pezzo dichiarato aperto,
+  "nessun test di bypass possibile per il percorso 7 finche' F1.2.1 non gli aggiunge un controllo
+  proprio", era gia' risolto da un incremento SUCCESSIVO a quella voce - F1.2.1 percorso 7 fu
+  chiuso, con un test di bypass gia' scritto in quello stesso incremento
+  (`tests/test_skill_registry.py::PolicyGateTests`) - semplicemente mai ricollegato
+  esplicitamente a questa voce, vedi sotto). Con **questo, l'intera sezione F1.2 e' chiusa**.
 - `F1.2.2` (parziale, prima capability: radici filesystem) — 12/09/2026: "definire capability per
   filesystem root, app, contatto, dominio web, device, servizio Home Assistant, rete e durata" -
   la prima delle otto, scelta perche' e' l'unica gia' collegabile senza dover prima costruire
@@ -1280,6 +1287,29 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   e `tests/test_planner_provider.py`. Non ancora affrontato: `F1.2.2`-`F1.2.3`, `F1.2.6`-`F1.2.7`;
   lo stesso irrigidimento non e' stato applicato a `core/agent.py::TaskAgent._schema()` (gia' ha
   `additionalProperties: False` sull'unione, ma non il controllo per-intent piu' stretto).
+- `F1.2.4` (chiusura - il percorso agente era gia' coperto) — 15/09/2026: il limite dichiarato
+  sopra ("il controllo per-intent piu' stretto non e' applicato a `TaskAgent._schema()`")
+  investigato prima di scrivere codice, non riprodotto alla lettera: `TaskAgent.run()` ha gia' un
+  filtro per-intent, riga per riga identico nello SCOPO a `_known_parameters_by_intent()` del
+  planner - "parametri: solo quelli della capacita', senza vuoti" (gia' esistente, costruito per
+  F1.5.3: `metadata = valid[intent].get("parameters") or {}; parameters = {name: value for
+  name, value in parameters.items() if name in metadata and ...}`). Il filtro tiene SOLO le
+  chiavi dichiarate dai metadata DELL'INTENT del passo, non l'unione di tutte le capacita' visibili
+  nello schema JSON - esattamente l'equivalente del controllo per-intent del planner, semplicemente
+  mai testato esplicitamente per lo scenario GENERALE ("un parametro legittimo di un'ALTRA skill",
+  non solo `confirmed`/`authenticated`, gia' coperto da
+  `ExternalContentCannotForgeAuthorizationTests` per F1.5.3). Il percorso planner/workflow/trigger
+  era gia' coperto per intero: `RunWorkflowSkill`/i trigger eseguono sempre un `PlanStep` costruito
+  da `_plan_from_payload()` (via `SaveWorkflowSkill.execute()` -> `planner_provider.build_plan()`),
+  mai un percorso parallelo che bypassi quella validazione - un piano con un parametro non
+  dichiarato viene rifiutato ALLA COSTRUZIONE, prima ancora che `PlanExecutor.execute()` entri in
+  gioco. Aggiunto 1 nuovo test in
+  `tests/test_agent.py::UnknownParameterNeverReachesTheExecutorTests` - due capacita' REALI
+  (`DELETE_PATH`/`SYSTEM_POWER`), un passo per `DELETE_PATH` con anche `"action"` (un parametro
+  VERO di `SYSTEM_POWER`, non di `DELETE_PATH` - lo schema JSON per unione lo permetterebbe, il
+  filtro per-intent no) verifica che l'executor riceva SOLO `path`, mai `action`. Nessun file di
+  produzione toccato. `F1.2.4` ora **chiuso** nella sua interezza. Prova: 2.556/2.556 test,
+  ruff verde su `tests/test_agent.py`.
 - `F1.2.5` (parziale) — 11/09/2026: `core/execution_safety.py::rollback_effect` eseguiva sempre
   l'intent compensatorio (`DELETE_PATH`/`RENAME_PATH`/`MOVE_PATH`, con `confirmed: True`
   auto-iniettato) chiamando `registry.execute()` direttamente, bypassando `PolicyEngine` del
@@ -1318,9 +1348,9 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   ruff, mypy su 75 file e compileall verdi. Smoke CLI con Ollama irraggiungibile: avvio,
   risposta e arresto in 4,8 s, exit 0. Rimangono aperti capability, policy completa del
   rollback/workflow, dispatcher grezzo e ownership/race di sessione; G1 non e' superato.
-- `F1.2.8` — 11/09/2026: audit dei test di bypass gia' esistenti per ognuno dei 7 percorsi di
-  [docs/action-execution-paths.md](docs/action-execution-paths.md), integrato dove mancava un
-  caso reale invece di riscrivere da zero. Percorso 1/2 (comando diretto/agente):
+- `F1.2.8` (parziale) — 11/09/2026: audit dei test di bypass gia' esistenti per ognuno dei 7
+  percorsi di [docs/action-execution-paths.md](docs/action-execution-paths.md), integrato dove
+  mancava un caso reale invece di riscrivere da zero. Percorso 1/2 (comando diretto/agente):
   `tests/test_jake_core_permissions.py::BlockedIntentsGateTests` (`blocked_intents`
   vince anche con `confirmed` gia' impostato). Percorso 3 (piano automatico):
   `tests/test_plan_executor.py::PolicyTests`. Percorso 4 (companion): nuovo test
@@ -1331,6 +1361,20 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   (rollback): gia' coperto da `F1.2.5` sopra. Percorso 7 (`SkillRegistry.execute()`): nessun test
   di bypass possibile da scrivere finche' `F1.2.1` non gli aggiunge un controllo proprio - il gap
   resta documentato, non "testato" nel senso di verificarne la chiusura.
+- `F1.2.8` (chiusura - il percorso 7 era gia' stato chiuso) — 15/09/2026: la precondizione della
+  voce sopra ("finche' F1.2.1 non gli aggiunge un controllo proprio") era gia' stata soddisfatta
+  da un incremento SUCCESSIVO a quella voce dell'11/09 - "F1.2.1 percorso 7 - chiusura finale"
+  (`SkillRegistry.execute()` reso fail-closed di default) ha gia' scritto, nello stesso
+  incremento, il test di bypass mancante:
+  `tests/test_skill_registry.py::PolicyGateTests::
+  test_no_policy_engine_blocks_without_calling_the_skill`/
+  `test_intent_in_blocked_intents_blocks_without_calling_the_skill` (nessun `policy_engine` o un
+  intent bloccato fermano l'esecuzione PRIMA di chiamare la skill, non solo dopo). Semplicemente
+  mai ricollegato esplicitamente a QUESTA voce della roadmap, ne' mai incluso nella riga di Stato
+  in cima alla sezione, che non menzionava affatto `F1.2.8`. Nessun file di produzione o di test
+  toccato: solo la classificazione dello stato in questo documento. Con questo, `F1.2.8` e'
+  **chiuso** nella sua interezza (tutti e 7 i percorsi), e con esso **l'intera sezione F1.2 e'
+  chiusa**. Prova: 2.556/2.556 test (suite gia' verde, nessuna riga aggiunta).
 - `F1.2.7` — 12/09/2026: aggiunto `PolicyEngine.explain(intent, parameters=None) -> dict`
   ("policy simulator": mostra se e perche' un'azione sarebbe permessa, SENZA eseguire nulla).
   Refattorizzata la logica di `decide_interactive`/`decide_automated` in due varianti private
@@ -4513,7 +4557,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 15/09/2026. Sessione lunga con 76 incrementi completati e verificati (PR #28-#103), la
+Aggiornato 15/09/2026. Sessione lunga con 78 incrementi completati e verificati (PR #28-#104), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -4743,14 +4787,27 @@ chiamante di produzione aggiornato; restituito da `/devices/<id>/claim`, rimanda
 `/command`; nuovo `current_session_id()` in `core/request_context.py`, stesso meccanismo di
 `current_device_id`; nuova capability `session_blocked_intents` in `PolicyEngine`, simmetrica a
 `device_blocked_intents`. Deliberatamente non esteso al ledger in questo incremento - fetta
-stretta). Con questo, `F1.2.3` e' **chiuso** nella sua interezza (tutte e cinque le dimensioni).
-Il resto:
-`F1.2.6` (percorso interattivo/agente, ripreso da lavoro
-non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
+stretta). Con questo, `F1.2.3` e' **chiuso** nella sua interezza (tutte e cinque le dimensioni), e
+`F1.2.4` chiusura - il percorso agente era gia' coperto (il limite dichiarato "il controllo
+per-intent non e' applicato a `TaskAgent._schema()`" investigato prima di scrivere codice: l'agente
+ha gia' un filtro per-intent, costruito per F1.5.3 ("parametri: solo quelli della capacita', senza
+vuoti"), riga per riga equivalente nello scopo a `_known_parameters_by_intent()` del planner -
+semplicemente mai testato esplicitamente per lo scenario GENERALE, non solo confirmed/
+authenticated; il percorso planner/workflow/trigger era gia' coperto per intero, ogni piano passa
+sempre da `_plan_from_payload()` prima di raggiungere `PlanExecutor`. Nessun codice di produzione
+cambiato, solo un test in piu'). Con questo, `F1.2.4` e' **chiuso** nella sua interezza, e `F1.2.8`
+chiusura - il percorso 7 era gia' stato chiuso (la precondizione dichiarata - "finche' F1.2.1 non
+gli aggiunge un controllo proprio" - era gia' soddisfatta da un incremento successivo a quella
+voce, che aveva gia' scritto il test di bypass mancante, `PolicyGateTests` - mai ricollegato
+esplicitamente a questa voce ne' incluso nella riga di Stato in cima alla sezione, che non
+menzionava affatto `F1.2.8`; correzione anche di un residuo stale nell'elenco "il resto" qui
+sotto, che menzionava ancora `F1.2.6` - chiuso da giorni - come se fosse ancora aperto). **Con
+questo, l'intera sezione F1.2 (Policy kernel e capability) e' chiusa.** Il resto:
+`F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.555/2.555 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.556/2.556 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
 invariati, nessuno dei due coperto da "mypy selettivo" in CI - 80 file nella lista selettiva,
 invariata: nessun file nuovo in questo incremento). `G1` resta aperto.
