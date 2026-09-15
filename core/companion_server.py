@@ -35,7 +35,9 @@ from typing import cast
 from core.device_registry import DeviceRegistry
 from core.event_bus import EventBus
 from core.hud_protocol import EventType, HudEvent
-from core.request_context import reset_current_device_id, set_current_device_id
+from core.request_context import (
+    reset_current_device_id, reset_current_session_id, set_current_device_id, set_current_session_id,
+)
 from core.version import PROTOCOL_VERSION, VERSION
 
 DEFAULT_HOST = "127.0.0.1"
@@ -185,21 +187,30 @@ class _Handler(BaseHTTPRequestHandler):
         # parte gia' dal default), resettare resta la scelta corretta a prescindere dai dettagli
         # di implementazione di chi gestisce le richieste.
         device_id = (body.get("device_id") or "").strip() or None
-        token = set_current_device_id(device_id)
+        device_token = set_current_device_id(device_id)
+        # F1.2.3 (capability per SESSIONE): session_id opzionale nel body - lo stesso ricevuto da
+        # /claim in risposta. Stesso schema/stesse garanzie di device_id sopra.
+        session_id = (body.get("session_id") or "").strip() or None
+        session_token = set_current_session_id(session_id)
         try:
             response = self.companion.command_handler(text)
         finally:
-            reset_current_device_id(token)
+            reset_current_device_id(device_token)
+            reset_current_session_id(session_token)
         self._json_response(200, {"response": response})
         return None
 
     def _handle_claim(self, device_id: str):
         body = self._read_json_body()
         name = body.get("name", "")
-        previous = self.companion.devices.claim(device_id, name)
+        # F1.2.3 (capability per SESSIONE): session_id e' NUOVO a ogni claim(), anche per lo
+        # stesso device_id di prima - il client lo deve rimandare in /command (campo opzionale
+        # "session_id", stesso schema gia' usato per "device_id") perche' il resto della catena
+        # di chiamate su QUEL thread lo veda tramite core/request_context.py.
+        previous, session_id = self.companion.devices.claim(device_id, name)
         if previous:
             self.companion.event_bus.publish(HudEvent(EventType.DEVICE_HANDOFF, {"from": previous, "to": device_id}))
-        self._json_response(200, {"active_device": device_id})
+        self._json_response(200, {"active_device": device_id, "session_id": session_id})
 
     def _handle_release(self, device_id: str):
         # _read_json_body() scarta il risultato (release non ha ancora parametri), ma va

@@ -286,6 +286,13 @@ class JakeCore:
             # male in config.json solleva subito (PolicyEngine.__init__), non un fallimento
             # silenzioso all'avvio.
             time_restricted_intents=config.get("time_restricted_intents", {}) or {},
+            # F1.2.3 (intersezione, quinta e ultima capability: SESSIONE): {session_id:
+            # [intent, ...]} in config.json, vuoto per default - stesso principio di
+            # device_blocked_intents, ma per l'id di una CONNESSIONE companion (core.
+            # request_context.current_session_id(), nuovo a ogni DeviceRegistry.claim()) invece
+            # che per l'identita' persistente del dispositivo. Utile per un permesso che deve
+            # valere solo finche' quella specifica connessione resta viva, non per sempre.
+            session_blocked_intents=config.get("session_blocked_intents", {}) or {},
         )
         # F1.2.5: collegato DOPO la creazione (self.agent/coding_agent/research_agent esistono
         # gia', self.policy_engine no, quando i tre TaskAgent vengono costruiti sopra) - senza

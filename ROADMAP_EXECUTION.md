@@ -772,17 +772,16 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   stringa grezza, non risolta - limite dichiarato), e ora anche l'ottava e ultima - "durata",
   **decisione esplicita dell'utente**: finestra oraria - vedi sotto); `F1.2.4`
   chiuso per il percorso planner (vedi sotto); `F1.2.6` e `F1.2.7` chiusi (vedi sotto); `F1.2.3`
-  chiuso parzialmente (QUATTRO delle cinque dimensioni testuali - "utente, dispositivo, agente,
-  skill e sessione" - sono gia' intersecate su ENTRAMBI i percorsi con "vince il piu' restrittivo":
+  **chiuso** (tutte e cinque le dimensioni testuali - "utente, dispositivo, agente, skill e
+  sessione" - sono ora intersecate su ENTRAMBI i percorsi con "vince il piu' restrittivo":
   dispositivo/agente (le capability costruite sotto), utente (`windows_user_blocked_intents`,
   F1.4.2 - la stessa identita' "utente" di cui parla questa voce, solo costruita e datata sotto
   quell'altro numero), skill (`blocked_intents`, il controllo PIU' vecchio e fondamentale del
   modulo, verificato leggendo `_decide_interactive_reasoned`/`_decide_automated_reasoned`: e'
   gia' il PRIMO controllo su entrambi i percorsi, prima di device/utente/agente - non serviva
-  costruire nulla di nuovo, andava solo riconosciuto come questa dimensione, vedi sotto). Resta
-  genuinamente aperta solo "sessione" - nessuna infrastruttura di identita' di sessione esiste nel
-  progetto, e il significato non e' definito da nessuna parte: non indovinato qui, per lo stesso
-  principio gia' seguito per "durata" in F1.2.2).
+  costruire nulla di nuovo, andava solo riconosciuto come questa dimensione), e ora anche
+  "sessione" - **decisione esplicita dell'utente**: l'id di una CONNESSIONE companion, distinto
+  dal device_id persistente - vedi sotto).
 - `F1.2.2` (parziale, prima capability: radici filesystem) — 12/09/2026: "definire capability per
   filesystem root, app, contatto, dominio web, device, servizio Home Assistant, rete e durata" -
   la prima delle otto, scelta perche' e' l'unica gia' collegabile senza dover prima costruire
@@ -1227,6 +1226,39 @@ Criterio di uscita: nessun executor è raggiungibile senza una decisione emessa 
   sicurezza senza esserlo per davvero). Nessun file di produzione o di test toccato: solo la
   classificazione dello stato in questo documento. Prova: 2.525/2.525 test (suite gia' verde,
   nessuna riga aggiunta).
+- `F1.2.3` (quinta e ultima capability: sessione) — 15/09/2026: "sessione" era l'ultima dimensione
+  senza un significato definito. **Decisione esplicita dell'utente**, presentata con candidati
+  concreti invece di una domanda aperta: l'id di una CONNESSIONE companion, distinto dalla sua
+  identita' PERSISTENTE (`device_id`) - un dispositivo che si disconnette/riconnette (l'app va in
+  background e poi torna, una perdita di rete, un riavvio) e' una sessione NUOVA, anche per lo
+  stesso device_id di prima; un permesso scoped alla sessione vale solo finche' QUELLA connessione
+  resta viva. `DeviceRegistry.claim()` (core/device_registry.py) genera ora un `session_id` nuovo
+  (`core.logger.new_trace_id()`, la stessa fonte gia' usata per trace_id/action_id) a OGNI
+  chiamata, non solo la prima per un dato device_id - cambio di firma da `str | None` a
+  `tuple[str | None, str]` (previous, session_id), l'unico chiamante di produzione
+  (`core/companion_server.py::_handle_claim`) aggiornato di conseguenza, restituisce ora
+  `session_id` nella risposta JSON di `/devices/<id>/claim`. Il client lo rimanda in `/command`
+  (campo opzionale `session_id` nel body, stesso schema gia' usato per `device_id`); nuovo
+  `core.request_context.current_session_id()` (stesso identico meccanismo/stesse garanzie di
+  isolamento per thread di `current_device_id`/`current_agent_name`, propagato da
+  `_handle_command` con lo stesso pattern set/reset in un `finally`). Nuova capability
+  `PolicyEngine.session_blocked_intents: {session_id: {intent, ...}}`, simmetrica a
+  `device_blocked_intents`, stesso ordine di controllo (subito dopo `agent_blocked_intents`) su
+  ENTRAMBI i percorsi, nuovo `POLICY_REASON_SESSION_BLOCKED`. Deliberatamente NON esteso al ledger
+  in questo incremento (nessun campo `session_id` su `ActionReceipt`) - fetta stretta, stesso
+  principio "una capacita' alla volta" gia' seguito per le altre dimensioni di questa
+  intersezione; rimandabile a un incremento dedicato se richiesto. Aggiornati 14 usi esistenti di
+  `claim()` in `tests/test_device_registry.py` per la nuova firma (nessun cambio di comportamento
+  per `previous`, solo spacchettamento della tupla). Aggiunti 2 nuovi test in
+  `tests/test_device_registry.py::ClaimTests` (session_id restituito, due claim dello stesso
+  device restituiscono session_id diversi), 4 in
+  `tests/test_companion_server.py::CommandEndpointTests`/`DeviceHandoffEndpointTests` (session_id
+  nel body visibile all'handler, assente lascia il contesto al default, `/claim` lo restituisce,
+  due claim danno session_id diversi), 3 in `tests/test_request_context.py::SessionId*Tests`
+  (stesso schema di `AgentName*Tests`, incluso l'isolamento tra thread concorrenti), 8 in
+  `tests/test_policy_engine.py::SessionCapabilityTests` (stesso schema di
+  `AgentCapabilityTests`). Con questo, `F1.2.3` e' **chiuso** nella sua interezza (tutte e cinque
+  le dimensioni). Prova: 2.555/2.555 test, ruff/mypy verdi su tutti i file toccati.
 - `F1.2.4` — 12/09/2026: `core/planner_provider.py::_build_output_schema()` chiedeva a Ollama
   passi con `"parameters": {"type": "object"}` SENZA alcuna restrizione sulle chiavi - la causa
   originale del bug corretto in F1.2.5 (un passo poteva arrivare gia' con `"confirmed": true`
@@ -4481,7 +4513,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 15/09/2026. Sessione lunga con 75 incrementi completati e verificati (PR #28-#102), la
+Aggiornato 15/09/2026. Sessione lunga con 76 incrementi completati e verificati (PR #28-#103), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -4702,13 +4734,23 @@ dell'utente**, presentata con candidati concreti: un intent permesso solo in cer
 `time_restricted_intents`, stesso principio "nega per default"; diversa dalle altre capability -
 dipende dal momento, non dai parametri - nuovo `now_provider` iniettabile; una finestra malformata
 solleva alla costruzione, fail loud invece di un fail-open silenzioso). Con questo, `F1.2.2` e'
-**chiuso** nella sua interezza. Il resto:
+**chiuso** nella sua interezza, e `F1.2.3` chiusura - quinta capability: sessione (**decisione
+esplicita dell'utente**, presentata con candidati concreti: l'id di una CONNESSIONE companion,
+distinto dal device_id persistente - un dispositivo che si disconnette/riconnette e' una sessione
+NUOVA, anche per lo stesso device_id di prima. `DeviceRegistry.claim()` genera ora un session_id
+nuovo a ogni chiamata - cambio di firma da `str | None` a `tuple[str | None, str]`, l'unico
+chiamante di produzione aggiornato; restituito da `/devices/<id>/claim`, rimandabile dal client in
+`/command`; nuovo `current_session_id()` in `core/request_context.py`, stesso meccanismo di
+`current_device_id`; nuova capability `session_blocked_intents` in `PolicyEngine`, simmetrica a
+`device_blocked_intents`. Deliberatamente non esteso al ledger in questo incremento - fetta
+stretta). Con questo, `F1.2.3` e' **chiuso** nella sua interezza (tutte e cinque le dimensioni).
+Il resto:
 `F1.2.6` (percorso interattivo/agente, ripreso da lavoro
 non committato), `F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
 verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
 dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
 verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.536/2.536 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
+`master` e' pulito, 2.555/2.555 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
 errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
 invariati, nessuno dei due coperto da "mypy selettivo" in CI - 80 file nella lista selettiva,
 invariata: nessun file nuovo in questo incremento). `G1` resta aperto.

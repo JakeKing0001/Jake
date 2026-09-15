@@ -126,7 +126,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from core.identity import current_windows_user
-from core.request_context import current_agent_name, current_device_id
+from core.request_context import current_agent_name, current_device_id, current_session_id
 
 
 class PolicyDecision(str, Enum):
@@ -208,12 +208,18 @@ POLICY_REASON_AGENT_BLOCKED = "intent_in_agent_blocked_intents"
 # STESSO intent puo' essere permesso o negato a seconda di QUANDO viene chiesto, non e' mai
 # bloccato in assoluto.
 POLICY_REASON_TIME_WINDOW_DENIED = "outside_allowed_time_window"
+# F1.2.3 (intersezione, quinta e ultima dimensione: SESSIONE - decisione esplicita dell'utente su
+# cosa "sessione" dovesse significare): stesso principio di POLICY_REASON_DEVICE_BLOCKED sopra, ma
+# per core.request_context.current_session_id() - l'id della CONNESSIONE companion corrente,
+# distinto dal device_id persistente - invece che per dispositivo.
+POLICY_REASON_SESSION_BLOCKED = "intent_in_session_blocked_intents"
 POLICY_REASONS = frozenset({
     POLICY_REASON_BLOCKED, POLICY_REASON_REQUIRE_AUTH, POLICY_REASON_CONFIRM, POLICY_REASON_ALLOWED,
     POLICY_REASON_CAPABILITY_DENIED, POLICY_REASON_DEVICE_BLOCKED, POLICY_REASON_WEB_CAPABILITY_DENIED,
     POLICY_REASON_APP_CAPABILITY_DENIED, POLICY_REASON_CONTACT_CAPABILITY_DENIED,
     POLICY_REASON_SMART_DEVICE_CAPABILITY_DENIED, POLICY_REASON_WINDOWS_USER_BLOCKED,
     POLICY_REASON_NETWORK_CAPABILITY_DENIED, POLICY_REASON_AGENT_BLOCKED, POLICY_REASON_TIME_WINDOW_DENIED,
+    POLICY_REASON_SESSION_BLOCKED,
 })
 
 # F1.2.2: le quattro mutazioni sono le stesse gia' raggruppate in core/execution_safety.py::
@@ -371,6 +377,7 @@ class PolicyEngine:
         allowed_smart_devices: set | list | None = None, windows_user_blocked_intents: dict[str, set] | None = None,
         allowed_network_hosts: set | list | None = None, agent_blocked_intents: dict[str | None, set] | None = None,
         time_restricted_intents: dict[str, list] | None = None, now_provider=None,
+        session_blocked_intents: dict[str | None, set] | None = None,
     ):
         self.auth_gate = auth_gate
         self.blocked_intents = set(blocked_intents or set())
@@ -437,6 +444,16 @@ class PolicyEngine:
         # datetime.now ogni volta che serve, cosi' un test puo' passare un orologio finto senza
         # dover aspettare l'ora reale per provare una finestra.
         self._now_provider = now_provider or datetime.now
+        # F1.2.3 (intersezione, quinta e ultima capability: SESSIONE): {session_id: {intent,
+        # ...}} - vuoto/None (default) = nessuna restrizione aggiuntiva, stesso principio di
+        # device_blocked_intents. Un session_id assente dal dizionario (incluso None, nessuna
+        # connessione companion in corso) non ha alcuna restrizione per sessione. Simmetrico a
+        # device_blocked_intents ma per CONNESSIONE (vedi core.request_context.
+        # current_session_id()) invece che per identita' persistente del dispositivo: un permesso
+        # scoped a una sessione vale solo finche' quella specifica connessione resta viva.
+        self.session_blocked_intents = {
+            session_id: set(intents) for session_id, intents in (session_blocked_intents or {}).items()
+        }
 
     def register_intent(self, intent: str) -> None:
         """Sincronizza UN intent con la policy corrente, secondo la sua classificazione del
@@ -512,6 +529,8 @@ class PolicyEngine:
             return PolicyDecision.BLOCK, POLICY_REASON_WINDOWS_USER_BLOCKED
         if self._agent_blocks(intent):
             return PolicyDecision.BLOCK, POLICY_REASON_AGENT_BLOCKED
+        if self._session_blocks(intent):
+            return PolicyDecision.BLOCK, POLICY_REASON_SESSION_BLOCKED
         if intent in FILESYSTEM_CAPABILITY_INTENTS and not self._filesystem_capability_allows(parameters):
             return PolicyDecision.BLOCK, POLICY_REASON_CAPABILITY_DENIED
         if intent in WEB_CAPABILITY_INTENTS and not self._web_capability_allows(parameters):
@@ -555,6 +574,8 @@ class PolicyEngine:
             return PolicyDecision.BLOCK, POLICY_REASON_WINDOWS_USER_BLOCKED
         if self._agent_blocks(intent):
             return PolicyDecision.BLOCK, POLICY_REASON_AGENT_BLOCKED
+        if self._session_blocks(intent):
+            return PolicyDecision.BLOCK, POLICY_REASON_SESSION_BLOCKED
         if intent in FILESYSTEM_CAPABILITY_INTENTS and not self._filesystem_capability_allows(parameters or {}):
             return PolicyDecision.BLOCK, POLICY_REASON_CAPABILITY_DENIED
         if intent in WEB_CAPABILITY_INTENTS and not self._web_capability_allows(parameters or {}):
@@ -595,6 +616,15 @@ class PolicyEngine:
         (comportamento di default) non blocca mai nulla; `None` non e' MAI una voce utile da
         configurare (nessun agente specifico da restringere), vedi il docstring del modulo."""
         return intent in self.agent_blocked_intents.get(current_agent_name(), set())
+
+    def _session_blocks(self, intent: str) -> bool:
+        """F1.2.3 (intersezione, quinta e ultima capability): vero se la sessione companion
+        corrente su QUESTO thread (core.request_context.current_session_id(), None se nessuna
+        connessione companion e' coinvolta - voce locale o automazione) ha questo intent nel
+        proprio elenco di intent bloccati. Un dizionario vuoto/senza voce per questa sessione
+        (comportamento di default) non blocca mai nulla; `None` non e' MAI una voce utile da
+        configurare, stesso principio di _agent_blocks sopra."""
+        return intent in self.session_blocked_intents.get(current_session_id(), set())
 
     def _filesystem_capability_allows(self, parameters: dict) -> bool:
         """True se nessuna radice e' configurata (default, nessuna restrizione) oppure se OGNI
