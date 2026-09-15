@@ -388,7 +388,7 @@ class IntentSafetyRegistryConsistencyTests(unittest.TestCase):
             VERIFIABLE_INTENTS,
             {
                 "CREATE_PATH", "RENAME_PATH", "MOVE_PATH", "DELETE_PATH", "KILL_PROCESS_BY_PORT", "CLOSE_WINDOW",
-                "EXTRACT_ARCHIVE", "CREATE_SKILL", "DELETE_CREATED_SKILL",
+                "EXTRACT_ARCHIVE", "CREATE_SKILL", "DELETE_CREATED_SKILL", "RESTART_EXPLORER",
             },
         )
 
@@ -417,6 +417,31 @@ class CloseWindowVerificationTests(unittest.TestCase):
         win32gui.IsWindow.return_value = True
         with unittest.mock.patch.dict("sys.modules", {"win32gui": win32gui}):
             self.assertFalse(verify_effect("CLOSE_WINDOW", {"hwnd": 1}))
+
+
+class _FakeProcess:
+    def __init__(self, name):
+        self.info = {"name": name}
+
+
+class RestartExplorerVerificationTests(unittest.TestCase):
+    """F1.3.2 (stesso pattern trovato una quarta volta in questa sessione, dopo processi/
+    finestre/casa): verifica indipendente che almeno un processo explorer.exe sia davvero in
+    esecuzione, invece di fidarsi del successo dichiarato da RestartExplorerSkill - stesso
+    principio di CloseWindowVerificationTests sopra. Ignora `data` (sempre {}): non c'e' un PID
+    noto in anticipo per RESTART_EXPLORER, a differenza di KILL_PROCESS_BY_PORT."""
+
+    def test_explorer_present_verifies_as_running(self):
+        with unittest.mock.patch("psutil.process_iter", return_value=[_FakeProcess("explorer.exe")]):
+            self.assertTrue(verify_effect("RESTART_EXPLORER", {}))
+
+    def test_explorer_absent_verifies_as_not_running(self):
+        with unittest.mock.patch("psutil.process_iter", return_value=[_FakeProcess("notepad.exe")]):
+            self.assertFalse(verify_effect("RESTART_EXPLORER", {}))
+
+    def test_no_processes_at_all_verifies_as_not_running(self):
+        with unittest.mock.patch("psutil.process_iter", return_value=[]):
+            self.assertFalse(verify_effect("RESTART_EXPLORER", {}))
 
 
 class IsSafeToAutoRetryTests(unittest.TestCase):

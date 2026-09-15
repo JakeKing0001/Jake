@@ -1537,9 +1537,11 @@ reversibili dispone di undo testato.
   `execution_safety.py`; non ancora browser); `F1.3.4`/`F1.3.5` restano aperti, mai affrontati
   (infrastruttura nuova sostanziale, non una fetta stretta collegabile a qualcosa gia' esistente);
   `INTENT_SAFETY_REGISTRY` esteso il 15/09/2026 a EXTRACT_ARCHIVE/CREATE_SKILL/DELETE_CREATED_SKILL
-  (vedi sotto, per il secondo criterio del Gate G1) - gli altri 15 intent DESTRUCTIVE/ADMIN restano
-  fuori con motivazione dichiarata (store interno gia' auto-verificato via cursor.rowcount, o
-  natura non verificabile come SYSTEM_POWER).
+  e poi a RESTART_EXPLORER (vedi sotto, per il secondo criterio del Gate G1 - RESTART_EXPLORER
+  aveva anche il quarto buco "successo dichiarato senza controllo" gia' trovato tre volte in
+  questa sessione, corretto direttamente nella skill) - gli altri 14 intent DESTRUCTIVE/ADMIN
+  restano fuori con motivazione dichiarata (store interno gia' auto-verificato via cursor.rowcount,
+  o natura non verificabile come SYSTEM_POWER).
 - `F1.3.1` — 11/09/2026: `core/execution_safety.py` aveva tre strutture parallele da tenere
   sincronizzate a mano - `VERIFIABLE_INTENTS` (insieme), l'if/elif di `verify_effect`,
   `ROLLBACK_HANDLERS` + `ROLLBACK_COMPENSATING_INTENT` (due dizionari) - esattamente il pattern
@@ -1838,6 +1840,33 @@ reversibili dispone di undo testato.
   gonfiare lo scope di questo incremento oltre il previsto. Prova: 2.576/2.576 test, ruff verde,
   mypy verde sui file nel set selettivo (`core/execution_safety.py`/`core/skill_forge.py` gia'
   inclusi; `skills/skill_forge_skills.py` non lo era - un errore preesistente e non correlato,
+  verificato individualmente).
+- `F1.3.2` (esteso a Explorer) / `F1.3.1` (estensione - RESTART_EXPLORER) — 15/09/2026: durante
+  l'indagine sui candidati rimasti dopo la voce precedente, verificato per davvero (non assunto)
+  se `RestartExplorerSkill` condividesse lo stesso pattern "dichiara successo senza controllare
+  l'effetto reale" gia' trovato tre volte in questa sessione (processi, finestre, casa). Confermato:
+  `execute()` restituiva `success=True` subito dopo `subprocess.Popen("explorer.exe")`, senza
+  aspettare che Explorer fosse DAVVERO ripartito - fire-and-forget quanto `PostMessage(WM_CLOSE)`
+  per CLOSE_WINDOW, stessa causa, stesso rimedio. Nuovo `_wait_until_explorer_running()` in
+  `skills/system_maintenance.py` (stesso schema di `_wait_until_window_closed` in
+  `skills/window_control.py`: polling con `psutil.process_iter` fino a
+  `EXPLORER_RESTART_WAIT_SECONDS`, reso configurabile SOLO per i test); `RESTART_EXPLORER` aggiunto
+  anche a `INTENT_SAFETY_REGISTRY` con un secondo controllo indipendente (`_verify_explorer_running`,
+  ignora `data` - a differenza di KILL_PROCESS_BY_PORT non c'e' un PID noto in anticipo per il
+  NUOVO processo, si controlla solo che un `explorer.exe` esista), nessun rollback (riavviare non
+  ha un inverso, stesso principio di KILL_PROCESS_BY_PORT/CLOSE_WINDOW). Effetto collaterale
+  consapevole: RESTART_EXPLORER diventa anche automaticamente ritentabile su un `OPERATION_FAILED`
+  transitorio (idempotente per costruzione - riprovare raggiunge lo stesso stato finale, Explorer
+  in esecuzione), documentato nel docstring di `is_safe_to_auto_retry`. Nuovi test in
+  `tests/test_system_maintenance_skills.py::RestartExplorerTests` (il caso che prima veniva
+  riportato come successo: taskkill/Popen non sollevano eccezioni ma Explorer non ricompare mai) e
+  `tests/test_execution_safety.py::RestartExplorerVerificationTests` (3 test), tutti verificati
+  FALLIRE contro il codice precedente. Con questo, il secondo criterio del Gate G1 copre 10 dei 20
+  intent DESTRUCTIVE/ADMIN (piu' CLOSE_WINDOW). Ancora aperto, deliberatamente non affrontato qui:
+  EMPTY_RECYCLE_BIN (un verificatore via `SHQueryRecycleBinW` sembra fattibile - stesso principio,
+  API nativa senza dipendenze esterne - ma non ancora investigato a fondo). Prova: 2.580/2.580
+  test, ruff verde, mypy verde sui file selettivi (`skills/system_maintenance.py` non e' nella
+  lista - stesso errore preesistente e non correlato di `skills/skill_forge_skills.py` sopra,
   verificato individualmente).
 
 ### F1.4 — Identità, autenticazione e segreti
@@ -4749,7 +4778,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 15/09/2026. Sessione lunga con 83 incrementi completati e verificati (PR #28-#109), la
+Aggiornato 15/09/2026. Sessione lunga con 84 incrementi completati e verificati (PR #28-#110), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -5088,13 +5117,13 @@ piccole senza un criterio. Ad oggi: il quinto criterio (sandbox) ha le fondament
 affatto, servirebbero bindings ctypes da zero) - manifest di directory (F1.6.5) e negazione rete
 (F1.6.6, con un'alternativa piu' semplice suggerita - una regola del Windows Firewall scoped al
 worker, invece di AppContainer) restano aperti; il secondo (prova e audit per le azioni ad alto
-impatto) copre da 15/09/2026 9 dei 20 intent DESTRUCTIVE/ADMIN (CREATE_PATH/RENAME_PATH/MOVE_PATH/
-DELETE_PATH/KILL_PROCESS_BY_PORT/EXTRACT_ARCHIVE/CREATE_SKILL/DELETE_CREATED_SKILL, piu'
-CLOSE_WINDOW che non e' DESTRUCTIVE/ADMIN ma ha comunque un verificatore) - vedi la voce datata in
-F1.3 sopra per quali degli altri 11 sono stati scartati con motivazione (store interni gia' auto-
-verificati) e quali restano da investigare (EMPTY_RECYCLE_BIN/RESTART_EXPLORER, sospettati dello
-stesso pattern "successo dichiarato senza controllo" gia' trovato tre volte altrove, ma non ancora
-verificati); il quarto (prompt-injection) ha F1.5.1-F1.5.4
+impatto) copre da 15/09/2026 10 dei 20 intent DESTRUCTIVE/ADMIN (CREATE_PATH/RENAME_PATH/MOVE_PATH/
+DELETE_PATH/KILL_PROCESS_BY_PORT/EXTRACT_ARCHIVE/CREATE_SKILL/DELETE_CREATED_SKILL/
+RESTART_EXPLORER, piu' CLOSE_WINDOW che non e' DESTRUCTIVE/ADMIN ma ha comunque un verificatore) -
+vedi le voci datate in F1.3 sopra per quali degli altri 10 sono stati scartati con motivazione
+(store interni gia' auto-verificati) e quali restano da investigare (EMPTY_RECYCLE_BIN, un
+verificatore via SHQueryRecycleBinW sembra fattibile ma non ancora costruito); il quarto
+(prompt-injection) ha F1.5.1-F1.5.4
 piu' un piccolo corpus mirato multi-sorgente/multilingue (F1.5.6, il significato letterale di
 "corpus" per un attacco dal vivo contro un modello vero resta un esercizio di red-team manuale
 separato) ma ancora nessun test di injection indiretta (F1.5.7); il sesto (kill switch) e' ora
