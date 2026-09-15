@@ -7,8 +7,10 @@ passo senza alcuna conferma, con un comando diretto dell'utente - non serviva ne
 costruito ad arte."""
 import unittest
 
+from core.plan_executor import PlanExecutor
 from core.planner import Plan, PlanStep
 from core.policy_engine import PolicyEngine
+from core.skill_result import SkillResult
 from skills.workflow import RunWorkflowSkill, SaveWorkflowSkill
 
 
@@ -33,6 +35,18 @@ class FakePlanExecutor:
     def execute(self, plan, **kwargs):
         self.calls.append((plan, kwargs))
         return self.outcome
+
+
+class _RecordingRegistry:
+    """Registro minimo per il PlanExecutor VERO sotto - registra ogni intent eseguito davvero,
+    cosi' un test puo' provare che un passo bloccato non arriva mai a toccare la skill."""
+
+    def __init__(self):
+        self.executed_intents: list[str] = []
+
+    def execute(self, intent, parameters=None, policy_engine=None):
+        self.executed_intents.append(intent)
+        return SkillResult(success=True, data={})
 
 
 class FakePlannerProvider:
@@ -76,6 +90,28 @@ class RunWorkflowSkillTests(unittest.TestCase):
         self.assertEqual(len(plan_executor.calls), 1)
         _, kwargs = plan_executor.calls[0]
         self.assertIs(kwargs["policy_engine"], policy_engine)
+
+    def test_a_blocked_step_inside_a_saved_workflow_is_really_denied_end_to_end(self):
+        """F1.2.5 ("applicare policy anche a... sotto-azioni generate da workflow"): il test
+        sopra prova solo il CABLAGGIO (il policy_engine vero arriva a PlanExecutor.execute()),
+        con un FakePlanExecutor che non applica alcuna policy per davvero. Qui si usa il
+        PlanExecutor VERO (non un doppio) per provare che un'automazione con un passo bloccato
+        viene DAVVERO fermata prima di toccare la skill - non solo che il parametro e' stato
+        passato."""
+        plan = Plan(steps=[PlanStep(intent="RUN_COMMAND", parameters={"command": "qualcosa"})])
+        workflow_manager = FakeWorkflowManager({"automazione": plan})
+        registry = _RecordingRegistry()
+        real_plan_executor = PlanExecutor(registry)
+        policy_engine = PolicyEngine(blocked_intents={"RUN_COMMAND"})
+        skill = RunWorkflowSkill(workflow_manager, real_plan_executor, policy_engine=policy_engine)
+
+        result = skill.execute({"name": "automazione"})
+
+        self.assertTrue(result.success, "RunWorkflowSkill stessa riesce: e' il PASSO dentro il piano a fermarsi")
+        outcome = result.data["outcome"]
+        self.assertFalse(outcome.success)
+        self.assertEqual(outcome.stopped_step.result.error, "POLICY_BLOCKED")
+        self.assertEqual(registry.executed_intents, [], "RUN_COMMAND non deve mai raggiungere la skill vera")
 
     def test_default_policy_engine_is_none_when_never_wired(self):
         """Chi costruisce la skill in isolamento senza collegare la policy (nessun JakeCore
