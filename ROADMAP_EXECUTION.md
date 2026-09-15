@@ -1967,11 +1967,15 @@ Criterio di uscita: nessun segreto in chiaro e ogni azione admin richiede un fat
   gia' coperto); `F1.4.7` **chiuso** (VERIFICA, non fix - vedi sotto: nessuna infrastruttura di
   speaker verification/voiceprint esiste da nessuna parte nel progetto, quindi l'avvertimento
   "non usarlo come unico fattore" e' banalmente soddisfatto per assenza del rischio stesso); il
-  resto della fase (`F1.4.4`-`F1.4.6`) e' ora `DOING` con una **decisione di prodotto esplicita
-  e completa dell'utente** (15/09/2026, vedi sotto per il piano completo in 10 fasi che copre
-  anche F1.5.8/F1.8.1) invece di restare bloccato in attesa - passkey/WebAuthn dietro adapter,
-  pairing QR con `PairingChallenge`/`DeviceIdentity`/`DeviceCredential`/`DeviceRegistry` separati,
-  token per-dispositivo revocabile/ruotabile ogni 90 giorni, multi-device come requisito esplicito.
+  resto della fase (`F1.4.4`-`F1.4.6`) e' ora **chiuso** seguendo una **decisione di prodotto
+  esplicita e completa dell'utente** (15/09/2026, vedi sotto per il piano completo in 10 fasi,
+  concluso il 16/09/2026, che copre anche F1.5.8/F1.8.1) - passkey/WebAuthn dietro adapter
+  (`AuthProvider`, fase 9), pairing QR con `PairingChallenge`/`DeviceIdentity`/`DeviceCredential`
+  separati (fasi 1/2/4), token per-dispositivo revocabile/ruotabile ogni 90 giorni (fase 2/5),
+  multi-device come requisito esplicito verificato end-to-end (fase 10). "Chiuso" qui significa
+  che ogni pezzo dichiarato e' stato costruito E testato, non che ogni pezzo e' gia' collegato a
+  un chokepoint di produzione - vedi la nota di stato onesto alla fine della voce "fase 10" per
+  cosa e' vivo oggi contro cosa resta un meccanismo pronto ma non ancora adottato.
   `core/windows_hello.py` esiste gia' - vedi l'audit storico in [ROADMAP.md](ROADMAP.md) fase F1 -
   ma non era stato riletto contro l'elenco piu' fine di qui prima di questa decisione.
 - **Decisione di prodotto completa (F1.4.4/F1.4.5/F1.4.6/F1.5.8/F1.8.1)** — 15/09/2026: dopo
@@ -2233,6 +2237,39 @@ Criterio di uscita: nessun segreto in chiaro e ogni azione admin richiede un fat
   l'API vera) e 5 in `tests/test_auth_gate.py` (il nuovo percorso passkey + la prova che il
   default di Windows Hello passa davvero dall'adapter). Prova: 2.744/2.744 test, ruff/mypy verdi
   (nuovo file aggiunto al set selettivo mypy, 86 file).
+- `F1.4`/`F1.5.8`/`F1.8.1` (fase 10 del piano - test end-to-end multi-device, ULTIMA fase) —
+  16/09/2026: due scenari distinti, deliberatamente non mescolati, in un nuovo
+  `tests/test_multi_device_end_to_end.py`. **Scenario 1** compone i pezzi GIA' cablati in
+  produzione (pairing fase 4, credenziali per-dispositivo fase 2, autenticazione per-dispositivo
+  su `companion_server.py` fase 6) in un flusso realistico con DUE dispositivi VERI, richieste
+  HTTP vere: entrambi si accoppiano via `PairingService`, ottengono credenziali proprie,
+  autenticano le proprie richieste; l'azione in sospeso creata da un dispositivo (via
+  `ConversationStateManager`, F1.8.1 gia' esistente da prima di questa sessione) non e' MAI
+  visibile/confermabile dall'altro - la prova finale che il buco chiuso in fase 6 (device_id
+  autenticato, non auto-dichiarato) produce davvero l'isolamento richiesto dalla specifica fin
+  dall'inizio; revocare un dispositivo lo fa fallire (401) senza toccare l'altro; un pairing
+  rifiutato non crea alcun dispositivo. **Scenario 2** compone `ResourceLockManager` (fase 7) e
+  `TaskRiskBudget` (fase 8), che restano deliberatamente NON cablati in `TaskAgent`/
+  `PlanExecutor` (passo successivo dichiarato in entrambe le fasi): un task simulato con piu'
+  passi dimostra che i due meccanismi INTEROPERANO (leggere gli appunti poi tentare di inviarli
+  via email viene segnalato come escalation PRIMA dell'esecuzione, la scrittura successiva sulla
+  risorsa resta comunque serializzata), e due "dispositivi" (thread veri) che scrivono sulla
+  stessa risorsa non si intrecciano mai - onesto per costruzione: nessuna affermazione di un
+  collegamento a `TaskAgent`/`PlanExecutor` che non esiste ancora. Nuovi 6 test. Prova:
+  2.750/2.750 test, ruff/mypy verdi.
+
+  **Chiusura del piano in 10 fasi (F1.4.4/F1.4.5/F1.4.6/F1.5.8/F1.8.1)**: tutte e dieci le fasi
+  concordate con l'utente sono state completate e verificate (fasi 1-10, 15-16/09/2026). Stato
+  onesto di cosa e' VIVO in produzione oggi contro cosa resta un meccanismo pronto ma non ancora
+  adottato, per chi riprende: **cablati in un chokepoint reale** - identita'/credenziali/pairing
+  per dispositivo (fasi 1/2/4/5), autenticazione per-dispositivo su `companion_server.py` (fase
+  6), l'adapter `AuthProvider` dentro `AuthGate` (fase 9, ma `PasskeyProvider` resta inerte per
+  design). **Costruiti, testati, MAI ANCORA collegati a `TaskAgent`/`PlanExecutor`**: la coda/
+  lock per resource key (fase 7 - manca ancora il censimento di quale `resource_key` deriva da
+  ogni intent, dello stesso ordine di grandezza di `INTENT_EFFECT_CLASS`) e il risk budget per
+  escalation concatenata (fase 8). Chi riprende questo lavoro dovrebbe considerare quel
+  censimento e quel collegamento come il naturale undicesimo passo, non ancora richiesto
+  esplicitamente e quindi non affrontato qui.
 - `F1.4.2` (prima fetta - identita' Windows/dispositivo) — 13/09/2026: "distinguere identita'
   Windows, profilo Jake, dispositivo e speaker profile". Investigato PRIMA di scrivere codice
   (non assunto dal testo della roadmap): "profilo Jake" non e' un concetto definito da nessuna
@@ -2490,8 +2527,12 @@ Criterio di uscita: zero bypass nel corpus security e provenienza mostrata per o
   sotto; la memoria a lungo termine/NEST restano fuori, gap dichiarato); `F1.5.6` chiuso
   parzialmente (corpus piccolo e mirato che prova il backstop strutturale su piu' sorgenti/lingue,
   vedi sotto - non un elenco enorme di varianti letterali, dichiaratamente non significativo senza
-  un modello vero dietro questi test, vedi sotto); il resto della sezione (F1.5.5, F1.5.8) resta
-  completamente aperto, `F1.5.7` chiuso parzialmente (nomi file - vedi sotto; PDF/commenti di
+  un modello vero dietro questi test, vedi sotto); `F1.5.5` resta N/A dichiarato (nessuna
+  integrazione con modelli cloud esiste nel progetto - vedi la sezione F1.4, investigato in
+  precedenza); `F1.5.8` **chiuso** (risk budget per escalation concatenata, `TaskRiskBudget` -
+  vedi la voce "fase 8 del piano" in F1.4 sopra; meccanismo costruito e testato, non ancora
+  collegato a `TaskAgent`/`PlanExecutor`, vedi la nota di stato onesto alla fine della fase 10);
+  `F1.5.7` chiuso parzialmente (nomi file - vedi sotto; PDF/commenti di
   codice/testo su immagini restano fuori, nessuno di questi formati e' oggi PARSATO da Jake al di
   la' del testo grezzo).
 - `F1.5.1` (prima fetta - marcatore strutturale per il contenuto esterno) — 14/09/2026: fase mai
@@ -5166,7 +5207,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 16/09/2026. Sessione lunga con 95 incrementi completati e verificati (PR #28-#121), la
+Aggiornato 16/09/2026. Sessione lunga con 96 incrementi completati e verificati (PR #28-#122), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -5571,8 +5612,10 @@ classificazione per nome del parametro chiusa, "identificatore di dispositivo" d
 fuori scope per essere troppo vago (nessun formato standard); `F1.7.8` e' chiuso), il resto di
 `F1.8` (il resto di `F1.8.1` - lo slot
 per canale e' ora chiuso, il contesto conversazionale condiviso tra canali e' stato investigato e
-confermato VOLUTO dall'utente (non un buco), resta solo "una coda per azioni concorrenti" non
-legate a una conferma - un concetto letteralmente diverso, gia' in parte coperto da F1.8.2;
+confermato VOLUTO dall'utente (non un buco); "una coda per azioni concorrenti" non legate a una
+conferma e' stata poi costruita per davvero il 16/09/2026 come `ResourceLockManager` - vedi la
+voce "fase 7 del piano" in F1.4 sopra, meccanismo costruito e testato ma non ancora collegato a
+un chokepoint di produzione, vedi la nota di stato onesto alla fine della fase 10;
 `F1.8.4` e' ora CHIUSO per intero (visibilita' fallimenti, rilascio device audio, drain limitato,
 checkpoint da cui riprendere - tutti e quattro coperti); il resto di `F1.8.5` - diagnosi di un deadlock vero su un lock applicativo, non solo un
 thread esterno lento; il resto di `F1.8.7` - undo, non ancora testabile per race finche' non
