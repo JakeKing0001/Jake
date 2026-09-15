@@ -667,6 +667,62 @@ class ExternalContentCannotForgeAuthorizationTests(unittest.TestCase):
         self.assertEqual(offenders, [])
 
 
+class UnknownParameterNeverReachesTheExecutorTests(unittest.TestCase):
+    """F1.2.4 ("negare per default parametri o intent sconosciuti"): stesso principio gia' chiuso
+    per il planner (core/planner_provider.py::_known_parameters_by_intent, "un passo con una
+    chiave dichiarata da un'ALTRA skill ma non da quella del passo stesso") - qui si verifica che
+    lo STESSO scenario sia gia' coperto anche sul percorso agente, dallo stesso filtro gia' usato
+    per F1.5.3 ("parametri: solo quelli della capacita', senza vuoti", core/agent.py::run()): il
+    filtro tiene solo le chiavi dichiarate dai metadata DELL'INTENT del passo, non l'unione di
+    tutte le capacita' - un parametro legittimo di un'ALTRA skill (non solo confirmed/
+    authenticated, gia' coperto da ExternalContentCannotForgeAuthorizationTests sopra) non deve
+    mai raggiungere l'executor se il passo e' per un intent diverso."""
+
+    class _TwoCapabilityRegistry:
+        _CAPABILITIES = [
+            {"intent": "DELETE_PATH", "description": "Cancella un percorso.", "parameters": {
+                "path": {"type": "string", "required": True, "description": "Percorso."},
+            }},
+            {"intent": "SYSTEM_POWER", "description": "Spegne/riavvia il PC.", "parameters": {
+                "action": {"type": "string", "required": True, "description": "shutdown/restart."},
+            }},
+        ]
+
+        def __init__(self):
+            self.calls = []
+
+        def list_capabilities(self):
+            return self._CAPABILITIES
+
+        def execute(self, intent, parameters=None, policy_engine=None):
+            parameters = dict(parameters or {})
+            self.calls.append((intent, parameters))
+            return SkillResult(success=True, data={"path": parameters.get("path")})
+
+    def test_a_parameter_declared_by_a_different_capability_is_stripped_not_forwarded(self):
+        registry = self._TwoCapabilityRegistry()
+        client = ScriptedOllamaClient([
+            {"thought": "", "action": {
+                # "action" e' un parametro VERO di SYSTEM_POWER, non di DELETE_PATH - lo schema
+                # JSON (unione di tutti i parametri) lo permetterebbe, il filtro per-intent no.
+                "intent": "DELETE_PATH", "parameters": {"path": "C:\\x", "action": "shutdown"},
+            }, "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto.", "ask_user": ""},
+        ])
+        agent = TaskAgent(
+            registry, None, client, model_provider=lambda: "fake-model",
+            format_result=lambda intent, result: str(result.data), fixed_tools=["DELETE_PATH", "SYSTEM_POWER"],
+            policy_engine=PolicyEngine(),
+        )
+
+        agent.run("cancella C:\\x")
+
+        self.assertEqual(len(registry.calls), 1)
+        _, parameters_seen_by_executor = registry.calls[0]
+        self.assertEqual(parameters_seen_by_executor, {"path": "C:\\x"})
+        self.assertNotIn("action", parameters_seen_by_executor)
+
+
 class StructuredLoggingTests(unittest.TestCase):
     """F0: ogni passo dell'agente scrive un record in jake_actions.jsonl (core/logger.log_
     action), condividendo un solo trace_id per tutta la run - vedi anche tests/test_logger.py
