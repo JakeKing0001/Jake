@@ -95,6 +95,20 @@ class HudEventSerializationTests(unittest.TestCase):
         restored = HudEvent.from_json('{"type": "IDLE", "payload": {}, "at": 1}')
         self.assertEqual(restored.sequence_id, 0)
 
+    def test_trace_id_defaults_to_none(self):
+        """A differenza di sequence_id, trace_id non lo assegna EventBus.publish() - None significa
+        'nessuna esecuzione specifica da correlare', non un valore mancante."""
+        self.assertIsNone(HudEvent(type=EventType.IDLE).trace_id)
+
+    def test_trace_id_round_trips_through_json(self):
+        event = HudEvent(type=EventType.IDLE, trace_id="abc123")
+        self.assertEqual(HudEvent.from_json(event.to_json()).trace_id, "abc123")
+
+    def test_from_json_defaults_trace_id_to_none_for_a_record_without_it(self):
+        """Compatibilita' con un record scritto prima di questo incremento (nessuna chiave trace_id)."""
+        restored = HudEvent.from_json('{"type": "IDLE", "payload": {}, "at": 1}')
+        self.assertIsNone(restored.trace_id)
+
 
 class LegacyStateMappingTests(unittest.TestCase):
     def test_known_legacy_states_map_to_an_event(self):

@@ -245,7 +245,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F3.6` | Browser Automation (G1 superato, mai iniziato) | `READY` |
 | `F3.7` | Application Adapters (G1 superato, mai iniziato) | `READY` |
 | `F3.8` | Demonstration Learning (G1 superato, mai iniziato) | `READY` |
-| `F4.1` | Protocol Architecture (F4.1.2/F4.1.3/F4.1.5 chiusi, F4.1.1/F4.1.4 prime fette lato Python - 16/09/2026; trace_id, lato C++ di F4.1.4, F4.1.6 mai affrontati) | `DOING` |
+| `F4.1` | Protocol Architecture (F4.1.2/F4.1.3/F4.1.5 chiusi, F4.1.1 chiuso lato Python (sequence_id+trace_id)/F4.1.4 prima fetta lato Python - 16/09/2026; lato C++ di F4.1.1/F4.1.4, F4.1.6 mai affrontati) | `DOING` |
 | `F4.2` | Native HUD (F4.2.1/F4.2.4 chiusi, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026; F4.2.5/F4.2.6 e resto di F4.2.3 richiedono test interattivi/visivi) | `DOING` |
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
 | `F4.4` | Interaction Design (G1 superato, mai iniziato) | `READY` |
@@ -4767,8 +4767,9 @@ Dipende da: F1.1.
 Criterio di uscita: client Python finto e JakeClient C++ superano la stessa suite di fixture.
 
 - Stato: `DOING`; `F4.1.5` **chiuso** (già vero per costruzione da `F1.8.6`, stesso `EventBus`,
-  cross-riferimento non nuovo lavoro - vedi sotto); `F4.1.1` chiuso parzialmente (`sequence_id`
-  fatto, `trace_id` no - vedi sotto); `F4.1.2` **chiuso** (schema condiviso generato, niente più
+  cross-riferimento non nuovo lavoro - vedi sotto); `F4.1.1` chiuso parzialmente (`sequence_id` E
+  `trace_id` fatti lato Python - vedi sotto, 16/09/2026; il lato C++ ignora ancora entrambi i campi
+  in silenzio, mai consumati); `F4.1.2` **chiuso** (schema condiviso generato, niente più
   enum mantenuti a mano lato C++ - vedi sotto); `F4.1.4` chiuso parzialmente (contract test per
   payload malformato lato Python, tre buchi reali trovati e corretti - vedi sotto; il lato C++
   resta scoperto, nessuna toolchain di test C++/QML in questo progetto); `F4.1.3` **chiuso**
@@ -4803,9 +4804,8 @@ Criterio di uscita: client Python finto e JakeClient C++ superano la stessa suit
   tra "produttori" diversi, e un test di concorrenza con 8 thread veri × 50 pubblicazioni ciascuno
   che verifica NESSUN ID duplicato o saltato) - tutti verificati FALLIRE contro il codice
   precedente (`AttributeError: 'HudEvent' object has no attribute 'sequence_id'`) prima di
-  applicare il fix. Non ancora affrontato: `trace_id` (correlazione con lo stesso `trace_id` già
-  usato nel ledger per `F1.7.2` - richiederebbe passare `trace_id` a ciascuno degli 8 call site di
-  `publish()`, non disponibile in scope per tutti senza indagare caso per caso, rimandato); il
+  applicare il fix. `trace_id` affrontato separatamente il 16/09/2026 (vedi la voce "resto -
+  trace_id" piu' sotto, dopo `F4.1.3`); il
   lato C++ (`JakeClient.cpp`) non tocca ancora `sequence_id` - un campo JSON extra è ignorato
   silenziosamente dal parser esistente, nessuna rottura, ma nessun consumo nemmeno (F4.1.3,
   reconnect/resume, è il punto in cui servirà davvero). Prova: 2.762/2.762 test, ruff/mypy verdi.
@@ -4931,6 +4931,37 @@ Criterio di uscita: client Python finto e JakeClient C++ superano la stessa suit
   gia' verdi dalla fetta precedente, suite rieseguita per sicurezza - un fallimento isolato di
   `test_sandboxed_skill_worker.py` risultato flaky pre-esistente sotto carico, non una
   regressione, verificato passare sia in isolamento sia in una riesecuzione completa).
+- `F4.1.1` (resto - `trace_id`, lato Python) — 16/09/2026: dopo aver chiuso F1.3.5 per intero e un
+  buco di censimento in F1.5.7 (`DESCRIBE_SCREEN`), tornato sul resto dichiarato aperto di questa
+  fase. A differenza di `sequence_id` (assegnato centralmente da `EventBus.publish()`, l'unico
+  punto che conosce l'ordine globale), `trace_id` e' un'informazione che il CHIAMANTE gia' possiede
+  al momento in cui costruisce l'evento - lo stesso `trace_id` che gia' correla ogni passo di
+  un'esecuzione alle ricevute nel ledger (F1.7.2/F1.3.8), semplicemente mai portato fino
+  all'evento HUD. Nuovo campo `HudEvent.trace_id: str | None = None`, serializzato/letto come
+  `sequence_id` (compatibilita' con un record scritto prima di questo incremento: chiave assente
+  -> `None`). Investigato caso per caso, non ipotizzato, quale dei sette call site Python di
+  `publish()` avesse gia' un trace_id vero in scope: `notify()` lo aveva gia' (F1.7.2), ma infilato
+  a mano nel payload solo per NOTIFICATION - migrato al campo di prima classe (due test esistenti
+  aggiornati per leggere `event.trace_id` invece di `event.payload["trace_id"]`, stesso
+  comportamento osservabile); `_publish_effect_proof_events()` (UNDO/VERIFICATION) ha guadagnato
+  un parametro `trace_id` opzionale, passato da `_run_agent()` (il `trace_id` locale gia' inviato
+  a `orchestrator.run()`) e automaticamente da `_publish_plan_outcome_effect_proof_events()`
+  (leggendolo da `outcome.trace_id`, gia' popolato per F1.7.2 su entrambi i chiamanti reali -
+  `_try_plan`/`_default_on_trigger_fired`). **Deliberatamente non affrontato, dichiarato
+  apertamente**: AGENT_STEP (richiederebbe un nuovo parametro sulla callback `on_step` di
+  `TaskAgent`, un'interfaccia condivisa da tre agenti) e USER_MESSAGE/JAKE_MESSAGE/ERROR
+  (richiederebbero un contextvar nuovo per unificare PIU' punti che oggi generano ciascuno il
+  proprio `trace_id` in modo indipendente - `_execute_command`/`_run_agent`/`_try_plan` - dato che
+  `_answer_inner()` non ne possiede gia' uno proprio); il lato C++ ignora silenziosamente il nuovo
+  campo JSON (nessuna rottura, nessun consumo - stesso limite dichiarato per `sequence_id`).
+  Aggiunti 3 nuovi test in `tests/test_hud_protocol.py::HudEventSerializationTests`, 2 in
+  `tests/test_jake_core_event_bus.py::EffectProofEventTests` (trace_id su entrambi gli eventi;
+  propagazione automatica da `PlanOutcome.trace_id`) e 1 in `tests/test_jake_core_pipeline.py::
+  RunAgentTests` (lo stesso trace_id passato a `orchestrator.run()` arriva sull'evento pubblicato -
+  `FakeOrchestrator` esteso con un `trace_ids` separato, additivo, senza toccare la forma esistente
+  di `.calls` usata da altri quattro test). Prova: 2.836/2.836 test (il singolo fallimento isolato
+  e preesistente di `test_sandboxed_skill_worker.py` non si e' ripresentato in questo run),
+  ruff/mypy verdi.
 
 ### F4.2 — Shell overlay nativa
 

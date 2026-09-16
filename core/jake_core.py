@@ -474,10 +474,7 @@ class JakeCore:
         non c'e' un evento successivo a cui riattaccare il trace_id, dichiarato apertamente."""
         gated = self.notification_center.gate(kind, message)
         if gated is not None:
-            payload = {"kind": kind, "text": gated}
-            if trace_id:
-                payload["trace_id"] = trace_id
-            self.event_bus.publish(HudEvent(EventType.NOTIFICATION, payload))
+            self.event_bus.publish(HudEvent(EventType.NOTIFICATION, {"kind": kind, "text": gated}, trace_id=trace_id))
         return gated
 
     def _default_on_reminder_due(self, reminder: dict) -> None:
@@ -525,7 +522,9 @@ class JakeCore:
         """Estrae da un `PlanOutcome` (core/plan_executor.py) le stesse due liste che
         `_publish_effect_proof_events` sotto si aspetta, condivisa dai due chiamanti che
         ricevono un PlanOutcome (`_try_plan`, `_default_on_trigger_fired`) invece di ripetere la
-        stessa estrazione due volte."""
+        stessa estrazione due volte. `outcome.trace_id` (F1.7.2) e' gia' lo stesso che correla
+        ogni passo del piano nel ledger - propagato qui (F4.1.1) cosi' l'evento sul bus porta la
+        stessa correlazione, non solo la ricevuta scritta su disco."""
         verified_steps = [
             (step_outcome.step.intent, step_outcome.verified)
             for step_outcome in (*outcome.completed, *([outcome.stopped_step] if outcome.stopped_step else []))
@@ -533,9 +532,12 @@ class JakeCore:
         ]
         self._publish_effect_proof_events(
             verified_steps, [step_outcome.step.intent for step_outcome in outcome.rolled_back],
+            trace_id=outcome.trace_id,
         )
 
-    def _publish_effect_proof_events(self, verified_steps: list[tuple[str, str]], rolled_back_intents: list[str]) -> None:
+    def _publish_effect_proof_events(
+        self, verified_steps: list[tuple[str, str]], rolled_back_intents: list[str], *, trace_id: str | None = None,
+    ) -> None:
         """F1.3.8 ("esporre undo e prove a HUD/companion tramite eventi versionati"): prima di
         questo, un rollback (core/execution_safety.py::rollback_effect) o una verifica
         indipendente dell'effetto (F1.3.3, verify_effect) erano visibili SOLO nel ledger
@@ -547,9 +549,9 @@ class JakeCore:
         quando non c'e' nulla da riportare (nessun intent verificabile in questo turno, nessun
         rollback) - non aggiunge rumore al caso comune."""
         for intent in rolled_back_intents:
-            self.event_bus.publish(HudEvent(EventType.UNDO, {"intent": intent}))
+            self.event_bus.publish(HudEvent(EventType.UNDO, {"intent": intent}, trace_id=trace_id))
         for intent, verified in verified_steps:
-            self.event_bus.publish(HudEvent(EventType.VERIFICATION, {"intent": intent, "verified": verified}))
+            self.event_bus.publish(HudEvent(EventType.VERIFICATION, {"intent": intent, "verified": verified}, trace_id=trace_id))
 
     def _on_agent_step_completed(self, outcome) -> None:
         """F1.8.4 ("checkpoint... da cui riprendere"): collegato a `on_step_completed` di
@@ -886,6 +888,7 @@ class JakeCore:
         self._publish_effect_proof_events(
             [(step.intent, step.verified) for step in outcome.steps if step.verified is not None],
             [step.intent for step in outcome.rolled_back],
+            trace_id=trace_id,
         )
 
         if outcome.pending_confirmation is not None:

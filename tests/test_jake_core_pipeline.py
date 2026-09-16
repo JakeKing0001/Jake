@@ -129,9 +129,11 @@ class FakeOrchestrator:
         self.outcome = outcome
         self.raises = raises
         self.calls = []
+        self.trace_ids = []
 
     def run(self, request, history=None, trace_id=None, private=False):
         self.calls.append(request)
+        self.trace_ids.append(trace_id)
         if self.raises is not None:
             raise self.raises
         return self.outcome
@@ -854,6 +856,31 @@ class RunAgentTests(_JakeCoreTestCase):
         self.assertEqual(response, "Fatto.")
         self.assertIn("cancella il file", orchestrator.calls[0])
         self.assertIn("quello vecchio", orchestrator.calls[0])
+
+    def test_effect_proof_events_carry_the_same_trace_id_used_for_the_orchestrator_call(self):
+        """F4.1.1 ("aggiungere... trace id" a HudEvent): il trace_id che _run_agent genera per
+        correlare l'esecuzione dell'agente nel ledger (gia' passato a orchestrator.run()) deve
+        arrivare anche sugli eventi UNDO/VERIFICATION pubblicati sul bus, non solo nel ledger."""
+        from core.agent import AgentStep
+        from core.hud_protocol import EventType
+
+        outcome = AgentOutcome(
+            final_answer="Fatto.",
+            steps=[AgentStep(
+                intent="CREATE_PATH", parameters={"path": "C:\\x.txt"}, thought="",
+                result=SkillResult(success=True, data={}), verified="verified",
+            )],
+        )
+        core = self._core(orchestrator=FakeOrchestrator(outcome))
+        subscriber = core.event_bus.subscribe()
+
+        core._run_agent("crea un file")
+
+        event = subscriber.get_nowait()
+        self.assertEqual(event.type, EventType.VERIFICATION)
+        used_trace_id = event.trace_id
+        self.assertTrue(used_trace_id)
+        self.assertEqual(core.orchestrator.trace_ids[0], used_trace_id)
 
 
 class AgentCheckpointTests(_JakeCoreTestCase):
