@@ -1043,6 +1043,91 @@ class ActionErrorWiredIntoTheLedgerTests(unittest.TestCase):
         self.assertEqual(receipts[0]["error_category"], "transient")
 
 
+class UndoStoreWiringTests(unittest.TestCase):
+    """F1.3.5 (adozione - secondo chokepoint, dopo il pilota F1.1.6/F1.3.5 su JakeCore): run()
+    genera e salva ora un vero UndoDescriptor per un passo riuscito il cui intent ha un inverso
+    naturale, correlato alla ricevuta nel ledger tramite lo stesso action_id - stesso principio
+    identico gia' verificato per JakeCore._execute_command()."""
+
+    def setUp(self):
+        self.tmp_dir = Path(tempfile.mkdtemp(prefix="jake_agent_undo_test_"))
+        self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
+
+    def test_a_successful_create_path_step_saves_a_real_undo_descriptor(self):
+        target = self.tmp_dir / "nuovo.txt"
+        registry = FakeRegistry()
+        client = ScriptedOllamaClient([
+            {"thought": "Creo il file", "action": {"intent": "CREATE_PATH", "parameters": {"path": str(target)}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto.", "ask_user": ""},
+        ])
+        agent = _agent(registry, client)
+        agent.action_ledger = ActionLedger(path=self.tmp_dir / "ledger.jsonl")
+
+        with unittest.mock.patch("core.agent.log_action"):
+            agent.run("crea nuovo.txt")
+
+        receipt = agent.action_ledger.read_all()[0]
+        descriptor = agent.undo_store.get(receipt["action_id"])
+        self.assertIsNotNone(descriptor, "CREATE_PATH ha un inverso naturale (DELETE_PATH)")
+        self.assertEqual(descriptor.compensating_intent, "DELETE_PATH")
+        self.assertEqual(descriptor.compensating_parameters, {"path": str(target), "confirmed": True})
+
+    def test_an_intent_without_a_natural_inverse_saves_no_undo_descriptor(self):
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
+        client = ScriptedOllamaClient([
+            {"thought": "Aggiungo l'appunto", "action": {"intent": "ADD_NOTE", "parameters": {"text": "prova"}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto.", "ask_user": ""},
+        ])
+        agent = _agent(registry, client)
+        agent.action_ledger = ActionLedger(path=self.tmp_dir / "ledger.jsonl")
+
+        with unittest.mock.patch("core.agent.log_action"):
+            agent.run("aggiungi un appunto")
+
+        receipt = agent.action_ledger.read_all()[0]
+        self.assertIsNone(agent.undo_store.get(receipt["action_id"]))
+
+    def test_a_failed_step_saves_no_undo_descriptor(self):
+        registry = FakeRegistry(add_note_results=[SkillResult(success=False, data={}, error="OPERATION_FAILED")])
+        client = ScriptedOllamaClient([
+            {"thought": "Aggiungo l'appunto", "action": {"intent": "ADD_NOTE", "parameters": {"text": "prova"}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Non riuscito.", "ask_user": ""},
+        ])
+        agent = _agent(registry, client)
+        agent.action_ledger = ActionLedger(path=self.tmp_dir / "ledger.jsonl")
+
+        with unittest.mock.patch("core.agent.log_action"):
+            agent.run("aggiungi un appunto")
+
+        receipt = agent.action_ledger.read_all()[0]
+        self.assertIsNone(agent.undo_store.get(receipt["action_id"]))
+
+    def test_all_three_agents_share_the_same_undo_store_when_jake_core_wires_it(self):
+        """Il punto del parametro condiviso: un undo generato da un TaskAgent 'di dominio'
+        (coding/research) deve finire nello STESSO store di quello 'general', non in uno
+        scollegato - altrimenti un utente che annulla dopo un compito di ricerca non troverebbe
+        nulla se l'undo fosse stato generato durante un compito di coding."""
+        from core.undo_store import UndoStore
+
+        shared_store = UndoStore()
+        registry = FakeRegistry()
+        agent_general = TaskAgent(
+            registry, FakeRetriever(["CREATE_PATH"]), ScriptedOllamaClient([]),
+            model_provider=lambda: "fake-model", format_result=lambda intent, result: str(result.data),
+            undo_store=shared_store,
+        )
+        agent_coding = TaskAgent(
+            registry, FakeRetriever(["CREATE_PATH"]), ScriptedOllamaClient([]),
+            model_provider=lambda: "fake-model", format_result=lambda intent, result: str(result.data),
+            undo_store=shared_store, agent_name="coding",
+        )
+
+        self.assertIs(agent_general.undo_store, agent_coding.undo_store)
+
+
 class SpecializedAgentConfigurationTests(unittest.TestCase):
     """v5.0/5.1: un agente 'di dominio' (es. CodingAgent) e' lo stesso TaskAgent con
     fixed_tools/persona_line impostati, non una classe diversa (vedi core/orchestrator.py)."""

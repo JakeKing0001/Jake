@@ -224,7 +224,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F0.6` | Release Engineering | `DOING` |
 | `F1.1` | Trust Core | `DONE` |
 | `F1.2` | Security Architecture | `DONE` |
-| `F1.3` | Execution Reliability (F1.3.5 meccanismo + prima adozione, JakeCore - 16/09/2026; TaskAgent/PlanExecutor/skill "annulla"/F1.3.4 mai affrontati, non richiesti da G1) | `DOING` |
+| `F1.3` | Execution Reliability (F1.3.5 meccanismo + adozione in JakeCore/TaskAgent - 16/09/2026; PlanExecutor/skill "annulla"/F1.3.4 mai affrontati, non richiesti da G1) | `DOING` |
 | `F1.4` | Identity and Secrets | `DONE` |
 | `F1.5` | Application Security (gap dichiarati, non richiesti da G1) | `DOING` |
 | `F1.6` | Sandbox Runtime | `DONE` |
@@ -1573,9 +1573,9 @@ reversibili dispone di undo testato.
   finestre E casa (CONTROL_SMART_DEVICE, vedi sotto - la verifica e' dentro la skill stessa, non
   ancora un verificatore INDIPENDENTE in `INTENT_SAFETY_REGISTRY` come per CLOSE_WINDOW, che
   resta bloccato sulla stessa decisione di dipendenza per un client Home Assistant iniettabile in
-  `execution_safety.py`; non ancora browser); `F1.3.5` chiuso parzialmente (meccanismo E prima
-  adozione - `generate_undo_descriptor()`/`UndoStore` collegati al percorso a comando diretto di
-  `JakeCore` - vedi sotto, 16/09/2026; `TaskAgent`/`PlanExecutor` e una skill "annulla" restano da
+  `execution_safety.py`; non ancora browser); `F1.3.5` chiuso parzialmente (meccanismo E adozione
+  su due dei tre chokepoint reali - `JakeCore`/`TaskAgent`, con lo STESSO `UndoStore` condiviso
+  tra tutti gli agenti - vedi sotto, 16/09/2026; `PlanExecutor` e una skill "annulla" restano da
   fare, `preconditions` deliberatamente mai popolato); `F1.3.4` resta aperto, mai affrontato
   (infrastruttura nuova sostanziale a se',
   "snapshot minimo prima dell'azione" e' un problema diverso da F1.3.5 - cosa salvare PRIMA che
@@ -1644,6 +1644,26 @@ reversibili dispone di undo testato.
   generalizzare) e una skill "annulla" che consumi davvero `UndoStore.get()`/`mark_used()` -
   senza un consumatore, il meccanismo resta osservabile solo nei test, non ancora nell'esperienza
   utente. Prova: 2.806/2.806 test, ruff/mypy verdi.
+- `F1.3.5` (adozione - secondo chokepoint, `TaskAgent`) — 16/09/2026: esteso lo stesso schema al
+  secondo dei tre chokepoint reali, stesso identico principio gia' verificato per `JakeCore` -
+  `TaskAgent.run()` genera e salva un vero `UndoDescriptor` per un passo riuscito il cui intent
+  ha un inverso naturale, correlato alla ricevuta nel ledger tramite lo stesso `action_id`
+  (generato in `run()` prima di chiamare `_log_step()`, che ora accetta un `action_id`
+  iniettabile opzionale - stesso pattern letterale di `JakeCore._log_action_outcome`). Nuovo
+  parametro costruttore `undo_store=None` (stesso principio gia' usato per `session_recorder`/
+  `action_ledger`/`kill_switch`: condiviso se passato, un'istanza locale altrimenti) - `JakeCore`
+  passa ora `self.undo_store` (lo stesso già istanziato per il pilota) a TUTTI E TRE gli agenti
+  (`self.agent`/`self.coding_agent`/`self.research_agent`, i due ultimi via `agent_kwargs`
+  condiviso) cosi' un undo generato da un agente "di dominio" (coding/ricerca) finisce nello
+  STESSO store di quello generale, non in tre store scollegati - un utente che annulla dopo un
+  compito di ricerca lo troverebbe altrimenti solo se l'agente generale avesse eseguito quel
+  passo. Aggiunti 4 nuovi test in `tests/test_agent.py::UndoStoreWiringTests` (un `CREATE_PATH`
+  riuscito genera un vero undo `DELETE_PATH`; un intent senza inverso e un passo fallito non
+  salvano nulla; i tre agenti condividono davvero la stessa istanza quando `JakeCore` la collega)
+  - i tre test positivi verificati FALLIRE contro il codice precedente (`git stash` di
+  `core/agent.py`+`core/jake_core.py`) prima di applicare la modifica. **Deliberatamente non
+  affrontato**: `PlanExecutor` (il terzo e ultimo chokepoint) e la skill "annulla" restano passi
+  successivi separati. Prova: 2.810/2.810 test, ruff/mypy verdi.
 - `F1.3.1` — 11/09/2026: `core/execution_safety.py` aveva tre strutture parallele da tenere
   sincronizzate a mano - `VERIFIABLE_INTENTS` (insieme), l'if/elif di `verify_effect`,
   `ROLLBACK_HANDLERS` + `ROLLBACK_COMPENSATING_INTENT` (due dizionari) - esattamente il pattern
