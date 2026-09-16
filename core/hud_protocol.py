@@ -80,6 +80,19 @@ class HudEvent:
     # consecutivi per accorgersi di un evento perso (coda satura, vedi F1.8.6) o - dopo un
     # riconnect (F4.1.3, non ancora affrontato) - riprendere da dove aveva lasciato.
     sequence_id: int = 0
+    # F4.1.1 (resto - "aggiungere... trace id"): a differenza di sequence_id sopra, NON assegnato
+    # da EventBus.publish() - il chiamante che gia' conosce il trace_id di un'esecuzione reale
+    # (JakeCore._execute_command/_run_agent, PlanOutcome.trace_id, F1.7.2) lo passa al momento
+    # della costruzione. None (il default) significa "nessuna esecuzione specifica da correlare",
+    # non un valore mancante per errore - il caso normale per un evento di stato che non deriva da
+    # un comando preciso (IDLE, LISTENING, DEVICE_HANDOFF). Prima fetta: solo NOTIFICATION (gia'
+    # lo portava, ma nel payload - F1.7.2) e UNDO/VERIFICATION (gia' correlati a un trace_id reale
+    # nel ledger, mai esposto sul bus eventi) lo popolano davvero; AGENT_STEP e USER_MESSAGE/
+    # JAKE_MESSAGE/ERROR restano None - richiederebbero rispettivamente un nuovo parametro sulla
+    # callback on_step e un modo di risalire al trace_id di UN turno quando piu' percorsi interni
+    # (_execute_command/_run_agent/_try_plan) ne generano uno ciascuno in modo indipendente,
+    # lavoro non affrontato qui.
+    trace_id: str | None = None
 
     def to_json(self) -> str:
         return json.dumps(
@@ -89,6 +102,7 @@ class HudEvent:
                 "payload": self.payload,
                 "at": self.at,
                 "sequence_id": self.sequence_id,
+                "trace_id": self.trace_id,
             },
             ensure_ascii=False,
         )
@@ -117,7 +131,7 @@ class HudEvent:
             raise ValueError(f"HudEvent.from_json: 'payload' deve essere un oggetto JSON, ricevuto {type(payload).__name__}")
         return cls(
             type=EventType(data["type"]), payload=payload, at=data.get("at", time.time()),
-            sequence_id=data.get("sequence_id", 0),
+            sequence_id=data.get("sequence_id", 0), trace_id=data.get("trace_id"),
         )
 
     @classmethod
