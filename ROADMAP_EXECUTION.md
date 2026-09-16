@@ -245,7 +245,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F3.6` | Browser Automation (G1 superato, mai iniziato) | `READY` |
 | `F3.7` | Application Adapters (G1 superato, mai iniziato) | `READY` |
 | `F3.8` | Demonstration Learning (G1 superato, mai iniziato) | `READY` |
-| `F4.1` | Protocol Architecture (F4.1.2/F4.1.5 chiusi, F4.1.1 sequence_id chiuso, F4.1.4 prima fetta lato Python - 16/09/2026; trace_id/F4.1.3/F4.1.6/lato C++ di F4.1.4 mai affrontati) | `DOING` |
+| `F4.1` | Protocol Architecture (F4.1.2/F4.1.5 chiusi, F4.1.1/F4.1.3/F4.1.4 prime fette lato Python - 16/09/2026; trace_id, lato C++ di F4.1.3/F4.1.4, F4.1.6 mai affrontati) | `DOING` |
 | `F4.2` | Native HUD (F4.2.1/F4.2.4 chiusi, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026; F4.2.5/F4.2.6 e resto di F4.2.3 richiedono test interattivi/visivi) | `DOING` |
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
 | `F4.4` | Interaction Design (G1 superato, mai iniziato) | `READY` |
@@ -4598,8 +4598,10 @@ Criterio di uscita: client Python finto e JakeClient C++ superano la stessa suit
   fatto, `trace_id` no - vedi sotto); `F4.1.2` **chiuso** (schema condiviso generato, niente più
   enum mantenuti a mano lato C++ - vedi sotto); `F4.1.4` chiuso parzialmente (contract test per
   payload malformato lato Python, tre buchi reali trovati e corretti - vedi sotto; il lato C++
-  resta scoperto, nessuna toolchain di test C++/QML in questo progetto); resto (`F4.1.3`/
-  `F4.1.6`) mai affrontato.
+  resta scoperto, nessuna toolchain di test C++/QML in questo progetto); `F4.1.3` chiuso
+  parzialmente (meccanismo di replay lato server - `EventBus`/`companion_server.py` - vedi
+  sotto; lato C++, auto-reconnect e invio di `Last-Event-ID`, mai affrontato); resto (`F4.1.6`)
+  mai affrontato.
 - `F4.1.5` (VERIFICA, nessun codice) — 16/09/2026: "garantire che client lento non blocchi il
   core" è lo STESSO `core/event_bus.py::EventBus` già verificato per questo in `F1.8.6`
   ("impedire che un client lento blocchi event bus o altri client") - coda `queue.Queue(maxsize=
@@ -4680,6 +4682,46 @@ Criterio di uscita: client Python finto e JakeClient C++ superano la stessa suit
   JakeClient C++ superano la stessa suite di fixture" (il criterio di uscita letterale
   dell'intera sezione F4.1) resta quindi non raggiungibile finche' quella toolchain non esiste,
   limite dichiarato apertamente, non nascosto. Prova: 2.772/2.772 test, ruff/mypy verdi.
+- `F4.1.3` (meccanismo lato server - resume dall'ultimo sequence id) — 16/09/2026: decisione
+  esplicita dell'utente di continuare su questa voce (sostanziosa, tocca sia Python sia C++)
+  invece di fermarsi dopo F4.1/F4.2. Stesso principio "prima il meccanismo, poi l'adozione" gia'
+  seguito piu' volte in questa sessione (`ResourceLockManager`, `DeviceCredentialStore`...): prima
+  fetta scelta deliberatamente lato server, interamente verificabile con test Python veri, senza
+  ancora toccare il lato C++ (nessun auto-reconnect ancora esiste li', un pezzo separato -
+  `onEventStreamFinished()` oggi si limita a segnalare la disconnessione, non ritenta mai da
+  solo). Nuovo `EventBus._replay_buffer` (un `collections.deque(maxlen=...)`, gli ultimi N eventi
+  pubblicati) e nuovo `EventBus.subscribe_with_replay(since_sequence_id)`: ritorna
+  `(coda_iscritto, eventi_da_riprodurre, gap)`, calcolati sotto un UNICO lock insieme
+  all'iscrizione - buco di concorrenza reale evitato deliberatamente fin dal design (non trovato
+  poi): due operazioni separate ("calcola il replay" poi "iscriviti") avrebbero lasciato una
+  finestra in cui un evento pubblicato esattamente in mezzo sarebbe sparito o sarebbe stato
+  duplicato, a seconda dell'ordine. `gap=True` quando il buffer (dimensione limitata per
+  costruzione) non copre l'intera finestra richiesta - uno o piu' eventi persi per sempre,
+  dichiarato onestamente al chiamante, mai un replay finto completo. `core/companion_server.py::
+  _stream_events()` legge l'header SSE standard `Last-Event-ID` (lo stesso che un browser
+  leggerebbe da solo per un `EventSource` - letto qui a mano perche' `JakeClient.cpp` parsa SSE
+  manualmente); un header assente o non un intero valido si comporta come una connessione nuova,
+  nessuna rottura per un client che non implementa ancora questo pezzo. Ogni evento (replay E
+  dal vivo) porta ora anche una riga `id: <sequence_id>` prima di `data:`, il formato SSE
+  standard - verificato che `JakeClient.cpp` non si rompe con questa riga in piu' (il suo parser
+  cerca solo righe che iniziano per `"data: "`, ignora silenziosamente il resto, incluso `id:` -
+  gia' vero per costruzione, verificato ricompilando E facendo girare per davvero l'eseguibile
+  ESISTENTE, non solo letto nel codice). Un gap viene segnalato con un commento SSE dedicato
+  (`: jake-replay-gap - ...`, ignorato da qualunque parser SSE standard). Aggiunti 5 nuovi test
+  in `tests/test_hud_protocol.py::EventBusReplayTests` (incluso un test di concorrenza con thread
+  veri che dimostra l'atomicita' iscrizione+replay - un evento pubblicato ESATTAMENTE durante la
+  riconnessione compare una volta sola, mai zero ne' due) e 5 in `tests/test_companion_server.py::
+  EventStreamTests` (richieste HTTP vere con l'header `Last-Event-ID`, non simulate: replay
+  esatto di cosa e' stato perso, transizione senza soluzione di continuita' dal replay al vivo,
+  comportamento invariato per un header assente/corrotto). Verificato end-to-end con l'eseguibile
+  HUD nativo VERO (stessa tecnica di F4.2.2, `ctypes`/`IsWindowVisible()`): il ciclo
+  HUD_HIDE→HUD_SHOW funziona ancora identico col nuovo formato SSE, nessuna regressione. Non
+  ancora affrontato (il resto di `F4.1.3`): il lato C++ non implementa ancora ne' un vero
+  auto-reconnect (nessun retry automatico dopo una disconnessione) ne' l'invio dell'header
+  `Last-Event-ID` per sfruttare il meccanismo appena costruito - dichiarato apertamente come
+  passo successivo separato, non affrontato qui; "snapshot iniziale" (`GET /status`, gia'
+  esistente e gia' usato da `JakeClient::fetchStatus()`) non riesaminato in questo incremento.
+  Prova: 2.781/2.781 test, ruff/mypy verdi lato Python; build C++ verde, nessuna regressione.
 
 ### F4.2 — Shell overlay nativa
 

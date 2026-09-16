@@ -270,6 +270,112 @@ class EventStreamTests(CompanionServerTestCase):
         self.assertEqual(payload["type"], "THINKING")
         self.assertEqual(payload["payload"], {"detail": "prova"})
 
+    def test_events_carry_an_id_line_matching_their_sequence_id(self):
+        """F4.1.3: formato SSE standard `id: <n>` prima di ogni `data:` - lo stesso che un
+        browser leggerebbe da solo per un EventSource, qui verificato a mano perche' JakeClient.
+        cpp parsa SSE manualmente (vedi hud/native/README.md)."""
+        from core.hud_protocol import HudEvent
+
+        lines: list = []
+
+        def _read_stream():
+            with request.urlopen(f"{self.base_url}/events", timeout=5) as response:
+                for _ in range(10):
+                    line = response.readline().decode("utf-8").strip()
+                    lines.append(line)
+                    if line.startswith("data: "):
+                        return
+
+        reader = threading.Thread(target=_read_stream, daemon=True)
+        reader.start()
+        time.sleep(0.2)
+        self.server.event_bus.publish(HudEvent(type=EventType.IDLE))
+        reader.join(timeout=5)
+
+        id_lines = [line for line in lines if line.startswith("id: ")]
+        self.assertEqual(len(id_lines), 1)
+        self.assertEqual(id_lines[0], "id: 1", "il primo evento pubblicato su un bus nuovo ha sequence_id 1")
+
+    def test_reconnecting_with_last_event_id_replays_exactly_what_was_missed(self):
+        """F4.1.3 ("resume dall'ultimo sequence id"): due eventi pubblicati PRIMA che il client
+        SSE si connetta (simula una disconnessione breve durante cui il client ha perso eventi)
+        - riconnettendo con Last-Event-ID: 1 il client deve ricevere SOLO il secondo (mai il
+        primo, che aveva gia' visto; mai perderlo in silenzio)."""
+        from core.hud_protocol import HudEvent
+
+        self.server.event_bus.publish(HudEvent(type=EventType.USER_MESSAGE, payload={"text": "gia' visto"}))
+        self.server.event_bus.publish(HudEvent(type=EventType.USER_MESSAGE, payload={"text": "perso durante il gap"}))
+
+        received: list = []
+
+        def _read_stream():
+            req = request.Request(f"{self.base_url}/events", headers={"Last-Event-ID": "1"})
+            with request.urlopen(req, timeout=5) as response:
+                for _ in range(10):
+                    line = response.readline().decode("utf-8").strip()
+                    if line.startswith("data: "):
+                        received.append(json.loads(line[len("data: "):]))
+                        return
+
+        reader = threading.Thread(target=_read_stream, daemon=True)
+        reader.start()
+        reader.join(timeout=5)
+
+        self.assertEqual(len(received), 1)
+        self.assertEqual(received[0]["payload"], {"text": "perso durante il gap"})
+        self.assertEqual(received[0]["sequence_id"], 2)
+
+    def test_reconnect_then_live_events_continue_seamlessly_after_the_replay(self):
+        from core.hud_protocol import HudEvent
+
+        self.server.event_bus.publish(HudEvent(type=EventType.USER_MESSAGE, payload={"text": "vecchio"}))
+        received: list = []
+
+        def _read_stream():
+            req = request.Request(f"{self.base_url}/events", headers={"Last-Event-ID": "1"})
+            with request.urlopen(req, timeout=5) as response:
+                for _ in range(10):
+                    line = response.readline().decode("utf-8").strip()
+                    if line.startswith("data: "):
+                        received.append(json.loads(line[len("data: "):]))
+                        if len(received) == 2:
+                            return
+
+        reader = threading.Thread(target=_read_stream, daemon=True)
+        reader.start()
+        time.sleep(0.2)  # da' tempo alla richiesta di connettersi e ricevere il replay prima di pubblicare dal vivo
+        self.server.event_bus.publish(HudEvent(type=EventType.USER_MESSAGE, payload={"text": "nuovo"}))
+        reader.join(timeout=5)
+
+        self.assertEqual([event["payload"]["text"] for event in received], ["nuovo"])
+
+    def test_a_missing_or_invalid_last_event_id_behaves_like_a_fresh_connection(self):
+        """Un client che non implementa ancora questo pezzo (o manda un header corrotto) non deve
+        rompersi: nessun replay, comportamento identico a prima di F4.1.3."""
+        from core.hud_protocol import HudEvent
+
+        for header_value in (None, "non-un-numero", ""):
+            with self.subTest(header=header_value):
+                received: list = []
+
+                def _read_stream(header_value=header_value, received=received):
+                    headers = {"Last-Event-ID": header_value} if header_value is not None else {}
+                    req = request.Request(f"{self.base_url}/events", headers=headers)
+                    with request.urlopen(req, timeout=5) as response:
+                        for _ in range(10):
+                            line = response.readline().decode("utf-8").strip()
+                            if line.startswith("data: "):
+                                received.append(line)
+                                return
+
+                reader = threading.Thread(target=_read_stream, daemon=True)
+                reader.start()
+                time.sleep(0.2)
+                self.server.event_bus.publish(HudEvent(type=EventType.IDLE))
+                reader.join(timeout=5)
+
+                self.assertEqual(len(received), 1, f"header={header_value!r}")
+
 
 class TokenAuthenticationTests(unittest.TestCase):
     """F1 (Identity & Authentication, "capability token... per dispositivo" - vedi ROADMAP.md):
