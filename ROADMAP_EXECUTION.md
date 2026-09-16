@@ -2,6 +2,7 @@
 
 - Versione del piano: 1.0
 - Data di riferimento: 10 settembre 2026
+- Aggiornamento specifiche di prodotto: 16 settembre 2026 — orb 3D particellare e continuità multi-device
 - Fonte dello stato: codice, test, cronologia Git e [audit tecnico storico](ROADMAP.md)
 - Regola: questo è il documento operativo; l'audit conserva prove, incidenti e dettagli delle sessioni.
 
@@ -16,13 +17,25 @@ Jake deve diventare un assistente personale locale per Windows che:
 5. chiede autorizzazione in base al rischio;
 6. esegue, osserva l'effetto, corregge gli errori e produce una ricevuta;
 7. anticipa bisogni senza interrompere inutilmente;
-8. continua la stessa attività tra PC, telefono e stanze;
+8. continua la stessa attività e sessione tra PC, telefono e stanze, con handoff esplicito e
+   ripresa del contesto al ritorno sul PC;
 9. impara capacità nuove dentro una sandbox e senza aumentare i propri privilegi;
-10. continua a funzionare localmente quando internet o servizi opzionali non sono disponibili.
+10. continua a funzionare localmente quando internet o servizi opzionali non sono disponibili;
+11. rende visibile la propria presenza con una orb 3D particellare nativa, centrale e guidata
+    dallo stato, affiancata da pannelli contestuali.
 
 Il prodotto non è considerato “Jarvis” perché possiede molte skill. Lo è quando completa in
 modo affidabile scenari end-to-end, mantiene il contesto nel tempo e rende ogni azione
 importante controllabile dall'utente.
+
+**Decisioni di prodotto — 16/09/2026**: il multi-device resta parte del target finale di Jake.
+Il video di riferimento discusso nella conversazione “Iniziare con Jake” è una reference
+funzionale per F6/F7: rilevare un evento rilevante, valutare se contattare l'utente, raggiungerlo
+tramite companion e mantenere lo stesso task/sessione fino al ritorno sul PC (scenario S8).
+Il canale vocale futuro preferito è una companion call/VoIP; la PSTN non è un prerequisito.
+La presenza visiva di Jake è l'orb, non un avatar umanoide. Queste decisioni precisano il target
+futuro: non attestano implementazioni o nuove chiusure e non modificano gli stati verificati
+nelle note dei commit, nel registro dei pacchetti o nello stato di partenza storico.
 
 ## 2. Regole del piano
 
@@ -4640,7 +4653,21 @@ Criterio di uscita: una procedura dimostrata sopravvive a riavvio, resize e dati
 
 - Stato: `DOING` (16/09/2026, F4.2.1 chiuso - vedi sotto); build prototype `VERIFY`
 - Priorità: `P1`
-- Output: interfaccia nativa fluida che mostra stato, prove, permessi e controllo.
+- Output: interfaccia nativa fluida con orb 3D particellare centrale e pannelli contestuali che
+  mostrano stato, prove, permessi e controllo.
+
+**Target HUD — 16/09/2026 (specifica di prodotto, da implementare e verificare)**: l'orb è la
+presenza visiva di Jake, non un avatar umanoide. Deve avere volume e profondità reali, un nucleo
+centrale e una particle shell animata; il cerchio 2D con colore/pulsazione oggi in
+`hud/native/qml/Orb.qml` resta il prototipo di partenza, non la prova del completamento del
+nuovo target. Il percorso resta nativo C++/Qt 6/QML in `hud/native/`; Qt Quick 3D con particelle
+o rendering/shader custom sono opzioni da validare con un prototipo e misure prestazionali.
+
+L'orb è state-driven e audio-reactive: rende leggibili lo stato reale del core e l'attività
+vocale. I pannelli contestuali la affiancano per conversazione, piano, permessi, prove e task
+lunghi; la successiva integrazione liquid-glass riguarda la composizione complessiva e i
+pannelli, preservando leggibilità, input e accessibilità. La sequenza tecnica è in F4.4;
+le verifiche già registrate per protocollo e shell overlay restano invariate.
 
 - `F4.2.1` (prima fetta - trasparenza, no-activate, click-through grossolano) — 16/09/2026: dopo
   il superamento del Gate G1 (vedi sopra), decisione esplicita dell'utente di riprendere il track
@@ -5014,7 +5041,7 @@ Criterio di uscita: nessun click perso fuori dai pannelli e nessun focus rubato 
 
 ### F4.3 — Liquid glass e performance
 
-Dipende da: F4.2.
+Dipende da: F4.2; integrazione con l'orb dopo base 3D e particle shell di F4.4.
 
 1. `F4.3.1` Implementare blur/composition nativi con effetto sobrio.
 2. `F4.3.2` Separare rendering decorativo da contenuto e input.
@@ -5022,22 +5049,72 @@ Dipende da: F4.2.
 4. `F4.3.4` Ridurre o fermare animazioni in background e con reduced motion.
 5. `F4.3.5` Offrire qualità low/medium/high e fallback opaco.
 6. `F4.3.6` Verificare contrasto su desktop chiari, scuri e ad alto dettaglio.
+7. `F4.3.7` Integrare successivamente orb e pannelli contestuali nella composizione liquid-glass,
+   senza coprire prove, permessi o indicatori di stato e senza intercettare input decorativi.
 
-Criterio di uscita: 60 FPS sul profilo consigliato e input latency invariata entro il budget.
+Criterio di uscita: 60 FPS sul profilo consigliato e input latency invariata entro il budget,
+misurati anche con orb particellare, pannelli e liquid-glass attivi insieme; qualità ridotta e
+reduced motion restano utilizzabili.
 
 ### F4.4 — State machine e Orb 2.0
 
-Dipende da: F4.1 e F4.3.
+Dipende da: F4.1 e F4.2 per la base nativa; F2 per l'audio reale, F4.5 per il context coupling
+e F4.3 per l'integrazione liquid-glass e il polish finale.
 
 1. `F4.4.1` Stati: hidden, idle, listening, transcribing, thinking, planning, waiting permission,
-   executing, verifying, success, partial, error, paused, private e disconnected.
-2. `F4.4.2` Definire transizioni valide e priorità eventi.
-3. `F4.4.3` Rendere animazioni interrupt-safe.
-4. `F4.4.4` Collegare forma d'onda a livelli audio reali senza conservare audio.
-5. `F4.4.5` Usare colore, forma e testo: mai solo colore.
+   executing, verifying, success, partial, warning, error, paused, private e disconnected.
+   Il target visivo minimo comprende idle/listening/thinking/executing/waiting/success/warning/
+   error; waiting rappresenta l'attesa di conferma/permesso. Definire il mapping esplicito dal
+   protocollo senza confondere stati di prodotto e nomi degli eventi esistenti.
+2. `F4.4.2` Definire transizioni valide e priorità eventi; ogni comportamento dell'orb deve
+   derivare dallo stato reale, senza anticipare successo o nascondere attese ed errori.
+3. `F4.4.3` Rendere animazioni interrupt-safe, incluse transizioni di particelle e ritorno a idle.
+4. `F4.4.4` Collegare forma d'onda, espansione e intensità delle particelle a livelli audio reali
+   di microfono e TTS, distinguendo ascolto e risposta senza conservare audio; silenzio, mute e
+   device indisponibile devono produrre un fallback esplicito e stabile.
+5. `F4.4.5` Usare colore, forma e testo: mai solo colore; offrire reduced motion e qualità ridotta.
 6. `F4.4.6` Ripristinare stato coerente dopo reconnect o evento fuori ordine.
+7. `F4.4.7` Costruire la base 3D nativa: scena, camera, nucleo, profondità e ciclo di rendering;
+   validare Qt Quick 3D o rendering/shader custom sulla toolchain e sull'hardware target.
+8. `F4.4.8` Aggiungere particle shell volumetrica e campo di movimento, con densità e qualità
+   scalabili; preservare la percezione 3D durante rotazione e deformazione.
+9. `F4.4.9` Collegare orb e pannelli al medesimo task, stato e contesto: piano, avanzamento,
+   richiesta di permesso, evidenza e handoff futuro devono restare coerenti tra loro.
+10. `F4.4.10` Applicare cinematic polish dopo la verifica funzionale: glow, profondità,
+    distorsioni controllate e transizioni fluide, poi composizione con liquid-glass F4.3,
+    entro i budget prestazionali e i vincoli di accessibilità.
 
-Criterio di uscita: state transition test completo e nessuno stato bloccato dopo errore/reconnect.
+#### Comportamento visivo target per stato
+
+| Stato | Comportamento dell'orb | Significato leggibile |
+|---|---|---|
+| idle | Respirazione lenta, particelle stabili | Jake è disponibile |
+| listening | Pulsazioni ed espansione guidate dal microfono | Ascolto attivo |
+| thinking | Vortice interno e variazione di densità | Elaborazione in corso |
+| executing | Flussi più focalizzati e movimento deciso | Azione in esecuzione |
+| waiting | Pulsazione lenta e assetto riconoscibile | Conferma o permesso richiesto |
+| success | Compattazione e stabilizzazione breve | Esito verificato, poi ritorno allo stato corrente |
+| warning | Distorsione contenuta e segnale persistente nel pannello | Attenzione richiesta senza simulare un errore fatale |
+| error | Instabilità o frammentazione breve, poi assetto stabile | Errore con spiegazione e possibilità di recupero |
+
+#### Sequenza tecnica dell'orb — target futuro
+
+Gli ID esistenti restano stabili; l'ordine di realizzazione è quello seguente. Nessuna tappa
+è dichiarata completata da questa specifica.
+
+| Tappa | Ambito | Prova richiesta prima della tappa successiva |
+|---|---|---|
+| 1. Base 3D | F4.4.7 | Scena nativa con volume/profondità reali e frame time misurato |
+| 2. Particle shell | F4.4.8 | Particelle 3D stabili, densità scalabile e qualità ridotta verificata |
+| 3. State-driven behavior | F4.4.1–F4.4.3, F4.4.5–F4.4.6 | Otto stati target distinguibili e transizioni interrompibili, inclusi errore/reconnect |
+| 4. Audio-reactive | F4.4.4, F2 | Risposta a microfono/TTS reali; silenzio, mute e audio assente gestiti |
+| 5. Context coupling | F4.4.9, F4.5 | Orb e pannelli mostrano lo stesso task, permesso ed esito |
+| 6. Cinematic polish | F4.4.10, F4.3 | Glow, transizioni e liquid-glass verificati insieme a performance e reduced motion |
+
+Criterio di uscita: state transition test completo e verifica visiva registrata degli otto
+stati target su orb 3D particellare nativa; nessuno stato bloccato dopo errore/reconnect;
+risposta ad audio reale, coerenza con i pannelli e budget F4.3 verificati. Una demo decorativa
+o il solo prototipo 2D non chiudono il requisito. La verifica dell'handoff dipende inoltre da F7.
 
 ### F4.5 — Pannelli contestuali
 
@@ -5050,8 +5127,12 @@ Dipende da: F4.1 e contratti F1.
 5. `F4.5.5` File/source/browser/home/media panel specifici.
 6. `F4.5.6` Coda notifiche e monitor attività lunghe.
 7. `F4.5.7` Nessun contenuto sensibile nelle preview in privacy mode.
+8. `F4.5.8` Affiancare l'orb centrale con pannelli aperti dal contesto del task: conversazione,
+   piano, permessi, prove e notifiche devono condividere stato e correlazione; predisporre il
+   riepilogo di ripresa della stessa sessione al ritorno dal companion (F7.4).
 
-Criterio di uscita: ogni `ActionReceipt` ha una rappresentazione accessibile nell'HUD.
+Criterio di uscita: ogni `ActionReceipt` ha una rappresentazione accessibile nell'HUD e i
+pannelli contestuali restano coerenti con l'orb, senza coprire controlli, prove o richieste.
 
 ### F4.6 — Action center e undo
 
@@ -5103,6 +5184,8 @@ G2 unisce F2, F3 e F4. È superato quando i seguenti scenari passano tre volte c
 5. Interrompere Jake a metà risposta e dare un nuovo comando.
 6. Mostrare prova, policy e undo nell'HUD.
 7. Completare gli stessi scenari offline quando le capacità richieste sono locali.
+8. Verificare la presenza visiva nativa di F4.4: orb 3D particellare guidata dallo stato e
+   dall'audio reale, con pannelli contestuali coerenti, reduced motion e budget F4.3 rispettati.
 
 ## 12. F5 — World Model & Memory 3.0
 
@@ -5225,6 +5308,15 @@ Criterio di uscita: un ricordo può essere trovato e cancellato da tutti gli ind
 - Priorità: `P2`
 - Dipendenze: G1 per sicurezza, G3 per proattività personalizzata.
 
+**Reference funzionale F6/F7 — 16/09/2026 (target futuro)**: il video di riferimento definisce
+un comportamento da dimostrare, non una capacità già disponibile: evento autonomamente
+rilevato → valutazione di rilevanza/urgenza e possibilità di risolverlo entro la delega →
+decisione se interrompere l'utente → notifica o companion call → prosecuzione autorizzata o
+attesa di una decisione → ripresa dello stesso task/sessione sul PC → aggiornamento dell'esito
+verificato. F6 decide se, quando e perché contattare; F7 fornisce il canale remoto e la
+continuità. La demo completa è lo scenario S8; i test della decisione F6 possono precedere
+il companion usando un trasporto simulato, senza dichiarare verificata l'integrazione F7.
+
 ### F6.1 — Event engine unificato
 
 Dipende da: G1.
@@ -5237,8 +5329,12 @@ Dipende da: G1.
 5. `F6.1.5` Gestire eventi mancati durante shutdown senza raffiche al riavvio.
 6. `F6.1.6` Osservare lag, drop e consumer lento.
 7. `F6.1.7` Migrare reminder, trigger e advisor sul contratto comune gradualmente.
+8. `F6.1.8` Rilevare autonomamente eventi rilevanti dalle sorgenti autorizzate: crash di processi,
+   build/CI fallite, anomalie NEST, scadenze, completamento task lunghi e risorse anomale;
+   associare evidenza, timestamp e task/sessione quando disponibili.
 
-Criterio di uscita: reminder, trigger e advisor usano lo stesso event pipeline.
+Criterio di uscita: reminder, trigger e advisor usano lo stesso event pipeline; almeno un
+monitor rileva un evento fixture senza richiesta dell'utente e senza duplicarlo.
 
 ### F6.2 — Suggestion engine
 
@@ -5251,8 +5347,12 @@ Dipende da: F6.1 e F5.5.
 5. `F6.2.5` Non apprendere da un singolo rifiuto ambiguo.
 6. `F6.2.6` Applicare cooldown e deduplica.
 7. `F6.2.7` Spiegare quale evento e memoria hanno prodotto la proposta.
+8. `F6.2.8` Valutare importanza, urgenza, rischio, possibilità di risoluzione entro la delega e
+   bisogno di decisione umana; produrre una scelta motivata tra nessuna interruzione, digest,
+   notifica e richiesta di contatto vocale, senza concedere nuove autorizzazioni.
 
-Criterio di uscita: nessun suggerimento si esegue senza policy e ogni suggerimento è spiegabile.
+Criterio di uscita: nessun suggerimento si esegue senza policy e ogni suggerimento è spiegabile;
+fixture rilevante, irrilevante e risolvibile entro la delega verificano la scelta di contatto.
 
 ### F6.3 — Notification intelligence
 
@@ -5265,8 +5365,15 @@ Dipende da: F6.2 e F4.
 5. `F6.3.5` Non pronunciare contenuti sensibili su speaker condivisi.
 6. `F6.3.6` Misurare interruption relevance.
 7. `F6.3.7` Impedire starvation permanente delle notifiche in coda.
+8. `F6.3.8` Instradare il contatto proattivo al companion autorizzato: spiegare situazione,
+   urgenza, azioni già verificate e decisione richiesta, correlando notifica/call al task/sessione.
+9. `F6.3.9` Richiedere una companion call/VoIP soltanto quando policy di contatto, preferenze e
+   urgenza lo consentono; gestire rifiuto, mancata risposta e device offline con fallback
+   notifica/digest e cooldown, senza chiamate ripetute o escalation automatica alla PSTN.
 
-Criterio di uscita: < 1 interruzione irrilevante al giorno nel pilot e nessun leak cross-device.
+Criterio di uscita: < 1 interruzione irrilevante al giorno nel pilot e nessun leak cross-device;
+quiet mode, scelta del device, mancata risposta e fallback sono verificati. La decisione di
+contatto si testa in F6; notifica/call reali richiedono F7.2/F7.3 e scenario S8.
 
 ### F6.4 — Commitment e goal manager
 
@@ -5331,13 +5438,24 @@ Criterio di uscita: 30 giorni di pilot senza loop di notifica o azione distrutti
 - < 1 interruzione irrilevante al giorno;
 - zero azioni esterne non delegate;
 - nessun superamento budget;
-- kill switch e quiet mode sempre efficaci.
+- kill switch e quiet mode sempre efficaci;
+- catena evento → valutazione → scelta di contatto verificata anche quando la scelta corretta
+  è non interrompere; la demo remota completa S8 resta un requisito d'integrazione con F7/G4.
 
 ## 14. F7 — Mobile, Home e Ambient Computing
 
 - Stato: `DOING` sulle fondamenta; prodotto `BACKLOG`
 - Priorità: `P2`
 - Dipendenze: F1 per trust, F2 per audio, F5 per continuità, F6 per proattività.
+
+**Target multi-device — 16/09/2026**: parte confermata del prodotto finale, oltre alla base
+locale Windows. PC, telefono e dispositivi ambientali devono condividere lo stesso task e
+la stessa sessione logica: handoff/session continuity è un requisito esplicito, non soltanto
+la disponibilità di più interfacce. Il companion deve poter ricevere notifiche e, in futuro,
+companion call/VoIP avviate da Jake secondo F6.3. Questo è il canale vocale preferito rispetto
+alla PSTN; l'eventuale telefonia tradizionale resta un'integrazione opzionale successiva,
+non necessaria per chiudere il target companion. Fondazioni e verifiche esistenti non
+attestano ancora questa esperienza completa.
 
 ### F7.1 — Protocollo companion sicuro
 
@@ -5364,8 +5482,11 @@ Dipende da: F7.1.
 5. `F7.2.5` File share esplicito e scoped.
 6. `F7.2.6` Offline queue limitata e visibile.
 7. `F7.2.7` Remote wipe delle sole chiavi Jake sul device perso.
+8. `F7.2.8` Aprire da una notifica proattiva lo stesso task/sessione del core, con riepilogo,
+   evidenza e decisione pendente; evitare di creare una conversazione scollegata.
 
-Criterio di uscita: tutti i comandi mobile attraversano lo stesso policy kernel del PC.
+Criterio di uscita: tutti i comandi mobile attraversano lo stesso policy kernel del PC;
+una notifica apre il task corretto e un'eventuale risposta aggiorna la stessa sessione.
 
 ### F7.3 — Voce mobile e satellite
 
@@ -5378,8 +5499,16 @@ Dipende da: F2 e F7.1.
 5. `F7.3.5` Gestione latenza, perdita rete e fallback testuale.
 6. `F7.3.6` Nessun audio persistito per default.
 7. `F7.3.7` Audio session id correlato a command e conversation id.
+8. `F7.3.8` Aggiungere come target futuro companion call/VoIP Jake→utente, con segnalazione
+   e audio autenticati/cifrati; integrare la richiesta di contatto F6.3 dopo il companion MVP.
+9. `F7.3.9` Mostrare motivo e urgenza prima dell'accettazione; gestire accept, decline, timeout,
+   fine chiamata e fallback testuale/notifica senza aprire il microfono prima dell'accettazione.
+10. `F7.3.10` Correlare la call al task e alla sessione logica esistenti; una risposta vocale
+    attraversa la stessa policy del PC e rispetta scope, scadenza e autenticazione richiesta.
 
-Criterio di uscita: conversazione passa PC→telefono→stanza senza doppio audio o perdita turno.
+Criterio di uscita: conversazione passa PC→telefono→stanza senza doppio audio o perdita turno;
+companion call reale verificata per accettazione, rifiuto, timeout e perdita rete, con fallback
+senza duplicazioni e senza dipendenza da PSTN. Il solo streaming audio non chiude il target call.
 
 ### F7.4 — Handoff e presence
 
@@ -5388,12 +5517,21 @@ Dipende da: F7.2, F7.3 e F5.6.
 1. `F7.4.1` Separare device noto, disponibile, presente, foreground e active responder.
 2. `F7.4.2` Elezione basata su scelta esplicita, prossimità, cuffie e recency.
 3. `F7.4.3` Lease con timeout; niente ownership eterna dopo crash.
-4. `F7.4.4` Trasferire conversation id, pending action e permission state.
+4. `F7.4.4` Trasferire conversation id, task id e session id logico, checkpoint, pending action
+   e permission state; conservare le correlazioni senza rigenerare il task al cambio di device.
 5. `F7.4.5` Impedire che un secondo device approvi un'azione fuori scope.
 6. `F7.4.6` Mostrare sempre quale dispositivo sta ascoltando o parlando.
 7. `F7.4.7` Riconciliare due claim simultanei in modo deterministico.
+8. `F7.4.8` Rendere esplicita la session continuity PC→companion→PC: stessa attività, cronologia,
+   decisioni, esiti verificati e prossimo passo; al ritorno sul PC riprendere il contesto senza
+   chiedere all'utente di rispiegarlo, mostrando il riepilogo nei pannelli F4.5.
+9. `F7.4.9` Lasciare proseguire soltanto i passi già autorizzati mentre cambia il responder;
+   checkpoint e attesa devono conservare le decisioni pendenti senza duplicare azioni o
+   riutilizzare approvazioni scadute, di altro owner o fuori scope.
 
-Criterio di uscita: fault test coprono crash, rete persa, claim simultanei e lease scaduto.
+Criterio di uscita: fault test coprono crash, rete persa, claim simultanei e lease scaduto;
+scenari S5/S8 dimostrano andata e ritorno sullo stesso task/sessione, un solo active responder,
+nessuna azione duplicata e ripresa di contesto, decisioni e ricevute sul PC.
 
 ### F7.5 — Home Assistant profondo
 
@@ -5438,11 +5576,14 @@ Criterio di uscita: safety review dedicata prima di qualunque pilot su strada.
 ### Gate G4 — Presenza ambientale
 
 - pairing, revoca e trasporto cifrato;
-- handoff senza perdita di contesto o doppio responder;
+- handoff/session continuity PC→companion→PC sullo stesso task/sessione, senza perdita di
+  contesto, azioni duplicate o doppio responder (S5);
 - memoria separata per owner;
 - dispositivi fisici sensibili protetti da policy specifica;
 - sync offline verificata;
-- indicatori di ascolto e device attivo sempre visibili.
+- indicatori di ascolto e device attivo sempre visibili;
+- scenario S8 completo: evento autonomo, decisione di contatto, notifica e companion call/VoIP
+  con fallback, prosecuzione entro delega o attesa e ripresa sul PC con esito verificato.
 
 ## 15. F8 — Self-Improvement ed ecosistema
 
@@ -5633,16 +5774,21 @@ Passa se il retry non produce doppio submit.
 
 Passa se un device indisponibile non fa dichiarare successo totale.
 
-### Scenario S5 — Handoff PC→telefono
+### Scenario S5 — Handoff PC→telefono→PC
 
 1. Il telefono paired richiede il lease.
-2. F7 verifica presenza e capability e trasferisce conversation id.
+2. F7 verifica presenza e capability e trasferisce conversation id, task id e session id logico,
+   checkpoint e decisioni pendenti.
 3. Il PC smette di parlare; il task autorizzato può continuare.
-4. Eventi e permission card passano al telefono.
+4. Eventi e permission card passano al telefono sullo stesso task/sessione.
 5. La rete cade: il telefono mostra offline e nessun comando è duplicato.
 6. Al ritorno della rete, sincronizzazione e lease vengono riconciliati.
+7. Tornato al PC, l'utente riprende la stessa attività con cronologia, decisioni, stato corrente,
+   ricevute e prossimo passo nei pannelli F4, senza rispiegare il contesto.
 
-Passa se esiste un solo active responder e nessuna approvazione attraversa profili.
+Passa se esiste un solo active responder, nessuna approvazione attraversa profili o viene
+riutilizzata fuori validità e lo stesso task/sessione sopravvive all'andata e al ritorno senza
+perdita di contesto o duplicazione di azioni.
 
 ### Scenario S6 — Auto-miglioramento
 
@@ -5668,6 +5814,30 @@ Passa se il plugin non può leggere una cartella non dichiarata.
 7. Se peggiora, undo ripristina lo stato e il ledger conserva le prove.
 
 Passa se Jake non inventa il successo e lascia il sistema recuperabile.
+
+### Scenario S8 — Jake contatta l'utente e riprende sul PC
+
+Reference funzionale: video discusso il 16/09/2026 in “Iniziare con Jake”. Scenario target
+F6/F7 da implementare e verificare, non evidenza di una demo già riuscita.
+
+1. Mentre l'utente è lontano dal PC, un monitor autorizzato rileva un evento fixture rilevante
+   (per esempio una build fallita) e lo collega al task; non serve una richiesta manuale.
+2. F6 valuta evidenza, importanza, urgenza, possibilità di risoluzione entro delega e necessità
+   di una decisione; registra perché interrompere oppure rinviare l'evento a un riepilogo.
+3. Jake raggiunge il companion paired con una notifica o, se consentito dalle preferenze e
+   dalla policy di contatto, una companion call/VoIP con motivo e urgenza visibili.
+4. L'utente accetta la call o apre la notifica; Jake spiega situazione, lavoro già verificato e
+   decisione richiesta nella stessa sessione. Ogni approvazione resta soggetta a F1.
+5. Jake continua entro la delega o conserva il checkpoint in attesa; decline, timeout o rete
+   persa producono il fallback previsto, senza chiamate ripetute o duplicazione del lavoro.
+6. Al ritorno sul PC, handoff e pannelli F4 riprendono lo stesso task/sessione, incluse le
+   decisioni prese sul telefono, le prove e l'eventuale attesa ancora aperta.
+7. Alla risoluzione verificata Jake aggiorna il task e notifica l'esito sul dispositivo attivo.
+
+Passa se entrambe le modalità (notifica e call) sono provate end-to-end, quiet mode e rifiuto
+sono rispettati, un evento irrilevante non interrompe e nessuna approvazione viene implicata
+dalla sola accettazione della call. Stessi task/sessione e un solo responder per tutto il
+percorso; nessuna azione duplicata, perdita di contesto o dipendenza dalla PSTN.
 
 ## 18. Metriche di prodotto e gate quantitativi
 
