@@ -131,4 +131,8 @@ voce ──VAD──▶ Whisper (GPU) ──▶ TranscriptNormalizer ──▶ R
 .venv\Scripts\python.exe -m unittest discover -s tests -t . -v   # test unitari (niente Ollama/microfono)
 ```
 
+Per il client HUD nativo, dopo la build CMake: `ctest --test-dir hud/native/build --output-on-failure`.
+Qt Test usa le stesse fixture eventi dei test Python, più test SSE su loopback; non verifica
+il rendering o l'input QML. Dettagli in [HUD nativo](hud/native/README.md#f414--contract-test-condivisi-pythonc).
+
 Aggiungere una skill: un file in `skills/` con una classe (`metadata`, `execute`) registrata in `core/skill_registry.py`, più qualche frase in `training/intents.jsonl`; oppure un plugin in `plugins/` con `register(registry)` (vedi `plugins/example_coin_flip.py`).

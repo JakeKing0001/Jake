@@ -245,7 +245,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F3.6` | Browser Automation (G1 superato, mai iniziato) | `READY` |
 | `F3.7` | Application Adapters (G1 superato, mai iniziato) | `READY` |
 | `F3.8` | Demonstration Learning (G1 superato, mai iniziato) | `READY` |
-| `F4.1` | Protocol Architecture (F4.1.2/F4.1.3/F4.1.5/F4.1.6 chiusi, F4.1.1 chiuso lato Python (sequence_id+trace_id)/F4.1.4 prima fetta lato Python - 16/09/2026; solo il lato C++ di F4.1.1/F4.1.4 resta scoperto, gap permanente dichiarato) | `DOING` |
+| `F4.1` | Protocol Architecture (F4.1.2/F4.1.3/F4.1.5/F4.1.6 chiusi; F4.1.4 corpus condiviso Python/C++ e Qt Test/CTest verificati localmente, CI da eseguire; F4.1.1 sequence id consumato dal client, trace id validato ma non ancora correlato nell'UI - 16/09/2026) | `DOING` |
 | `F4.2` | Native HUD (F4.2.1/F4.2.4 chiusi, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026; F4.2.5/F4.2.6 e resto di F4.2.3 richiedono test interattivi/visivi) | `DOING` |
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
 | `F4.4` | Interaction Design (G1 superato, mai iniziato) | `READY` |
@@ -4766,19 +4766,14 @@ Dipende da: F1.1.
 
 Criterio di uscita: client Python finto e JakeClient C++ superano la stessa suite di fixture.
 
-- Stato: `DOING`; `F4.1.5` **chiuso** (già vero per costruzione da `F1.8.6`, stesso `EventBus`,
-  cross-riferimento non nuovo lavoro - vedi sotto); `F4.1.1` chiuso parzialmente (`sequence_id` E
-  `trace_id` fatti lato Python - vedi sotto, 16/09/2026; il lato C++ ignora ancora entrambi i campi
-  in silenzio, mai consumati); `F4.1.2` **chiuso** (schema condiviso generato, niente più
-  enum mantenuti a mano lato C++ - vedi sotto); `F4.1.4` chiuso parzialmente (contract test per
-  payload malformato lato Python, tre buchi reali trovati e corretti - vedi sotto; il lato C++
-  resta scoperto, nessuna toolchain di test C++/QML in questo progetto); `F4.1.3` **chiuso**
-  (meccanismo di replay lato server, E auto-reconnect/`Last-Event-ID` lato client - vedi sotto,
-  con un buco reale preesistente corretto nello stesso passo); `F4.1.6` **chiuso** (finestra di
-  compatibilita' ZERO definita e documentata, con un buco reale di spam corretto lato C++ - vedi
-  sotto, 16/09/2026). Con questo **F4.1 e' completo per intero lato Python**; lato C++ restano
-  scoperti `sequence_id`/`trace_id` (mai consumati, ignorati in silenzio) e i contract test veri e
-  propri (nessuna toolchain di test C++/QML in questo progetto).
+- Stato: `DOING`; `F4.1.2`/`F4.1.3`/`F4.1.5`/`F4.1.6` chiusi quanto documentato nelle voci
+  sotto. `F4.1.4` passa a `VERIFY`: parser e segnali reali C++ superano ora le stesse fixture
+  Python con Qt Test/CTest, piu' test SSE reali; manca la CI del nuovo incremento. Superata
+  quindi la precedente premessa "nessuna toolchain C++" (storica, nelle note precedenti).
+  `F4.1.1`: timestamp/sequence/trace serializzati e validati; il client usa gia' sequence id
+  per `Last-Event-ID` (F4.1.3, non lo ignora come diceva il riepilogo precedente), mentre trace
+  id non ha ancora una rappresentazione/correlazione nell'UI. La suite QML di layout/input,
+  lo snapshot completo e il riavvio del server con contatore azzerato restano non coperti.
 - `F4.1.5` (VERIFICA, nessun codice) — 16/09/2026: "garantire che client lento non blocchi il
   core" è lo STESSO `core/event_bus.py::EventBus` già verificato per questo in `F1.8.6`
   ("impedire che un client lento blocchi event bus o altri client") - coda `queue.Queue(maxsize=
@@ -4998,6 +4993,40 @@ Criterio di uscita: client Python finto e JakeClient C++ superano la stessa suit
   `F4.1.6` e' **chiuso** e `F4.1` e' completo lato Python (resta solo il consumo/test lato C++ di
   `sequence_id`/`trace_id`, gap permanente dichiarato). Prova: build C++ verde, nessun test Python
   toccato in questo incremento (suite gia' verde da F4.1.1).
+
+- `F4.1.4` (corpus condiviso e test nativi, chiusura locale) — 16/09/2026: ripresa da master
+  `c67ce8a`, pulito/allineato al tracking; CI `35098804258` verde nei tre job Windows. Non
+  ripetuto F1.2.6: gia' integrato in PR #28, G1 dichiarato superato in PR #124. Definition
+  of Ready: input eventi JSON/SSE, output accettazione/rifiuto e segnali reali del client;
+  toccati `hud_protocol`, generatore, `JakeClient`, build/test/CI; nessun dato reale, nuovo
+  permesso o pubblicazione remota. Successo = tutti i tipi/legacy/estensioni funzionano;
+  errore = forma/numeri/valori invalidi non cambiano stato/sequence/dispositivo né emettono
+  comandi UI; sicurezza = mismatch fermato, diagnostici senza valori sensibili. Criterio
+  misurabile: stesso corpus nei due linguaggi, gate completo e test TCP headless ripetibili.
+  `tests/fixtures/hud_events.json` contiene 75 casi, tutti i 16 tipi. Prima del fix, i primi
+  73 casi riproducono 33 mancati rifiuti Python e 39 discrepanze C++; aggiunti altri due
+  casi JSON non finito in campi di estensione. Regole payload/limiti/vocabolario verifica
+  generati dalla fonte Python in `HudEventTypes.h`, senza un secondo censimento C++.
+  Default legacy mantenuti (schema assente = versione corrente, payload assente/null = `{}`,
+  sequence assente = 0, trace assente/null = None); campi noti opzionali ma tipizzati quando
+  presenti, estensioni ammesse. Booleani non sono numeri; interi numerici come 42.0 ammessi;
+  sequence 0..qint64 max, step 0..int max, timestamp finito non negativo. JSON NaN/Infinity
+  rifiutato anche in estensioni; nessun valore sensibile ripetuto negli errori di validazione.
+  Il client rifiuta PRIMA degli effetti o avanzamento del cursore. Due test HTTP/SSE su
+  loopback riproducono altri difetti reali: l'abort per mismatch generava un secondo errore
+  da `finished()` e `readyRead()` poteva riattivare connected; UTF-8 diviso fra letture TCP
+  diventava U+FFFD. Corretto sopprimendo l'errore duplicato/riattivazione e bufferizzando
+  byte fino al blocco completo. Il seam di test e' friend nativo, nessuna API/QML pubblica.
+  CTest/Qt Test aggiunti alla build normale, DLL test distribuite da windeployqt; `BUILD_TESTING=OFF`
+  resta disponibile. CI estesa a CTest + diagnostica testo/JUnit/LastTest.log, 14 giorni.
+  Prova: 75/75 fixture per entrambi, 80/80 casi Qt Test (init/cleanup inclusi), 20/20 CTest
+  consecutivi; 118/118 test Python mirati, ruff/mypy selettivo (87 file)/compileall verdi,
+  smoke CLI senza Ollama verde (6,7 s), smoke HUD nativo attivo dopo 3 s. Suite completa finale
+  2.914/2.914 in 100,468 s (baseline 2.836/2.836); warning di teardown HTTP/subprocess gia'
+  presenti nella baseline, nessun test fallito. Build MSVC 19.51/Qt 6.7.3/Ninja verde.
+  Stato `VERIFY` finché il commit nuovo supera CI; nessun push/PR/merge eseguito dall'agente.
+  Limiti: non verifica rendering/focus/click-through/accessibilita'/input QML, non aggiunge
+  card undo/evidence, snapshot completo o gestione restart del server. Il gate G2 resta aperto.
 
 ### F4.2 — Shell overlay nativa
 
@@ -5829,6 +5858,15 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 - Personalità progettata per manipolare, fingere coscienza o scoraggiare il controllo dell'utente.
 
 ## 24. Prossima azione esatta
+
+Stato corrente 16/09/2026, ripresa dopo PR #142: `F4.1.4` implementato/verificato localmente
+con corpus condiviso e Qt Test/CTest, commit locale su `codex/f4-hud-contract-tests`;
+2.914 test Python/80 casi Qt Test verdi, manca CI del nuovo incremento.
+Nessuna pubblicazione GitHub autorizzata all'agente: l'utente pubblica il ramo e apre la PR,
+poi si osservano i tre check. Non aprire un nuovo ID prima del verde (sezione 20). In seguito,
+priorita' del track HUD: `F4.2.6`, regioni interattive osservabili, ora con toolchain di test
+nativa disponibile; non dichiarare G2 chiuso con il solo protocollo. Le note lunghe sotto sono
+storiche e non sostituiscono questo stato corrente.
 
 Aggiornato 16/09/2026. Sessione lunga con 97 incrementi completati e verificati (PR #28-#123), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il

@@ -11,10 +11,12 @@ consumatore alla volta, mai trasmissibile in rete. Qui il vocabolario viene reso
 (un'enum, non stringhe libere) e serializzabile (JSON), cosi' core/event_bus.py e
 core/companion_server.py possono trasmetterlo fuori dal processo."""
 import json
+import math
 import time
 from dataclasses import dataclass, field
 from enum import Enum
 
+from core.action_ledger import VERIFICATION_FAILED, VERIFICATION_UNVERIFIED, VERIFICATION_VERIFIED
 from core.version import PROTOCOL_VERSION
 
 
@@ -44,6 +46,58 @@ class EventType(str, Enum):
     # str} (uno dei tre valori di core/action_ledger.py::VERIFICATION_VERIFIED/UNVERIFIED/FAILED).
     UNDO = "UNDO"
     VERIFICATION = "VERIFICATION"
+
+
+# F4.1.4: forma dei campi CONSUMATI; generata anche per C++ da generate_hud_event_types.
+# Campi opzionali per compatibilita' con from_legacy_state e record preesistenti; chiavi nuove
+# ammesse. Assente non significa malformato, PRESENTE col tipo sbagliato non viene coercizzato.
+HUD_PAYLOAD_RULES: dict[str, dict[str, str]] = {
+    "*": {"detail": "string"},
+    EventType.USER_MESSAGE.value: {"text": "string"},
+    EventType.JAKE_MESSAGE.value: {"text": "string"},
+    EventType.AGENT_STEP.value: {"step": "step", "description": "string"},
+    EventType.NOTIFICATION.value: {"kind": "string", "text": "string"},
+    EventType.DEVICE_HANDOFF.value: {"from": "string", "to": "string"},
+    EventType.UNDO.value: {"intent": "string"},
+    EventType.VERIFICATION.value: {"intent": "string", "verified": "verification"},
+}
+HUD_VERIFICATION_VALUES = (VERIFICATION_VERIFIED, VERIFICATION_UNVERIFIED, VERIFICATION_FAILED)
+HUD_SEQUENCE_ID_MAX = 2**63 - 1  # qint64, preservato senza perdita da QJsonValue in Qt6
+HUD_STEP_MAX = 2**31 - 1  # il segnale JakeClient::agentStep usa int
+
+
+def _is_integer_in_range(value: object, maximum: int) -> bool:
+    # JSON ha un solo tipo numerico: 42.0 e' un intero valido anche per QJsonValue::toInteger.
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return 0 <= value <= maximum and value == int(value)
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError("HudEvent.from_json: costante non JSON")
+
+
+def _finite_json_float(value: str) -> float:
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("HudEvent.from_json: numero non finito")
+    return number
+
+
+def _validate_payload(event_type: EventType, payload: dict) -> None:
+    rules = {**HUD_PAYLOAD_RULES["*"], **HUD_PAYLOAD_RULES.get(event_type.value, {})}
+    for key, rule in rules.items():
+        if key not in payload:
+            continue
+        value = payload[key]
+        if rule == "string":
+            valid = isinstance(value, str)
+        elif rule == "step":
+            valid = _is_integer_in_range(value, HUD_STEP_MAX)
+        else:
+            valid = isinstance(value, str) and value in HUD_VERIFICATION_VALUES
+        if not valid:
+            raise ValueError(f"HudEvent.from_json: payload.{key} non valido")
 
 
 # Traduce gli stati gia' in uso da WakeWordSession/SessionHooks.set_state (stringhe libere,
@@ -114,24 +168,43 @@ class HudEvent:
         # JSON viene validato per FORMA prima di costruire l'oggetto, non solo per presenza,
         # cosi' un input malformato fallisce qui con un errore chiaro invece di produrre un
         # HudEvent con un campo del tipo sbagliato che rompe un chiamante lontano e confuso.
-        data = json.loads(raw)
+        data = json.loads(raw, parse_constant=_reject_json_constant, parse_float=_finite_json_float)
         if not isinstance(data, dict):
             raise ValueError(f"HudEvent.from_json: atteso un oggetto JSON, ricevuto {type(data).__name__}")
         if "type" not in data:
             raise ValueError("HudEvent.from_json: campo 'type' obbligatorio mancante")
         schema_version = data.get("schema_version", PROTOCOL_VERSION)
-        if schema_version != PROTOCOL_VERSION:
+        if not _is_integer_in_range(schema_version, HUD_SEQUENCE_ID_MAX) or schema_version != PROTOCOL_VERSION:
             raise ValueError(
-                f"versione protocollo non supportata: {schema_version}; attesa {PROTOCOL_VERSION}"
+                f"versione protocollo non supportata; attesa {PROTOCOL_VERSION}"
             )
+        if not isinstance(data["type"], str):
+            raise ValueError("HudEvent.from_json: 'type' deve essere una stringa")
+        try:
+            event_type = EventType(data["type"])
+        except ValueError:
+            raise ValueError("HudEvent.from_json: type non supportato") from None
         payload = data.get("payload")
         if payload is None:
             payload = {}
         elif not isinstance(payload, dict):
             raise ValueError(f"HudEvent.from_json: 'payload' deve essere un oggetto JSON, ricevuto {type(payload).__name__}")
+        at = data.get("at", time.time())
+        try:
+            valid_at = type(at) in (int, float) and math.isfinite(at) and at >= 0
+        except OverflowError:
+            valid_at = False
+        if not valid_at:
+            raise ValueError("HudEvent.from_json: 'at' deve essere un timestamp finito non negativo")
+        sequence_id = data.get("sequence_id", 0)
+        if not _is_integer_in_range(sequence_id, HUD_SEQUENCE_ID_MAX):
+            raise ValueError("HudEvent.from_json: 'sequence_id' deve essere un intero non negativo qint64")
+        trace_id = data.get("trace_id")
+        if trace_id is not None and not isinstance(trace_id, str):
+            raise ValueError("HudEvent.from_json: 'trace_id' deve essere una stringa o null")
+        _validate_payload(event_type, payload)
         return cls(
-            type=EventType(data["type"]), payload=payload, at=data.get("at", time.time()),
-            sequence_id=data.get("sequence_id", 0), trace_id=data.get("trace_id"),
+            type=event_type, payload=payload, at=at, sequence_id=int(sequence_id), trace_id=trace_id,
         )
 
     @classmethod

@@ -17,8 +17,8 @@ niente di Ollama, agenti o memoria — esattamente il punto della fase "UI separ
   Events, parsing manuale — Qt non ha un client SSE nativo), `POST /command`,
   `POST /devices/<id>/claim`.
 
-Finestra normale, bordata, opaca. **Non** ancora: overlay trasparente/click-through (4.9.3), vetro
-vero con blur/rifrazione (4.9.4/4.9.5), stato reattivo del vetro (4.9.6), Orb 2.0 con particelle
+Finestra overlay trasparente/click-through e no-activate (F4.2.1), con show/hide reale (F4.2.2).
+**Non** ancora: vetro vero con blur/rifrazione (4.9.4/4.9.5), stato reattivo del vetro (4.9.6), Orb 2.0 con particelle
 (4.9.7), pannelli contestuali per tipo di task (4.9.8), transizioni fluide (4.9.9), multi-monitor
 (4.9.10). Ognuna di quelle è un passo successivo, deliberatamente non affrontato qui.
 
@@ -212,9 +212,9 @@ dichiarato apertamente non gestito, non lo stesso della disconnessione breve tes
 
 ## Stato di verifica
 
-A differenza di tutto il resto di Jake (Python, con test automatici in `tests/`), questo codice
-**non ha una suite di test**: C++/QML non fanno parte della toolchain di test del progetto. È
-stato però compilato ed eseguito davvero in questo ambiente il giorno in cui è stato scritto
+Dal 16/09/2026 il client C++ ha una suite Qt Test/CTest (F4.1.4), oltre ai test Python;
+il layout/input/rendering QML non ha ancora una suite automatica. Il prototipo è
+stato anche compilato ed eseguito davvero in questo ambiente il giorno in cui è stato scritto
 (MSVC 19.51 via Visual Studio Build Tools, Qt 6.7.3 msvc2019_64, CMake+Ninja), non solo scritto
 alla cieca:
 
@@ -233,7 +233,47 @@ alla cieca:
 
 Quello che **non** è verificato: l'aspetto visivo (nessuno screenshot, nessuna GUI osservabile in
 questo ambiente), l'interazione utente reale con mouse/tastiera, il comportamento su una macchina
-diversa da questa, e ovviamente tutte le fasi successive (4.9.3+) non ancora scritte.
+diversa da questa, e le fasi successive non ancora scritte (vetro/Orb/pannelli contestuali).
+
+## F4.1.4 — contract test condivisi Python/C++
+
+`tests/fixtures/hud_events.json` è l'unico corpus letto sia da `tests/test_hud_event_contract.py`
+sia da `tests/JakeClientContractTests.cpp`. Copre tutti i 16 tipi, valori Unicode, record legacy,
+campi di estensione e input malformati: JSON/root, versione, tipo, payload, timestamp,
+sequence/trace id e campi noti del payload. Le regole per questi campi, i limiti numerici e i
+valori della verifica sono generati in `HudEventTypes.h` dalla fonte Python, non ricopiati.
+
+Contratto: versione esplicita uguale al manifest; versione assente ammessa per record legacy;
+payload assente/null normalizzato a `{}`; campi noti opzionali, ma validati quando presenti;
+chiavi di estensione ammesse. Numeri integrali come `42.0` sono ammessi, booleani no;
+sequence id tra 0 e `2^63-1`, step tra 0 e `2^31-1`, timestamp finito non negativo,
+trace id stringa/null. Il client rifiuta gli eventi malformati prima di segnali, mutazioni
+di stato/dispositivo o avanzamento di `Last-Event-ID`; un mismatch interrompe lo stream e
+genera un solo diagnostico per connessione. Nessun payload sensibile viene incluso nei
+diagnostici di validazione. Nessun nuovo permesso o store persistente del core.
+
+I test native esercitano il parser/segnali **reali** di `JakeClient` senza finestra. Due test
+HTTP/SSE su loopback verificano inoltre l'abort per mismatch (incluso `finished()`, senza
+doppio errore) e un carattere UTF-8 diviso fra due letture TCP: il buffer conserva byte fino
+al blocco completo, evitando corruzione dei caratteri. Non è una prova del layout QML,
+del focus, del click-through o dell'accessibilità; né aggiunge card undo/evidence nell'UI.
+
+```powershell
+.venv\Scripts\python.exe -m unittest tests.test_hud_event_contract
+ctest --test-dir hud/native/build --output-on-failure
+```
+
+Da `hud/native/` configurare/compilare con il preset normale: `BUILD_TESTING=ON` è il
+default CTest e richiede il componente Qt Test (incluso in Qt base); `-DBUILD_TESTING=OFF`
+disabilita soltanto la costruzione dei test. `windeployqt` distribuisce anche le DLL del
+test executable, quindi non occorre modificare il `PATH`. La CI esegue CTest dopo la build
+e conserva per 14 giorni `hud-contract.txt`, `hud-contract.xml` (JUnit) e `LastTest.log`.
+
+Prova locale 16/09/2026: 75/75 fixture comuni, 80/80 casi Qt Test (incluse init/cleanup e i
+tre test aggiuntivi), 20/20 esecuzioni CTest consecutive; suite Python 2.914/2.914,
+ruff/mypy (87 file)/compileall verdi, smoke CLI senza Ollama e avvio/arresto HUD verdi.
+CI del nuovo incremento ancora da
+eseguire dopo pubblicazione dell'utente; il precedente `c67ce8a` è verde (run `35098804258`).
 
 ## Come ricompilare
 

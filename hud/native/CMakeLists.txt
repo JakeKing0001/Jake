@@ -78,6 +78,7 @@ add_custom_command(
     DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/generate_hud_event_types.py"
         "${CMAKE_CURRENT_SOURCE_DIR}/../../core/hud_protocol.py"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../core/action_ledger.py"
     COMMENT "Generating HudEventTypes.h from core/hud_protocol.py::EventType"
     VERBATIM
 )
@@ -150,3 +151,30 @@ endif()
 set_target_properties(JakeHud PROPERTIES
     WIN32_EXECUTABLE ON
 )
+
+# F4.1.4: stesso corpus del client Python; Qt Test e' parte della toolchain Qt, non un mock QML.
+include(CTest)
+if(BUILD_TESTING)
+    find_package(Qt6 6.5 REQUIRED COMPONENTS Test)
+    qt_add_executable(JakeHudContractTests
+        tests/JakeClientContractTests.cpp src/JakeClient.h src/JakeClient.cpp
+    )
+    set_target_properties(JakeHudContractTests PROPERTIES WIN32_EXECUTABLE OFF)
+    add_dependencies(JakeHudContractTests JakeHudEventTypesHeader)
+    target_include_directories(JakeHudContractTests PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated")
+    target_compile_definitions(JakeHudContractTests PRIVATE
+        JAKE_PROTOCOL_VERSION=${JAKE_PROTOCOL_VERSION}
+        JAKE_HUD_CONTRACT_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/../../tests/fixtures/hud_events.json"
+    )
+    target_link_libraries(JakeHudContractTests PRIVATE Qt6::Core Qt6::Network Qt6::Qml Qt6::Test)
+    if(WIN32)
+        add_custom_command(TARGET JakeHudContractTests POST_BUILD
+            COMMAND "${JAKE_WINDEPLOYQT_EXECUTABLE}" --release --no-translations "$<TARGET_FILE:JakeHudContractTests>"
+            VERBATIM
+        )
+    endif()
+    add_test(NAME hud-event-contract COMMAND JakeHudContractTests
+        -o hud-contract.txt,txt -o hud-contract.xml,junitxml -o -,txt
+    )
+    set_tests_properties(hud-event-contract PROPERTIES TIMEOUT 30)
+endif()

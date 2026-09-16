@@ -19,16 +19,31 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.hud_protocol import EventType  # noqa: E402
+from core.hud_protocol import (  # noqa: E402
+    EventType, HUD_PAYLOAD_RULES, HUD_SEQUENCE_ID_MAX, HUD_STEP_MAX, HUD_VERIFICATION_VALUES,
+)
 
 _HEADER_TEMPLATE = """// GENERATO AUTOMATICAMENTE da tools/generate_hud_event_types.py - NON MODIFICARE A MANO.
 // Fonte: core/hud_protocol.py::EventType. Rigenerato ad ogni build (vedi CMakeLists.txt) cosi'
 // un tipo aggiunto o rinominato lato Python si riflette qui senza bisogno di tenerlo a mano in
 // sincronia (F4.1.2, "niente enum mantenuti a mano").
 #pragma once
+#include <array>
+#include <cstdint>
 
 namespace JakeHudEventType {{
 {constants}
+inline constexpr std::array<const char *, {event_count}> ALL{{{{{event_names}}}}};
+}}
+
+namespace JakeHudContract {{
+struct PayloadRule {{ const char *event; const char *key; const char *kind; }};
+inline constexpr std::array<PayloadRule, {rule_count}> PAYLOAD_RULES{{{{
+{rules}
+}}}};
+inline constexpr std::array<const char *, {verification_count}> VERIFICATION_VALUES{{{{{verification_values}}}}};
+inline constexpr std::int64_t SEQUENCE_ID_MAX = {sequence_max};
+inline constexpr std::int64_t STEP_MAX = {step_max};
 }}
 """
 
@@ -37,7 +52,15 @@ def generate_header(event_type_names: list) -> str:
     constants = "\n".join(
         f'inline constexpr const char *{name} = "{name}";' for name in event_type_names
     )
-    return _HEADER_TEMPLATE.format(constants=constants)
+    rules = [f'    {{"{event}", "{key}", "{kind}"}},' for event, fields in HUD_PAYLOAD_RULES.items()
+             if event == "*" or event in event_type_names for key, kind in fields.items()]
+    return _HEADER_TEMPLATE.format(
+        constants=constants, event_count=len(event_type_names), event_names=", ".join(event_type_names),
+        rule_count=len(rules), rules="\n".join(rules),
+        verification_count=len(HUD_VERIFICATION_VALUES),
+        verification_values=", ".join(f'"{value}"' for value in HUD_VERIFICATION_VALUES),
+        sequence_max=HUD_SEQUENCE_ID_MAX, step_max=HUD_STEP_MAX,
+    )
 
 
 def main() -> int:

@@ -6,6 +6,8 @@
 #include <QTimer>
 #include <QUuid>
 #include <QUrl>
+#include <algorithm>
+#include <cmath>
 
 #include "HudEventTypes.h" // generato da tools/generate_hud_event_types.py, vedi CMakeLists.txt
 
@@ -14,6 +16,40 @@ namespace {
 // funzionare" - vedi hud/native/README.md) - un assistente personale con un solo server locale
 // non ha lo stesso rischio di "thundering herd" di un servizio con molti client concorrenti.
 constexpr int kReconnectDelayMs = 3000;
+
+bool isIntegerInRange(const QJsonValue &value, qint64 maximum) {
+    const auto integer = value.toInteger(-1);
+    return value.isDouble() && integer >= 0 && integer <= maximum;
+}
+
+bool isValidEvent(const QJsonObject &object, const QString &type, const QJsonObject &payload) {
+    if (!std::any_of(JakeHudEventType::ALL.begin(), JakeHudEventType::ALL.end(),
+                     [&](const char *name) { return type == QLatin1String(name); })) return false;
+    const auto rawPayload = object.value("payload");
+    if (!rawPayload.isUndefined() && !rawPayload.isNull() && !rawPayload.isObject()) return false;
+    const auto at = object.value("at");
+    if (!at.isUndefined() && (!at.isDouble() || !std::isfinite(at.toDouble()) || at.toDouble() < 0)) return false;
+    const auto sequence = object.value("sequence_id");
+    if (!sequence.isUndefined() && !isIntegerInRange(sequence, JakeHudContract::SEQUENCE_ID_MAX)) return false;
+    const auto trace = object.value("trace_id");
+    if (!trace.isUndefined() && !trace.isNull() && !trace.isString()) return false;
+    for (const auto &rule : JakeHudContract::PAYLOAD_RULES) {
+        if (QLatin1String(rule.event) != QLatin1String("*") && type != QLatin1String(rule.event)) continue;
+        const auto value = payload.value(QLatin1String(rule.key));
+        if (value.isUndefined()) continue;
+        const auto kind = QLatin1String(rule.kind);
+        if (kind == QLatin1String("string")) {
+            if (!value.isString()) return false;
+        } else if (kind == QLatin1String("step")) {
+            if (!isIntegerInRange(value, JakeHudContract::STEP_MAX)) return false;
+        } else if (!value.isString() || !std::any_of(
+                       JakeHudContract::VERIFICATION_VALUES.begin(), JakeHudContract::VERIFICATION_VALUES.end(),
+                       [&](const char *status) { return value.toString() == QLatin1String(status); })) {
+            return false;
+        }
+    }
+    return true;
+}
 }
 
 JakeClient::JakeClient(QObject *parent)
@@ -80,6 +116,10 @@ void JakeClient::fetchStatus() {
                 reply->deleteLater();
                 return;
             }
+            if (m_protocolMismatchReported) {
+                reply->deleteLater();
+                return;
+            }
             setConnected(true);
             if (object.value("active_device").isString())
                 setActiveDevice(object.value("active_device").toString());
@@ -92,16 +132,19 @@ void JakeClient::fetchStatus() {
 }
 
 void JakeClient::onEventStreamReadyRead() {
-    m_eventBuffer += QString::fromUtf8(m_eventStream->readAll());
+    auto *stream = qobject_cast<QNetworkReply *>(sender());
+    if (stream == nullptr || stream != m_eventStream || m_protocolMismatchReported) return;
+    m_eventBuffer += stream->readAll();
     // Un evento SSE e' un blocco terminato da una riga vuota (\n\n): puo' arrivare a pezzi,
     // quindi si processano solo i blocchi completi gia' arrivati, tenendo il resto in coda.
-    int separatorIndex;
-    while ((separatorIndex = m_eventBuffer.indexOf(QStringLiteral("\n\n"))) != -1) {
-        const QString block = m_eventBuffer.left(separatorIndex);
+    qsizetype separatorIndex;
+    while ((separatorIndex = m_eventBuffer.indexOf("\n\n")) != -1) {
+        const QByteArray block = m_eventBuffer.left(separatorIndex);
         m_eventBuffer.remove(0, separatorIndex + 2);
-        for (const QString &line : block.split('\n')) {
-            if (line.startsWith(QStringLiteral("data: ")))
-                handleEventLine(line.mid(6));
+        for (const QByteArray &line : block.split('\n')) {
+            if (line.startsWith("data: "))
+                handleEventLine(QString::fromUtf8(line.mid(6)));
+            if (m_protocolMismatchReported) return; // abort non deve essere seguito da connected=true
             // Le righe che iniziano con ":" sono keep-alive SSE (vedi companion_server.py,
             // SSE_KEEPALIVE_SECONDS): si ignorano, servono solo a tenere viva la connessione.
         }
@@ -124,7 +167,7 @@ void JakeClient::onEventStreamFinished() {
     const bool isCurrentStream = (finishedStream == m_eventStream);
     if (isCurrentStream) {
         setConnected(false);
-        if (finishedStream->error() != QNetworkReply::NoError)
+        if (finishedStream->error() != QNetworkReply::NoError && !m_protocolMismatchReported)
             emit errorOccurred(finishedStream->errorString());
         m_eventStream = nullptr;
     }
@@ -142,10 +185,13 @@ void JakeClient::onEventStreamFinished() {
 }
 
 void JakeClient::handleEventLine(const QString &jsonLine) {
+    if (m_protocolMismatchReported) return;
     const auto doc = QJsonDocument::fromJson(jsonLine.toUtf8());
     if (!doc.isObject()) return;
     const auto object = doc.object();
-    if (object.value("schema_version").toInt(-1) != JAKE_PROTOCOL_VERSION) {
+    const auto version = object.value("schema_version");
+    if (!version.isUndefined() && (!isIntegerInRange(version, JakeHudContract::SEQUENCE_ID_MAX)
+                                  || version.toInteger(-1) != JAKE_PROTOCOL_VERSION)) {
         // F4.1.6 ("definire compatibility window"): finestra ZERO - nessuna tolleranza tra
         // versioni diverse, per costruzione (JAKE_PROTOCOL_VERSION e' generato dallo stesso
         // config/release.json letto da core/version.py, vedi CMakeLists.txt - le due parti sono
@@ -158,6 +204,7 @@ void JakeClient::handleEventLine(const QString &jsonLine) {
         // ricompilato - lo stesso comportamento gia' definito per /status (fetchStatus()).
         if (!m_protocolMismatchReported) {
             m_protocolMismatchReported = true;
+            setConnected(false);
             emit errorOccurred(QStringLiteral("Evento Jake con versione protocollo non compatibile"));
         }
         if (m_eventStream != nullptr)
@@ -166,6 +213,9 @@ void JakeClient::handleEventLine(const QString &jsonLine) {
     }
     const QString type = object.value("type").toString();
     const auto payload = object.value("payload").toObject();
+    // F4.1.4: rifiuto PRIMA di qualsiasi effetto/segnale o avanzamento di Last-Event-ID.
+    // Le regole sono generate dalla fonte Python; niente coercizioni a stringa/oggetto vuoto.
+    if (!object.value("type").isString() || !isValidEvent(object, type, payload)) return;
     // F4.1.3: aggiornato per OGNI evento riuscito, indipendentemente dal tipo - e' quello che
     // connectToJake() manda come Last-Event-ID alla prossima riconnessione.
     const qint64 sequenceId = object.value("sequence_id").toInteger(0);
