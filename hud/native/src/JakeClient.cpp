@@ -6,6 +6,8 @@
 #include <QUuid>
 #include <QUrl>
 
+#include "HudEventTypes.h" // generato da tools/generate_hud_event_types.py, vedi CMakeLists.txt
+
 JakeClient::JakeClient(QObject *parent)
     : QObject(parent), m_manager(new QNetworkAccessManager(this)) {
     // Un id stabile per la durata del processo: basta per identificare "questo HUD" nel
@@ -113,28 +115,29 @@ void JakeClient::handleEventLine(const QString &jsonLine) {
     const QString type = object.value("type").toString();
     const auto payload = object.value("payload").toObject();
 
-    // Vocabolario esatto di core/hud_protocol.py (EventType): tenerlo sincronizzato a mano tra
-    // Python e C++ e' l'unico punto fragile di questo protocollo, finche' non esiste una
-    // definizione condivisa generata automaticamente.
-    if (type == QStringLiteral("USER_MESSAGE")) {
+    // F4.1.2: JakeHudEventType::* (generato da tools/generate_hud_event_types.py DALLA fonte
+    // vera, core/hud_protocol.py::EventType) invece di stringhe letterali scritte qui a mano -
+    // un tipo aggiunto/rinominato lato Python fa fallire questa build invece di disallinearsi in
+    // silenzio.
+    if (type == QLatin1String(JakeHudEventType::USER_MESSAGE)) {
         emit messageReceived(QStringLiteral("user"), payload.value("text").toString());
-    } else if (type == QStringLiteral("JAKE_MESSAGE")) {
+    } else if (type == QLatin1String(JakeHudEventType::JAKE_MESSAGE)) {
         emit messageReceived(QStringLiteral("jake"), payload.value("text").toString());
-        setState(QStringLiteral("IDLE"));
-    } else if (type == QStringLiteral("AGENT_STEP")) {
+        setState(QLatin1String(JakeHudEventType::IDLE));
+    } else if (type == QLatin1String(JakeHudEventType::AGENT_STEP)) {
         emit agentStep(payload.value("step").toInt(), payload.value("description").toString());
-        setState(QStringLiteral("EXECUTING"));
-    } else if (type == QStringLiteral("NOTIFICATION")) {
+        setState(QLatin1String(JakeHudEventType::EXECUTING));
+    } else if (type == QLatin1String(JakeHudEventType::NOTIFICATION)) {
         emit notification(payload.value("kind").toString(), payload.value("text").toString());
-    } else if (type == QStringLiteral("ERROR")) {
+    } else if (type == QLatin1String(JakeHudEventType::ERROR)) {
         emit errorOccurred(payload.value("detail").toString());
-        setState(QStringLiteral("ERROR"));
-    } else if (type == QStringLiteral("DEVICE_HANDOFF")) {
+        setState(QLatin1String(JakeHudEventType::ERROR));
+    } else if (type == QLatin1String(JakeHudEventType::DEVICE_HANDOFF)) {
         setActiveDevice(payload.value("to").toString());
         emit deviceHandoff(payload.value("from").toString(), payload.value("to").toString());
-    } else if (type == QStringLiteral("HUD_SHOW")) {
+    } else if (type == QLatin1String(JakeHudEventType::HUD_SHOW)) {
         emit visibilityRequested(true);
-    } else if (type == QStringLiteral("HUD_HIDE")) {
+    } else if (type == QLatin1String(JakeHudEventType::HUD_HIDE)) {
         emit visibilityRequested(false);
     } else {
         // LISTENING/THINKING/EXECUTING/IDLE/DICTATION/PAUSED: il nome dell'evento coincide gia'

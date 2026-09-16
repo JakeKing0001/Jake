@@ -245,7 +245,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F3.6` | Browser Automation (G1 superato, mai iniziato) | `READY` |
 | `F3.7` | Application Adapters (G1 superato, mai iniziato) | `READY` |
 | `F3.8` | Demonstration Learning (G1 superato, mai iniziato) | `READY` |
-| `F4.1` | Protocol Architecture (F4.1.5 chiuso, F4.1.1 sequence_id chiuso - 16/09/2026; trace_id e resto mai affrontati) | `DOING` |
+| `F4.1` | Protocol Architecture (F4.1.2/F4.1.5 chiusi, F4.1.1 sequence_id chiuso - 16/09/2026; trace_id/F4.1.3/F4.1.4/F4.1.6 mai affrontati) | `DOING` |
 | `F4.2` | Native HUD (F4.2.1/F4.2.4 chiusi, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026; F4.2.5/F4.2.6 e resto di F4.2.3 richiedono test interattivi/visivi) | `DOING` |
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
 | `F4.4` | Interaction Design (G1 superato, mai iniziato) | `READY` |
@@ -4595,7 +4595,8 @@ Criterio di uscita: client Python finto e JakeClient C++ superano la stessa suit
 
 - Stato: `DOING`; `F4.1.5` **chiuso** (già vero per costruzione da `F1.8.6`, stesso `EventBus`,
   cross-riferimento non nuovo lavoro - vedi sotto); `F4.1.1` chiuso parzialmente (`sequence_id`
-  fatto, `trace_id` no - vedi sotto); resto (`F4.1.2`-`F4.1.4`, `F4.1.6`) mai affrontato.
+  fatto, `trace_id` no - vedi sotto); `F4.1.2` **chiuso** (schema condiviso generato, niente più
+  enum mantenuti a mano lato C++ - vedi sotto); resto (`F4.1.3`/`F4.1.4`/`F4.1.6`) mai affrontato.
 - `F4.1.5` (VERIFICA, nessun codice) — 16/09/2026: "garantire che client lento non blocchi il
   core" è lo STESSO `core/event_bus.py::EventBus` già verificato per questo in `F1.8.6`
   ("impedire che un client lento blocchi event bus o altri client") - coda `queue.Queue(maxsize=
@@ -4630,6 +4631,29 @@ Criterio di uscita: client Python finto e JakeClient C++ superano la stessa suit
   lato C++ (`JakeClient.cpp`) non tocca ancora `sequence_id` - un campo JSON extra è ignorato
   silenziosamente dal parser esistente, nessuna rottura, ma nessun consumo nemmeno (F4.1.3,
   reconnect/resume, è il punto in cui servirà davvero). Prova: 2.762/2.762 test, ruff/mypy verdi.
+- `F4.1.2` (schema condiviso, niente enum mantenuti a mano) — 16/09/2026: buco reale, non solo
+  teorico - `JakeClient::handleEventLine()` confrontava `type` con stringhe letterali scritte a
+  mano (`"USER_MESSAGE"`, `"HUD_SHOW"`...), una copia manuale del vocabolario di `core/
+  hud_protocol.py::EventType` senza alcuna garanzia di sincronia: un tipo aggiunto o rinominato
+  lato Python poteva disallinearsi in silenzio dal lato C++. Nuovo `tools/
+  generate_hud_event_types.py`: legge l'enum VERO (non una copia) e genera `HudEventTypes.h`
+  (namespace `JakeHudEventType`, una costante `const char*` per membro). `hud/native/
+  CMakeLists.txt` lo rigenera come build step PRIMA di compilare (`find_package(Python3 ...
+  REQUIRED)` + `add_custom_command`/`add_dependencies`) - il file generato non è mai committato
+  (già coperto da `hud/native/build/` in `.gitignore`). `JakeClient.cpp` usa ora
+  `JakeHudEventType::USER_MESSAGE` ecc. invece delle stringhe letterali. Rischio identificato e
+  VERIFICATO non solo assunto: `ERROR` è anche il nome di una macro Win32 (`wingdi.h`, valore
+  `0`) - se questa translation unit avesse incluso `<windows.h>` senza `WIN32_LEAN_AND_MEAN`/
+  `NOGDI`, `JakeHudEventType::ERROR` si sarebbe rotto per sostituzione del preprocessore;
+  verificato compilando per davvero (nessun errore) invece di fidarsi della documentazione Qt su
+  cosa include internamente. Nuovo `tests/test_generate_hud_event_types.py` (6 test, generazione
+  pura lato Python, nessuna toolchain C++ richiesta - incluso un test che dimostra che un tipo mai
+  visto prima finisce comunque nell'header senza dover aggiornare il test, la prova diretta che la
+  fonte è l'enum vero e non un elenco copiato). Ricompilato con successo dopo il refactor
+  (il passo "Generating HudEventTypes.h..." appare nel log di build) e ripetuta la stessa
+  sequenza HUD_HIDE→HUD_SHOW con `ctypes`/`IsWindowVisible()` di F4.2.2 - stesso comportamento
+  corretto, nessuna regressione introdotta dal refactor. `F4.1.2` **chiuso**. Prova: 2.768/2.768
+  test, ruff/mypy verdi lato Python; build C++ verde.
 
 ### F4.2 — Shell overlay nativa
 
