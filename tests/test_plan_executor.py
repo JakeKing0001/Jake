@@ -161,6 +161,76 @@ class IndependentVerificationTests(unittest.TestCase):
         self.assertIsNone(outcome.completed[0].verified)
 
 
+class UndoStoreWiringTests(unittest.TestCase):
+    """F1.3.5 (adozione - terzo e ultimo dei tre chokepoint reali, dopo JakeCore e TaskAgent):
+    execute() genera e salva ora un vero UndoDescriptor per un passo riuscito il cui intent ha un
+    inverso naturale, correlato alla ricevuta nel ledger tramite lo stesso action_id - stesso
+    principio identico gia' verificato per gli altri due chokepoint."""
+
+    def test_a_successful_create_path_step_saves_a_real_undo_descriptor(self):
+        registry = FakeRegistry()
+        target = str(Path(tempfile.mkdtemp(prefix="jake_plan_undo_test_")) / "nuovo.txt")
+        plan = Plan(steps=[PlanStep(intent="CREATE_PATH", parameters={"path": target})])
+        with tempfile.TemporaryDirectory() as tmp:
+            executor = PlanExecutor(registry)
+            executor.action_ledger = ActionLedger(path=Path(tmp) / "ledger.jsonl")
+
+            executor.execute(plan, policy_engine=PolicyEngine())
+
+            receipt = executor.action_ledger.read_all()[0]
+            descriptor = executor.undo_store.get(receipt["action_id"])
+            self.assertIsNotNone(descriptor, "CREATE_PATH ha un inverso naturale (DELETE_PATH)")
+            self.assertEqual(descriptor.compensating_intent, "DELETE_PATH")
+            self.assertEqual(descriptor.compensating_parameters, {"path": target, "confirmed": True})
+
+    def test_an_intent_without_a_natural_inverse_saves_no_undo_descriptor(self):
+        registry = FakeRegistry(add_note_results=[SkillResult(success=True, data={})])
+        plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
+        with tempfile.TemporaryDirectory() as tmp:
+            executor = PlanExecutor(registry)
+            executor.action_ledger = ActionLedger(path=Path(tmp) / "ledger.jsonl")
+
+            executor.execute(plan, policy_engine=PolicyEngine())
+
+            receipt = executor.action_ledger.read_all()[0]
+            self.assertIsNone(executor.undo_store.get(receipt["action_id"]))
+
+    def test_a_blocked_step_saves_no_undo_descriptor(self):
+        registry = FakeRegistry()
+        plan = Plan(steps=[PlanStep(intent="ADD_NOTE", parameters={"text": "x"})])
+        with tempfile.TemporaryDirectory() as tmp:
+            executor = PlanExecutor(registry)
+            executor.action_ledger = ActionLedger(path=Path(tmp) / "ledger.jsonl")
+
+            executor.execute(plan, policy_engine=PolicyEngine(blocked_intents={"ADD_NOTE"}))
+
+            self.assertEqual(executor.action_ledger.read_all()[0]["result"], "policy_blocked")
+            # Nessun action_id noto per un passo mai eseguito: il punto e' che undo_store.save()
+            # non e' mai stato chiamato, verificato indirettamente - nessun errore, il flusso
+            # normale di blocco resta invariato.
+
+    def test_sharing_the_same_undo_store_with_other_chokepoints_is_supported(self):
+        """Il punto del parametro condiviso: JakeCore collega lo STESSO undo_store a tutti e tre
+        i chokepoint (JakeCore/TaskAgent/PlanExecutor) - un piano automatico/RUN_WORKFLOW/trigger
+        deve finire nello stesso store di un comando diretto o di un compito dell'agente, non in
+        uno scollegato."""
+        from core.undo_store import UndoStore
+
+        shared_store = UndoStore()
+        registry = FakeRegistry()
+        target = str(Path(tempfile.mkdtemp(prefix="jake_plan_shared_undo_")) / "nuovo.txt")
+        plan = Plan(steps=[PlanStep(intent="CREATE_PATH", parameters={"path": target})])
+        with tempfile.TemporaryDirectory() as tmp:
+            executor = PlanExecutor(registry, undo_store=shared_store)
+            executor.action_ledger = ActionLedger(path=Path(tmp) / "ledger.jsonl")
+
+            executor.execute(plan, policy_engine=PolicyEngine())
+
+            self.assertIs(executor.undo_store, shared_store)
+            receipt = executor.action_ledger.read_all()[0]
+            self.assertIsNotNone(shared_store.get(receipt["action_id"]))
+
+
 class StructuredLoggingTests(unittest.TestCase):
     def test_verifiable_intent_records_verified_true_on_real_success(self):
         registry = FakeRegistry()

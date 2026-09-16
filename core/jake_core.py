@@ -144,10 +144,16 @@ class JakeCore:
         # autenticare per-dispositivo appena il primo pairing avviene, senza bisogno di un
         # riavvio di Jake per "attivare" la funzionalita'.
         self.device_credential_store = DeviceCredentialStore()
-        # F1.3.5 (adozione - prima fetta, solo il percorso a comando diretto): il meccanismo
-        # (core/undo_store.py) esisteva gia', mai collegato a un chokepoint reale - vedi
-        # _execute_command() piu' sotto per dove viene popolato.
+        # F1.3.5 (adozione - collegato a tutti e tre i chokepoint reali: il percorso a comando
+        # diretto qui sotto, i tre TaskAgent - vedi self.agent/coding_agent/research_agent - e
+        # PlanExecutor subito sotto, stesso principio "un solo store condiviso" gia' applicato a
+        # session_recorder/action_ledger/kill_switch).
         self.undo_store = UndoStore()
+        # PlanExecutor e' costruito dentro SkillRegistry, prima che self.undo_store esista qui -
+        # stesso motivo/stesso pattern gia' usato sopra per session_recorder/action_ledger/
+        # kill_switch: assegnato subito dopo, invece di lasciargli l'istanza locale che
+        # UndoStore.__init__ crea da solo quando nessuno gliene passa una.
+        self.skill_registry.plan_executor.undo_store = self.undo_store
         self.companion_server = CompanionServer(
             event_bus=self.event_bus, command_handler=self.answer,
             port=int(config.get("companion_server_port", 8765) or 8765),
