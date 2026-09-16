@@ -112,6 +112,20 @@ interattivi reali (un desktop virtuale vero, un gioco vero) che questo ambiente 
 il secondo rischierebbe di introdurre codice fragile basato su API non documentate per un
 beneficio non ancora richiesto da nessuno - rimandato a quando servirà davvero.
 
+## Fase 4.9.3 / F4.2.4 — VERIFICA: nessun fallback necessario su Windows 10/11
+
+"Aggiungere fallback finestra normale quando composition non è disponibile": verificato con
+`DwmIsCompositionEnabled()` (l'API Win32 dedicata) chiamata per davvero su questa macchina -
+`HRESULT=0` (successo), `enabled=True`. A differenza di Windows 7 (dove Aero/DWM poteva essere
+disattivato dall'utente, es. col tema "Windows classico"), da Windows 8 in poi **la composizione
+DWM è sempre attiva e non disattivabile** - `DwmIsCompositionEnabled()` esiste ancora solo per
+compatibilità all'indietro e ritorna sempre `True` sui sistemi operativi che Jake supporta
+(Windows 10/11, vedi i requisiti di sistema del progetto). Lo scenario che il fallback dovrebbe
+gestire non può quindi verificarsi sul target reale: costruire un ramo "finestra normale opaca"
+mai raggiungibile sarebbe codice morto speculativo, lo stesso principio già applicato altrove nel
+progetto (Python) per non scrivere codice contro condizioni impossibili. **Nessun codice
+scritto**, solo la verifica.
+
 ## Stato di verifica
 
 A differenza di tutto il resto di Jake (Python, con test automatici in `tests/`), questo codice

@@ -246,7 +246,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F3.7` | Application Adapters (G1 superato, mai iniziato) | `READY` |
 | `F3.8` | Demonstration Learning (G1 superato, mai iniziato) | `READY` |
 | `F4.1` | Protocol Architecture | `VERIFY` |
-| `F4.2` | Native HUD (F4.2.1 chiuso, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026, resto mai affrontato) | `DOING` |
+| `F4.2` | Native HUD (F4.2.1/F4.2.4 chiusi, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026; F4.2.5/F4.2.6 e resto di F4.2.3 richiedono test interattivi/visivi) | `DOING` |
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
 | `F4.4` | Interaction Design (G1 superato, mai iniziato) | `READY` |
 | `F4.5` | Interaction Design (G1 superato, mai iniziato) | `READY` |
@@ -4569,6 +4569,16 @@ Criterio di uscita: una procedura dimostrata sopravvive a riavvio, resize e dati
   deve implementare) - entrambi richiederebbero test interattivi reali che questo ambiente non può
   fare, rimandati a quando serviranno davvero invece di introdurre codice fragile su API non
   documentate per un beneficio non ancora richiesto.
+- `F4.2.4` (VERIFICA, nessun codice) — 16/09/2026: "aggiungere fallback finestra normale quando
+  composition non è disponibile" verificato chiamando per davvero `DwmIsCompositionEnabled()`
+  (l'API Win32 dedicata) su questa macchina - `HRESULT=0`, `enabled=True`. Da Windows 8 in poi la
+  composizione DWM è sempre attiva e non disattivabile dall'utente (diverso da Windows 7, dove
+  Aero poteva essere spento) - `DwmIsCompositionEnabled()` esiste solo per compatibilità
+  all'indietro e ritorna sempre `True` sui sistemi operativi che Jake supporta (Windows 10/11).
+  Lo scenario che il fallback dovrebbe gestire non può quindi verificarsi sul target reale:
+  costruire un ramo "finestra normale opaca" mai raggiungibile sarebbe codice morto speculativo,
+  stesso principio "non scrivere codice contro condizioni impossibili" già applicato più volte in
+  questa sessione lato Python. `F4.2.4` **chiuso** (verifica, non fix).
 
 ### F4.1 — Protocollo e test contract
 
