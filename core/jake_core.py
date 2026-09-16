@@ -183,7 +183,7 @@ class JakeCore:
             context_provider=lambda: self._agent_context(),
             executor=lambda intent, parameters: self._resolve_and_execute(Command(intent, parameters)),
             session_recorder=self.session_recorder, action_ledger=self.action_ledger, agent_name="general",
-            kill_switch=self.kill_switch,
+            kill_switch=self.kill_switch, undo_store=self.undo_store,
         )
         self.agent.on_step = self._on_agent_step
         # F1.8.4 ("checkpoint... da cui riprendere"): collegato per tutti e tre gli agenti (vedi
@@ -202,7 +202,7 @@ class JakeCore:
             "context_provider": lambda: self._agent_context(),
             "executor": lambda intent, parameters: self._resolve_and_execute(Command(intent, parameters)),
             "session_recorder": self.session_recorder, "action_ledger": self.action_ledger,
-            "kill_switch": self.kill_switch,
+            "kill_switch": self.kill_switch, "undo_store": self.undo_store,
         }
         self.coding_agent = TaskAgent(
             self.skill_registry, self.retriever, self.ollama,

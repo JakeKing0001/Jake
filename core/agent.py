@@ -31,6 +31,7 @@ from core.schema_validation import validate_confirm_envelope
 from core.session_recorder import SessionRecorder
 from core.skill_result import SkillResult
 from core.taint import EXTERNAL_CONTENT_INTENTS, wrap_external_content
+from core.undo_store import UndoStore, generate_undo_descriptor
 
 # Strumenti sempre offerti all'agente, oltre a quelli pertinenti alla richiesta: sono i
 # "sensi" e le "mani" di base con cui si risolve quasi ogni compito composto.
@@ -121,7 +122,7 @@ class TaskAgent:
     def __init__(self, registry, retriever, client: OllamaClient, model_provider, format_result,
                  logger=None, context_provider=None, executor=None, fixed_tools: list[str] | None = None,
                  persona_line: str | None = None, session_recorder=None, action_ledger=None, agent_name: str = "general",
-                 kill_switch=None, policy_engine=None):
+                 kill_switch=None, policy_engine=None, undo_store=None):
         self.registry = registry
         self.retriever = retriever
         self.client = client
@@ -144,6 +145,12 @@ class TaskAgent:
         # solo, azionabile da voce/hotkey/tray - vedi core/kill_switch.py), altrimenti
         # un'istanza locale mai attivata (self.kill_switch.is_active() e' sempre False).
         self.kill_switch = kill_switch or KillSwitch()
+        # F1.3.5 (adozione - secondo chokepoint, dopo il pilota su JakeCore): come session_
+        # recorder/action_ledger/kill_switch, condiviso se passato (JakeCore ne tiene UNO solo
+        # per tutti e tre gli agenti - general/coding/research - cosi' un undo generato da uno
+        # qualunque dei tre finisce nello STESSO store, non in tre store scollegati), altrimenti
+        # un'istanza locale (i test che non se ne occupano).
+        self.undo_store = undo_store or UndoStore()
         # F1.2.5: opzionale (None = comportamento precedente, nessun controllo) - passato da
         # JakeCore cosi' il rollback rispetta blocked_intents invece di eseguire sempre la
         # compensazione (vedi core/execution_safety.py::rollback_effect).
@@ -283,7 +290,7 @@ class TaskAgent:
 
     def _log_step(
         self, trace_id: str, private: bool, started: float, model: str, intent: str, parameters: dict,
-        *, result: str, verified: bool | None, policy_reason: str | None = None,
+        *, result: str, verified: bool | None, policy_reason: str | None = None, action_id: str | None = None,
     ) -> None:
         """Un record in jake_actions.jsonl per passo dell'agente (F0: log strutturati), stesso
         formato e stesso trace_id condiviso con JakeCore._execute_command per il percorso a
@@ -292,7 +299,13 @@ class TaskAgent:
         conferma) alimenta anche session_recorder, con gli stessi parametri del passo, per
         tools/replay_session.py. Alimenta anche action_ledger (F1): requested_by="agent:<nome>",
         cosi' una ricevuta del ledger dice sempre se e' stato un comando diretto dell'utente o
-        una decisione autonoma dell'agente, non solo quale skill ha agito."""
+        una decisione autonoma dell'agente, non solo quale skill ha agito.
+
+        action_id e' iniettabile (F1.3.5, stesso principio di JakeCore._log_action_outcome):
+        run() lo genera PRIMA di chiamare questo metodo quando il passo e' riuscito, cosi' lo
+        stesso identificatore correla la ricevuta nel ledger con l'eventuale UndoDescriptor
+        salvato in self.undo_store - None (il default) preserva il comportamento per i passi
+        senza un undo da correlare (falliti, in attesa di conferma)."""
         duration_ms = (time.monotonic() - started) * 1000
         risk = risk_of(intent).value
         log_action(
@@ -308,7 +321,7 @@ class TaskAgent:
         validate_action_error(action_error)
         self.action_ledger.record(
             ActionReceipt(
-                action_id=new_action_id(), trace_id=trace_id, ts=time.time(), intent=intent,
+                action_id=action_id or new_action_id(), trace_id=trace_id, ts=time.time(), intent=intent,
                 requested_by=f"agent:{self.agent_name}", risk_decision=risk,
                 authorization=authorization_of(result, parameters), result=result,
                 idempotency_key=idempotency_key_of(intent, parameters),
@@ -589,9 +602,19 @@ class TaskAgent:
                     else None
                 )
                 outcome_label = "success" if (result is not None and result.success) else f"error:{result.error}" if result is not None else "no_result"
+                step_action_id = None
+                if result is not None and result.success:
+                    # F1.3.5 (adozione - secondo chokepoint, dopo il pilota su JakeCore): stesso
+                    # principio identico - un passo riuscito il cui intent ha un inverso naturale
+                    # genera un vero UndoDescriptor, correlato alla ricevuta nel ledger tramite lo
+                    # stesso action_id (generato QUI, non dentro _log_step).
+                    step_action_id = new_action_id()
+                    step_undo_descriptor = generate_undo_descriptor(step_action_id, intent, result.data or {})
+                    if step_undo_descriptor is not None:
+                        self.undo_store.save(step_undo_descriptor)
                 self._log_step(
                     trace_id, private, step_started, model, intent, parameters, result=outcome_label,
-                    verified=verified, policy_reason=execution.policy_reason,
+                    verified=verified, policy_reason=execution.policy_reason, action_id=step_action_id,
                 )
             outcome.steps.append(step)
             if self.logger:
