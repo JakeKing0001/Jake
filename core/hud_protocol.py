@@ -71,6 +71,15 @@ class HudEvent:
     type: EventType
     payload: dict = field(default_factory=dict)
     at: float = field(default_factory=time.time)
+    # F4.1.1 ("versionare HudEvent, aggiungere sequence id..."): 0 prima della pubblicazione -
+    # non un evento fantasma, un valore che non e' mai stato assegnato ancora. Il valore VERO
+    # viene assegnato da core/event_bus.py::EventBus.publish() (l'unico punto per cui OGNI
+    # HudEvent transita prima di raggiungere un iscritto), non dal chiamante che lo costruisce:
+    # solo il bus conosce l'ordine GLOBALE di pubblicazione tra produttori diversi (JakeCore,
+    # companion_server...). Un client (HUD nativo, companion) puo' confrontare due sequence_id
+    # consecutivi per accorgersi di un evento perso (coda satura, vedi F1.8.6) o - dopo un
+    # riconnect (F4.1.3, non ancora affrontato) - riprendere da dove aveva lasciato.
+    sequence_id: int = 0
 
     def to_json(self) -> str:
         return json.dumps(
@@ -79,6 +88,7 @@ class HudEvent:
                 "type": self.type.value,
                 "payload": self.payload,
                 "at": self.at,
+                "sequence_id": self.sequence_id,
             },
             ensure_ascii=False,
         )
@@ -91,7 +101,10 @@ class HudEvent:
             raise ValueError(
                 f"versione protocollo non supportata: {schema_version}; attesa {PROTOCOL_VERSION}"
             )
-        return cls(type=EventType(data["type"]), payload=data.get("payload") or {}, at=data.get("at", time.time()))
+        return cls(
+            type=EventType(data["type"]), payload=data.get("payload") or {}, at=data.get("at", time.time()),
+            sequence_id=data.get("sequence_id", 0),
+        )
 
     @classmethod
     def from_legacy_state(cls, state: str, detail: str = "") -> "HudEvent | None":

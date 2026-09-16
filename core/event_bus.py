@@ -15,9 +15,16 @@ class EventBus:
         self._subscribers: list[queue.Queue] = []
         self._lock = threading.Lock()
         self.max_queue_size = max_queue_size
+        # F4.1.1: numero d'ordine GLOBALE, gapless tra tutti i produttori (JakeCore,
+        # companion_server...) - assegnato QUI, non dal chiamante di publish(), perche' solo il
+        # bus vede l'ordine reale di interlacciamento tra thread produttori diversi.
+        self._next_sequence_id = 1
 
     def publish(self, event) -> None:
         with self._lock:
+            if hasattr(event, "sequence_id"):
+                event.sequence_id = self._next_sequence_id
+                self._next_sequence_id += 1
             subscribers = list(self._subscribers)
         for subscriber_queue in subscribers:
             try:
