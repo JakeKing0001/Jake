@@ -31,18 +31,17 @@ proprietà che Qt non espone tramite API cross-platform, isolate in `src/Overlay
 
 - **No-activate** (`WS_EX_NOACTIVATE`, applicato una volta all'avvio): l'overlay non ruba mai il
   focus tastiera ad altre app quando diventa visibile o viene cliccato.
-- **Click-through selettivo** (`WS_EX_TRANSPARENT`, attivato/disattivato a runtime tramite un
-  `HoverHandler` in `Main.qml`): quando il puntatore è fuori dall'area dei pannelli, i click
-  passano alla finestra sottostante come se l'overlay non esistesse; quando entra nell'area dei
-  pannelli, l'overlay torna interattivo.
+- **Click-through selettivo per pannello** (`WS_EX_TRANSPARENT`, attivato/disattivato a runtime):
+  ciascuno dei cinque pannelli (`StatusPanel`/`Orb`/`ConversationPanel`/`QuickActions`/
+  `CommandBar`) espone un proprio `hovered` tramite un `HoverHandler` interno; `Main.qml` aggrega
+  i cinque in `pointerOverAnyPanel` e disattiva il click-through SOLO quando il puntatore è
+  davvero sopra uno di essi. Fuori da tutti e cinque - inclusi i vuoti *tra* un pannello e
+  l'altro, non solo il margine esterno - i click passano alla finestra sottostante come se
+  l'overlay non esistesse.
 
-**Limite dichiarato di questo primo passo** (non nascosto): il click-through è per ORA
-grossolano, non per-pannello - l'intera area occupata dal `ColumnLayout` (tutti e cinque i
-pannelli insieme, compresi gli spazi vuoti *tra* un pannello e l'altro) è considerata "contenuto"
-e resta interattiva; solo il margine esterno di 16px è click-through. Distinguere i vuoti tra un
-pannello e l'altro (che dovrebbero anch'essi essere click-through) richiede un `HoverHandler` per
-pannello con aggregazione dello stato - rimandato a un passo successivo dedicato, non affrontato
-qui per non introdurre cinque punti di fallimento mai verificati visivamente in un colpo solo.
+**Limite superato rispetto alla prima versione di questo passo** (era grossolano - l'intera area
+del `ColumnLayout`, vuoti compresi, contava come "pannello" - ora è per pannello davvero, vedi
+sopra).
 
 **Verificato in questo ambiente** (stessa tecnica e stessi limiti di sopra - compilazione ed
 esecuzione reali, non lettura del codice): compila senza errori; l'eseguibile si avvia e resta in

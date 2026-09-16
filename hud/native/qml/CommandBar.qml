@@ -7,6 +7,12 @@ import QtQuick.Layouts
 RowLayout {
     id: root
     signal commandSubmitted(string text)
+    // F4.2.1: vedi lo stesso alias in StatusPanel.qml.
+    property alias hovered: hoverHandler.hovered
+
+    HoverHandler {
+        id: hoverHandler
+    }
 
     TextField {
         id: input

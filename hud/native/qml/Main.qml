@@ -12,10 +12,11 @@ import JakeHud
 // Fase 4.9.3/F4.2.1 ("trasparenza, click-through selettivo e no-activate"): finestra senza
 // bordi/trasparente, sempre sopra, senza icona in barra applicazioni (Qt.Tool) e che non ruba
 // mai il focus tastiera (WS_EX_NOACTIVATE, applicato in OverlayStyler - Qt non ha un flag
-// cross-platform per questo). Click-through GROSSOLANO in questo primo passo, non ancora
-// per-pannello (limite dichiarato, vedi README): l'intera area occupata dal ColumnLayout dei
-// pannelli resta interattiva, solo il margine esterno (16px) e' click-through - i vuoti TRA un
-// pannello e l'altro non sono ancora distinti dai pannelli stessi.
+// cross-platform per questo). Click-through PER PANNELLO (seconda fetta di F4.2.1): ciascuno dei
+// cinque pannelli espone un proprio "hovered" (HoverHandler nel rispettivo file .qml, vedi
+// StatusPanel.qml per il commento completo) - l'overlay e' click-through ovunque TRANNE quando il
+// puntatore e' sopra uno di questi cinque, inclusi quindi i vuoti tra un pannello e l'altro
+// (limite del primo passo, ora chiuso).
 ApplicationWindow {
     id: window
     width: 420
@@ -39,16 +40,18 @@ ApplicationWindow {
         id: overlayStyler
     }
 
+    // Vero SOLO quando il puntatore e' sopra uno dei cinque pannelli - mai calcolato dalla
+    // geometria del ColumnLayout (che includerebbe anche i vuoti tra un pannello e l'altro, il
+    // limite dichiarato del primo passo di F4.2.1).
+    readonly property bool pointerOverAnyPanel: statusPanel.hovered || orb.hovered
+        || conversation.hovered || quickActions.hovered || commandBar.hovered
+
+    onPointerOverAnyPanelChanged: overlayStyler.setClickThrough(window, !pointerOverAnyPanel)
+
     Component.onCompleted: {
         jake.connectToJake(jakeBaseUrl)
         overlayStyler.makeNoActivate(window)
         overlayStyler.setClickThrough(window, true)
-    }
-
-    HoverHandler {
-        id: contentHover
-        target: content
-        onHoveredChanged: overlayStyler.setClickThrough(window, !hovered)
     }
 
     ColumnLayout {
@@ -58,6 +61,7 @@ ApplicationWindow {
         spacing: 12
 
         StatusPanel {
+            id: statusPanel
             Layout.fillWidth: true
             connected: jake.connected
             state: jake.state
@@ -79,11 +83,13 @@ ApplicationWindow {
         }
 
         QuickActions {
+            id: quickActions
             Layout.fillWidth: true
             onActionTriggered: (command) => jake.sendCommand(command)
         }
 
         CommandBar {
+            id: commandBar
             Layout.fillWidth: true
             onCommandSubmitted: (text) => jake.sendCommand(text)
         }

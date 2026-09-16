@@ -246,7 +246,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F3.7` | Application Adapters (G1 superato, mai iniziato) | `READY` |
 | `F3.8` | Demonstration Learning (G1 superato, mai iniziato) | `READY` |
 | `F4.1` | Protocol Architecture | `VERIFY` |
-| `F4.2` | Native HUD (F4.2.1 prima fetta, 16/09/2026 - resto mai affrontato) | `DOING` |
+| `F4.2` | Native HUD (F4.2.1 chiuso, 16/09/2026 - F4.2.2-F4.2.6 mai affrontati) | `DOING` |
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
 | `F4.4` | Interaction Design (G1 superato, mai iniziato) | `READY` |
 | `F4.5` | Interaction Design (G1 superato, mai iniziato) | `READY` |
@@ -4465,7 +4465,7 @@ Criterio di uscita: una procedura dimostrata sopravvive a riavvio, resize e dati
 
 ## 10. F4 — HUD Engine 2.0
 
-- Stato: `DOING` (16/09/2026, prima fetta di F4.2 - vedi sotto); build prototype `VERIFY`
+- Stato: `DOING` (16/09/2026, F4.2.1 chiuso - vedi sotto); build prototype `VERIFY`
 - Priorità: `P1`
 - Output: interfaccia nativa fluida che mostra stato, prove, permessi e controllo.
 
@@ -4497,6 +4497,22 @@ Criterio di uscita: una procedura dimostrata sopravvive a riavvio, resize e dati
   `F4.2.2`-`F4.2.6` (gestione show/hide senza rubare focus, comportamento Alt-Tab/desktop
   virtuali/fullscreen, fallback finestra normale senza composition, test mouse/touch/tastiera/pen,
   regioni interattive osservabili nei test).
+- `F4.2.1` (chiusura del limite dichiarato - click-through per pannello) — 16/09/2026: il limite
+  esplicitamente lasciato aperto dal passo precedente ("intera area del `ColumnLayout`, vuoti
+  compresi, resta interattiva") chiuso: ciascuno dei cinque pannelli (`StatusPanel`/`Orb`/
+  `ConversationPanel`/`QuickActions`/`CommandBar`) espone ora un proprio `hovered` tramite un
+  `HoverHandler` interno al rispettivo file `.qml` (`property alias hovered: hoverHandler.hovered`,
+  stesso pattern ripetuto identico nei cinque file); `Main.qml` aggrega i cinque in
+  `pointerOverAnyPanel` e disattiva il click-through SOLO quando il puntatore è davvero sopra uno
+  di essi - i vuoti tra un pannello e l'altro sono ora click-through quanto il margine esterno,
+  non più "contenuto" per il solo fatto di stare dentro il `ColumnLayout`. Stesso identico
+  standard di verifica del passo precedente (nessuna suite di test automatica per C++/QML):
+  ricompilato ed eseguito per davvero, nessun errore di compilazione, nessun warning QML su
+  stderr, collegamento reale al `CompanionServer` confermato invariato
+  (`event_bus.subscriber_count()` 0→1). Stessi limiti non verificabili in questo ambiente già
+  dichiarati sopra (aspetto visivo, comportamento reale del click-through/no-activate contro
+  un'altra finestra vera). Con questo, `F4.2.1` è **chiuso**; resta aperto il resto di `F4.2`
+  (`F4.2.2`-`F4.2.6`, vedi sopra).
 
 ### F4.1 — Protocollo e test contract
 

@@ -9,6 +9,12 @@ Rectangle {
     color: "#1a1c22"
     radius: 10
     border.color: "#2c2f38"
+    // F4.2.1: vedi lo stesso alias in StatusPanel.qml.
+    property alias hovered: hoverHandler.hovered
+
+    HoverHandler {
+        id: hoverHandler
+    }
 
     function append(senderRole, messageText) {
         // Nomi dei campi del modello deliberatamente diversi da proprieta' comuni di Item/Text
