@@ -62,8 +62,26 @@ if(WIN32 AND NOT Qt6_DIR AND NOT DEFINED ENV{QTDIR} AND NOT DEFINED ENV{Qt6_DIR}
 endif()
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 Network)
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 qt_standard_project_setup(REQUIRES 6.5)
+
+# F4.1.2 ("generare o condividere lo schema tra Python e C++; niente enum mantenuti a mano"):
+# JakeClient.cpp confrontava stringhe letterali scritte a mano, senza garanzia di sincronia con
+# core/hud_protocol.py::EventType - questo header viene rigenerato ad ogni build DALLA fonte vera
+# (tools/generate_hud_event_types.py), mai committato ne' modificato a mano (vedi .gitignore).
+set(JAKE_HUD_EVENT_TYPES_HEADER "${CMAKE_CURRENT_BINARY_DIR}/generated/HudEventTypes.h")
+add_custom_command(
+    OUTPUT "${JAKE_HUD_EVENT_TYPES_HEADER}"
+    COMMAND "${Python3_EXECUTABLE}" -m tools.generate_hud_event_types --output "${JAKE_HUD_EVENT_TYPES_HEADER}"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+    DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/generate_hud_event_types.py"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../core/hud_protocol.py"
+    COMMENT "Generating HudEventTypes.h from core/hud_protocol.py::EventType"
+    VERBATIM
+)
+add_custom_target(JakeHudEventTypesHeader DEPENDS "${JAKE_HUD_EVENT_TYPES_HEADER}")
 
 qt_add_executable(JakeHud
     src/main.cpp
@@ -87,7 +105,8 @@ qt_add_qml_module(JakeHud
         qml/QuickActions.qml
 )
 
-target_include_directories(JakeHud PRIVATE src)
+add_dependencies(JakeHud JakeHudEventTypesHeader)
+target_include_directories(JakeHud PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
 target_compile_definitions(JakeHud PRIVATE
     JAKE_PRODUCT_VERSION="${JAKE_PRODUCT_VERSION}"
