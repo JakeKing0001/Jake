@@ -3500,12 +3500,13 @@ Dipende da: F1.1.
 
 Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock o ledger incoerente.
 
-- Stato: `DOING`; `F1.8.1` chiuso parzialmente (la parte di "ownership della sessione" ora
-  completa - doppia esecuzione della stessa azione in sospeso E slot per canale, entrambi chiusi,
-  vedi sotto; contesto conversazionale condiviso tra canali investigato e confermato VOLUTO
-  dall'utente, non un buco - vedi sotto; resta aperta "una coda per azioni concorrenti" - un
-  meccanismo generale per serializzare azioni concorrenti non legate a una conferma pendente, mai
-  affrontato);
+- Stato: `DOING`; `F1.8.1` **chiuso** (la parte di "ownership della sessione" completa - doppia
+  esecuzione della stessa azione in sospeso E slot per canale, entrambi chiusi, vedi sotto;
+  contesto conversazionale condiviso tra canali investigato e confermato VOLUTO dall'utente, non
+  un buco, vedi sotto; e ora anche "una coda per azioni concorrenti" - `ResourceLockManager`
+  (costruito e testato in isolamento nella fase 7 del piano multi-device di F1.4, mai collegato a
+  un chokepoint di produzione prima d'ora) adottato per la prima volta su un buco REALE
+  riprodotto empiricamente, non teorico - vedi sotto, 16/09/2026);
   `F1.8.2` chiuso per tutti i registri/store condivisi tra thread (ledger, promemoria, todo,
   memoria a lungo termine, centro notifiche, elenco skill registrate, archivio esempi
   frase->intent, registro dispositivi/handoff, e ora anche il risolutore app - vedi sotto);
@@ -3521,6 +3522,58 @@ Criterio di uscita: fault test concorrenti non producono doppie azioni, deadlock
   dichiaratamente non testabile per race - non perche' rimandato, ma perche' `UndoDescriptor`
   - F1.3.5 - e' solo un contratto dati, non esiste ancora nessuno store con stato condiviso da
   annullare su cui una race potrebbe verificarsi; vedi sotto).
+- `F1.8.1` (chiusura finale - prima adozione reale di `ResourceLockManager`) — 16/09/2026: dopo la
+  chiusura del piano multi-device (fase 10/10, F1.4), l'unico pezzo ancora dichiarato aperto in
+  tutta la sezione F1 era "una coda per azioni concorrenti" di `F1.8.1` - un meccanismo generale
+  per serializzare azioni mutative sulla stessa risorsa, non legate a una conferma pendente.
+  `core/resource_lock.py::ResourceLockManager` esisteva gia' (fase 7 del piano, 15/09/2026) ma
+  dichiaratamente MAI collegato a un chokepoint di produzione, ne' esisteva un censimento di quale
+  `resource_key` derivare da un dato intent/parametri - lavoro dello stesso ordine di grandezza
+  di `INTENT_EFFECT_CLASS` (209 intent), esplicitamente rimandato. Invece di tentare quel
+  censimento intero, individuata la fetta piu' stretta e piu' rischiosa gia' pronta per un pilota:
+  le quattro skill di mutazione filesystem gia' raggruppate insieme dalla capability di `F1.2.2`
+  (`CREATE_PATH`/`RENAME_PATH`/`MOVE_PATH`/`DELETE_PATH`, stessi due parametri `path`/
+  `destination`). Lette tutte e quattro: condividono lo STESSO controllo-poi-agisci non atomico
+  (`target.exists()` seguito, alcune righe piu' sotto, da `mkdir`/`rename`/`shutil.move`/
+  `unlink`, mai sotto lock). Buco reale riprodotto empiricamente PRIMA di scrivere il fix (non
+  ipotizzato dalla lettura del codice): due `MOVE_PATH` concorrenti, sorgenti diverse ma stesso
+  NOME file, verso la STESSA cartella di destinazione (scenario plausibile - voce e companion, o
+  un'automazione e un comando manuale, che spostano file scaricati/generati con lo stesso nome
+  nella stessa cartella) superano ENTRAMBI il controllo "il file di destinazione non esiste
+  ancora" prima che uno dei due lo crei per davvero: **entrambi riportano `success=True`, ma uno
+  dei due file sparisce silenziosamente sovrascritto dall'altro**, senza alcun `ALREADY_EXISTS` ne'
+  altro errore - il tipo di buco piu' grave possibile per questa categoria (perdita di dati
+  silenziosa, non solo un messaggio d'errore sbagliato). Riprodotto isolatamente con uno script
+  a parte (due thread veri, `shutil.move` rallentato ad arte nella finestra esatta) prima di
+  toccare il codice di produzione. Corretto in `core/skill_registry.py::execute()` - il
+  dispatcher grezzo gia' fail-closed per policy (`F1.2.1` percorso 7) e gia' punto di passaggio
+  UNICO per tutti e tre i chokepoint reali (comando diretto, agente, piano) piu' il rollback
+  (`execution_safety.rollback_effect()` chiama gia' `registry.execute()` direttamente): nuovo
+  `_resource_lock_keys(intent, parameters)` deriva le resource key da bloccare SOLO per le quattro
+  mutazioni filesystem (nessun cambio di comportamento per gli altri ~200 intent, lock creati
+  pigramente solo quando davvero richiesti), risolvendo `path`/`destination` con
+  `Path(value).expanduser().resolve()` + `os.path.normcase` - stessa normalizzazione gia' accettata
+  per la capability filesystem di `F1.2.2`, stesso limite dichiarato ereditato da li': `destination`
+  e' la CARTELLA indicata dal chiamante, non il percorso finale con il nome del file gia' appeso
+  (calcolarlo duplicherebbe la logica interna della skill) - una serializzazione dell'intera
+  cartella di destinazione, piu' larga del necessario ma mai piu' stretta, quindi comunque
+  corretta per il buco trovato; e per `RENAME_PATH`, `new_name` non e' tra i parametri riconosciuti
+  (`PATH_PARAMETERS`), quindi due `RENAME_PATH` con `path` diversi ma stesso `new_name` nella
+  stessa cartella non sono ancora serializzati tra loro - residuo dichiarato apertamente, stessa
+  forma di limite gia' accettata altrove in questa sessione (es. `allowed_apps`/`allowed_contacts`
+  sulla stringa grezza). Nuovo `_acquire_all_writes()` acquisisce piu' resource key in ordine
+  ORDINATO (`sorted(set(...))`) per evitare il classico deadlock se due chiamate concorrenti
+  bloccassero le stesse due chiavi in ordine opposto. Aggiunti 6 nuovi test in
+  `tests/test_skill_registry.py::FilesystemMutationResourceLockTests`: il test principale (due
+  `MOVE_PATH` VERI concorrenti, `shutil.move` rallentato per forzare l'attesa sul lock, non solo
+  sperare nella fortuna dello scheduler) verificato FALLIRE contro il codice precedente (`git
+  stash` di solo `core/skill_registry.py`, il test isolato torna a riportare 2 successi invece di
+  1) prima di applicare la correzione; un test dedicato conferma che una resource key indipendente
+  (una `CREATE_PATH` su una cartella scorrelata) non attende MAI il lock di un `MOVE_PATH` lento
+  su un'altra cartella - il lock e' per resource key, non un lock unico globale sul filesystem.
+  Con questo, l'intera sezione `F1.8` e' **chiusa**. Prova: 2.755/2.755 test, ruff/mypy verdi su
+  `core/skill_registry.py`/`tests/test_skill_registry.py` (86 file nella lista selettiva mypy,
+  invariata - il file era gia' incluso).
 - `F1.8.2` (store non ancora esaminato - risolutore app) — 15/09/2026: dopo aver esaurito due volte
   le fette facili in F1.2/F1.3/F1.4/F1.6/F1.8.5, tentati (e scartati con motivazione, non
   implementati) due candidati che sembravano promettenti - un verificatore indipendente in
@@ -5207,7 +5260,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 16/09/2026. Sessione lunga con 96 incrementi completati e verificati (PR #28-#122), la
+Aggiornato 16/09/2026. Sessione lunga con 97 incrementi completati e verificati (PR #28-#123), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
 codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
 fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
@@ -5652,3 +5705,19 @@ locali ovunque nel resto del metodo. `F1.8.2` e' ora chiuso anche per questo sto
 concorrenti di F1.8.1, deadlock applicativo reale di F1.8.5, undo di F1.8.7) - nessuno di questi
 tre ha ancora uno scenario reale/infrastruttura su cui costruire senza inventare un problema che
 non esiste.
+
+**Aggiornamento 16/09/2026 (F1.8.1, prima adozione reale di `ResourceLockManager` - chiusura di
+tutto `F1.8`)**: "coda per azioni concorrenti" sopra non era piu' vero dopo la chiusura del piano
+multi-device (`ResourceLockManager` esiste da fase 7, 15/09/2026) - restava vero solo "mai
+collegato a un chokepoint di produzione". Trovata la fetta piu' stretta e piu' rischiosa: le
+quattro skill di mutazione filesystem gia' raggruppate da `F1.2.2` condividono tutte un
+controllo-poi-agisci non atomico. Buco reale riprodotto empiricamente (non ipotizzato): due
+`MOVE_PATH` concorrenti con sorgenti diverse ma stesso nome file verso la stessa cartella di
+destinazione riportano ENTRAMBI successo, ma uno dei due file sparisce silenziosamente
+sovrascritto dall'altro - perdita di dati silenziosa, non solo un errore sbagliato. Corretto in
+`core/skill_registry.py::execute()` (il dispatcher unico gia' fail-closed per policy, gia' punto
+di passaggio di tutti i chokepoint reali incluso il rollback), con lo stesso limite gia' accettato
+per la capability filesystem di `F1.2.2` su cosa "destination" rappresenta. Con questo, l'unico
+pezzo ancora aperto in tutta `F1.8` e' chiuso, e l'intera sezione `F1.8` e' **chiusa**. Vedi la
+voce datata 16/09/2026 in F1.8 sopra per il dettaglio completo. Prova: 2.755/2.755 test,
+ruff/mypy verdi.
