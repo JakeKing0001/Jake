@@ -59,6 +59,7 @@ from skills.session_control import (
 )
 from skills.notification_mode import GetNotificationModeSkill, SetNotificationModeSkill
 from skills.skill_forge_skills import CreateSkillSkill, DeleteCreatedSkillSkill, ListCreatedSkillsSkill
+from skills.undo import UndoLastActionSkill
 
 
 class JakeCore:
@@ -407,6 +408,7 @@ class JakeCore:
             ("DELETE_CREATED_SKILL", DeleteCreatedSkillSkill(self.skill_forge, self.learning)),
             ("SET_NOTIFICATION_MODE", SetNotificationModeSkill(self.notification_center)),
             ("GET_NOTIFICATION_MODE", GetNotificationModeSkill(self.notification_center)),
+            ("UNDO_LAST_ACTION", UndoLastActionSkill(self)),
         ):
             self.skill_registry.register_skill(intent, skill)
 

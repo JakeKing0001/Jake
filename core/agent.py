@@ -61,6 +61,11 @@ NEVER_FOR_AGENT = {
     # checkpoint, non un passo che un agente GIA' in esecuzione dovrebbe mai scegliere da solo -
     # stesso principio di KILL_SWITCH sopra.
     "RESUME_INTERRUPTED_TASK",
+    # F1.3.5: "annulla l'ultima azione" e' un comando diretto dell'utente su una decisione
+    # dell'utente stesso - un agente che si "autoannullasse" un passo come strategia di
+    # recupero (invece di fermarsi/ritentare/segnalare l'errore, gia' gestiti altrove)
+    # produrrebbe un comportamento imprevedibile, mai visto ne' richiesto.
+    "UNDO_LAST_ACTION",
 }
 NONE_ACTION = "NONE"
 

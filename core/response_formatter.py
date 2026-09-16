@@ -105,6 +105,8 @@ def _format_error(intent: str, result: SkillResult) -> str:
         if intent == "SET_REMINDER":
             return "Quando devo ricordartelo? Dimmi ad esempio: tra 10 minuti, oppure alle 18."
         return "Mancano delle informazioni per eseguire questa azione."
+    if error == "NO_UNDO_AVAILABLE":
+        return "Non c'è nessuna azione recente che posso annullare."
     if error == "NOT_FOUND":
         if intent == "RESUME_INTERRUPTED_TASK":
             return "Non ho nessun compito interrotto da riprendere."
