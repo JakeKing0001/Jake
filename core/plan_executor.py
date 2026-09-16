@@ -16,6 +16,7 @@ from core.request_context import current_device_id
 from core.risk import risk_of
 from core.session_recorder import SessionRecorder
 from core.skill_result import SkillResult
+from core.undo_store import UndoStore, generate_undo_descriptor
 
 
 @dataclass
@@ -60,7 +61,7 @@ class PlanExecutor:
     Un passo che richiede conferma (operazione rischiosa) mette in pausa il piano senza
     eseguirlo: la sicurezza delle conferme non viene mai aggirata da una richiesta multi-step."""
 
-    def __init__(self, skill_registry, session_recorder=None, action_ledger=None, kill_switch=None):
+    def __init__(self, skill_registry, session_recorder=None, action_ledger=None, kill_switch=None, undo_store=None):
         self.skill_registry = skill_registry
         # Disattivato per default (vedi SessionRecorder.__init__) finche' JakeCore non assegna
         # il proprio, condiviso con _execute_command e TaskAgent (vedi core/jake_core.py): senza,
@@ -73,6 +74,11 @@ class PlanExecutor:
         # F1: come sopra - condiviso con TaskAgent/JakeCore se passato (un solo interruttore per
         # tutto, vedi core/kill_switch.py), altrimenti un'istanza locale mai attivata.
         self.kill_switch = kill_switch or KillSwitch()
+        # F1.3.5 (adozione - terzo e ultimo chokepoint, dopo JakeCore e TaskAgent): stesso
+        # principio identico - condiviso se passato (JakeCore passa lo STESSO undo_store gia'
+        # collegato agli altri due, cosi' un piano automatico/RUN_WORKFLOW/trigger finisce nello
+        # stesso store), altrimenti un'istanza locale (i test che non se ne occupano).
+        self.undo_store = undo_store or UndoStore()
 
     def execute(
         self, plan, policy_engine=None,
@@ -210,9 +216,19 @@ class PlanExecutor:
 
             if step_outcome.result.success:
                 outcome.completed.append(step_outcome)
+                # F1.3.5 (adozione - terzo chokepoint): stesso principio identico gia' visto in
+                # JakeCore/TaskAgent - un passo riuscito il cui intent ha un inverso naturale
+                # genera un vero UndoDescriptor, correlato alla ricevuta nel ledger tramite lo
+                # stesso action_id (generato QUI, non dentro _log_step).
+                step_action_id = new_action_id()
+                step_undo_descriptor = generate_undo_descriptor(
+                    step_action_id, step.intent, step_outcome.result.data or {},
+                )
+                if step_undo_descriptor is not None:
+                    self.undo_store.save(step_undo_descriptor)
                 self._log_step(
                     trace_id, private, model, requested_by, step_started, step.intent, safe_parameters,
-                    result="success", verified=verified, policy_reason=policy_reason,
+                    result="success", verified=verified, policy_reason=policy_reason, action_id=step_action_id,
                 )
                 continue
 
@@ -234,7 +250,7 @@ class PlanExecutor:
 
     def _log_step(
         self, trace_id: str, private: bool, model: str | None, requested_by: str, started: float, intent: str,
-        parameters: dict, *, result: str, verified: bool | None, policy_reason: str | None,
+        parameters: dict, *, result: str, verified: bool | None, policy_reason: str | None, action_id: str | None = None,
     ) -> None:
         """Stesso formato e stesso trace_id condiviso di TaskAgent._log_step (core/agent.py):
         un piano fisso eseguito da PlanExecutor (il ripiego di JakeCore._try_plan, o
@@ -244,7 +260,13 @@ class PlanExecutor:
         tools/replay_session.py. Alimenta anche action_ledger (F1) con lo stesso requested_by
         di tutto il piano. policy_reason (F1.2.6): None per il passo interrotto dal kill switch
         (non e' una decisione di policy), altrimenti una delle quattro costanti di
-        core.policy_engine.POLICY_REASONS."""
+        core.policy_engine.POLICY_REASONS.
+
+        action_id e' iniettabile (F1.3.5, stesso principio di JakeCore/TaskAgent): execute() lo
+        genera PRIMA di chiamare questo metodo quando il passo e' riuscito, cosi' lo stesso
+        identificatore correla la ricevuta nel ledger con l'eventuale UndoDescriptor salvato in
+        self.undo_store - None (il default) preserva il comportamento per i passi senza un undo
+        da correlare (bloccato/richiede conferma/fallito/interrotto dal kill switch)."""
         duration_ms = (time.monotonic() - started) * 1000
         risk = risk_of(intent).value
         log_action(
@@ -260,7 +282,7 @@ class PlanExecutor:
         validate_action_error(action_error)
         self.action_ledger.record(
             ActionReceipt(
-                action_id=new_action_id(), trace_id=trace_id, ts=time.time(), intent=intent,
+                action_id=action_id or new_action_id(), trace_id=trace_id, ts=time.time(), intent=intent,
                 requested_by=requested_by, risk_decision=risk, authorization=authorization_of(result, parameters),
                 result=result, idempotency_key=idempotency_key_of(intent, parameters),
                 verified=verification_status_of(verified), error_category=action_error.category,
