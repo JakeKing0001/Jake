@@ -49,6 +49,7 @@ from core.skill_registry import SkillRegistry
 from core.skill_result import SkillResult
 from core.system_advisor import SystemAdvisor
 from core.trigger_scheduler import TriggerScheduler
+from core.undo_store import UndoStore, generate_undo_descriptor
 from skills.kill_switch import KillSwitchSkill, ResetKillSwitchSkill
 from skills.learn import CorrectLastSkill, ForgetLearnedSkill, LearnCommandSkill, ListLearnedSkill
 from skills.model_control import ListModelsSkill, SetModelSkill
@@ -143,6 +144,10 @@ class JakeCore:
         # autenticare per-dispositivo appena il primo pairing avviene, senza bisogno di un
         # riavvio di Jake per "attivare" la funzionalita'.
         self.device_credential_store = DeviceCredentialStore()
+        # F1.3.5 (adozione - prima fetta, solo il percorso a comando diretto): il meccanismo
+        # (core/undo_store.py) esisteva gia', mai collegato a un chokepoint reale - vedi
+        # _execute_command() piu' sotto per dove viene popolato.
+        self.undo_store = UndoStore()
         self.companion_server = CompanionServer(
             event_bus=self.event_bus, command_handler=self.answer,
             port=int(config.get("companion_server_port", 8765) or 8765),
@@ -1001,18 +1006,29 @@ class JakeCore:
         response = format_skill_result(resolved.intent, result, self.skill_registry)
         if note:
             response = f"{note} {response}"
+        action_id = None
         if result is not None and result.success:
             self.conversation_state.remember_entities(resolved.intent, resolved.parameters, result.data or {})
             # F1.5.2: segnala a answer() che QUESTA risposta puo' contenere contenuto esterno
             # (core/request_context.py per il perche' - letto una volta li', non qui: un comando
             # diretto e' l'unico percorso, mai l'agente ne' una conferma, che non passano da qui).
             set_current_command_source_intent(resolved.intent)
+            # F1.3.5 (adozione - prima fetta): un'azione riuscita il cui intent ha un inverso
+            # naturale (core/execution_safety.py::UNDO_PARAMS_BY_INTENT) genera un vero
+            # UndoDescriptor - None per un intent senza inverso, mai inventato. action_id generato
+            # QUI (non dentro _log_action_outcome) cosi' lo stesso identificatore correla la
+            # ricevuta nel ledger con il descrittore salvato in self.undo_store.
+            action_id = new_action_id()
+            undo_descriptor = generate_undo_descriptor(action_id, resolved.intent, result.data or {})
+            if undo_descriptor is not None:
+                self.undo_store.save(undo_descriptor)
         if learn:
             self.learning.observe(text, resolved, result, route=self.router.last_route)
         self._remember_exchange(text, resolved, response)
         outcome = "success" if (result is not None and result.success) else f"error:{result.error}" if result is not None else "no_result"
         self._log_action_outcome(
             trace_id, started, resolved.intent, resolved.parameters, result=outcome, policy_reason=execution.policy_reason,
+            action_id=action_id,
         )
         return response
 
@@ -1045,7 +1061,7 @@ class JakeCore:
 
     def _log_action_outcome(
         self, trace_id: str, started: float, intent: str, parameters: dict | None, *, result: str,
-        policy_reason: str | None = None,
+        policy_reason: str | None = None, action_id: str | None = None,
     ) -> None:
         """Punto unico da cui _execute_command scrive in jake_actions.jsonl (F0: log strutturati
         con trace_id, durata, modello, skill, decisione di rischio, risultato). verified resta
@@ -1059,7 +1075,13 @@ class JakeCore:
         ripartire davvero per verificare un fix - log_action da solo non basta, non porta i
         parametri. Alimenta anche core/action_ledger.py (F1): una ricevuta con action_id,
         richiedente ("user": e' sempre un comando diretto dell'utente su questo percorso) e
-        autorizzazione derivata da authorization_of()."""
+        autorizzazione derivata da authorization_of().
+
+        action_id e' iniettabile (F1.3.5): _execute_command lo genera PRIMA di chiamare questo
+        metodo quando l'azione e' riuscita, cosi' lo stesso identificatore correla la ricevuta nel
+        ledger con l'eventuale UndoDescriptor salvato in self.undo_store - None (il default)
+        preserva il comportamento di sempre per gli altri percorsi (bloccato/non trovato/richiede
+        conferma), che non hanno alcun undo da correlare."""
         duration_ms = (time.monotonic() - started) * 1000
         risk = risk_of(intent).value
         log_action(
@@ -1076,7 +1098,7 @@ class JakeCore:
         validate_action_error(action_error)
         self.action_ledger.record(
             ActionReceipt(
-                action_id=new_action_id(), trace_id=trace_id, ts=time.time(), intent=intent,
+                action_id=action_id or new_action_id(), trace_id=trace_id, ts=time.time(), intent=intent,
                 requested_by="user", risk_decision=risk, authorization=authorization_of(result, parameters),
                 result=result, idempotency_key=idempotency_key_of(intent, parameters),
                 error_category=action_error.category, policy_reason=policy_reason, duration_ms=duration_ms, model=self.model,
