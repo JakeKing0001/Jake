@@ -34,6 +34,17 @@ ApplicationWindow {
         onMessageReceived: (role, text) => conversation.append(role, text)
         onNotification: (kind, text) => conversation.append("notifica", text)
         onErrorOccurred: (detail) => conversation.append("errore", detail || qsTr("Errore sconosciuto"))
+        // F4.2.2 ("gestire show/hide senza rubare focus"): HUD_SHOW/HUD_HIDE nascondono/mostrano
+        // DAVVERO la finestra (prima cadevano nel ramo generico di JakeClient e non facevano
+        // nulla di osservabile). WS_EX_NOACTIVATE (F4.2.1) e' gia' applicato una volta all'avvio
+        // e sopravvive a ShowWindow (non tocca gli extended style) - riapplicato comunque ad ogni
+        // ricomparsa per essere espliciti, non per necessita' dimostrata: costa un'unica chiamata
+        // Win32 innocua anche se gia' impostato.
+        onVisibilityRequested: (visible) => {
+            window.visible = visible;
+            if (visible)
+                overlayStyler.makeNoActivate(window);
+        }
     }
 
     OverlayStyler {
