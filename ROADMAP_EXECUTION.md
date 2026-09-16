@@ -245,10 +245,10 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F3.6` | Browser Automation (G1 superato, mai iniziato) | `READY` |
 | `F3.7` | Application Adapters (G1 superato, mai iniziato) | `READY` |
 | `F3.8` | Demonstration Learning (G1 superato, mai iniziato) | `READY` |
-| `F4.1` | Protocol Architecture (F4.1.2/F4.1.3/F4.1.5/F4.1.6 chiusi, F4.1.1 chiuso lato Python (sequence_id+trace_id)/F4.1.4 prima fetta lato Python - 16/09/2026; solo il lato C++ di F4.1.1/F4.1.4 resta scoperto, gap permanente dichiarato) | `DOING` |
+| `F4.1` | Protocol Architecture (F4.1.2/F4.1.3/F4.1.5/F4.1.6 chiusi; F4.1.4 corpus condiviso Python/C++ e Qt Test/CTest verificati localmente, CI da eseguire; F4.1.1 sequence id consumato dal client, trace id validato ma non ancora correlato nell'UI - 16/09/2026) | `DOING` |
 | `F4.2` | Native HUD (F4.2.1/F4.2.4 chiusi, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026; F4.2.5/F4.2.6 e resto di F4.2.3 richiedono test interattivi/visivi) | `DOING` |
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
-| `F4.4` | Interaction Design (G1 superato, mai iniziato) | `READY` |
+| `F4.4` | Interaction Design (G1 superato; Orb 2.0 specificato come sfera di particelle animate su richiesta utente, F4.4.7 pianificato - 16/09/2026; implementazione non iniziata) | `READY` |
 | `F4.5` | Interaction Design (G1 superato, mai iniziato) | `READY` |
 | `F4.6` | Trust UX (G1 superato, mai iniziato) | `READY` |
 | `F4.7` | Accessibility (G1 superato, mai iniziato) | `READY` |
@@ -4766,19 +4766,14 @@ Dipende da: F1.1.
 
 Criterio di uscita: client Python finto e JakeClient C++ superano la stessa suite di fixture.
 
-- Stato: `DOING`; `F4.1.5` **chiuso** (già vero per costruzione da `F1.8.6`, stesso `EventBus`,
-  cross-riferimento non nuovo lavoro - vedi sotto); `F4.1.1` chiuso parzialmente (`sequence_id` E
-  `trace_id` fatti lato Python - vedi sotto, 16/09/2026; il lato C++ ignora ancora entrambi i campi
-  in silenzio, mai consumati); `F4.1.2` **chiuso** (schema condiviso generato, niente più
-  enum mantenuti a mano lato C++ - vedi sotto); `F4.1.4` chiuso parzialmente (contract test per
-  payload malformato lato Python, tre buchi reali trovati e corretti - vedi sotto; il lato C++
-  resta scoperto, nessuna toolchain di test C++/QML in questo progetto); `F4.1.3` **chiuso**
-  (meccanismo di replay lato server, E auto-reconnect/`Last-Event-ID` lato client - vedi sotto,
-  con un buco reale preesistente corretto nello stesso passo); `F4.1.6` **chiuso** (finestra di
-  compatibilita' ZERO definita e documentata, con un buco reale di spam corretto lato C++ - vedi
-  sotto, 16/09/2026). Con questo **F4.1 e' completo per intero lato Python**; lato C++ restano
-  scoperti `sequence_id`/`trace_id` (mai consumati, ignorati in silenzio) e i contract test veri e
-  propri (nessuna toolchain di test C++/QML in questo progetto).
+- Stato: `DOING`; `F4.1.2`/`F4.1.3`/`F4.1.5`/`F4.1.6` chiusi quanto documentato nelle voci
+  sotto. `F4.1.4` passa a `VERIFY`: parser e segnali reali C++ superano ora le stesse fixture
+  Python con Qt Test/CTest, piu' test SSE reali; manca la CI del nuovo incremento. Superata
+  quindi la precedente premessa "nessuna toolchain C++" (storica, nelle note precedenti).
+  `F4.1.1`: timestamp/sequence/trace serializzati e validati; il client usa gia' sequence id
+  per `Last-Event-ID` (F4.1.3, non lo ignora come diceva il riepilogo precedente), mentre trace
+  id non ha ancora una rappresentazione/correlazione nell'UI. La suite QML di layout/input,
+  lo snapshot completo e il riavvio del server con contatore azzerato restano non coperti.
 - `F4.1.5` (VERIFICA, nessun codice) — 16/09/2026: "garantire che client lento non blocchi il
   core" è lo STESSO `core/event_bus.py::EventBus` già verificato per questo in `F1.8.6`
   ("impedire che un client lento blocchi event bus o altri client") - coda `queue.Queue(maxsize=
@@ -4999,6 +4994,40 @@ Criterio di uscita: client Python finto e JakeClient C++ superano la stessa suit
   `sequence_id`/`trace_id`, gap permanente dichiarato). Prova: build C++ verde, nessun test Python
   toccato in questo incremento (suite gia' verde da F4.1.1).
 
+- `F4.1.4` (corpus condiviso e test nativi, chiusura locale) — 16/09/2026: ripresa da master
+  `c67ce8a`, pulito/allineato al tracking; CI `35098804258` verde nei tre job Windows. Non
+  ripetuto F1.2.6: gia' integrato in PR #28, G1 dichiarato superato in PR #124. Definition
+  of Ready: input eventi JSON/SSE, output accettazione/rifiuto e segnali reali del client;
+  toccati `hud_protocol`, generatore, `JakeClient`, build/test/CI; nessun dato reale, nuovo
+  permesso o pubblicazione remota. Successo = tutti i tipi/legacy/estensioni funzionano;
+  errore = forma/numeri/valori invalidi non cambiano stato/sequence/dispositivo né emettono
+  comandi UI; sicurezza = mismatch fermato, diagnostici senza valori sensibili. Criterio
+  misurabile: stesso corpus nei due linguaggi, gate completo e test TCP headless ripetibili.
+  `tests/fixtures/hud_events.json` contiene 75 casi, tutti i 16 tipi. Prima del fix, i primi
+  73 casi riproducono 33 mancati rifiuti Python e 39 discrepanze C++; aggiunti altri due
+  casi JSON non finito in campi di estensione. Regole payload/limiti/vocabolario verifica
+  generati dalla fonte Python in `HudEventTypes.h`, senza un secondo censimento C++.
+  Default legacy mantenuti (schema assente = versione corrente, payload assente/null = `{}`,
+  sequence assente = 0, trace assente/null = None); campi noti opzionali ma tipizzati quando
+  presenti, estensioni ammesse. Booleani non sono numeri; interi numerici come 42.0 ammessi;
+  sequence 0..qint64 max, step 0..int max, timestamp finito non negativo. JSON NaN/Infinity
+  rifiutato anche in estensioni; nessun valore sensibile ripetuto negli errori di validazione.
+  Il client rifiuta PRIMA degli effetti o avanzamento del cursore. Due test HTTP/SSE su
+  loopback riproducono altri difetti reali: l'abort per mismatch generava un secondo errore
+  da `finished()` e `readyRead()` poteva riattivare connected; UTF-8 diviso fra letture TCP
+  diventava U+FFFD. Corretto sopprimendo l'errore duplicato/riattivazione e bufferizzando
+  byte fino al blocco completo. Il seam di test e' friend nativo, nessuna API/QML pubblica.
+  CTest/Qt Test aggiunti alla build normale, DLL test distribuite da windeployqt; `BUILD_TESTING=OFF`
+  resta disponibile. CI estesa a CTest + diagnostica testo/JUnit/LastTest.log, 14 giorni.
+  Prova: 75/75 fixture per entrambi, 80/80 casi Qt Test (init/cleanup inclusi), 20/20 CTest
+  consecutivi; 118/118 test Python mirati, ruff/mypy selettivo (87 file)/compileall verdi,
+  smoke CLI senza Ollama verde (6,7 s), smoke HUD nativo attivo dopo 3 s. Suite completa finale
+  2.914/2.914 in 100,468 s (baseline 2.836/2.836); warning di teardown HTTP/subprocess gia'
+  presenti nella baseline, nessun test fallito. Build MSVC 19.51/Qt 6.7.3/Ninja verde.
+  Stato `VERIFY` finché il commit nuovo supera CI; nessun push/PR/merge eseguito dall'agente.
+  Limiti: non verifica rendering/focus/click-through/accessibilita'/input QML, non aggiunge
+  card undo/evidence, snapshot completo o gestione restart del server. Il gate G2 resta aperto.
+
 ### F4.2 — Shell overlay nativa
 
 Dipende da: F4.1.
@@ -5036,8 +5065,49 @@ Dipende da: F4.1 e F4.3.
 4. `F4.4.4` Collegare forma d'onda a livelli audio reali senza conservare audio.
 5. `F4.4.5` Usare colore, forma e testo: mai solo colore.
 6. `F4.4.6` Ripristinare stato coerente dopo reconnect o evento fuori ordine.
+7. `F4.4.7` Realizzare l'Orb come sfera volumetrica di particelle animate: profondita',
+   rotazione, pulsazione e movimento coerente con lo stato, non un semplice cerchio pieno.
 
-Criterio di uscita: state transition test completo e nessuno stato bloccato dopo errore/reconnect.
+Criterio di uscita: state transition test completo, nessuno stato bloccato dopo errore/reconnect,
+sfera di particelle verificata visivamente e nei test di animazione/performance sotto descritti.
+
+#### F4.4.7 — Sfera di particelle mobile (Orb 2.0, richiesta utente 16/09/2026)
+
+- Stato: `BACKLOG`, specifica di prodotto aggiunta; non implementato e non verificato.
+- Direzione visiva: l'elemento centrale dell'HUD e' una sfera composta da punti luminosi,
+  con volume/profondita' apparente, movimento continuo controllato e silhouette sferica
+  riconoscibile. Particelle che ruotano/ondulano e una pulsazione sobria, non uno sciame casuale
+  senza forma, un cerchio piatto o una GIF/video preregistrata. Rendering nativo Qt/QML;
+  tecnologia e numero di particelle da scegliere con il profiling, non fissati senza prove.
+- Interpretazione corrente di "mobile": sfera ANIMATA, tramite movimento delle particelle.
+  La possibilita' di trascinare/riposizionare la sfera sul desktop e' una decisione distinta,
+  da confermare prima di implementarla nel layout `F4.7.4`; non e' data per gia' richiesta.
+- Input: stato dell'HUD da `JakeClient`/protocollo `F4.1`, qualita' e reduced motion da `F4.3`,
+  livelli audio reali da `F4.4.4` quando disponibili. Output: componente Orb 2.0 che sostituisce
+  il rendering semplice di `hud/native/qml/Orb.qml`, senza modificare policy o autorizzazioni.
+- Dipendenze: regioni osservabili `F4.2.6`, profiling/qualita'/reduced motion `F4.3.3`-`F4.3.5`,
+  transizioni e animazioni interrupt-safe `F4.4.2`-`F4.4.3`. La specifica non salta questi gate.
+- Comportamento: idle con movimento lento; ascolto con espansione/pulsazione; ragionamento e
+  azione con pattern distinguibili; attesa permesso, errore, pausa, privato e disconnessione
+  leggibili anche tramite forma/testo (`F4.4.5`), mai il solo colore. La reazione al parlato
+  usa esclusivamente livelli reali quando esposti: animazione decorativa di fallback non
+  presentata come misura del microfono/TTS.
+- Sicurezza/input: decorazione separata da regioni interattive; nessun click intercettato
+  fuori dalle regioni previste, nessun focus rubato e nessun comando eseguito dall'animazione.
+  Nessuna nuova acquisizione o conservazione di audio/schermo, nessun provider cloud necessario.
+- Degrado: sfera di particelle statica/sobria con reduced motion; animazioni ferme quando
+  nascosta e ridotte in background. Profili low/medium/high; fallback statico accessibile se
+  GPU/rendering non disponibili, con stato leggibile. Il fallback non vale come completamento
+  della sfera animata nel profilo normale.
+- Prove richieste: fixture stato/audio sintetico dichiarato, seed ripetibile per i test,
+  screenshot/video controllati che mostrino volume e movimento; test di cambio rapido stato,
+  pausa/ripresa, hide/show e reconnect senza loop o animazioni residue. Profilare frame time,
+  GPU e consumo sullo stesso hardware di `F4.3`, riportando risoluzione/qualita'/particelle.
+- Criterio di completamento: sfera realmente costruita da particelle nel profilo normale,
+  transizioni interrupt-safe verdi, nessuna animazione attiva in hidden/reduced motion quando
+  deve fermarsi, 60 FPS sul profilo consigliato con budget/input latency di `F4.3` rispettati,
+  contrasto verificato e fallback/reduced motion accessibili. Build/test/CI verdi; nessuna
+  metrica o verifica visiva dichiarata soltanto perche' il componente compila.
 
 ### F4.5 — Pannelli contestuali
 
@@ -5829,6 +5899,18 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 - Personalità progettata per manipolare, fingere coscienza o scoraggiare il controllo dell'utente.
 
 ## 24. Prossima azione esatta
+
+Stato corrente 16/09/2026, ripresa dopo PR #142: `F4.1.4` implementato/verificato localmente
+con corpus condiviso e Qt Test/CTest, commit locale su `codex/f4-hud-contract-tests`;
+2.914 test Python/80 casi Qt Test verdi, manca CI del nuovo incremento. Ramo remoto pubblicato
+dall'utente (verifica 16/09/2026: `e0f9b3d`); PR/CI non ancora presenti, master remoto `c67ce8a`.
+Richiesta utente aggiunta come `F4.4.7`: Orb 2.0 a sfera di particelle animate, specifica sopra;
+nessuna implementazione anticipata o gate dichiarato superato per questa sola scelta visiva.
+Nessuna pubblicazione GitHub autorizzata all'agente: l'utente aggiorna il ramo e apre la PR,
+poi si osservano i tre check. Non aprire un nuovo ID prima del verde (sezione 20). In seguito,
+priorita' del track HUD: `F4.2.6`, regioni interattive osservabili, ora con toolchain di test
+nativa disponibile; non dichiarare G2 chiuso con il solo protocollo. Le note lunghe sotto sono
+storiche e non sostituiscono questo stato corrente.
 
 Aggiornato 16/09/2026. Sessione lunga con 97 incrementi completati e verificati (PR #28-#123), la
 maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il

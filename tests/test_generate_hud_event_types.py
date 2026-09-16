@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from core.hud_protocol import EventType
+from core.hud_protocol import EventType, HUD_PAYLOAD_RULES, HUD_VERIFICATION_VALUES
 from tools.generate_hud_event_types import generate_header, main
 
 
@@ -32,6 +32,15 @@ class GenerateHeaderTests(unittest.TestCase):
         header = generate_header(["IDLE"])
         self.assertIn("GENERATO AUTOMATICAMENTE", header)
         self.assertIn("NON MODIFICARE A MANO", header)
+
+    def test_known_types_and_payload_rules_come_from_the_python_contract(self):
+        header = generate_header([member.name for member in EventType])
+        self.assertIn(f"std::array<const char *, {len(EventType)}> ALL", header)
+        for event, fields in HUD_PAYLOAD_RULES.items():
+            for key, rule in fields.items():
+                self.assertIn(f'{{"{event}", "{key}", "{rule}"}}', header)
+        for value in HUD_VERIFICATION_VALUES:
+            self.assertIn(f'"{value}"', header)
 
 
 class MainWritesTheFileTests(unittest.TestCase):

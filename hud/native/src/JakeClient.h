@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QObject>
+#include <QByteArray>
 #include <QQmlEngine>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -55,6 +56,7 @@ private slots:
     void onCommandFinished();
 
 private:
+    friend class JakeClientContractTests; // seam nativo; nessuna API/QML di iniezione pubblica
     void setConnected(bool value);
     void setState(const QString &value);
     void setActiveDevice(const QString &value);
@@ -64,7 +66,7 @@ private:
     QNetworkAccessManager *m_manager;
     QNetworkReply *m_eventStream = nullptr;
     QString m_baseUrl;
-    QString m_eventBuffer;
+    QByteArray m_eventBuffer; // UTF-8 decodificato SOLO dopo un blocco SSE completo
     QString m_deviceId;
     bool m_connected = false;
     QString m_state = QStringLiteral("IDLE");

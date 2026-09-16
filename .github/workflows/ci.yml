@@ -99,10 +99,8 @@ jobs:
 
       - uses: seanmiddleditch/gha-setup-ninja@v5
 
-      # Il prototipo C++/QML non ha ancora una suite di test (vedi hud/native/README.md): qui
-      # verifichiamo solo che compili ed esegua senza errori subito dopo l'avvio, non il
-      # comportamento visivo. E' la stessa verifica fatta manualmente per il commit 4.9.2,
-      # ora ripetuta a ogni push invece che una tantum.
+      # F4.1.4: CTest verifica il client C++ con lo stesso corpus HudEvent dei test Python.
+      # Lo smoke resta distinto: avvio QML/runtime, non una prova del comportamento visivo.
       - uses: jurplel/install-qt-action@v4
         with:
           version: "6.7.3"
@@ -115,6 +113,21 @@ jobs:
       - name: Compila
         working-directory: hud/native
         run: cmake --build --preset windows-ninja
+
+      - name: Contract test HUD (fixture condivise Python/C++)
+        run: ctest --test-dir hud/native/build --output-on-failure
+
+      - name: Pubblica diagnostica contract HUD
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hud-contract-diagnostics
+          path: |
+            hud/native/build/hud-contract.txt
+            hud/native/build/hud-contract.xml
+            hud/native/build/Testing/Temporary/LastTest.log
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Avvia e chiudi subito (fuma il binario, nessun server companion in questo job)
         working-directory: hud/native/build
