@@ -222,37 +222,37 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F0.4` | Quality Engineering | `BLOCKED` |
 | `F0.5` | Performance Engineering | `BLOCKED` |
 | `F0.6` | Release Engineering | `DOING` |
-| `F1.1` | Trust Core | `DOING` |
-| `F1.2` | Security Architecture | `DOING` |
-| `F1.3` | Execution Reliability | `DOING` |
-| `F1.4` | Identity and Secrets | `DOING` |
-| `F1.5` | Application Security | `DOING` |
-| `F1.6` | Sandbox Runtime | `DOING` |
-| `F1.7` | Observability | `DOING` |
-| `F1.8` | Runtime Reliability | `DOING` |
-| `F2.1` | Voice Quality | `BLOCKED` |
-| `F2.2` | Speech Runtime | `BLOCKED` |
-| `F2.3` | Voice Quality | `BLOCKED` |
-| `F2.4` | Audio Systems | `BLOCKED` |
-| `F2.5` | Speech Runtime | `BLOCKED` |
-| `F2.6` | Conversation Runtime | `BLOCKED` |
-| `F2.7` | Identity and Voice | `BLOCKED` |
-| `F3.1` | Computer Use Quality | `BLOCKED` |
-| `F3.2` | Windows Automation | `BLOCKED` |
-| `F3.3` | Windows Automation | `BLOCKED` |
-| `F3.4` | Execution Runtime | `BLOCKED` |
-| `F3.5` | Computer Use Reliability | `BLOCKED` |
-| `F3.6` | Browser Automation | `BLOCKED` |
-| `F3.7` | Application Adapters | `BLOCKED` |
-| `F3.8` | Demonstration Learning | `BLOCKED` |
+| `F1.1` | Trust Core | `DONE` |
+| `F1.2` | Security Architecture | `DONE` |
+| `F1.3` | Execution Reliability (F1.3.4/F1.3.5 mai affrontati, non richiesti da G1) | `DOING` |
+| `F1.4` | Identity and Secrets | `DONE` |
+| `F1.5` | Application Security (gap dichiarati, non richiesti da G1) | `DOING` |
+| `F1.6` | Sandbox Runtime | `DONE` |
+| `F1.7` | Observability | `DONE` |
+| `F1.8` | Runtime Reliability | `DONE` |
+| `F2.1` | Voice Quality (G1 superato, mai iniziato) | `READY` |
+| `F2.2` | Speech Runtime (G1 superato, mai iniziato) | `READY` |
+| `F2.3` | Voice Quality (G1 superato, mai iniziato) | `READY` |
+| `F2.4` | Audio Systems (G1 superato, mai iniziato) | `READY` |
+| `F2.5` | Speech Runtime (G1 superato, mai iniziato) | `READY` |
+| `F2.6` | Conversation Runtime (G1 superato, mai iniziato) | `READY` |
+| `F2.7` | Identity and Voice (G1 superato, mai iniziato) | `READY` |
+| `F3.1` | Computer Use Quality (G1 superato, mai iniziato) | `READY` |
+| `F3.2` | Windows Automation (G1 superato, mai iniziato) | `READY` |
+| `F3.3` | Windows Automation (G1 superato, mai iniziato) | `READY` |
+| `F3.4` | Execution Runtime (G1 superato, mai iniziato) | `READY` |
+| `F3.5` | Computer Use Reliability (G1 superato, mai iniziato) | `READY` |
+| `F3.6` | Browser Automation (G1 superato, mai iniziato) | `READY` |
+| `F3.7` | Application Adapters (G1 superato, mai iniziato) | `READY` |
+| `F3.8` | Demonstration Learning (G1 superato, mai iniziato) | `READY` |
 | `F4.1` | Protocol Architecture | `VERIFY` |
 | `F4.2` | Native HUD | `VERIFY` |
-| `F4.3` | Native HUD | `BLOCKED` |
-| `F4.4` | Interaction Design | `BLOCKED` |
-| `F4.5` | Interaction Design | `BLOCKED` |
-| `F4.6` | Trust UX | `BLOCKED` |
-| `F4.7` | Accessibility | `BLOCKED` |
-| `F4.8` | Release Engineering | `BLOCKED` |
+| `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
+| `F4.4` | Interaction Design (G1 superato, mai iniziato) | `READY` |
+| `F4.5` | Interaction Design (G1 superato, mai iniziato) | `READY` |
+| `F4.6` | Trust UX (G1 superato, mai iniziato) | `READY` |
+| `F4.7` | Accessibility (G1 superato, mai iniziato) | `READY` |
+| `F4.8` | Release Engineering (G1 superato, mai iniziato) | `READY` |
 | `F5.1` | Memory Platform | `DOING` |
 | `F5.2` | Memory Platform | `DOING` |
 | `F5.3` | Knowledge Model | `DOING` |
@@ -4171,9 +4171,62 @@ G1 è superato soltanto se:
 - kill switch interrompe attività e figli entro il budget definito;
 - modalità privata non lascia contenuti nei nuovi store.
 
+**Verdetto — 16/09/2026: G1 SUPERATO.** Con la chiusura di F1.8 (vedi sopra, stesso giorno) e la
+chiusura precedente di F1.1/F1.2/F1.4/F1.6/F1.7, ciascuno dei sette criteri è stato riverificato
+con la stessa evidenza (test reali, non lettura del codice) e con gli stessi limiti dichiarati
+apertamente già accettati altrove in questo documento (mai "il codice esiste" senza superare il
+gate - regola 7, sezione 23):
+
+1. **Ogni percorso usa Action Contract 2.0 e PolicyEngine** - `F1.1`/`F1.2` chiuse: tutti i sette
+   percorsi d'esecuzione (`docs/action-execution-paths.md`) sono fail-closed su `PolicyEngine`
+   (`F1.2.1`, i tre "percorso N" un tempo aperti sono tutti chiusi); i tre chokepoint reali
+   costruiscono `ActionReceipt`/`ActionError` condivisi (`F1.1.4`/`F1.1.7`). Limite dichiarato e
+   accettato: le ~200 skill non costruiscono `ActionProposal` da sole (per design - lo fa il
+   chiamante), ed `effect_class`/`preconditions` di livello parametro restano `None` quando ignoti
+   invece di un valore indovinato.
+2. **Tutte le azioni ad alto impatto hanno prova e audit** - ogni ricevuta porta sempre
+   `verified`/`unverified`/`verification_failed` (mai inferito dall'assenza di eccezioni, `F1.3.3`)
+   e un `error_category` (`F1.1.4`); 11 dei 20 intent DESTRUCTIVE/ADMIN hanno anche un
+   verificatore INDIPENDENTE in `INTENT_SAFETY_REGISTRY` (`F1.3`), i restanti 9 esaminati uno per
+   uno e scartati con motivazione (store interno già auto-verificato via `cursor.rowcount`, o
+   natura intrinsecamente non verificabile come `SYSTEM_POWER`) - nessun candidato rimasto ha la
+   stessa fetta stretta e meccanica degli undici già chiusi.
+3. **Capability applicate ad agenti, skill e device** - `F1.2.3` chiuso: le cinque dimensioni
+   testuali della roadmap (utente/dispositivo/agente/skill/sessione) sono intersecate su entrambi
+   i percorsi con "vince il più restrittivo"; `F1.2.2` chiuso per sette delle otto capability
+   dichiarate (filesystem/web/app/contatto/device Home Assistant/rete/durata), con i rispettivi
+   limiti dichiarati (app/contatto/rete su stringa grezza non risolta).
+4. **Prompt-injection suite verde** - `tests/test_prompt_injection_attack.py` e l'intera suite
+   correlata (`test_taint.py`, `PromptInjectionMitigationTests` in `test_agent.py`,
+   `test_request_context.py`) verdi. `F1.5.1`-`F1.5.4`/`F1.5.6`/`F1.5.7` chiusi parzialmente con
+   gap dichiarati apertamente (propagazione del taint in memoria a lungo termine/NEST, injection
+   dentro PDF/immagini - nessuno di questi formati è oggi parsato da Jake oltre il testo grezzo) -
+   letto il criterio alla lettera ("suite verde"), non "ogni vettore teorico coperto", è
+   soddisfatto.
+5. **Plugin ostile contenuto dalla sandbox** - `F1.6` **chiuso per intero** (tutti e otto i
+   sotto-punti): Low Integrity + Job Object (CPU/RAM/numero processi/watchdog wall-clock), gate
+   applicativo su file e rete, serializzazione IPC, quarantena automatica. Limite dichiarato e
+   accettato: un controllo A LIVELLO APPLICATIVO (non kernel) per file/rete, aggirabile in teoria
+   da codice Python deliberatamente sofisticato (`ctypes`/syscall diretta) - fermo restando il
+   confine KERNEL di Low Integrity/Job Object per CPU/RAM/processi/tempo, quello sì imposto dal
+   sistema operativo.
+6. **Kill switch interrompe attività e figli entro il budget definito** - `F1.8.3` chiuso
+   (RUN_COMMAND con Job Object, chiamata al modello, le altre skill con subprocess verificate a
+   posto).
+7. **Modalità privata non lascia contenuti nei nuovi store** - `F1.7.8` chiuso: tutti e tre i
+   chokepoint (diretto, agente, automatico) verificati end-to-end.
+
+Nessuno dei limiti sopra è nascosto: sono le stesse eccezioni già scritte, motivate e accettate
+nelle rispettive voci datate di `F1`. Con questo, l'Onda 1 ("Nucleo fidato") è dichiarata
+completa: `F2`/`F3`/`F4` (Onda 2) e le fondamenta di `F8` non sono più bloccate dalla dipendenza
+G1 - restano bloccate solo dalle proprie dipendenze interne (es. `F2.2` dipende da `F2.1`, mai
+affrontato). Nessuna riga del registro §5.1 o l'inizio implementativo di una di queste fasi è
+stato deciso qui: quale fase iniziare per prima è una decisione di prodotto/prioritizzazione,
+non una conseguenza meccanica del gate - riportata all'utente.
+
 ## 8. F2 — Voice Natural 3.0
 
-- Stato: `BLOCKED` fino a G1, progettazione `READY`
+- Stato: `READY` (G1 superato il 16/09/2026, vedi Gate G1 sopra), mai iniziato
 - Priorità: `P1`
 - Output: conversazione vocale full-duplex, rapida, correggibile e misurata.
 
@@ -4284,7 +4337,7 @@ Criterio di uscita: nessuna contaminazione di memoria o permesso tra profili nei
 
 ## 9. F3 — Computer Use Engine 3.0
 
-- Stato: `BLOCKED` fino a G1, spike tecnico `READY`
+- Stato: `READY` (G1 superato il 16/09/2026, vedi Gate G1 sopra), mai iniziato
 - Priorità: `P1`
 - Output: Jake controlla Windows per semantica, verifica il risultato e usa i pixel come fallback.
 
@@ -4412,7 +4465,7 @@ Criterio di uscita: una procedura dimostrata sopravvive a riavvio, resize e dati
 
 ## 10. F4 — HUD Engine 2.0
 
-- Stato: `BLOCKED` fino a G1; build prototype `VERIFY`
+- Stato: `READY` (G1 superato il 16/09/2026, vedi Gate G1 sopra); build prototype `VERIFY`
 - Priorità: `P1`
 - Output: interfaccia nativa fluida che mostra stato, prove, permessi e controllo.
 
