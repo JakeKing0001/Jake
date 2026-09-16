@@ -124,27 +124,58 @@ def execute_action_with_retry(
     return execution, attempts
 
 
+# F1.3.5 ("generare undo token con scadenza e precondizioni"): le quattro funzioni
+# "_*_undo_params" sotto sono ESTRATTE dai rispettivi handler di rollback (stesso identico
+# calcolo di prima, nessun cambio di comportamento) cosi' da poterle riusare anche fuori dal
+# percorso di compensazione automatica - vedi generate_undo_descriptor() piu' sotto, che le
+# chiama per popolare un vero UndoDescriptor.compensating_parameters invece di duplicare a mano
+# lo stesso calcolo una seconda volta (esattamente il pattern "due insiemi paralleli scollegati"
+# che il docstring di IntentSafetyEntry mette gia' in guardia altrove in questo modulo).
+def _create_path_undo_params(data: dict) -> dict:
+    return {"path": data["path"], "confirmed": True}
+
+
 def _rollback_create_path(registry, data, policy_engine):
-    registry.execute("DELETE_PATH", {"path": data["path"], "confirmed": True}, policy_engine=policy_engine)
+    registry.execute("DELETE_PATH", _create_path_undo_params(data), policy_engine=policy_engine)
+
+
+def _rename_path_undo_params(data: dict) -> dict:
+    return {"path": data["new_path"], "new_name": Path(data["path"]).name}
 
 
 def _rollback_rename_path(registry, data, policy_engine):
-    original_name = Path(data["path"]).name
-    registry.execute(
-        "RENAME_PATH", {"path": data["new_path"], "new_name": original_name}, policy_engine=policy_engine,
-    )
+    registry.execute("RENAME_PATH", _rename_path_undo_params(data), policy_engine=policy_engine)
+
+
+def _move_path_undo_params(data: dict) -> dict:
+    return {"path": data["new_path"], "destination": str(Path(data["path"]).parent), "confirmed": True}
 
 
 def _rollback_move_path(registry, data, policy_engine):
-    original_dir = str(Path(data["path"]).parent)
-    registry.execute(
-        "MOVE_PATH", {"path": data["new_path"], "destination": original_dir, "confirmed": True},
-        policy_engine=policy_engine,
-    )
+    registry.execute("MOVE_PATH", _move_path_undo_params(data), policy_engine=policy_engine)
+
+
+def _extract_archive_undo_params(data: dict) -> dict:
+    return {"path": data["destination"], "confirmed": True}
 
 
 def _rollback_extract_archive(registry, data, policy_engine):
-    registry.execute("DELETE_PATH", {"path": data["destination"], "confirmed": True}, policy_engine=policy_engine)
+    registry.execute("DELETE_PATH", _extract_archive_undo_params(data), policy_engine=policy_engine)
+
+
+# F1.3.5: {intent originale: funzione pura che calcola i parametri dell'intent compensatorio dai
+# dati della ricevuta originale} - lo stesso identico calcolo gia' usato da ciascun
+# "_rollback_*" sopra (che li riusa direttamente, non li duplica), esposto anche per
+# core/undo_store.py::generate_undo_descriptor() (pubblico, non con un trattino basso, proprio
+# perche' un modulo esterno lo consuma - stesso principio di INTENT_SAFETY_REGISTRY). Solo i
+# quattro intent che hanno gia' un `RollbackAction` qui sotto: un intent senza inverso naturale
+# (es. DELETE_PATH) non ha un compensating_parameters sensato da calcolare.
+UNDO_PARAMS_BY_INTENT: dict[str, Callable[[dict], dict]] = {
+    "CREATE_PATH": _create_path_undo_params,
+    "RENAME_PATH": _rename_path_undo_params,
+    "MOVE_PATH": _move_path_undo_params,
+    "EXTRACT_ARCHIVE": _extract_archive_undo_params,
+}
 
 
 def _verify_process_terminated(data: dict) -> bool:
