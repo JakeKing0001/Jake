@@ -280,6 +280,7 @@ INTENT_EFFECT_CLASS: dict[str, str] = {
     "TRANSLATE_CLIPBOARD": EFFECT_CLASS_READ,  # traduce via Ollama ma NON riscrive il risultato negli appunti
     "TRANSLATE_TEXT": EFFECT_CLASS_READ,
     "TYPE_TEXT": EFFECT_CLASS_MODIFY,
+    "UNDO_LAST_ACTION": EFFECT_CLASS_READ,  # propone solo una busta CONFIRMATION_REQUIRED, non muta nulla direttamente
     "WEB_SEARCH": EFFECT_CLASS_READ,
 }
 

@@ -88,6 +88,22 @@ class UndoStore:
             return None
         return descriptor
 
+    def most_recent_usable(self, *, now: Optional[float] = None) -> Optional[UndoDescriptor]:
+        """Il descrittore usabile creato PIU' di recente, tra QUALUNQUE azione lo abbia generato -
+        indipendentemente da quale dei tre chokepoint (JakeCore/TaskAgent/PlanExecutor) l'ha
+        salvato, dato che tutti e tre condividono la STESSA istanza (F1.3.5, adozione). "Annulla
+        l'ultima azione" e' per l'utente un concetto UNICO, non tre code separate. `None` se non
+        ce n'e' nessuno usabile (mai esistito, tutti scaduti o gia' consumati) - mai il piu'
+        vecchio o un valore indovinato. L'ordine di iterazione di un dict Python (3.7+) rispecchia
+        l'ordine di inserimento; `mark_used()` sostituisce il valore per la STESSA chiave, senza
+        spostarla, quindi l'ordine resta quello di creazione anche dopo un consumo."""
+        with self._lock:
+            descriptors = list(self._descriptors.values())
+        for descriptor in reversed(descriptors):
+            if descriptor.is_usable(now=now):
+                return descriptor
+        return None
+
     def mark_used(self, action_id: str) -> bool:
         """Consuma l'undo (un solo utilizzo, mai due) - vero se c'era davvero un descrittore
         usabile da consumare, falso altrimenti (gia' consumato, scaduto, o mai esistito)."""

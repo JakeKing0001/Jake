@@ -294,6 +294,10 @@ SKILL_RISK: dict[str, RiskLevel] = {
     "DELETE_CREATED_SKILL": RiskLevel.DESTRUCTIVE,
     "SET_NOTIFICATION_MODE": RiskLevel.LOCAL_REVERSIBLE,
     "GET_NOTIFICATION_MODE": RiskLevel.READ_ONLY,
+    # READ_ONLY apposta: la skill stessa non muta mai nulla, propone solo una busta
+    # CONFIRMATION_REQUIRED (skills/undo.py) - e' l'intent compensatorio dentro quella busta
+    # (spesso DESTRUCTIVE, es. DELETE_PATH) a passare comunque da PolicyEngine per conto suo.
+    "UNDO_LAST_ACTION": RiskLevel.READ_ONLY,
 }
 
 

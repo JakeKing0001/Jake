@@ -157,5 +157,54 @@ class UndoStoreTests(unittest.TestCase):
         self.assertEqual(errors, [])
 
 
+class MostRecentUsableTests(unittest.TestCase):
+    """F1.3.5 (skill 'annulla', consumatore): 'annulla l'ultima azione' e' per l'utente un
+    concetto UNICO tra i tre chokepoint (comando diretto/agente/piano), non tre code separate -
+    most_recent_usable() cerca nell'INTERO store, non per action_id specifico."""
+
+    def test_empty_store_has_nothing_to_undo(self):
+        self.assertIsNone(UndoStore().most_recent_usable())
+
+    def test_returns_the_only_descriptor_when_there_is_one(self):
+        store = UndoStore()
+        descriptor = generate_undo_descriptor("action-1", "CREATE_PATH", {"path": "x"})
+        store.save(descriptor)
+
+        self.assertIs(store.most_recent_usable(), descriptor)
+
+    def test_returns_the_most_recently_saved_one_not_the_oldest(self):
+        store = UndoStore()
+        store.save(generate_undo_descriptor("action-1", "CREATE_PATH", {"path": "primo"}))
+        second = generate_undo_descriptor("action-2", "CREATE_PATH", {"path": "secondo"})
+        store.save(second)
+
+        self.assertIs(store.most_recent_usable(), second)
+
+    def test_skips_expired_descriptors_to_find_an_older_still_usable_one(self):
+        store = UndoStore()
+        still_usable = generate_undo_descriptor("action-1", "CREATE_PATH", {"path": "vivo"}, ttl_seconds=100, now=1000.0)
+        expired = generate_undo_descriptor("action-2", "CREATE_PATH", {"path": "scaduto"}, ttl_seconds=10, now=1000.0)
+        store.save(still_usable)
+        store.save(expired)
+
+        self.assertIs(store.most_recent_usable(now=1050.0), still_usable)
+
+    def test_skips_an_already_consumed_descriptor(self):
+        store = UndoStore()
+        older = generate_undo_descriptor("action-1", "CREATE_PATH", {"path": "vecchio"})
+        newer = generate_undo_descriptor("action-2", "CREATE_PATH", {"path": "nuovo"})
+        store.save(older)
+        store.save(newer)
+        store.mark_used("action-2")
+
+        self.assertEqual(store.most_recent_usable().action_id, "action-1")
+
+    def test_nothing_usable_returns_none_not_the_oldest_stale_one(self):
+        store = UndoStore()
+        store.save(generate_undo_descriptor("action-1", "CREATE_PATH", {"path": "x"}, ttl_seconds=10, now=1000.0))
+
+        self.assertIsNone(store.most_recent_usable(now=1050.0))
+
+
 if __name__ == "__main__":
     unittest.main()
