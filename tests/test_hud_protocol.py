@@ -19,6 +19,18 @@ class HudEventSerializationTests(unittest.TestCase):
         event = HudEvent(type=EventType.NOTIFICATION, payload={})
         self.assertIn('"type": "NOTIFICATION"', event.to_json())
 
+    def test_every_event_type_round_trips_not_just_a_sample(self):
+        """F4.1.4 ("contract test per ogni evento"): un test per OGNI membro di EventType, non
+        solo per una manciata scelta a mano - se un tipo futuro venisse aggiunto senza un
+        percorso di round-trip funzionante (es. un valore che collide con un altro), questo test
+        lo scopre automaticamente senza bisogno di essere aggiornato."""
+        for member in EventType:
+            with self.subTest(event_type=member.name):
+                event = HudEvent(type=member, payload={"probe": member.name})
+                restored = HudEvent.from_json(event.to_json())
+                self.assertEqual(restored.type, member)
+                self.assertEqual(restored.payload, {"probe": member.name})
+
     def test_undo_and_verification_events_round_trip_too(self):
         """F1.3.8 ("esporre undo e prove a HUD/companion tramite eventi versionati"): i due tipi
         aggiunti per questo passo seguono lo stesso protocollo di tutti gli altri, nessun
@@ -41,6 +53,32 @@ class HudEventSerializationTests(unittest.TestCase):
     def test_from_json_rejects_an_unknown_type(self):
         with self.assertRaises(ValueError):
             HudEvent.from_json('{"type": "NOT_A_REAL_EVENT", "payload": {}}')
+
+    def test_from_json_rejects_a_payload_that_is_not_an_object(self):
+        """F4.1.4 ("contract test per ogni payload malformato"): buco reale, non solo teorico -
+        un payload sbagliato (una stringa invece di un dict) veniva accettato SILENZIOSAMENTE
+        prima di questo test (`data.get("payload") or {}` ricade su `{}` solo per un valore
+        falsy, mai per un valore del TIPO sbagliato) - l'evento risultante avrebbe rotto qualunque
+        chiamante che si aspettasse un dict (es. `payload.get(...)`), in un punto lontano e
+        confuso da dove il payload era stato letto per davvero."""
+        for malformed_payload in ('"non e un dict"', "[1, 2, 3]", "42", "true"):
+            with self.subTest(payload=malformed_payload):
+                with self.assertRaisesRegex(ValueError, "payload"):
+                    HudEvent.from_json(f'{{"type": "IDLE", "payload": {malformed_payload}}}')
+
+    def test_from_json_rejects_a_missing_type_with_a_clear_error(self):
+        """Prima: KeyError('type') non catturato - un'eccezione tecnica del dict sottostante,
+        non un errore chiaro coerente con lo stile del resto della classe (ValueError)."""
+        with self.assertRaisesRegex(ValueError, "type"):
+            HudEvent.from_json('{"payload": {}}')
+
+    def test_from_json_rejects_a_non_object_top_level_json(self):
+        """Prima: AttributeError su una lista/valore al livello superiore - non un errore chiaro
+        su un input malformato in arrivo dalla rete."""
+        for malformed in ("[]", "42", '"una stringa"', "null"):
+            with self.subTest(raw=malformed):
+                with self.assertRaises(ValueError):
+                    HudEvent.from_json(malformed)
 
     def test_sequence_id_defaults_to_zero_before_publishing(self):
         """F4.1.1: 0 non e' un evento fantasma - e' 'mai passato da EventBus.publish()', l'unico

@@ -245,7 +245,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F3.6` | Browser Automation (G1 superato, mai iniziato) | `READY` |
 | `F3.7` | Application Adapters (G1 superato, mai iniziato) | `READY` |
 | `F3.8` | Demonstration Learning (G1 superato, mai iniziato) | `READY` |
-| `F4.1` | Protocol Architecture (F4.1.2/F4.1.5 chiusi, F4.1.1 sequence_id chiuso - 16/09/2026; trace_id/F4.1.3/F4.1.4/F4.1.6 mai affrontati) | `DOING` |
+| `F4.1` | Protocol Architecture (F4.1.2/F4.1.5 chiusi, F4.1.1 sequence_id chiuso, F4.1.4 prima fetta lato Python - 16/09/2026; trace_id/F4.1.3/F4.1.6/lato C++ di F4.1.4 mai affrontati) | `DOING` |
 | `F4.2` | Native HUD (F4.2.1/F4.2.4 chiusi, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026; F4.2.5/F4.2.6 e resto di F4.2.3 richiedono test interattivi/visivi) | `DOING` |
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
 | `F4.4` | Interaction Design (G1 superato, mai iniziato) | `READY` |
@@ -4596,7 +4596,10 @@ Criterio di uscita: client Python finto e JakeClient C++ superano la stessa suit
 - Stato: `DOING`; `F4.1.5` **chiuso** (già vero per costruzione da `F1.8.6`, stesso `EventBus`,
   cross-riferimento non nuovo lavoro - vedi sotto); `F4.1.1` chiuso parzialmente (`sequence_id`
   fatto, `trace_id` no - vedi sotto); `F4.1.2` **chiuso** (schema condiviso generato, niente più
-  enum mantenuti a mano lato C++ - vedi sotto); resto (`F4.1.3`/`F4.1.4`/`F4.1.6`) mai affrontato.
+  enum mantenuti a mano lato C++ - vedi sotto); `F4.1.4` chiuso parzialmente (contract test per
+  payload malformato lato Python, tre buchi reali trovati e corretti - vedi sotto; il lato C++
+  resta scoperto, nessuna toolchain di test C++/QML in questo progetto); resto (`F4.1.3`/
+  `F4.1.6`) mai affrontato.
 - `F4.1.5` (VERIFICA, nessun codice) — 16/09/2026: "garantire che client lento non blocchi il
   core" è lo STESSO `core/event_bus.py::EventBus` già verificato per questo in `F1.8.6`
   ("impedire che un client lento blocchi event bus o altri client") - coda `queue.Queue(maxsize=
@@ -4654,6 +4657,29 @@ Criterio di uscita: client Python finto e JakeClient C++ superano la stessa suit
   sequenza HUD_HIDE→HUD_SHOW con `ctypes`/`IsWindowVisible()` di F4.2.2 - stesso comportamento
   corretto, nessuna regressione introdotta dal refactor. `F4.1.2` **chiuso**. Prova: 2.768/2.768
   test, ruff/mypy verdi lato Python; build C++ verde.
+- `F4.1.4` (prima fetta - contract test per payload malformato, lato Python) — 16/09/2026: "aggiungere
+  contract test per ogni evento e payload malformato" - investigato scrivendo i test prima del
+  fix (disciplina consueta), scoperti TRE buchi reali in `HudEvent.from_json()`, non solo
+  teorici: (1) un `payload` di TIPO sbagliato (una stringa, una lista, un numero invece di un
+  dict) veniva accettato silenziosamente - `data.get("payload") or {}` ricade su `{}` solo per
+  un valore falsy (`None`, stringa vuota...), mai per un valore del tipo sbagliato ma non vuoto -
+  producendo un `HudEvent.payload` che non e' un dict, pronto a rompere qualunque chiamante che
+  si aspettasse `payload.get(...)` in un punto lontano e confuso da dove il payload era stato
+  letto per davvero; (2) un campo `type` mancante sollevava `KeyError('type')`, un'eccezione
+  tecnica del dict sottostante invece di un errore chiaro coerente con lo stile gia' usato dal
+  resto della classe (`ValueError`); (3) un JSON valido ma non un oggetto al livello superiore
+  (una lista, un numero, `null`) sollevava `AttributeError` su `.get()`. Tutti e tre corretti in
+  `from_json()` con validazione esplicita PER FORMA (non solo presenza) prima di costruire
+  l'oggetto, ciascuno con un messaggio `ValueError` chiaro. Aggiunti 3 nuovi test dedicati (uno
+  per buco, ciascuno con piu' varianti malformate via `subTest`), tutti verificati FALLIRE contro
+  il codice precedente prima di applicare il fix, piu' un quarto test che esercita il round-trip
+  di OGNI membro di `EventType` (non piu' una manciata scelta a mano - un tipo futuro aggiunto
+  senza un percorso funzionante verrebbe scoperto automaticamente). Non ancora affrontato (il
+  resto di `F4.1.4`): il lato C++ non ha ancora alcuna suite di test (nessuna toolchain di test
+  per C++/QML in questo progetto, vedi `hud/native/README.md`) - "client Python finto e
+  JakeClient C++ superano la stessa suite di fixture" (il criterio di uscita letterale
+  dell'intera sezione F4.1) resta quindi non raggiungibile finche' quella toolchain non esiste,
+  limite dichiarato apertamente, non nascosto. Prova: 2.772/2.772 test, ruff/mypy verdi.
 
 ### F4.2 — Shell overlay nativa
 
