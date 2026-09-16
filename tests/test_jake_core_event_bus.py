@@ -54,28 +54,30 @@ class NotifyEventTests(unittest.TestCase):
         self.assertIsNone(message)
         self.assertTrue(subscriber.empty())
 
-    def test_a_trace_id_is_included_in_the_payload_when_given(self):
+    def test_a_trace_id_is_attached_to_the_event_when_given(self):
         """F1.7.2 ("collegare... notifica con lo stesso trace id"): un'automazione ha gia' un
         trace_id reale (PlanOutcome.trace_id) che correla ai passi gia' registrati nel ledger -
-        deve arrivare fino all'evento HUD, non sparire."""
+        deve arrivare fino all'evento HUD, non sparire. F4.1.1: campo di prima classe su
+        HudEvent, non piu' infilato nel payload (era cosi' prima di questo incremento)."""
         core = _bare_core(mode=NotificationMode.NORMAL)
         subscriber = core.event_bus.subscribe()
 
         core.notify("trigger", "Ho eseguito automaticamente 'buonanotte'", trace_id="abc123")
 
         event = subscriber.get_nowait()
-        self.assertEqual(event.payload["trace_id"], "abc123")
+        self.assertEqual(event.trace_id, "abc123")
+        self.assertNotIn("trace_id", event.payload)
 
-    def test_no_trace_id_key_when_not_given(self):
+    def test_trace_id_is_none_when_not_given(self):
         """Il comportamento esistente (nessun trace_id, es. un promemoria o un avviso senza
-        un'esecuzione da correlare) non deve cambiare: nessuna chiave 'trace_id' inventata."""
+        un'esecuzione da correlare) non deve cambiare: nessun valore inventato."""
         core = _bare_core(mode=NotificationMode.NORMAL)
         subscriber = core.event_bus.subscribe()
 
         core.notify("advisory", "batteria scarica")
 
         event = subscriber.get_nowait()
-        self.assertNotIn("trace_id", event.payload)
+        self.assertIsNone(event.trace_id)
 
 
 class EffectProofEventTests(unittest.TestCase):
@@ -112,6 +114,40 @@ class EffectProofEventTests(unittest.TestCase):
         core._publish_effect_proof_events([], [])
 
         self.assertTrue(subscriber.empty())
+
+    def test_a_given_trace_id_is_attached_to_both_undo_and_verification_events(self):
+        """F4.1.1 ("aggiungere... trace id"): lo stesso trace_id che gia' correla questi eventi
+        alle ricevute nel ledger (F1.3.8) deve arrivare anche sull'evento HUD, non solo su disco."""
+        core = _bare_core()
+        subscriber = core.event_bus.subscribe()
+
+        core._publish_effect_proof_events(
+            [("CREATE_PATH", "verified")], ["DELETE_PATH"], trace_id="abc123",
+        )
+
+        events = [subscriber.get_nowait(), subscriber.get_nowait()]
+        self.assertTrue(all(event.trace_id == "abc123" for event in events))
+
+    def test_plan_outcomes_own_trace_id_is_forwarded_automatically(self):
+        """`_publish_plan_outcome_effect_proof_events()` non richiede un trace_id esplicito da chi
+        la chiama (`_try_plan`/`_default_on_trigger_fired`): lo legge gia' da `outcome.trace_id`
+        (F1.7.2)."""
+        from core.plan_executor import PlanOutcome, PlanStep, StepOutcome
+        from core.skill_result import SkillResult
+
+        outcome = PlanOutcome(
+            rolled_back=[StepOutcome(
+                step=PlanStep(intent="DELETE_PATH", parameters={}),
+                result=SkillResult(success=True, data={}), attempts=1,
+            )],
+            trace_id="def456",
+        )
+        core = _bare_core()
+        subscriber = core.event_bus.subscribe()
+
+        core._publish_plan_outcome_effect_proof_events(outcome)
+
+        self.assertEqual(subscriber.get_nowait().trace_id, "def456")
 
     def test_plan_outcome_extraction_covers_completed_stopped_and_rolled_back_steps(self):
         """_publish_plan_outcome_effect_proof_events() estrae da un PlanOutcome vero (non solo
