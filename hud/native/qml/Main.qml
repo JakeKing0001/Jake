@@ -8,13 +8,22 @@ import JakeHud
 // vetro vero e proprio (blur/rifrazione) la 4.9.4/4.9.5. Qui ricrea solo i cinque pezzi
 // richiesti: orb centrale, barra comando, pannello conversazione, pannello di stato, azioni
 // rapide, tutti collegati DAVVERO al server companion di Jake (core/companion_server.py).
+//
+// Fase 4.9.3/F4.2.1 ("trasparenza, click-through selettivo e no-activate"): finestra senza
+// bordi/trasparente, sempre sopra, senza icona in barra applicazioni (Qt.Tool) e che non ruba
+// mai il focus tastiera (WS_EX_NOACTIVATE, applicato in OverlayStyler - Qt non ha un flag
+// cross-platform per questo). Click-through GROSSOLANO in questo primo passo, non ancora
+// per-pannello (limite dichiarato, vedi README): l'intera area occupata dal ColumnLayout dei
+// pannelli resta interattiva, solo il margine esterno (16px) e' click-through - i vuoti TRA un
+// pannello e l'altro non sono ancora distinti dai pannelli stessi.
 ApplicationWindow {
     id: window
     width: 420
     height: 640
     visible: true
     title: qsTr("Jake HUD")
-    color: "#14161c"
+    color: "transparent"
+    flags: Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
 
     // 127.0.0.1:8765 e' il default di companion_server_port in config/settings.example.json.
     property string jakeBaseUrl: "http://127.0.0.1:8765"
@@ -26,9 +35,24 @@ ApplicationWindow {
         onErrorOccurred: (detail) => conversation.append("errore", detail || qsTr("Errore sconosciuto"))
     }
 
-    Component.onCompleted: jake.connectToJake(jakeBaseUrl)
+    OverlayStyler {
+        id: overlayStyler
+    }
+
+    Component.onCompleted: {
+        jake.connectToJake(jakeBaseUrl)
+        overlayStyler.makeNoActivate(window)
+        overlayStyler.setClickThrough(window, true)
+    }
+
+    HoverHandler {
+        id: contentHover
+        target: content
+        onHoveredChanged: overlayStyler.setClickThrough(window, !hovered)
+    }
 
     ColumnLayout {
+        id: content
         anchors.fill: parent
         anchors.margins: 16
         spacing: 12

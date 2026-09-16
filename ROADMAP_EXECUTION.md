@@ -246,7 +246,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F3.7` | Application Adapters (G1 superato, mai iniziato) | `READY` |
 | `F3.8` | Demonstration Learning (G1 superato, mai iniziato) | `READY` |
 | `F4.1` | Protocol Architecture | `VERIFY` |
-| `F4.2` | Native HUD | `VERIFY` |
+| `F4.2` | Native HUD (F4.2.1 prima fetta, 16/09/2026 - resto mai affrontato) | `DOING` |
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
 | `F4.4` | Interaction Design (G1 superato, mai iniziato) | `READY` |
 | `F4.5` | Interaction Design (G1 superato, mai iniziato) | `READY` |
@@ -4465,9 +4465,38 @@ Criterio di uscita: una procedura dimostrata sopravvive a riavvio, resize e dati
 
 ## 10. F4 — HUD Engine 2.0
 
-- Stato: `READY` (G1 superato il 16/09/2026, vedi Gate G1 sopra); build prototype `VERIFY`
+- Stato: `DOING` (16/09/2026, prima fetta di F4.2 - vedi sotto); build prototype `VERIFY`
 - Priorità: `P1`
 - Output: interfaccia nativa fluida che mostra stato, prove, permessi e controllo.
+
+- `F4.2.1` (prima fetta - trasparenza, no-activate, click-through grossolano) — 16/09/2026: dopo
+  il superamento del Gate G1 (vedi sopra), decisione esplicita dell'utente di riprendere il track
+  HUD nativo (`hud/native/`, prototipo 4.9.2 già compilato/eseguito in una sessione precedente,
+  vedi `hud/native/README.md`) invece di F2/F3, entrambi mai iniziati. Prima fetta del letterale
+  della voce: finestra senza bordi e trasparente (`color: "transparent"` + `Qt.
+  FramelessWindowHint`), sempre sopra (`Qt.WindowStaysOnTopHint`) e senza icona in barra
+  applicazioni (`Qt.Tool`); nuovo `hud/native/src/OverlayStyler.{h,cpp}` isola le due proprietà
+  che Qt non espone in modo cross-platform - `WS_EX_NOACTIVATE` (applicato una volta all'avvio,
+  l'overlay non ruba mai il focus tastiera) e `WS_EX_TRANSPARENT` (attivato/disattivato a runtime
+  da un `HoverHandler` in `Main.qml`: click-through fuori dai pannelli, interattivo dentro).
+  Limite dichiarato apertamente (non nascosto, vedi il README aggiornato): il click-through è per
+  ora GROSSOLANO, non per-pannello - l'intera area del `ColumnLayout` (i cinque pannelli insieme,
+  compresi i vuoti tra l'uno e l'altro) resta interattiva, solo il margine esterno di 16px è
+  click-through; distinguere i vuoti tra pannelli richiede un `HoverHandler` per pannello con
+  aggregazione dello stato, rimandato a un passo successivo dedicato. Stesso standard di verifica
+  già accettato per questo track (C++/QML non ha una suite di test automatica, vedi il README):
+  compilato ed eseguito per davvero in questo ambiente (MSVC 19.51/Qt 6.7.3/Ninja) - compila senza
+  errori, l'eseguibile si avvia e resta in esecuzione senza warning QML su stderr, e collegamento
+  reale confermato con la stessa tecnica di prima (`event_bus.subscriber_count()` passa da 0 a 1
+  esattamente quando `JakeHud.exe` gira con un `CompanionServer` vero sulla porta 8765). Non
+  verificato (limite dell'ambiente, non del codice, dichiarato apertamente): l'aspetto visivo
+  della trasparenza, se il click-through passi DAVVERO un click a una finestra sottostante reale,
+  se il no-activate impedisca DAVVERO il furto di focus, e la leggibilità dei pannelli senza
+  sfondo proprio su uno sfondo desktop arbitrario (materia esplicita della fase successiva
+  4.9.4/4.9.5, "vetro vero"). Non ancora affrontato in questo passo (il resto di `F4.2`):
+  `F4.2.2`-`F4.2.6` (gestione show/hide senza rubare focus, comportamento Alt-Tab/desktop
+  virtuali/fullscreen, fallback finestra normale senza composition, test mouse/touch/tastiera/pen,
+  regioni interattive osservabili nei test).
 
 ### F4.1 — Protocollo e test contract
 
