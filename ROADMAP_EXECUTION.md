@@ -222,37 +222,37 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F0.4` | Quality Engineering | `BLOCKED` |
 | `F0.5` | Performance Engineering | `BLOCKED` |
 | `F0.6` | Release Engineering | `DOING` |
-| `F1.1` | Trust Core | `DONE` (G1, 16/09/2026) |
-| `F1.2` | Security Architecture | `DONE` (G1, 16/09/2026) |
-| `F1.3` | Execution Reliability | `DOING` (F1.3.4/F1.3.5 mai affrontati - infrastruttura undo/snapshot sostanziale, non richiesta da G1) |
-| `F1.4` | Identity and Secrets | `DONE` (G1, 16/09/2026) |
-| `F1.5` | Application Security | `DOING` (gap dichiarati - memoria a lungo termine/NEST, PDF/immagini - non richiesti da G1) |
-| `F1.6` | Sandbox Runtime | `DONE` (G1, 16/09/2026) |
-| `F1.7` | Observability | `DONE` (G1, 16/09/2026) |
-| `F1.8` | Runtime Reliability | `DONE` (G1, 16/09/2026) |
-| `F2.1` | Voice Quality | `READY` (G1 superato, mai iniziato) |
-| `F2.2` | Speech Runtime | `READY` (G1 superato, mai iniziato) |
-| `F2.3` | Voice Quality | `READY` (G1 superato, mai iniziato) |
-| `F2.4` | Audio Systems | `READY` (G1 superato, mai iniziato) |
-| `F2.5` | Speech Runtime | `READY` (G1 superato, mai iniziato) |
-| `F2.6` | Conversation Runtime | `READY` (G1 superato, mai iniziato) |
-| `F2.7` | Identity and Voice | `READY` (G1 superato, mai iniziato) |
-| `F3.1` | Computer Use Quality | `READY` (G1 superato, mai iniziato) |
-| `F3.2` | Windows Automation | `READY` (G1 superato, mai iniziato) |
-| `F3.3` | Windows Automation | `READY` (G1 superato, mai iniziato) |
-| `F3.4` | Execution Runtime | `READY` (G1 superato, mai iniziato) |
-| `F3.5` | Computer Use Reliability | `READY` (G1 superato, mai iniziato) |
-| `F3.6` | Browser Automation | `READY` (G1 superato, mai iniziato) |
-| `F3.7` | Application Adapters | `READY` (G1 superato, mai iniziato) |
-| `F3.8` | Demonstration Learning | `READY` (G1 superato, mai iniziato) |
+| `F1.1` | Trust Core | `DONE` |
+| `F1.2` | Security Architecture | `DONE` |
+| `F1.3` | Execution Reliability (F1.3.4/F1.3.5 mai affrontati, non richiesti da G1) | `DOING` |
+| `F1.4` | Identity and Secrets | `DONE` |
+| `F1.5` | Application Security (gap dichiarati, non richiesti da G1) | `DOING` |
+| `F1.6` | Sandbox Runtime | `DONE` |
+| `F1.7` | Observability | `DONE` |
+| `F1.8` | Runtime Reliability | `DONE` |
+| `F2.1` | Voice Quality (G1 superato, mai iniziato) | `READY` |
+| `F2.2` | Speech Runtime (G1 superato, mai iniziato) | `READY` |
+| `F2.3` | Voice Quality (G1 superato, mai iniziato) | `READY` |
+| `F2.4` | Audio Systems (G1 superato, mai iniziato) | `READY` |
+| `F2.5` | Speech Runtime (G1 superato, mai iniziato) | `READY` |
+| `F2.6` | Conversation Runtime (G1 superato, mai iniziato) | `READY` |
+| `F2.7` | Identity and Voice (G1 superato, mai iniziato) | `READY` |
+| `F3.1` | Computer Use Quality (G1 superato, mai iniziato) | `READY` |
+| `F3.2` | Windows Automation (G1 superato, mai iniziato) | `READY` |
+| `F3.3` | Windows Automation (G1 superato, mai iniziato) | `READY` |
+| `F3.4` | Execution Runtime (G1 superato, mai iniziato) | `READY` |
+| `F3.5` | Computer Use Reliability (G1 superato, mai iniziato) | `READY` |
+| `F3.6` | Browser Automation (G1 superato, mai iniziato) | `READY` |
+| `F3.7` | Application Adapters (G1 superato, mai iniziato) | `READY` |
+| `F3.8` | Demonstration Learning (G1 superato, mai iniziato) | `READY` |
 | `F4.1` | Protocol Architecture | `VERIFY` |
 | `F4.2` | Native HUD | `VERIFY` |
-| `F4.3` | Native HUD | `READY` (G1 superato, mai iniziato) |
-| `F4.4` | Interaction Design | `READY` (G1 superato, mai iniziato) |
-| `F4.5` | Interaction Design | `READY` (G1 superato, mai iniziato) |
-| `F4.6` | Trust UX | `READY` (G1 superato, mai iniziato) |
-| `F4.7` | Accessibility | `READY` (G1 superato, mai iniziato) |
-| `F4.8` | Release Engineering | `READY` (G1 superato, mai iniziato) |
+| `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
+| `F4.4` | Interaction Design (G1 superato, mai iniziato) | `READY` |
+| `F4.5` | Interaction Design (G1 superato, mai iniziato) | `READY` |
+| `F4.6` | Trust UX (G1 superato, mai iniziato) | `READY` |
+| `F4.7` | Accessibility (G1 superato, mai iniziato) | `READY` |
+| `F4.8` | Release Engineering (G1 superato, mai iniziato) | `READY` |
 | `F5.1` | Memory Platform | `DOING` |
 | `F5.2` | Memory Platform | `DOING` |
 | `F5.3` | Knowledge Model | `DOING` |
