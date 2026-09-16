@@ -246,7 +246,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F3.7` | Application Adapters (G1 superato, mai iniziato) | `READY` |
 | `F3.8` | Demonstration Learning (G1 superato, mai iniziato) | `READY` |
 | `F4.1` | Protocol Architecture | `VERIFY` |
-| `F4.2` | Native HUD (F4.2.1 chiuso, F4.2.2 prima fetta - 16/09/2026, resto mai affrontato) | `DOING` |
+| `F4.2` | Native HUD (F4.2.1 chiuso, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026, resto mai affrontato) | `DOING` |
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
 | `F4.4` | Interaction Design (G1 superato, mai iniziato) | `READY` |
 | `F4.5` | Interaction Design (G1 superato, mai iniziato) | `READY` |
@@ -4533,6 +4533,42 @@ Criterio di uscita: una procedura dimostrata sopravvive a riavvio, resize e dati
   un produttore verrà aggiunto altrove; resto di `F4.2.2` (comportamento Alt-Tab/desktop
   virtuali/fullscreen, fallback finestra normale, test mouse/touch/tastiera/pen, regioni
   interattive osservabili nei test - questi ultimi tre condivisi con `F4.2.3`-`F4.2.6`).
+- `F4.2.2` (chiusura del "non verificato" - buco reale trovato con una tecnica di verifica più
+  forte) — 16/09/2026: il punto lasciato esplicitamente "non verificato" sopra ("se la finestra
+  sparisca/ricompaia DAVVERO") non era una formalità - indagato con una tecnica mai usata prima in
+  questo track: un piccolo script Python con `ctypes` che interroga `IsWindowVisible()`/
+  `GetWindowLongW()` sulla HWND REALE dall'esterno, senza bisogno di vedere la finestra su uno
+  schermo. **Buco reale confermato**: `window.visible = visible` in QML aggiornava la proprietà
+  QML (verificato con un log temporaneo su file - `qDebug()`/stderr non arrivano in modo
+  affidabile per un `WIN32_EXECUTABLE` lanciato in background da bash, scoperto anch'esso
+  indagando) ma NON chiamava mai `ShowWindow` sulla HWND reale per QUESTA combinazione di flag
+  (`Qt.Tool`+`Qt.FramelessWindowHint`+`Qt.WindowStaysOnTopHint`+sfondo trasparente, che fa
+  aggiungere a Qt stesso `WS_EX_LAYERED`) - la finestra restava `IsWindowVisible()==True` anche
+  con `window.visible==false`, riprodotto in modo affidabile e correlato temporalmente con la
+  pubblicazione reale di `HUD_HIDE`/`HUD_SHOW`. Corretto con `OverlayStyler::forceVisibility()`,
+  `ShowWindow(hwnd, SW_SHOWNOACTIVATE/SW_HIDE)` esplicito (`SW_SHOWNOACTIVATE`, non `SW_SHOW`, per
+  non rubare focus alla ricomparsa). Verificato che il fix funziona per davvero:
+  `IsWindowVisible()` passa a `False`/torna a `True` esattamente in corrispondenza della
+  pubblicazione di `HUD_HIDE`/`HUD_SHOW` (correlazione temporale, non solo "succede prima o poi"),
+  e dopo l'intero ciclo `GetWindowLongW(GWL_EXSTYLE)` conferma che `WS_EX_NOACTIVATE` (F4.2.1)
+  sopravvive. Codice di debug temporaneo (log su file, metodo `Q_INVOKABLE` di appoggio) rimosso
+  prima del commit finale. Con questo, la prima fetta di `F4.2.2` è chiusa con una prova reale
+  invece che con "compila ed esegue senza crash" soltanto - lezione di metodo per il resto del
+  track: quella tecnica di verifica precedente non basta a scoprire un buco come questo.
+- `F4.2.3` (Alt-Tab, prima fetta - VERIFICA, nessun codice nuovo) — 16/09/2026: la stessa tecnica
+  sopra (`GetWindowLongW(GWL_EXSTYLE)` sulla finestra reale) conferma che `WS_EX_TOOLWINDOW` è già
+  presente - conseguenza automatica di `Qt.Tool` (impostato in F4.2.1), non qualcosa che
+  richiedeva codice nuovo. `WS_EX_TOOLWINDOW` è il flag Win32 che esclude una finestra da Alt-Tab
+  e dalla barra applicazioni: la parte "Alt-Tab" del requisito letterale di `F4.2.3` è quindi già
+  soddisfatta, verificato invece di assunto dal nome del flag Qt. Deliberatamente non affrontato
+  (limite dichiarato, stessa decisione già presa per AppContainer in `F1.6.4`): il comportamento
+  sui desktop virtuali di Windows (richiederebbe `IVirtualDesktopManager`, un'interfaccia COM non
+  documentata pubblicamente da Microsoft, usata da tool di terze parti mai stabile tra versioni di
+  Windows) e il comportamento contro un gioco a schermo intero in modalità esclusiva (il sistema
+  operativo tipicamente sopprime le altre finestre topmost per costruzione, non qualcosa che Jake
+  deve implementare) - entrambi richiederebbero test interattivi reali che questo ambiente non può
+  fare, rimandati a quando serviranno davvero invece di introdurre codice fragile su API non
+  documentate per un beneficio non ancora richiesto.
 
 ### F4.1 — Protocollo e test contract
 

@@ -38,3 +38,15 @@ void OverlayStyler::setClickThrough(QQuickWindow *window, bool enabled) {
     Q_UNUSED(enabled);
 #endif
 }
+
+void OverlayStyler::forceVisibility(QQuickWindow *window, bool visible) {
+#ifdef Q_OS_WIN
+    if (!window)
+        return;
+    HWND hwnd = reinterpret_cast<HWND>(window->winId());
+    ShowWindow(hwnd, visible ? SW_SHOWNOACTIVATE : SW_HIDE);
+#else
+    Q_UNUSED(window);
+    Q_UNUSED(visible);
+#endif
+}
