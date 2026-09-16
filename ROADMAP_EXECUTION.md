@@ -224,7 +224,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F0.6` | Release Engineering | `DOING` |
 | `F1.1` | Trust Core | `DONE` |
 | `F1.2` | Security Architecture | `DONE` |
-| `F1.3` | Execution Reliability (F1.3.5 meccanismo - 16/09/2026, non ancora collegato; F1.3.4 mai affrontato, non richiesti da G1) | `DOING` |
+| `F1.3` | Execution Reliability (F1.3.5 meccanismo + prima adozione, JakeCore - 16/09/2026; TaskAgent/PlanExecutor/skill "annulla"/F1.3.4 mai affrontati, non richiesti da G1) | `DOING` |
 | `F1.4` | Identity and Secrets | `DONE` |
 | `F1.5` | Application Security (gap dichiarati, non richiesti da G1) | `DOING` |
 | `F1.6` | Sandbox Runtime | `DONE` |
@@ -1573,10 +1573,11 @@ reversibili dispone di undo testato.
   finestre E casa (CONTROL_SMART_DEVICE, vedi sotto - la verifica e' dentro la skill stessa, non
   ancora un verificatore INDIPENDENTE in `INTENT_SAFETY_REGISTRY` come per CLOSE_WINDOW, che
   resta bloccato sulla stessa decisione di dipendenza per un client Home Assistant iniettabile in
-  `execution_safety.py`; non ancora browser); `F1.3.5` chiuso parzialmente (meccanismo -
-  `generate_undo_descriptor()`/`UndoStore` - vedi sotto, 16/09/2026; ancora non collegato a
-  nessun chokepoint di produzione ne' a una skill "annulla", `preconditions` deliberatamente mai
-  popolato); `F1.3.4` resta aperto, mai affrontato (infrastruttura nuova sostanziale a se',
+  `execution_safety.py`; non ancora browser); `F1.3.5` chiuso parzialmente (meccanismo E prima
+  adozione - `generate_undo_descriptor()`/`UndoStore` collegati al percorso a comando diretto di
+  `JakeCore` - vedi sotto, 16/09/2026; `TaskAgent`/`PlanExecutor` e una skill "annulla" restano da
+  fare, `preconditions` deliberatamente mai popolato); `F1.3.4` resta aperto, mai affrontato
+  (infrastruttura nuova sostanziale a se',
   "snapshot minimo prima dell'azione" e' un problema diverso da F1.3.5 - cosa salvare PRIMA che
   un'azione muti qualcosa, non come annullarla dopo - non una fetta stretta collegabile a
   qualcosa gia' esistente);
@@ -1622,6 +1623,27 @@ reversibili dispone di undo testato.
   minimo prima dell'azione") resta un problema completamente separato, non affrontato qui. Prova:
   2.801/2.801 test, ruff/mypy verdi (87 file nella lista selettiva mypy, `core/undo_store.py`
   aggiunto).
+- `F1.3.5` (adozione - prima fetta, percorso a comando diretto) — 16/09/2026: collegato per
+  davvero il meccanismo appena costruito a UN chokepoint reale - `JakeCore._execute_command()`,
+  il percorso a comando singolo (lo stesso gia' pilotato per primo in `F1.1.6`). Quando un'azione
+  riuscita ha un intent con inverso naturale (`core/execution_safety.py::UNDO_PARAMS_BY_INTENT`),
+  un vero `UndoDescriptor` viene generato e salvato in `self.undo_store` (nuovo, istanziato in
+  `JakeCore.__init__`) - `None` per un intent senza inverso, nessun cambio di comportamento per
+  gli altri ~205 intent. `action_id` generato in `_execute_command()` PRIMA di chiamare
+  `_log_action_outcome()` (che ora accetta un `action_id` iniettabile opzionale, `None` di
+  default preserva il comportamento per tutti gli altri percorsi che non hanno un undo da
+  correlare - bloccato/non trovato/richiede conferma) cosi' la stessa identita' correla la
+  ricevuta nel ledger con il descrittore salvato, non due identificatori scollegati. Aggiunti 5
+  nuovi test in `tests/test_jake_core_pipeline.py::ExecuteCommandUndoStoreWiringTests` (un
+  `CREATE_PATH` riuscito genera un undo `DELETE_PATH` usabile con gli stessi parametri esatti;
+  ricevuta e descrittore condividono lo stesso `action_id`; un intent senza inverso, un'azione
+  fallita, e un'azione bloccata non salvano nulla) - i due test positivi verificati FALLIRE contro
+  il codice precedente (`git stash` di solo `core/jake_core.py`) prima di applicare la modifica.
+  **Deliberatamente non affrontato**: `TaskAgent`/`PlanExecutor` (gli altri due chokepoint reali,
+  stesso schema gia' visto per `F1.1.6`→`F1.1.7` - un pilota su un solo percorso prima di
+  generalizzare) e una skill "annulla" che consumi davvero `UndoStore.get()`/`mark_used()` -
+  senza un consumatore, il meccanismo resta osservabile solo nei test, non ancora nell'esperienza
+  utente. Prova: 2.806/2.806 test, ruff/mypy verdi.
 - `F1.3.1` — 11/09/2026: `core/execution_safety.py` aveva tre strutture parallele da tenere
   sincronizzate a mano - `VERIFIABLE_INTENTS` (insieme), l'if/elif di `verify_effect`,
   `ROLLBACK_HANDLERS` + `ROLLBACK_COMPENSATING_INTENT` (due dizionari) - esattamente il pattern

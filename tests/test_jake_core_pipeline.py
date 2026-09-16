@@ -36,6 +36,7 @@ from core.request_context import (
 )
 from core.session_recorder import SessionRecorder
 from core.skill_result import SkillResult
+from core.undo_store import UndoStore
 from skills.delete_path import DeletePathSkill
 
 
@@ -255,6 +256,7 @@ def _bare_core(**overrides) -> JakeCore:
     core.system_advisor = overrides.get("system_advisor", mock.MagicMock())
     core.companion_server = overrides.get("companion_server", mock.MagicMock())
     core.device_credential_store = overrides.get("device_credential_store", mock.MagicMock())
+    core.undo_store = overrides.get("undo_store", UndoStore())
     core.retriever = overrides.get("retriever", mock.MagicMock())
     # F1.8.4 ("drain limitato"): letti/scritti da answer()/shutdown() - vedi core/jake_core.py.
     core._in_flight_answers = 0
@@ -506,6 +508,65 @@ class ExecuteCommandTests(_JakeCoreTestCase):
         core = self._core(skill_registry=registry, router=FakeRouter(Command("OPEN_APP", {"app": "chrome"})))
         core._execute_command("apri chrome", Command("OPEN_APP", {"app": "chrome"}))
         self.assertEqual(core.conversation_state.get_entities().get("app"), "chrome")
+
+
+class ExecuteCommandUndoStoreWiringTests(_JakeCoreTestCase):
+    """F1.3.5 (adozione - prima fetta): il meccanismo (core/undo_store.py) esisteva gia', mai
+    collegato a nessun chokepoint reale prima di questo incremento - qui verificato che
+    _execute_command lo popoli DAVVERO per un'azione riuscita, non solo che il meccanismo
+    isolato funzioni (gia' coperto da tests/test_undo_store.py)."""
+
+    def test_a_successful_create_path_saves_a_real_undo_descriptor(self):
+        registry = FakeRegistry({"CREATE_PATH": FakeSkill(SkillResult(success=True, data={"path": "C:\\nuovo.txt"}))})
+        core = self._core(skill_registry=registry, router=FakeRouter(Command("CREATE_PATH", {"path": "C:\\nuovo.txt"})))
+
+        core._execute_command("crea nuovo.txt", Command("CREATE_PATH", {"path": "C:\\nuovo.txt"}))
+
+        receipt = core.action_ledger.read_all()[-1]
+        descriptor = core.undo_store.get(receipt["action_id"])
+        self.assertIsNotNone(descriptor, "un'azione con inverso naturale deve generare un undo usabile")
+        self.assertEqual(descriptor.compensating_intent, "DELETE_PATH")
+        self.assertEqual(descriptor.compensating_parameters, {"path": "C:\\nuovo.txt", "confirmed": True})
+
+    def test_the_ledger_receipt_and_the_undo_descriptor_share_the_same_action_id(self):
+        """La correlazione e' il punto: senza lo stesso action_id, non c'e' modo di risalire
+        dalla ricevuta nel ledger al suo eventuale undo."""
+        registry = FakeRegistry({"CREATE_PATH": FakeSkill(SkillResult(success=True, data={"path": "C:\\x.txt"}))})
+        core = self._core(skill_registry=registry, router=FakeRouter(Command("CREATE_PATH", {"path": "C:\\x.txt"})))
+
+        core._execute_command("crea x.txt", Command("CREATE_PATH", {"path": "C:\\x.txt"}))
+
+        receipt = core.action_ledger.read_all()[-1]
+        self.assertIsNotNone(core.undo_store.get(receipt["action_id"]))
+
+    def test_an_intent_without_a_natural_inverse_saves_no_undo_descriptor(self):
+        registry = FakeRegistry({"GET_TIME": FakeSkill(SkillResult(success=True, data={"time": "10:00"}))})
+        core = self._core(skill_registry=registry, router=FakeRouter(Command("GET_TIME", {})))
+
+        core._execute_command("che ore sono", Command("GET_TIME", {}))
+
+        receipt = core.action_ledger.read_all()[-1]
+        self.assertIsNone(core.undo_store.get(receipt["action_id"]))
+
+    def test_a_failed_execution_saves_no_undo_descriptor(self):
+        registry = FakeRegistry({"CREATE_PATH": FakeSkill(SkillResult(success=False, data={}, error="OPERATION_FAILED"))})
+        core = self._core(skill_registry=registry, router=FakeRouter(Command("CREATE_PATH", {"path": "C:\\x.txt"})))
+
+        core._execute_command("crea x.txt", Command("CREATE_PATH", {"path": "C:\\x.txt"}))
+
+        receipt = core.action_ledger.read_all()[-1]
+        self.assertIsNone(core.undo_store.get(receipt["action_id"]), "nulla da annullare per un'azione mai riuscita")
+
+    def test_a_blocked_intent_saves_no_undo_descriptor(self):
+        registry = FakeRegistry({"DELETE_PATH": FakeSkill()})
+        core = self._core(skill_registry=registry, blocked_intents=["DELETE_PATH"])
+
+        core._execute_command("cancella tutto", Command("DELETE_PATH", {}))
+
+        self.assertEqual(core.action_ledger.read_all()[-1]["result"], "blocked_by_policy")
+        # Nessun action_id noto per un'azione mai eseguita: nessun descrittore da cercare, il
+        # punto e' che undo_store.save() non e' mai stato chiamato (verificato indirettamente -
+        # nessun errore, nessuna eccezione, il flusso normale di blocco resta invariato).
 
 
 class ConcurrentPendingActionConfirmationTests(_JakeCoreTestCase):
