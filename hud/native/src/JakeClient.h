@@ -69,4 +69,9 @@ private:
     bool m_connected = false;
     QString m_state = QStringLiteral("IDLE");
     QString m_activeDevice;
+    // F4.1.3 (lato C++, seconda fetta): l'ultimo sequence_id visto, mandato come header
+    // Last-Event-ID alla riconnessione per sfruttare il replay gia' costruito lato server
+    // (core/event_bus.py::EventBus.subscribe_with_replay, PR #133) - 0 = "nessun evento visto
+    // ancora", stessa convenzione di HudEvent.sequence_id lato Python.
+    qint64 m_lastSequenceId = 0;
 };
