@@ -175,6 +175,41 @@ vero auto-reconnect (nessun retry automatico dopo una disconnessione, `onEventSt
 si limita oggi a segnalarla) né invia l'header `Last-Event-ID` per sfruttare il meccanismo appena
 costruito lato server - un passo successivo separato, non affrontato qui.
 
+## F4.1.3 — auto-reconnect e Last-Event-ID lato C++ (seconda fetta)
+
+Seconda fetta, questa volta lato client: `JakeClient` traccia ora `m_lastSequenceId` (aggiornato
+in `handleEventLine()` per OGNI evento riuscito, letto dal campo `sequence_id` già presente nel
+JSON) e lo manda come header `Last-Event-ID` ad ogni `connectToJake()` successiva alla prima -
+sfruttando per davvero il meccanismo di resume costruito lato server sopra. Alla disconnessione
+del flusso SSE, `onEventStreamFinished()` programma una riconnessione automatica dopo un ritardo
+fisso di 3 secondi (non backoff esponenziale - "prima deve funzionare": un assistente personale
+con un solo server locale non ha lo stesso rischio di "thundering herd" di un servizio con molti
+client concorrenti).
+
+**Buco reale preesistente corretto nello stesso passo** (mai raggiunto finché `connectToJake()`
+veniva chiamata una sola volta all'avvio, ora raggiungibile per davvero con la riconnessione
+automatica): `onEventStreamFinished()` leggeva il MEMBRO `m_eventStream` invece del mittente
+reale del segnale (`sender()`) - lo stream vecchio abortito da una riconnessione emette comunque
+`finished()` in modo asincrono, e se nel frattempo `connectToJake()` avesse già riassegnato
+`m_eventStream` al nuovo stream, questo slot avrebbe cancellato/nullato per errore lo stream
+NUOVO scambiandolo per quello vecchio appena finito. Corretto confrontando il mittente reale con
+il membro prima di agire, e programmando una nuova riconnessione solo se lo stream finito è
+davvero quello corrente (mai per un vecchio stream abortito deliberatamente).
+
+**Verificato per davvero, non solo compilato**: eseguibile lanciato PRIMA che qualunque server
+fosse in ascolto sulla porta (simula "Jake core non ancora avviato"/un riavvio) - la prima
+connessione fallisce come atteso, ma l'eseguibile continua a ritentare da solo ogni 3 secondi
+senza crash; avviato poi un `CompanionServer` vero sulla stessa porta: connesso con successo
+entro mezzo secondo dall'avvio del server (`event_bus.subscriber_count()` passa a 1), senza
+alcun intervento manuale né riavvio del processo HUD. **Non verificato in combinazione** (limite
+dell'ambiente, dichiarato apertamente): il replay VERO durante un reconnect a metà sessione (il
+server usato nel test sopra parte già scritto per accettarlo, verificato in isolamento nella
+prima fetta - simulare un'interruzione di rete senza fermare il processo server richiederebbe
+manipolare il socket TCP di un singolo client, non raggiungibile dagli strumenti di questo
+ambiente); il caso di un server che riparte con un `EventBus` NUOVO (contatore `sequence_id`
+azzerato) mentre il client conserva ancora un `m_lastSequenceId` più alto da prima - scenario
+dichiarato apertamente non gestito, non lo stesso della disconnessione breve testata sopra.
+
 ## Stato di verifica
 
 A differenza di tutto il resto di Jake (Python, con test automatici in `tests/`), questo codice
