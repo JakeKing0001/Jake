@@ -8,6 +8,13 @@ Item {
     property string state: "IDLE"
     width: 120
     height: 120
+    // F4.2.1: vedi lo stesso alias in StatusPanel.qml - l'orb non gestisce ancora click propri,
+    // ma resta comunque un'area "del pannello", non uno sfondo click-through.
+    property alias hovered: hoverHandler.hovered
+
+    HoverHandler {
+        id: hoverHandler
+    }
 
     readonly property color stateColor: {
         switch (state) {
