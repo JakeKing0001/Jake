@@ -50,6 +50,7 @@ void JakeClient::connectToJake(const QString &baseUrl) {
         m_eventStream = nullptr;
     }
     m_eventBuffer.clear();
+    m_protocolMismatchReported = false;
 
     QNetworkRequest request(QUrl(m_baseUrl + QStringLiteral("/events")));
     request.setRawHeader("Accept", "text/event-stream");
@@ -145,7 +146,22 @@ void JakeClient::handleEventLine(const QString &jsonLine) {
     if (!doc.isObject()) return;
     const auto object = doc.object();
     if (object.value("schema_version").toInt(-1) != JAKE_PROTOCOL_VERSION) {
-        emit errorOccurred(QStringLiteral("Evento Jake con versione protocollo non compatibile"));
+        // F4.1.6 ("definire compatibility window"): finestra ZERO - nessuna tolleranza tra
+        // versioni diverse, per costruzione (JAKE_PROTOCOL_VERSION e' generato dallo stesso
+        // config/release.json letto da core/version.py, vedi CMakeLists.txt - le due parti sono
+        // sempre build-compatibili quando ricompilate insieme; uno scarto e' sempre un binario
+        // HUD non ricompilato dopo un cambio di schema, mai una versione "abbastanza vicina" da
+        // tollerare). Segnalato UNA sola volta per connessione (non un errorOccurred per ogni
+        // evento sullo stesso stream, vedi m_protocolMismatchReported) e lo stream si interrompe
+        // subito: onEventStreamFinished() programmera' comunque una riconnessione automatica fra
+        // kReconnectDelayMs, che fallira' di nuovo nello stesso modo finche' l'HUD non viene
+        // ricompilato - lo stesso comportamento gia' definito per /status (fetchStatus()).
+        if (!m_protocolMismatchReported) {
+            m_protocolMismatchReported = true;
+            emit errorOccurred(QStringLiteral("Evento Jake con versione protocollo non compatibile"));
+        }
+        if (m_eventStream != nullptr)
+            m_eventStream->abort();
         return;
     }
     const QString type = object.value("type").toString();

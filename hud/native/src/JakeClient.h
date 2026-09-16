@@ -74,4 +74,10 @@ private:
     // (core/event_bus.py::EventBus.subscribe_with_replay, PR #133) - 0 = "nessun evento visto
     // ancora", stessa convenzione di HudEvent.sequence_id lato Python.
     qint64 m_lastSequenceId = 0;
+    // F4.1.6 ("definire compatibility window tra core e HUD"): senza questo, ogni singolo evento
+    // con schema_version incompatibile emetteva un errorOccurred proprio - su uno stream SSE che
+    // puo' ricevere piu' eventi al secondo, un core disallineato (es. HUD non ricompilato dopo un
+    // cambio di schema) inonderebbe l'interfaccia con lo stesso errore ripetuto invece di
+    // segnalarlo UNA volta e interrompere lo stream. Azzerato ad ogni nuova connectToJake().
+    bool m_protocolMismatchReported = false;
 };
