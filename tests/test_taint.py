@@ -39,6 +39,7 @@ class WrapExternalContentTests(unittest.TestCase):
             "WEB_SEARCH", "RESEARCH", "GET_BROWSER_HISTORY",
             "FIND_FILE", "FIND_LARGE_FILES", "LIST_RECENT_FILES",
             "SEARCH_FILES", "HYBRID_SEARCH_FILES", "SEMANTIC_SEARCH_FILES",
+            "DESCRIBE_SCREEN",
         }))
 
 

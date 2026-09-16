@@ -76,6 +76,11 @@ EXTERNAL_CONTENT_INTENTS = frozenset({
     "WEB_SEARCH", "RESEARCH", "GET_BROWSER_HISTORY",
     "FIND_FILE", "FIND_LARGE_FILES", "LIST_RECENT_FILES",
     "SEARCH_FILES", "HYBRID_SEARCH_FILES", "SEMANTIC_SEARCH_FILES",
+    # F1.5.7 (testo su immagini): buco reale trovato ricontrollando le skill di visione - READ_SCREEN
+    # (OCR) era gia' censito, DESCRIBE_SCREEN (modello di visione locale, skills/describe_screen.py)
+    # no, pur restituendo lo stesso genere di testo derivato da cio' che c'e' VERAMENTE sullo
+    # schermo (response_formatter.py restituisce data["description"] verbatim).
+    "DESCRIBE_SCREEN",
 })
 
 EXTERNAL_CONTENT_MARKER = "[CONTENUTO ESTERNO"
