@@ -69,6 +69,8 @@ qt_add_executable(JakeHud
     src/main.cpp
     src/JakeClient.h
     src/JakeClient.cpp
+    src/OverlayStyler.h
+    src/OverlayStyler.cpp
 )
 
 # Modulo QML "JakeHud" (vedi "import JakeHud" in qml/Main.qml ed engine.loadFromModule in
