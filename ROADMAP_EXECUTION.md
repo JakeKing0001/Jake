@@ -245,7 +245,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F3.6` | Browser Automation (G1 superato, mai iniziato) | `READY` |
 | `F3.7` | Application Adapters (G1 superato, mai iniziato) | `READY` |
 | `F3.8` | Demonstration Learning (G1 superato, mai iniziato) | `READY` |
-| `F4.1` | Protocol Architecture | `VERIFY` |
+| `F4.1` | Protocol Architecture (F4.1.5 chiuso, F4.1.1 sequence_id chiuso - 16/09/2026; trace_id e resto mai affrontati) | `DOING` |
 | `F4.2` | Native HUD (F4.2.1/F4.2.4 chiusi, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026; F4.2.5/F4.2.6 e resto di F4.2.3 richiedono test interattivi/visivi) | `DOING` |
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
 | `F4.4` | Interaction Design (G1 superato, mai iniziato) | `READY` |
@@ -4592,6 +4592,44 @@ Dipende da: F1.1.
 6. `F4.1.6` Definire compatibility window tra core e HUD.
 
 Criterio di uscita: client Python finto e JakeClient C++ superano la stessa suite di fixture.
+
+- Stato: `DOING`; `F4.1.5` **chiuso** (già vero per costruzione da `F1.8.6`, stesso `EventBus`,
+  cross-riferimento non nuovo lavoro - vedi sotto); `F4.1.1` chiuso parzialmente (`sequence_id`
+  fatto, `trace_id` no - vedi sotto); resto (`F4.1.2`-`F4.1.4`, `F4.1.6`) mai affrontato.
+- `F4.1.5` (VERIFICA, nessun codice) — 16/09/2026: "garantire che client lento non blocchi il
+  core" è lo STESSO `core/event_bus.py::EventBus` già verificato per questo in `F1.8.6`
+  ("impedire che un client lento blocchi event bus o altri client") - coda `queue.Queue(maxsize=
+  ...)` per iscritto, `put_nowait`, scarto del più vecchio su coda piena, mai un blocco. Nessun
+  codice nuovo: la voce letterale di `F4.1.5` era già soddisfatta da lavoro fatto sotto un altro
+  numero di roadmap, semplicemente mai ricollegata esplicitamente a questa voce (stesso schema già
+  visto per `F1.2.8`/`F1.3.5` in questa sessione). `F4.1.5` **chiuso**.
+- `F4.1.1` (prima fetta - `sequence_id`) — 16/09/2026: "versionare `HudEvent`, aggiungere sequence
+  id, trace id e timestamp" - `at` (timestamp) esisteva già; `sequence_id`/`trace_id` no. Buco
+  reale, non teorico: senza un numero d'ordine, un client (HUD nativo, companion) non ha alcun
+  modo di accorgersi che un evento è andato perso (coda satura, `F1.8.6`/`F4.1.5` sopra) o
+  arrivato fuori ordine dopo un riconnect. Nuovo campo `HudEvent.sequence_id: int = 0`
+  (`0` = "mai passato da `EventBus.publish()`", non un evento fantasma), serializzato in
+  `to_json()`/letto in `from_json()` con fallback `0` per compatibilità con un record scritto
+  prima di questo incremento. Assegnato da `core/event_bus.py::EventBus.publish()` - l'UNICO
+  punto per cui ogni `HudEvent` transita prima di raggiungere un iscritto, quindi l'unico che
+  conosce l'ordine GLOBALE reale tra produttori diversi (`JakeCore`, `companion_server` -
+  verificato con `grep` che sono gli unici 8 punti che chiamano `publish()` in tutto il progetto,
+  tutti con un `HudEvent`) - un contatore locale per produttore avrebbe potuto assegnare lo stesso
+  numero a due eventi diversi. `EventBus` resta deliberatamente generico (duck-typing
+  `hasattr(event, "sequence_id")`, mai un import di `HudEvent`), coerente col proprio docstring
+  ("bus di eventi multi-consumatore", non specifico al protocollo HUD). Incremento sotto lo stesso
+  `self._lock` già esistente per la lista iscritti - nessun lock nuovo. Aggiunti 4 nuovi test in
+  `tests/test_hud_protocol.py::HudEventSerializationTests` e una nuova classe
+  `EventBusSequenceIdTests` (4 test: incremento base, stesso ID per iscritti diversi, ID condiviso
+  tra "produttori" diversi, e un test di concorrenza con 8 thread veri × 50 pubblicazioni ciascuno
+  che verifica NESSUN ID duplicato o saltato) - tutti verificati FALLIRE contro il codice
+  precedente (`AttributeError: 'HudEvent' object has no attribute 'sequence_id'`) prima di
+  applicare il fix. Non ancora affrontato: `trace_id` (correlazione con lo stesso `trace_id` già
+  usato nel ledger per `F1.7.2` - richiederebbe passare `trace_id` a ciascuno degli 8 call site di
+  `publish()`, non disponibile in scope per tutti senza indagare caso per caso, rimandato); il
+  lato C++ (`JakeClient.cpp`) non tocca ancora `sequence_id` - un campo JSON extra è ignorato
+  silenziosamente dal parser esistente, nessuna rottura, ma nessun consumo nemmeno (F4.1.3,
+  reconnect/resume, è il punto in cui servirà davvero). Prova: 2.762/2.762 test, ruff/mypy verdi.
 
 ### F4.2 — Shell overlay nativa
 
