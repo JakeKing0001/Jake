@@ -1573,11 +1573,11 @@ reversibili dispone di undo testato.
   finestre E casa (CONTROL_SMART_DEVICE, vedi sotto - la verifica e' dentro la skill stessa, non
   ancora un verificatore INDIPENDENTE in `INTENT_SAFETY_REGISTRY` come per CLOSE_WINDOW, che
   resta bloccato sulla stessa decisione di dipendenza per un client Home Assistant iniettabile in
-  `execution_safety.py`; non ancora browser); `F1.3.5` chiuso parzialmente (meccanismo E adozione
+  `execution_safety.py`; non ancora browser); `F1.3.5` **chiuso per intero** (meccanismo, adozione
   su TUTTI E TRE i chokepoint reali - `JakeCore`/`TaskAgent`/`PlanExecutor`, con lo STESSO
-  `UndoStore` condiviso da tutti - vedi sotto, 16/09/2026; resta solo una skill "annulla" che lo
-  consumi davvero, `preconditions` deliberatamente mai popolato); `F1.3.4` resta aperto, mai
-  affrontato (infrastruttura nuova sostanziale a se',
+  `UndoStore` condiviso da tutti - E la skill "annulla" (`UNDO_LAST_ACTION`) che lo consuma
+  davvero, vedi sotto, 16/09/2026; `preconditions` deliberatamente mai popolato); `F1.3.4` resta
+  aperto, mai affrontato (infrastruttura nuova sostanziale a se',
   "snapshot minimo prima dell'azione" e' un problema diverso da F1.3.5 - cosa salvare PRIMA che
   un'azione muti qualcosa, non come annullarla dopo - non una fetta stretta collegabile a
   qualcosa gia' esistente);
@@ -2661,8 +2661,9 @@ Criterio di uscita: zero bypass nel corpus security e provenienza mostrata per o
 - Stato: `DOING`; `F1.5.1` chiuso parzialmente (prima fetta - vedi sotto: un enum con le quattro
   categorie esiste, ma solo `EXTERNAL_CONTENT` e' davvero collegata a un punto di produzione;
   `USER_DATA`/`INSTRUCTION`/`TOOL_RESULT` restano dichiarate ma non ancora usate; censimento
-  `EXTERNAL_CONTENT_INTENTS` esteso il 15/09/2026 da 7 a 13 intent - vedi sotto, buco reale nel
-  censimento originale che tocca anche `F1.5.7`); `F1.5.3`
+  `EXTERNAL_CONTENT_INTENTS` esteso il 15/09/2026 da 7 a 13 intent, poi il 16/09/2026 a 14 con
+  `DESCRIBE_SCREEN` - vedi sotto, buchi reali nel censimento originale che toccano anche `F1.5.7`);
+  `F1.5.3`
   **chiuso** (VERIFICA su entrambi i percorsi reali che eseguono un'azione a partire da JSON
   potenzialmente influenzato da contenuto esterno - l'agente a passi, vedi sotto, E il piano
   fisso/`PlanExecutor`, la cui protezione esisteva gia' da prima di questa sessione ed e' PIU'
@@ -2681,9 +2682,9 @@ Criterio di uscita: zero bypass nel corpus security e provenienza mostrata per o
   precedenza); `F1.5.8` **chiuso** (risk budget per escalation concatenata, `TaskRiskBudget` -
   vedi la voce "fase 8 del piano" in F1.4 sopra; meccanismo costruito e testato, non ancora
   collegato a `TaskAgent`/`PlanExecutor`, vedi la nota di stato onesto alla fine della fase 10);
-  `F1.5.7` chiuso parzialmente (nomi file - vedi sotto; PDF/commenti di
-  codice/testo su immagini restano fuori, nessuno di questi formati e' oggi PARSATO da Jake al di
-  la' del testo grezzo).
+  `F1.5.7` chiuso parzialmente (nomi file - vedi sotto la fase 15/09; testo su immagini/schermo
+  ORA coperto tramite `DESCRIBE_SCREEN` - 16/09/2026, vedi sotto; PDF/commenti di codice restano
+  fuori, nessuno dei due formati e' oggi PARSATO da Jake al di la' del testo grezzo).
 - `F1.5.1` (prima fetta - marcatore strutturale per il contenuto esterno) — 14/09/2026: fase mai
   affrontata prima in questa sessione, prima investigata con un sottoagente di ricerca dedicato
   (stesso principio gia' seguito per F1.6/F1.1.7: capire lo stato reale prima di scrivere codice)
@@ -2897,6 +2898,29 @@ Criterio di uscita: zero bypass nel corpus security e provenienza mostrata per o
   rappresentante basta per l'intera classe, stesso meccanismo di wrap condiviso da tutti e sei),
   tutti verificati FALLIRE contro il codice precedente prima della correzione. Prova: 2.587/2.587
   test, ruff/mypy verdi su tutti i file toccati (`core/taint.py` gia' nel set selettivo).
+- `F1.5.1`/`F1.5.7` (censimento esteso - `DESCRIBE_SCREEN`, testo su immagini/schermo) —
+  16/09/2026: dopo aver chiuso F1.3.5 per intero (skill "annulla"), continuato sulla stessa
+  disciplina di ricensimento gia' applicata il 15/09 per i nomi di file - questa volta sulle skill
+  di VISIONE. `READ_SCREEN` (OCR del testo sullo schermo) era gia' censito in
+  `EXTERNAL_CONTENT_INTENTS`; `DESCRIBE_SCREEN` (`skills/describe_screen.py`, un modello di
+  visione locale che descrive cosa c'e' sullo schermo - layout, immagini, grafici) no, pur
+  restituendo lo stesso genere di testo derivato da cio' che c'e' VERAMENTE sullo schermo
+  (`core/response_formatter.py` restituisce `data["description"]` verbatim, che diventa `text` in
+  `TaskAgent._observe()` prima del controllo di wrap). Un sito web, un documento aperto o un
+  messaggio ricevuto puo' contenere testo scritto apposta per essere letto (e ubbidito) da un
+  modello - lo stesso rischio gia' riconosciuto per l'OCR, mai esteso alla visione. Aggravante:
+  `DESCRIBE_SCREEN` e' anche in `CORE_TOOLS` (`core/agent.py`), quindi sempre offerto all'agente,
+  non uno strumento raro. Un solo intent aggiunto a `EXTERNAL_CONTENT_INTENTS` (13→14 elementi);
+  nessun cambiamento al meccanismo di wrap ne' a `F1.5.4` (il "mostra sorgente" riusa la STESSA
+  `EXTERNAL_CONTENT_INTENTS`, beneficio automatico identico al 15/09). Nuovo test in
+  `tests/test_agent.py::ExternalContentTaintMarkerTests::test_describe_screen_results_carry_
+  the_marker`, verificato FALLIRE contro il codice precedente prima della correzione; aggiornato
+  anche il censimento hardcoded in `tests/test_taint.py`. **Deliberatamente non affrontato**: PDF e
+  commenti di codice (l'ultima parte letterale di `F1.5.7`) restano fuori - nessuno dei due formati
+  e' oggi parsato da Jake al di la' del testo grezzo, un gap architetturale diverso (serve un
+  parser nuovo, non solo un censimento) da quello chiuso qui. Prova: 2.830/2.830 test (il singolo
+  fallimento isolato di `test_sandboxed_skill_worker.py` visto nell'incremento precedente non si
+  e' ripresentato in questo run), ruff/mypy verdi.
 
 ### F1.6 — Sandbox permanente per skill
 
