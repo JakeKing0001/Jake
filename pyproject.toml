@@ -46,6 +46,7 @@ files = [
     "core/config.py",
     "core/execution_safety.py",
     "core/undo_store.py",
+    "core/action_snapshot.py",
     "core/schema_validation.py",
     "core/notification_center.py",
     "core/autonomy_budget.py",
