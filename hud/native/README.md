@@ -17,6 +17,12 @@ niente di Ollama, agenti o memoria — esattamente il punto della fase "UI separ
   Events, parsing manuale — Qt non ha un client SSE nativo), `POST /command`,
   `POST /devices/<id>/claim`.
 
+Direzione scelta per Orb 2.0 (16/09/2026): **sfera volumetrica di particelle animate**, con
+profondita' apparente, rotazione/pulsazione e movimento legato agli stati, non un cerchio pieno.
+Specifica e criteri performance/accessibilita' nella [roadmap esecutiva](../../ROADMAP_EXECUTION.md), **F4.4.7**. Pianificato,
+non ancora implementato: `Orb.qml` resta il prototipo semplice. "Mobile" e' inteso come animato;
+il trascinamento/riposizionamento sul desktop e' una decisione distinta da confermare.
+
 Finestra overlay trasparente/click-through e no-activate (F4.2.1), con show/hide reale (F4.2.2).
 **Non** ancora: vetro vero con blur/rifrazione (4.9.4/4.9.5), stato reattivo del vetro (4.9.6), Orb 2.0 con particelle
 (4.9.7), pannelli contestuali per tipo di task (4.9.8), transizioni fluide (4.9.9), multi-monitor
