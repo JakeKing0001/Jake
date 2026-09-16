@@ -152,6 +152,29 @@ pura, nessuna toolchain C++ richiesta); ricompilato con successo (il passo
 HUD_HIDE→HUD_SHOW con `ctypes`/`IsWindowVisible()` di F4.2.2 - stesso comportamento corretto,
 nessuna regressione introdotta dal refactor.
 
+## F4.1.3 — meccanismo di resume lato server (prima fetta, solo Python)
+
+"Gestire reconnect, resume dall'ultimo sequence id e snapshot iniziale" - prima fetta scelta
+deliberatamente SOLO lato server (`core/event_bus.py`/`core/companion_server.py`), interamente
+verificabile con test Python reali, senza ancora toccare `JakeClient.cpp` (stesso principio
+"prima il meccanismo, poi l'adozione" già seguito altrove nel progetto).
+
+Il server ora ricorda gli ultimi N eventi pubblicati (`EventBus._replay_buffer`) e legge l'header
+SSE standard `Last-Event-ID` su `GET /events`: un client che lo manda riceve prima gli eventi
+persi durante l'interruzione, poi continua dal vivo senza soluzione di continuità. Ogni evento
+porta ora anche una riga `id: <sequence_id>` (formato SSE standard) prima di `data:`.
+
+**Verificato che `JakeClient.cpp` non si rompe con questa riga in più**: il suo parser cerca solo
+righe che iniziano per `"data: "` e ignora silenziosamente il resto (già vero per costruzione,
+non una supposizione - verificato ricompilando E facendo girare per davvero l'eseguibile
+esistente con la stessa tecnica `ctypes`/`IsWindowVisible()` di F4.2.2, nessuna regressione nel
+ciclo HUD_HIDE→HUD_SHOW).
+
+**Non ancora affrontato** (dichiarato apertamente): `JakeClient.cpp` non implementa ancora un
+vero auto-reconnect (nessun retry automatico dopo una disconnessione, `onEventStreamFinished()`
+si limita oggi a segnalarla) né invia l'header `Last-Event-ID` per sfruttare il meccanismo appena
+costruito lato server - un passo successivo separato, non affrontato qui.
+
 ## Stato di verifica
 
 A differenza di tutto il resto di Jake (Python, con test automatici in `tests/`), questo codice

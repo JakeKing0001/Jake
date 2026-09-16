@@ -233,5 +233,96 @@ class EventBusSequenceIdTests(unittest.TestCase):
         self.assertEqual(sequence_ids, list(range(1, thread_count * events_per_thread + 1)))
 
 
+class EventBusReplayTests(unittest.TestCase):
+    """F4.1.3 ("resume dall'ultimo sequence id"): un client che riconnette dopo un'interruzione
+    breve deve poter recuperare gli eventi persi nel frattempo, dichiarati apertamente PERSI (non
+    finti recuperati) se l'interruzione e' durata piu' a lungo del buffer."""
+
+    def test_a_fresh_subscriber_with_no_prior_sequence_id_gets_no_replay(self):
+        bus = EventBus()
+        bus.publish(HudEvent(type=EventType.IDLE))
+
+        _subscriber, replayed, gap = bus.subscribe_with_replay(since_sequence_id=0)
+
+        self.assertEqual(replayed, [])
+        self.assertFalse(gap)
+
+    def test_reconnecting_client_receives_exactly_the_events_it_missed(self):
+        bus = EventBus()
+        first = HudEvent(type=EventType.USER_MESSAGE, payload={"text": "1"})
+        second = HudEvent(type=EventType.USER_MESSAGE, payload={"text": "2"})
+        third = HudEvent(type=EventType.USER_MESSAGE, payload={"text": "3"})
+        bus.publish(first)
+        bus.publish(second)
+        bus.publish(third)
+
+        _subscriber, replayed, gap = bus.subscribe_with_replay(since_sequence_id=first.sequence_id)
+
+        self.assertEqual([event.payload["text"] for event in replayed], ["2", "3"])
+        self.assertFalse(gap)
+
+    def test_caught_up_client_gets_an_empty_replay_not_a_gap(self):
+        bus = EventBus()
+        event = HudEvent(type=EventType.IDLE)
+        bus.publish(event)
+
+        _subscriber, replayed, gap = bus.subscribe_with_replay(since_sequence_id=event.sequence_id)
+
+        self.assertEqual(replayed, [])
+        self.assertFalse(gap, "nessun evento perso, il client era gia' aggiornato - non e' un gap")
+
+    def test_a_gap_longer_than_the_buffer_is_reported_honestly_not_hidden(self):
+        """Il buco che questo meccanismo deve DICHIARARE, non fingere di risolvere: una
+        disconnessione piu' lunga della capacita' del buffer di replay perde eventi per sempre -
+        il chiamante deve saperlo, non ricevere un replay silenziosamente incompleto."""
+        bus = EventBus(replay_buffer_size=3)
+        events = [HudEvent(type=EventType.IDLE, payload={"i": i}) for i in range(5)]
+        for event in events:
+            bus.publish(event)
+
+        _subscriber, replayed, gap = bus.subscribe_with_replay(since_sequence_id=events[0].sequence_id)
+
+        self.assertTrue(gap, "il buffer da 3 non copre piu' la finestra dall'evento 0, deve dichiararlo")
+        # Il buffer contiene solo gli ultimi 3 (eventi 2, 3, 4): il replay riporta quelli con
+        # sequence_id superiore a since_sequence_id tra quelli ANCORA disponibili, mai un errore.
+        self.assertEqual([event.payload["i"] for event in replayed], [2, 3, 4])
+
+    def test_the_subscription_and_the_replay_snapshot_are_atomic_no_event_lost_or_duplicated(self):
+        """Buco plausibile con due operazioni separate ("calcola il replay" poi "iscriviti", o
+        viceversa): un evento pubblicato esattamente nel mezzo sparirebbe o verrebbe duplicato.
+        Thread veri, stesso principio gia' usato altrove in questa sessione per i buchi di
+        concorrenza tra due passi non atomici."""
+        import threading
+
+        bus = EventBus()
+        first = HudEvent(type=EventType.IDLE)
+        bus.publish(first)
+
+        barrier = threading.Barrier(2)
+        result: dict = {}
+
+        def _reconnect():
+            barrier.wait(timeout=5)
+            subscriber, replayed, _gap = bus.subscribe_with_replay(since_sequence_id=first.sequence_id)
+            result["subscriber"] = subscriber
+            result["replayed"] = replayed
+
+        def _publish_concurrently():
+            barrier.wait(timeout=5)
+            bus.publish(HudEvent(type=EventType.IDLE, payload={"marker": "concurrent"}))
+
+        threads = [threading.Thread(target=_reconnect), threading.Thread(target=_publish_concurrently)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=5)
+
+        live_events = []
+        while not result["subscriber"].empty():
+            live_events.append(result["subscriber"].get_nowait())
+        total_markers = [e.payload.get("marker") for e in result["replayed"]] + [e.payload.get("marker") for e in live_events]
+        self.assertEqual(total_markers.count("concurrent"), 1, "l'evento concorrente deve comparire ESATTAMENTE una volta")
+
+
 if __name__ == "__main__":
     unittest.main()

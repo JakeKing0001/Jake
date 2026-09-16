@@ -306,8 +306,31 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "keep-alive")
         self.end_headers()
-        subscriber = self.companion.event_bus.subscribe()
+        # F4.1.3 ("resume dall'ultimo sequence id"): un client che riconnette manda l'header SSE
+        # standard Last-Event-ID con l'ultimo sequence_id visto (id: <n> prima di ogni riga data:
+        # sotto, lo stesso formato che i browser leggono da soli per un EventSource - qui letto a
+        # mano perche' JakeClient.cpp parsa SSE manualmente, vedi il suo README). Un header
+        # assente o non un intero valido e' trattato come "client nuovo, nessun replay" - stesso
+        # comportamento di sempre, nessuna rottura per un client che non implementa ancora questo
+        # pezzo (F4.1.3 lato C++, non ancora affrontato).
+        last_event_id_header = self.headers.get("Last-Event-ID")
+        since_sequence_id = 0
+        if last_event_id_header is not None:
+            try:
+                since_sequence_id = int(last_event_id_header)
+            except ValueError:
+                since_sequence_id = 0
+        subscriber, replayed, gap = self.companion.event_bus.subscribe_with_replay(since_sequence_id)
         try:
+            if gap:
+                # Commento SSE (righe che iniziano con ":", ignorate da qualunque parser SSE
+                # standard incluso quello di JakeClient.cpp, vedi core/hud_protocol.py) - il
+                # buffer di replay non copriva l'intera finestra richiesta, uno o piu' eventi sono
+                # persi per sempre: dichiarato onestamente sul filo, non nascosto silenziosamente.
+                self.wfile.write(b": jake-replay-gap - some events were permanently lost\n\n")
+            for event in replayed:
+                self.wfile.write(f"id: {event.sequence_id}\ndata: {event.to_json()}\n\n".encode("utf-8"))
+            self.wfile.flush()
             while True:
                 try:
                     event = subscriber.get(timeout=SSE_KEEPALIVE_SECONDS)
@@ -315,7 +338,7 @@ class _Handler(BaseHTTPRequestHandler):
                     self.wfile.write(b": keep-alive\n\n")
                     self.wfile.flush()
                     continue
-                self.wfile.write(f"data: {event.to_json()}\n\n".encode("utf-8"))
+                self.wfile.write(f"id: {event.sequence_id}\ndata: {event.to_json()}\n\n".encode("utf-8"))
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, OSError):
             pass
