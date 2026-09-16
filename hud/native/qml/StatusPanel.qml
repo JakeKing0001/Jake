@@ -8,6 +8,14 @@ RowLayout {
     property bool connected: false
     property string state: "IDLE"
     property string activeDevice: ""
+    // F4.2.1: esposto cosi' Main.qml puo' sapere se il puntatore e' su QUESTO pannello, per
+    // disattivare il click-through dell'overlay solo quando serve davvero (vedi il commento in
+    // Main.qml sul perche' e' per-pannello e non un'unica area grande quanto tutti i pannelli).
+    property alias hovered: hoverHandler.hovered
+
+    HoverHandler {
+        id: hoverHandler
+    }
 
     Rectangle {
         width: 8

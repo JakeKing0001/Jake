@@ -8,6 +8,12 @@ import QtQuick.Layouts
 RowLayout {
     id: root
     signal actionTriggered(string command)
+    // F4.2.1: vedi lo stesso alias in StatusPanel.qml.
+    property alias hovered: hoverHandler.hovered
+
+    HoverHandler {
+        id: hoverHandler
+    }
 
     property var actions: [
         { label: qsTr("Che ore sono"), command: "che ore sono" },
