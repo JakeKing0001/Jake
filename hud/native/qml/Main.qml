@@ -42,6 +42,7 @@ ApplicationWindow {
         // Win32 innocua anche se gia' impostato.
         onVisibilityRequested: (visible) => {
             window.visible = visible;
+            overlayStyler.forceVisibility(window, visible);
             if (visible)
                 overlayStyler.makeNoActivate(window);
         }

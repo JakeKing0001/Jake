@@ -31,4 +31,15 @@ public:
     // "sempre attivo" (i pannelli diventerebbero tutti click-through) ne' "mai attivo" (nessun
     // click raggiungerebbe mai il desktop/le altre finestre sotto).
     Q_INVOKABLE void setClickThrough(QQuickWindow *window, bool enabled);
+
+    // F4.2.2: buco reale trovato con un log su file (vedi la cronologia della roadmap per la
+    // sequenza di debug completa) - per la combinazione di flag di QUESTA finestra (Qt.Tool +
+    // Qt.FramelessWindowHint + Qt.WindowStaysOnTopHint + sfondo trasparente, quindi WS_EX_LAYERED
+    // aggiunto da Qt stesso), assegnare `window.visible` in QML AGGIORNA la proprieta' QML (letta
+    // indietro correttamente) ma NON chiama `ShowWindow(SW_HIDE)`/`SW_SHOW` sulla HWND reale -
+    // verificato empiricamente ispezionando `IsWindowVisible()` dall'esterno mentre la proprieta'
+    // QML cambiava correttamente. `ShowWindow` esplicito qui bypassa qualunque cosa nella
+    // pipeline QPA di Qt fallisca per questa combinazione di flag. `SW_SHOWNOACTIVATE` (non
+    // `SW_SHOW`) per non rubare il focus alla ricomparsa, in linea con `makeNoActivate()`.
+    Q_INVOKABLE void forceVisibility(QQuickWindow *window, bool visible);
 };
