@@ -56,6 +56,29 @@ app attiva, e la leggibilità dei pannelli senza sfondo proprio (`StatusPanel`/`
 uno sfondo desktop arbitrario invece del riquadro scuro `#14161c` di prima - quest'ultimo è
 esplicitamente materia della fase successiva (4.9.4/4.9.5, "vetro vero"), non di questo passo.
 
+## Fase 4.9.3 / F4.2.2 (prima fetta) — show/hide reale senza rubare focus
+
+`HUD_SHOW`/`HUD_HIDE` (`core/hud_protocol.py::EventType`) prima cadevano nel ramo generico di
+`JakeClient::handleEventLine()` che si limita a `setState(type)`: la finestra restava SEMPRE
+visibile, con lo stato letteralmente scritto `"HUD_SHOW"`/`"HUD_HIDE"` (non riconosciuto da
+`Orb.qml`, quindi mostrato col colore di default) - nessun nascondimento reale accadeva. Nuovo
+segnale `JakeClient::visibilityRequested(bool)`, emesso separatamente per i due tipi; `Main.qml`
+lo collega a `window.visible = visible`, riapplicando `OverlayStyler::makeNoActivate()` ad ogni
+ricomparsa (non dimostrato necessario - `ShowWindow` non tocca gli extended style Win32 già
+impostati - ma esplicito invece di assunto).
+
+**Verificato in questo ambiente** con un passo in più rispetto ai precedenti: non solo compilazione
+ed esecuzione reali, ma la pubblicazione di veri eventi `HUD_HIDE`/`HUD_SHOW`/`JAKE_MESSAGE` (in
+quest'ordine, con un `CompanionServer` vero) MENTRE `JakeHud.exe` era connesso - nessun crash,
+nessun warning QML su stderr, connessione SSE mai interrotta (`event_bus.subscriber_count()`
+resta 1 per tutta la sequenza, incluso dopo lo show/hide). **Non verificato** (limite
+dell'ambiente): se la finestra sparisca/ricompaia DAVVERO sullo schermo, e se al ritorno resti
+effettivamente senza rubare il focus da un'altra finestra reale.
+
+Non ancora affrontato del resto di `F4.2.2`: nessun produttore reale di `HUD_SHOW` esiste ancora
+nel progetto (solo `"exit"` è mappato a `HUD_HIDE` in `LEGACY_STATE_TO_EVENT_TYPE`) - il lato
+consumatore qui costruito è pronto a riceverlo quando un produttore verrà aggiunto altrove.
+
 ## Stato di verifica
 
 A differenza di tutto il resto di Jake (Python, con test automatici in `tests/`), questo codice

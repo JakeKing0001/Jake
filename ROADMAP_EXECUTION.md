@@ -246,7 +246,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F3.7` | Application Adapters (G1 superato, mai iniziato) | `READY` |
 | `F3.8` | Demonstration Learning (G1 superato, mai iniziato) | `READY` |
 | `F4.1` | Protocol Architecture | `VERIFY` |
-| `F4.2` | Native HUD (F4.2.1 chiuso, 16/09/2026 - F4.2.2-F4.2.6 mai affrontati) | `DOING` |
+| `F4.2` | Native HUD (F4.2.1 chiuso, F4.2.2 prima fetta - 16/09/2026, resto mai affrontato) | `DOING` |
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
 | `F4.4` | Interaction Design (G1 superato, mai iniziato) | `READY` |
 | `F4.5` | Interaction Design (G1 superato, mai iniziato) | `READY` |
@@ -4513,6 +4513,26 @@ Criterio di uscita: una procedura dimostrata sopravvive a riavvio, resize e dati
   dichiarati sopra (aspetto visivo, comportamento reale del click-through/no-activate contro
   un'altra finestra vera). Con questo, `F4.2.1` è **chiuso**; resta aperto il resto di `F4.2`
   (`F4.2.2`-`F4.2.6`, vedi sopra).
+- `F4.2.2` (prima fetta - show/hide reale) — 16/09/2026: buco reale trovato, non solo teorico -
+  `HUD_SHOW`/`HUD_HIDE` (`core/hud_protocol.py::EventType`) cadevano nel ramo generico di
+  `JakeClient::handleEventLine()` (`setState(type)`): la finestra restava SEMPRE visibile, con lo
+  stato mostrato letteralmente `"HUD_SHOW"`/`"HUD_HIDE"` (stringa non riconosciuta da `Orb.qml`),
+  nessun nascondimento reale accadeva mai. Nuovo segnale `JakeClient::visibilityRequested(bool)`
+  emesso separatamente per i due tipi; `Main.qml` lo collega a `window.visible = visible`,
+  riapplicando `OverlayStyler::makeNoActivate()` ad ogni ricomparsa (non dimostrato necessario -
+  `ShowWindow` non tocca gli extended style Win32 già impostati in F4.2.1 - ma esplicito invece di
+  assunto). Verifica con un passo IN PIÙ rispetto ai precedenti incrementi di questo track: non
+  solo compilazione/esecuzione reali, ma pubblicazione di veri eventi `HUD_HIDE`→`HUD_SHOW`→
+  `JAKE_MESSAGE` (in quest'ordine) su un `EventBus`/`CompanionServer` VERI MENTRE `JakeHud.exe`
+  era connesso - nessun crash, nessun warning QML su stderr, connessione SSE mai interrotta
+  (`event_bus.subscriber_count()` resta 1 per l'intera sequenza, anche dopo lo show/hide). Non
+  verificato (limite dell'ambiente): se la finestra sparisca/ricompaia DAVVERO sullo schermo, se
+  al ritorno resti senza rubare focus da una finestra reale. Non ancora affrontato: nessun
+  produttore reale di `HUD_SHOW` esiste ancora nel progetto (solo `"exit"` è mappato a `HUD_HIDE`
+  in `LEGACY_STATE_TO_EVENT_TYPE`) - il lato consumatore qui costruito è pronto a riceverlo quando
+  un produttore verrà aggiunto altrove; resto di `F4.2.2` (comportamento Alt-Tab/desktop
+  virtuali/fullscreen, fallback finestra normale, test mouse/touch/tastiera/pen, regioni
+  interattive osservabili nei test - questi ultimi tre condivisi con `F4.2.3`-`F4.2.6`).
 
 ### F4.1 — Protocollo e test contract
 
