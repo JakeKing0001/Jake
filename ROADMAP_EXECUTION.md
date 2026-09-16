@@ -224,7 +224,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F0.6` | Release Engineering | `DOING` |
 | `F1.1` | Trust Core | `DONE` |
 | `F1.2` | Security Architecture | `DONE` |
-| `F1.3` | Execution Reliability (F1.3.5 meccanismo + adozione su tutti e tre i chokepoint - 16/09/2026; skill "annulla"/F1.3.4 mai affrontati, non richiesti da G1) | `DOING` |
+| `F1.3` | Execution Reliability (F1.3.5 chiuso per intero - meccanismo, adozione sui tre chokepoint, skill "annulla" - 16/09/2026; resta solo F1.3.4, non richiesto da G1) | `DOING` |
 | `F1.4` | Identity and Secrets | `DONE` |
 | `F1.5` | Application Security (gap dichiarati, non richiesti da G1) | `DOING` |
 | `F1.6` | Sandbox Runtime | `DONE` |
@@ -1695,6 +1695,41 @@ reversibili dispone di undo testato.
   una fuga verso un file di produzione. Corretto isolando anche questo quarto test con lo stesso
   `tempfile.TemporaryDirectory()` gia' usato dagli altri tre. Prova: 2.814/2.814 test, ruff/mypy
   verdi.
+- `F1.3.5` (skill "annulla", consumatore - **chiusura completa di F1.3.5**) — 16/09/2026: nuova
+  `skills/undo.py::UndoLastActionSkill` (intent `UNDO_LAST_ACTION`), il pezzo che finalmente
+  rende visibile all'utente il meccanismo costruito e adottato nei quattro incrementi precedenti
+  - fino ad ora `UndoStore` esisteva solo popolato dai tre chokepoint, mai letto da nessuna parte.
+  Design deciso in questa sessione: la skill non esegue MAI direttamente l'intent compensatorio -
+  legge `self.core.undo_store.most_recent_usable()` (nuovo metodo, cerca il descrittore usabile
+  piu' recente tra QUALUNQUE dei tre chokepoint, non per `action_id` specifico - "annulla l'ultima
+  azione" e' per l'utente un concetto unico, non tre code separate) e propone SOLO una busta
+  `CONFIRMATION_REQUIRED` con `confirm_intent`/`confirm_parameters` gia' calcolati da
+  `generate_undo_descriptor()`, lasciando che la CONFERMA dell'utente passi dalla stessa identica
+  pipeline di policy/esecuzione/verifica di qualunque altro comando (`JakeCore.
+  _finalize_pending_action`) - mai un bypass di `PolicyEngine`/`blocked_intents` per l'intent
+  compensatorio, spesso `DESTRUCTIVE` (es. `DELETE_PATH` per annullare un `CREATE_PATH`).
+  Classificato `RiskLevel.READ_ONLY`/`EFFECT_CLASS_READ` (la skill stessa non muta mai nulla) in
+  `core/risk.py`/`core/action_contracts.py`; registrata come le altre skill meta-comando dentro
+  `JakeCore.__init__` (non nel catalogo - serve accesso a `core.undo_store`, stesso schema di
+  `ResumeInterruptedTaskSkill`); aggiunta a `NEVER_FOR_AGENT` in `core/agent.py` (un agente che si
+  "autoannullasse" un passo come strategia di recupero non ha mai senso, stesso principio gia'
+  applicato a `KILL_SWITCH`/`RESUME_INTERRUPTED_TASK`). Aggiunto anche `UndoStore.
+  most_recent_usable()` in `core/undo_store.py` (6 nuovi test in `tests/test_undo_store.py`) e un
+  messaggio dedicato per `NO_UNDO_AVAILABLE` in `core/response_formatter.py` (altrimenti sarebbe
+  ricaduto sul generico "si e' verificato un errore", fuorviante per un caso normale come "niente
+  da annullare"). Limite dichiarato apertamente nel docstring della skill: nessun chiamante
+  invoca mai `UndoStore.mark_used()`, quindi lo stesso undo potrebbe in teoria essere richiesto
+  due volte prima di scadere - non un buco di sicurezza (l'intent compensatorio e' idempotente per
+  costruzione), solo una rifinitura UX rimandata. Nuovo `tests/test_undo_skill.py` (9 test: nessun
+  undo disponibile su store vuoto/tutto scaduto, busta di conferma corretta per un `CREATE_PATH`
+  riuscito, la busta restituita e' una COPIA che non puo' corrompere il descrittore ancora vivo
+  nello store, sceglie il piu' recente tra piu' descrittori, descrizioni italiane per i tre intent
+  compensatori noti piu' un fallback onesto per un quinto ipotetico futuro). Con questo, **F1.3.5
+  e' chiuso per intero**: meccanismo, adozione su tutti e tre i chokepoint reali, e ora anche il
+  consumatore user-facing. Prova: 2.829/2.830 test (un fallimento isolato, `test_sandboxed_skill_
+  worker.py::test_a_forged_skill_cannot_spawn_an_unbounded_number_of_child_processes`, verificato
+  preesistente e indipendente da questa modifica - passa da solo, `git status --short data/`
+  pulito), ruff/mypy verdi.
 - `F1.3.1` — 11/09/2026: `core/execution_safety.py` aveva tre strutture parallele da tenere
   sincronizzate a mano - `VERIFIABLE_INTENTS` (insieme), l'if/elif di `verify_effect`,
   `ROLLBACK_HANDLERS` + `ROLLBACK_COMPENSATING_INTENT` (due dizionari) - esattamente il pattern
