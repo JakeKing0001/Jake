@@ -42,6 +42,12 @@ signals:
     void notification(const QString &kind, const QString &text);
     void errorOccurred(const QString &detail);
     void deviceHandoff(const QString &fromDevice, const QString &toDevice);
+    // F4.2.2 ("gestire show/hide senza rubare focus"): HUD_SHOW/HUD_HIDE (core/hud_protocol.py)
+    // controllano DAVVERO la visibilita' della finestra, non solo lo stato mostrato nell'Orb -
+    // prima di questo segnale cadevano nel ramo generico di handleEventLine() che si limita a
+    // setState(type), lasciando la finestra sempre visibile con lo stato scritto alla lettera
+    // "HUD_SHOW"/"HUD_HIDE" (non riconosciuto da Orb.qml, quindi mostrato col colore di default).
+    void visibilityRequested(bool visible);
 
 private slots:
     void onEventStreamReadyRead();

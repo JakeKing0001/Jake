@@ -132,9 +132,13 @@ void JakeClient::handleEventLine(const QString &jsonLine) {
     } else if (type == QStringLiteral("DEVICE_HANDOFF")) {
         setActiveDevice(payload.value("to").toString());
         emit deviceHandoff(payload.value("from").toString(), payload.value("to").toString());
+    } else if (type == QStringLiteral("HUD_SHOW")) {
+        emit visibilityRequested(true);
+    } else if (type == QStringLiteral("HUD_HIDE")) {
+        emit visibilityRequested(false);
     } else {
-        // LISTENING/THINKING/EXECUTING/IDLE/DICTATION/PAUSED/HUD_SHOW/HUD_HIDE: il nome
-        // dell'evento coincide gia' con lo stato da mostrare, nessuna traduzione necessaria.
+        // LISTENING/THINKING/EXECUTING/IDLE/DICTATION/PAUSED: il nome dell'evento coincide gia'
+        // con lo stato da mostrare, nessuna traduzione necessaria.
         setState(type);
     }
 }
