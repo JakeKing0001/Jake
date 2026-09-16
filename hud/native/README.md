@@ -22,6 +22,41 @@ vero con blur/rifrazione (4.9.4/4.9.5), stato reattivo del vetro (4.9.6), Orb 2.
 (4.9.7), pannelli contestuali per tipo di task (4.9.8), transizioni fluide (4.9.9), multi-monitor
 (4.9.10). Ognuna di quelle è un passo successivo, deliberatamente non affrontato qui.
 
+## Fase 4.9.3 / F4.2.1 — trasparenza, click-through selettivo, no-activate
+
+Finestra senza bordi e trasparente (`color: "transparent"` + `Qt.FramelessWindowHint`), sempre
+sopra le altre (`Qt.WindowStaysOnTopHint`) e senza icona in barra applicazioni (`Qt.Tool`). Due
+proprietà che Qt non espone tramite API cross-platform, isolate in `src/OverlayStyler.{h,cpp}`
+(manipolazione diretta della HWND via Win32, guardata da `#ifdef Q_OS_WIN`):
+
+- **No-activate** (`WS_EX_NOACTIVATE`, applicato una volta all'avvio): l'overlay non ruba mai il
+  focus tastiera ad altre app quando diventa visibile o viene cliccato.
+- **Click-through selettivo** (`WS_EX_TRANSPARENT`, attivato/disattivato a runtime tramite un
+  `HoverHandler` in `Main.qml`): quando il puntatore è fuori dall'area dei pannelli, i click
+  passano alla finestra sottostante come se l'overlay non esistesse; quando entra nell'area dei
+  pannelli, l'overlay torna interattivo.
+
+**Limite dichiarato di questo primo passo** (non nascosto): il click-through è per ORA
+grossolano, non per-pannello - l'intera area occupata dal `ColumnLayout` (tutti e cinque i
+pannelli insieme, compresi gli spazi vuoti *tra* un pannello e l'altro) è considerata "contenuto"
+e resta interattiva; solo il margine esterno di 16px è click-through. Distinguere i vuoti tra un
+pannello e l'altro (che dovrebbero anch'essi essere click-through) richiede un `HoverHandler` per
+pannello con aggregazione dello stato - rimandato a un passo successivo dedicato, non affrontato
+qui per non introdurre cinque punti di fallimento mai verificati visivamente in un colpo solo.
+
+**Verificato in questo ambiente** (stessa tecnica e stessi limiti di sopra - compilazione ed
+esecuzione reali, non lettura del codice): compila senza errori; l'eseguibile si avvia e resta in
+esecuzione senza warning QML su stderr; collegamento reale confermato allo stesso modo di prima
+(`event_bus.subscriber_count()` passa da 0 a 1 esattamente quando `JakeHud.exe` è in esecuzione
+con un `CompanionServer` vero sulla porta 8765, torna a 0 alla sua chiusura).
+
+**Non verificato** (limite dell'ambiente, non del codice): l'aspetto visivo della trasparenza
+(nessuno screenshot possibile qui), se il click-through funzioni DAVVERO passando un click a una
+finestra sottostante reale, se il no-activate impedisca DAVVERO il furto di focus da un'altra
+app attiva, e la leggibilità dei pannelli senza sfondo proprio (`StatusPanel`/`QuickActions`) su
+uno sfondo desktop arbitrario invece del riquadro scuro `#14161c` di prima - quest'ultimo è
+esplicitamente materia della fase successiva (4.9.4/4.9.5, "vetro vero"), non di questo passo.
+
 ## Stato di verifica
 
 A differenza di tutto il resto di Jake (Python, con test automatici in `tests/`), questo codice
