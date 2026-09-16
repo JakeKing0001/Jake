@@ -3,10 +3,18 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkRequest>
+#include <QTimer>
 #include <QUuid>
 #include <QUrl>
 
 #include "HudEventTypes.h" // generato da tools/generate_hud_event_types.py, vedi CMakeLists.txt
+
+namespace {
+// F4.1.3 (lato C++, seconda fetta): ritardo FISSO (non backoff esponenziale, "prima deve
+// funzionare" - vedi hud/native/README.md) - un assistente personale con un solo server locale
+// non ha lo stesso rischio di "thundering herd" di un servizio con molti client concorrenti.
+constexpr int kReconnectDelayMs = 3000;
+}
 
 JakeClient::JakeClient(QObject *parent)
     : QObject(parent), m_manager(new QNetworkAccessManager(this)) {
@@ -45,6 +53,12 @@ void JakeClient::connectToJake(const QString &baseUrl) {
 
     QNetworkRequest request(QUrl(m_baseUrl + QStringLiteral("/events")));
     request.setRawHeader("Accept", "text/event-stream");
+    // F4.1.3 (lato C++, seconda fetta): sfrutta per davvero il meccanismo di resume gia'
+    // costruito lato server (core/event_bus.py::EventBus.subscribe_with_replay, PR #133) -
+    // m_lastSequenceId=0 (mai connesso prima) non manda l'header affatto, stesso comportamento
+    // di sempre per la primissima connessione.
+    if (m_lastSequenceId > 0)
+        request.setRawHeader("Last-Event-ID", QByteArray::number(m_lastSequenceId));
     m_eventStream = m_manager->get(request);
     connect(m_eventStream, &QIODevice::readyRead, this, &JakeClient::onEventStreamReadyRead);
     connect(m_eventStream, &QNetworkReply::finished, this, &JakeClient::onEventStreamFinished);
@@ -95,12 +109,34 @@ void JakeClient::onEventStreamReadyRead() {
 }
 
 void JakeClient::onEventStreamFinished() {
-    setConnected(false);
-    if (m_eventStream != nullptr) {
-        if (m_eventStream->error() != QNetworkReply::NoError)
-            emit errorOccurred(m_eventStream->errorString());
-        m_eventStream->deleteLater();
+    // F4.1.3 (lato C++, seconda fetta): usa sender() invece del membro m_eventStream - corregge
+    // un buco reale preesistente, mai raggiunto finche' connectToJake() veniva chiamata una sola
+    // volta all'avvio (Main.qml::Component.onCompleted), ora raggiungibile per davvero con la
+    // riconnessione automatica sotto. Lo stream VECCHIO abortito da un connectToJake() successivo
+    // (es. proprio questa riconnessione) finisce comunque con finished() emesso in modo
+    // asincrono - se questo slot leggesse il MEMBRO m_eventStream invece del mittente reale del
+    // segnale, troverebbe gia' il nuovo stream (connectToJake lo riassegna subito) e lo
+    // cancellerebbe/nullerebbe per errore, scambiando "il vecchio stream e' finito" con "il
+    // nuovo stream e' finito".
+    auto *finishedStream = qobject_cast<QNetworkReply *>(sender());
+    if (finishedStream == nullptr) return;
+    const bool isCurrentStream = (finishedStream == m_eventStream);
+    if (isCurrentStream) {
+        setConnected(false);
+        if (finishedStream->error() != QNetworkReply::NoError)
+            emit errorOccurred(finishedStream->errorString());
         m_eventStream = nullptr;
+    }
+    finishedStream->deleteLater();
+    // F4.1.3: riconnessione automatica dopo un ritardo fisso, mandando l'ultimo sequence_id
+    // visto (m_lastSequenceId, aggiornato in handleEventLine() sotto) come Last-Event-ID - il
+    // meccanismo di resume lato server (EventBus.subscribe_with_replay, PR #133) recupera cosi'
+    // gli eventi persi durante l'interruzione invece di farli sparire silenziosamente. Solo per
+    // lo stream CORRENTE: un vecchio stream abortito da una riconnessione deliberata non deve
+    // programmarne una seconda.
+    if (isCurrentStream && !m_baseUrl.isEmpty()) {
+        const QString baseUrl = m_baseUrl;
+        QTimer::singleShot(kReconnectDelayMs, this, [this, baseUrl]() { connectToJake(baseUrl); });
     }
 }
 
@@ -114,6 +150,11 @@ void JakeClient::handleEventLine(const QString &jsonLine) {
     }
     const QString type = object.value("type").toString();
     const auto payload = object.value("payload").toObject();
+    // F4.1.3: aggiornato per OGNI evento riuscito, indipendentemente dal tipo - e' quello che
+    // connectToJake() manda come Last-Event-ID alla prossima riconnessione.
+    const qint64 sequenceId = object.value("sequence_id").toInteger(0);
+    if (sequenceId > 0)
+        m_lastSequenceId = sequenceId;
 
     // F4.1.2: JakeHudEventType::* (generato da tools/generate_hud_event_types.py DALLA fonte
     // vera, core/hud_protocol.py::EventType) invece di stringhe letterali scritte qui a mano -

@@ -245,7 +245,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F3.6` | Browser Automation (G1 superato, mai iniziato) | `READY` |
 | `F3.7` | Application Adapters (G1 superato, mai iniziato) | `READY` |
 | `F3.8` | Demonstration Learning (G1 superato, mai iniziato) | `READY` |
-| `F4.1` | Protocol Architecture (F4.1.2/F4.1.5 chiusi, F4.1.1/F4.1.3/F4.1.4 prime fette lato Python - 16/09/2026; trace_id, lato C++ di F4.1.3/F4.1.4, F4.1.6 mai affrontati) | `DOING` |
+| `F4.1` | Protocol Architecture (F4.1.2/F4.1.3/F4.1.5 chiusi, F4.1.1/F4.1.4 prime fette lato Python - 16/09/2026; trace_id, lato C++ di F4.1.4, F4.1.6 mai affrontati) | `DOING` |
 | `F4.2` | Native HUD (F4.2.1/F4.2.4 chiusi, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026; F4.2.5/F4.2.6 e resto di F4.2.3 richiedono test interattivi/visivi) | `DOING` |
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
 | `F4.4` | Interaction Design (G1 superato, mai iniziato) | `READY` |
@@ -4598,9 +4598,9 @@ Criterio di uscita: client Python finto e JakeClient C++ superano la stessa suit
   fatto, `trace_id` no - vedi sotto); `F4.1.2` **chiuso** (schema condiviso generato, niente più
   enum mantenuti a mano lato C++ - vedi sotto); `F4.1.4` chiuso parzialmente (contract test per
   payload malformato lato Python, tre buchi reali trovati e corretti - vedi sotto; il lato C++
-  resta scoperto, nessuna toolchain di test C++/QML in questo progetto); `F4.1.3` chiuso
-  parzialmente (meccanismo di replay lato server - `EventBus`/`companion_server.py` - vedi
-  sotto; lato C++, auto-reconnect e invio di `Last-Event-ID`, mai affrontato); resto (`F4.1.6`)
+  resta scoperto, nessuna toolchain di test C++/QML in questo progetto); `F4.1.3` **chiuso**
+  (meccanismo di replay lato server, E auto-reconnect/`Last-Event-ID` lato client - vedi sotto,
+  con un buco reale preesistente corretto nello stesso passo); resto (`F4.1.6`)
   mai affrontato.
 - `F4.1.5` (VERIFICA, nessun codice) — 16/09/2026: "garantire che client lento non blocchi il
   core" è lo STESSO `core/event_bus.py::EventBus` già verificato per questo in `F1.8.6`
@@ -4722,6 +4722,42 @@ Criterio di uscita: client Python finto e JakeClient C++ superano la stessa suit
   passo successivo separato, non affrontato qui; "snapshot iniziale" (`GET /status`, gia'
   esistente e gia' usato da `JakeClient::fetchStatus()`) non riesaminato in questo incremento.
   Prova: 2.781/2.781 test, ruff/mypy verdi lato Python; build C++ verde, nessuna regressione.
+- `F4.1.3` (chiusura - auto-reconnect e Last-Event-ID lato C++) — 16/09/2026: seconda fetta,
+  questa volta lato client. `JakeClient` traccia ora `m_lastSequenceId` (aggiornato in
+  `handleEventLine()` per OGNI evento riuscito, letto dal campo `sequence_id` gia' presente nel
+  JSON grazie a F4.1.1) e lo manda come header `Last-Event-ID` ad ogni `connectToJake()`
+  successiva alla prima - sfruttando per davvero il meccanismo di resume costruito lato server
+  nella fetta precedente. Alla disconnessione del flusso SSE, `onEventStreamFinished()`
+  programma una riconnessione automatica dopo un ritardo fisso di 3s (non backoff esponenziale -
+  "prima deve funzionare", vedi `hud/native/README.md`). **Buco reale preesistente corretto nello
+  stesso passo**, mai raggiunto finche' `connectToJake()` veniva chiamata una sola volta
+  all'avvio (`Main.qml::Component.onCompleted`), ora raggiungibile per davvero con la
+  riconnessione automatica: `onEventStreamFinished()` leggeva il MEMBRO `m_eventStream` invece
+  del mittente reale del segnale (`sender()`) - lo stream vecchio abortito da una riconnessione
+  emette comunque `finished()` in modo asincrono, e se nel frattempo `connectToJake()` avesse
+  gia' riassegnato `m_eventStream` al nuovo stream, questo slot avrebbe cancellato/nullato per
+  errore lo stream NUOVO scambiandolo per quello vecchio appena finito. Corretto confrontando il
+  mittente reale (`sender()`) con il membro prima di agire, e programmando una nuova
+  riconnessione solo se lo stream finito e' davvero quello corrente. Verificato per davvero, non
+  solo compilato: eseguibile lanciato PRIMA che qualunque server fosse in ascolto sulla porta
+  (simula "Jake core non ancora avviato"/un riavvio) - la prima connessione fallisce come atteso,
+  ma l'eseguibile continua a ritentare da solo ogni 3s senza crash; avviato poi un
+  `CompanionServer` vero sulla stessa porta: connesso con successo entro mezzo secondo dall'avvio
+  del server (`event_bus.subscriber_count()` passa a 1), senza alcun intervento manuale ne'
+  riavvio del processo HUD. Non verificato in combinazione (limite dell'ambiente, dichiarato
+  apertamente): il replay VERO durante un reconnect a meta' sessione (il meccanismo lato server
+  e' gia' verificato in isolamento nella fetta precedente - simulare un'interruzione di rete
+  senza fermare il processo server richiederebbe manipolare il socket TCP di un singolo client,
+  non raggiungibile dagli strumenti di questo ambiente); il caso di un server che riparte con un
+  `EventBus` NUOVO (contatore `sequence_id` azzerato) mentre il client conserva ancora un
+  `m_lastSequenceId` piu' alto da prima - scenario dichiarato apertamente non gestito. Con
+  questo, `F4.1.3` e' **chiuso** (entrambe le fette, server e client, per il caso di
+  disconnessione/riconnessione entro la vita dello stesso processo server); "snapshot iniziale"
+  (`GET /status`, gia' esistente) non riesaminato. Prova: build C++ verde, verifica end-to-end
+  con l'eseguibile reale come sopra; nessun file Python toccato in questa fetta (2.781/2.781 test
+  gia' verdi dalla fetta precedente, suite rieseguita per sicurezza - un fallimento isolato di
+  `test_sandboxed_skill_worker.py` risultato flaky pre-esistente sotto carico, non una
+  regressione, verificato passare sia in isolamento sia in una riesecuzione completa).
 
 ### F4.2 — Shell overlay nativa
 
