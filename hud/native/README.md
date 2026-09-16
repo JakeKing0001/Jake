@@ -126,6 +126,32 @@ mai raggiungibile sarebbe codice morto speculativo, lo stesso principio già app
 progetto (Python) per non scrivere codice contro condizioni impossibili. **Nessun codice
 scritto**, solo la verifica.
 
+## F4.1.2 — schema condiviso, niente enum mantenuti a mano
+
+Fino a questo incremento, `JakeClient::handleEventLine()` confrontava `type` con stringhe
+letterali scritte a mano (`"USER_MESSAGE"`, `"HUD_SHOW"`...) - una copia del vocabolario di
+`core/hud_protocol.py::EventType` mantenuta manualmente, senza alcuna garanzia che restasse
+sincronizzata: un tipo aggiunto o rinominato lato Python poteva disallinearsi in silenzio.
+
+Nuovo `tools/generate_hud_event_types.py`: legge l'enum VERO (non una copia) e genera
+`HudEventTypes.h` (namespace `JakeHudEventType`, una costante `const char*` per membro).
+`CMakeLists.txt` lo rigenera come build step PRIMA di compilare (`add_custom_command` +
+`add_dependencies`, `find_package(Python3 ... REQUIRED)`) - il file generato non è mai committato
+(già coperto da `hud/native/build/` in `.gitignore`, dato che vive sotto la build directory).
+`JakeClient.cpp` usa ora `JakeHudEventType::USER_MESSAGE` ecc. invece delle stringhe letterali.
+
+**Rischio verificato, non solo assunto**: `ERROR` è anche il nome di una macro Win32
+(`wingdi.h`, valore `0`) - se questa translation unit avesse incluso `<windows.h>` senza
+`WIN32_LEAN_AND_MEAN`/`NOGDI`, `JakeHudEventType::ERROR` si sarebbe rotto per sostituzione del
+preprocessore. Verificato che NON succede compilando per davvero (nessun errore), non assunto
+dalla documentazione Qt.
+
+**Verificato**: `python -m unittest tests.test_generate_hud_event_types` (6 test, generazione
+pura, nessuna toolchain C++ richiesta); ricompilato con successo (il passo
+"Generating HudEventTypes.h..." appare nel log di build); ripetuta la stessa sequenza
+HUD_HIDE→HUD_SHOW con `ctypes`/`IsWindowVisible()` di F4.2.2 - stesso comportamento corretto,
+nessuna regressione introdotta dal refactor.
+
 ## Stato di verifica
 
 A differenza di tutto il resto di Jake (Python, con test automatici in `tests/`), questo codice
@@ -161,6 +187,8 @@ progetto CMake separato dal resto di Jake, che resta puro Python):
 - CMake ≥ 3.21 (incluso nei Build Tools più recenti).
 - Qt 6.5+ per MSVC (es. via [aqtinstall](https://github.com/miurahr/aqtinstall):
   `pip install aqtinstall && aqt install-qt windows desktop 6.7.3 win64_msvc2019_64 -O C:/Qt`).
+- Un interprete Python 3 raggiungibile da CMake (F4.1.2: rigenera `HudEventTypes.h` come build
+  step - lo stesso venv del resto di Jake basta, `find_package(Python3)` lo trova da solo).
 
 ```
 # Da un "x64 Native Tools Command Prompt for VS" (o dopo aver chiamato vcvarsall.bat x64):
