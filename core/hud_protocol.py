@@ -95,14 +95,28 @@ class HudEvent:
 
     @classmethod
     def from_json(cls, raw: str) -> "HudEvent":
+        # F4.1.4 ("contract test per ogni payload malformato"): un evento arriva qui da una fonte
+        # esterna (SSE via core/companion_server.py, un client di terze parti) - ogni pezzo del
+        # JSON viene validato per FORMA prima di costruire l'oggetto, non solo per presenza,
+        # cosi' un input malformato fallisce qui con un errore chiaro invece di produrre un
+        # HudEvent con un campo del tipo sbagliato che rompe un chiamante lontano e confuso.
         data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise ValueError(f"HudEvent.from_json: atteso un oggetto JSON, ricevuto {type(data).__name__}")
+        if "type" not in data:
+            raise ValueError("HudEvent.from_json: campo 'type' obbligatorio mancante")
         schema_version = data.get("schema_version", PROTOCOL_VERSION)
         if schema_version != PROTOCOL_VERSION:
             raise ValueError(
                 f"versione protocollo non supportata: {schema_version}; attesa {PROTOCOL_VERSION}"
             )
+        payload = data.get("payload")
+        if payload is None:
+            payload = {}
+        elif not isinstance(payload, dict):
+            raise ValueError(f"HudEvent.from_json: 'payload' deve essere un oggetto JSON, ricevuto {type(payload).__name__}")
         return cls(
-            type=EventType(data["type"]), payload=data.get("payload") or {}, at=data.get("at", time.time()),
+            type=EventType(data["type"]), payload=payload, at=data.get("at", time.time()),
             sequence_id=data.get("sequence_id", 0),
         )
 
