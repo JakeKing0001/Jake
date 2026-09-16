@@ -224,7 +224,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F0.6` | Release Engineering | `DOING` |
 | `F1.1` | Trust Core | `DONE` |
 | `F1.2` | Security Architecture | `DONE` |
-| `F1.3` | Execution Reliability (F1.3.4/F1.3.5 mai affrontati, non richiesti da G1) | `DOING` |
+| `F1.3` | Execution Reliability (F1.3.5 meccanismo - 16/09/2026, non ancora collegato; F1.3.4 mai affrontato, non richiesti da G1) | `DOING` |
 | `F1.4` | Identity and Secrets | `DONE` |
 | `F1.5` | Application Security (gap dichiarati, non richiesti da G1) | `DOING` |
 | `F1.6` | Sandbox Runtime | `DONE` |
@@ -1573,14 +1573,55 @@ reversibili dispone di undo testato.
   finestre E casa (CONTROL_SMART_DEVICE, vedi sotto - la verifica e' dentro la skill stessa, non
   ancora un verificatore INDIPENDENTE in `INTENT_SAFETY_REGISTRY` come per CLOSE_WINDOW, che
   resta bloccato sulla stessa decisione di dipendenza per un client Home Assistant iniettabile in
-  `execution_safety.py`; non ancora browser); `F1.3.4`/`F1.3.5` restano aperti, mai affrontati
-  (infrastruttura nuova sostanziale, non una fetta stretta collegabile a qualcosa gia' esistente);
+  `execution_safety.py`; non ancora browser); `F1.3.5` chiuso parzialmente (meccanismo -
+  `generate_undo_descriptor()`/`UndoStore` - vedi sotto, 16/09/2026; ancora non collegato a
+  nessun chokepoint di produzione ne' a una skill "annulla", `preconditions` deliberatamente mai
+  popolato); `F1.3.4` resta aperto, mai affrontato (infrastruttura nuova sostanziale a se',
+  "snapshot minimo prima dell'azione" e' un problema diverso da F1.3.5 - cosa salvare PRIMA che
+  un'azione muti qualcosa, non come annullarla dopo - non una fetta stretta collegabile a
+  qualcosa gia' esistente);
   `INTENT_SAFETY_REGISTRY` esteso il 15/09/2026 a EXTRACT_ARCHIVE/CREATE_SKILL/DELETE_CREATED_SKILL,
   RESTART_EXPLORER (aveva anche il quarto buco "successo dichiarato senza controllo" gia' trovato
   tre volte in questa sessione, corretto direttamente nella skill) e infine EMPTY_RECYCLE_BIN
   (vedi sotto, per il secondo criterio del Gate G1) - gli altri 13 intent DESTRUCTIVE/ADMIN
   restano fuori con motivazione dichiarata (store interno gia' auto-verificato via cursor.rowcount,
   o natura non verificabile come SYSTEM_POWER).
+- `F1.3.5` (meccanismo - generazione e memorizzazione di un vero undo token) — 16/09/2026: dopo
+  aver chiuso F4.1/F4.2 (12 PR), decisione di continuare su un'altra fase interamente verificabile
+  con test Python. Investigato prima di scrivere codice (grep letterale): `UndoDescriptor`
+  (`core/action_contracts.py`, F1.1.2) esisteva SOLO come contratto dati - zero istanze
+  costruite in produzione. `core/execution_safety.py::rollback_effect()` sa gia' calcolare i
+  parametri di un intent compensatorio da un risultato riuscito, ma SOLO per la compensazione
+  AUTOMATICA innescata da una verifica fallita (F1.3.3), mai per un'azione RIUSCITA che l'utente
+  potrebbe voler annullare di sua scelta in seguito - lo stesso identico calcolo, mai riusato
+  fuori da quel percorso. Estratte (refactor comportamento-invariante, verificato con la suite
+  esistente di `rollback_effect()` invariata) le quattro funzioni pure di calcolo parametri gia'
+  dentro ciascun `_rollback_*` handler (`_create_path_undo_params` ecc.), esposte in un nuovo
+  `UNDO_PARAMS_BY_INTENT` pubblico - invece di duplicare lo stesso calcolo una seconda volta,
+  esattamente il pattern "due insiemi paralleli scollegati" gia' messo in guardia nel docstring
+  di `IntentSafetyEntry`. Nuovo `core/undo_store.py` (modulo a parte per evitare un import
+  circolare: `action_contracts` importa gia' da `execution_safety`, quindi `execution_safety` non
+  puo' importare `UndoDescriptor` da `action_contracts` senza un ciclo):
+  `generate_undo_descriptor(action_id, intent, data, ttl_seconds=..., now=...)` (pura, `None` -
+  non un valore indovinato - per un intent senza inverso naturale o per `data` malformato/senza
+  le chiavi attese, mai un descrittore con parametri inventati) e `UndoStore` (in-memoria, per
+  `action_id`, `threading.Lock` - stesso principio gia' accettato per `ResourceLockManager`:
+  poche chiavi per un assistente personale, un dizionario mai ripulito non e' un problema
+  pratico). `DEFAULT_UNDO_TTL_SECONDS = 5*60` - un default ragionevole dichiarato esplicitamente
+  ("prima deve funzionare", stesso principio gia' usato per altri TTL in questa sessione, es.
+  `PairingChallenge`), non una policy definitiva: nessun intent aveva mai bisogno di questo
+  numero prima d'ora. `preconditions` resta deliberatamente sempre `None` - lo stesso giudizio
+  caso per caso gia' rifiutato per `ActionProposal.preconditions`/`expected_effect` (F1.1.7), non
+  inventato nemmeno qui. Aggiunti 20 nuovi test in `tests/test_undo_store.py` (i quattro intent
+  con inverso naturale, gli intent senza, dati malformati, scadenza, consumo singolo, e un test
+  di concorrenza con 100 thread veri che salvano/rileggono ciascuno il proprio descrittore).
+  **Deliberatamente non affrontato** (stesso principio "prima il meccanismo, poi l'adozione" gia'
+  seguito per `ResourceLockManager`/`TaskRiskBudget` nel piano multi-device): nessun collegamento
+  ai tre chokepoint reali (`JakeCore`/`TaskAgent`/`PlanExecutor`) che potrebbero popolare questo
+  store dopo un'azione riuscita, ne' una skill "annulla" che lo consumi - `F1.3.4` ("snapshot
+  minimo prima dell'azione") resta un problema completamente separato, non affrontato qui. Prova:
+  2.801/2.801 test, ruff/mypy verdi (87 file nella lista selettiva mypy, `core/undo_store.py`
+  aggiunto).
 - `F1.3.1` — 11/09/2026: `core/execution_safety.py` aveva tre strutture parallele da tenere
   sincronizzate a mano - `VERIFIABLE_INTENTS` (insieme), l'if/elif di `verify_effect`,
   `ROLLBACK_HANDLERS` + `ROLLBACK_COMPENSATING_INTENT` (due dizionari) - esattamente il pattern
