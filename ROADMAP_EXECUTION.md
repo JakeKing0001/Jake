@@ -245,7 +245,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F3.6` | Browser Automation (G1 superato, mai iniziato) | `READY` |
 | `F3.7` | Application Adapters (G1 superato, mai iniziato) | `READY` |
 | `F3.8` | Demonstration Learning (G1 superato, mai iniziato) | `READY` |
-| `F4.1` | Protocol Architecture (F4.1.2/F4.1.3/F4.1.5 chiusi, F4.1.1 chiuso lato Python (sequence_id+trace_id)/F4.1.4 prima fetta lato Python - 16/09/2026; lato C++ di F4.1.1/F4.1.4, F4.1.6 mai affrontati) | `DOING` |
+| `F4.1` | Protocol Architecture (F4.1.2/F4.1.3/F4.1.5/F4.1.6 chiusi, F4.1.1 chiuso lato Python (sequence_id+trace_id)/F4.1.4 prima fetta lato Python - 16/09/2026; solo il lato C++ di F4.1.1/F4.1.4 resta scoperto, gap permanente dichiarato) | `DOING` |
 | `F4.2` | Native HUD (F4.2.1/F4.2.4 chiusi, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026; F4.2.5/F4.2.6 e resto di F4.2.3 richiedono test interattivi/visivi) | `DOING` |
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
 | `F4.4` | Interaction Design (G1 superato, mai iniziato) | `READY` |
@@ -4774,8 +4774,11 @@ Criterio di uscita: client Python finto e JakeClient C++ superano la stessa suit
   payload malformato lato Python, tre buchi reali trovati e corretti - vedi sotto; il lato C++
   resta scoperto, nessuna toolchain di test C++/QML in questo progetto); `F4.1.3` **chiuso**
   (meccanismo di replay lato server, E auto-reconnect/`Last-Event-ID` lato client - vedi sotto,
-  con un buco reale preesistente corretto nello stesso passo); resto (`F4.1.6`)
-  mai affrontato.
+  con un buco reale preesistente corretto nello stesso passo); `F4.1.6` **chiuso** (finestra di
+  compatibilita' ZERO definita e documentata, con un buco reale di spam corretto lato C++ - vedi
+  sotto, 16/09/2026). Con questo **F4.1 e' completo per intero lato Python**; lato C++ restano
+  scoperti `sequence_id`/`trace_id` (mai consumati, ignorati in silenzio) e i contract test veri e
+  propri (nessuna toolchain di test C++/QML in questo progetto).
 - `F4.1.5` (VERIFICA, nessun codice) — 16/09/2026: "garantire che client lento non blocchi il
   core" è lo STESSO `core/event_bus.py::EventBus` già verificato per questo in `F1.8.6`
   ("impedire che un client lento blocchi event bus o altri client") - coda `queue.Queue(maxsize=
@@ -4962,6 +4965,39 @@ Criterio di uscita: client Python finto e JakeClient C++ superano la stessa suit
   di `.calls` usata da altri quattro test). Prova: 2.836/2.836 test (il singolo fallimento isolato
   e preesistente di `test_sandboxed_skill_worker.py` non si e' ripresentato in questo run),
   ruff/mypy verdi.
+- `F4.1.6` (definire compatibility window tra core e HUD) — 16/09/2026: investigato PRIMA di
+  scrivere codice se esistesse gia' una risposta implicita, come gia' fatto per `F4.1.5`. Risposta:
+  finestra ZERO per costruzione, non una scelta arbitraria - `JAKE_PROTOCOL_VERSION` (lato C++,
+  `hud/native/CMakeLists.txt`) e `PROTOCOL_VERSION` (lato Python, `core/version.py`) leggono
+  ENTRAMBI lo stesso `config/release.json`, un solo repository/build, nessun canale di
+  distribuzione separato per HUD e core (verificato leggendo `hud/native/README.md` e
+  `CMakeLists.txt`, non assunto) - le due parti sono sempre allineate quando ricompilate insieme,
+  quindi un disallineamento reale e' sempre un binario HUD non ricompilato dopo un cambio di
+  schema (lo scenario concreto per uno sviluppatore solo su questo progetto), mai una versione
+  "abbastanza vicina" da voler tollerare a runtime. Il comportamento di rifiuto netto (gia' vero
+  per costruzione sia su `GET /status` sia su ogni evento SSE, `JakeClient.cpp`) era pero'
+  **incompleto**: un mismatch sullo STREAM di eventi (non su `/status`, verificato per errore una
+  sola volta per tentativo di connessione) emetteva `errorOccurred` per OGNI singolo evento
+  ricevuto sullo stream sbagliato, senza mai interrompere lo stream stesso - su un flusso SSE che
+  puo' portare piu' eventi al secondo, un core disallineato avrebbe inondato l'interfaccia con lo
+  stesso errore ripetuto all'infinito invece di segnalarlo una volta e fermarsi in modo pulito
+  come fa gia' `/status`. Corretto in `JakeClient.{h,cpp}`: nuovo `m_protocolMismatchReported`
+  (azzerato ad ogni `connectToJake()`) evita l'emissione ripetuta, e lo stream viene abortito alla
+  prima rilevazione - `onEventStreamFinished()` (gia' corretto in `F4.1.3` per usare `sender()`)
+  programma comunque la riconnessione automatica dopo `kReconnectDelayMs`, che fallira' di nuovo
+  nello stesso modo finche' l'HUD non viene ricompilato, esattamente il comportamento gia' definito
+  per `/status`. Verificato per davvero: ricompilato con successo (nessun errore/warning nuovo),
+  eseguibile lanciato standalone e confermato attivo/rispondente (`Get-Process`) - nessuna
+  regressione sul percorso comune (versioni allineate, il ramo toccato non viene mai eseguito).
+  **Limite dichiarato apertamente**: lo scenario di mismatch VERO non e' stato innescato dal vivo -
+  farlo richiederebbe scollegare artificialmente `JAKE_PROTOCOL_VERSION` lato C++ da
+  `PROTOCOL_VERSION` lato Python, il contrario esatto del modello di build a fonte unica appena
+  verificato; la correttezza della guardia booleana e' verificata per lettura attenta del codice
+  (stesso schema gia' usato con successo per `fetchStatus()`), non da un test C++ automatico
+  (nessuna toolchain di test C++/QML in questo progetto, gap dichiarato da `F4.1.4`). Con questo,
+  `F4.1.6` e' **chiuso** e `F4.1` e' completo lato Python (resta solo il consumo/test lato C++ di
+  `sequence_id`/`trace_id`, gap permanente dichiarato). Prova: build C++ verde, nessun test Python
+  toccato in questo incremento (suite gia' verde da F4.1.1).
 
 ### F4.2 — Shell overlay nativa
 
