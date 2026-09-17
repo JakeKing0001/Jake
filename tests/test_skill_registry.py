@@ -288,6 +288,17 @@ class FilesystemMutationResourceLockTests(unittest.TestCase):
         )
         self.assertEqual(len(keys), 2)
 
+    def test_resource_lock_keys_accept_pathlike_values(self):
+        registry = _bare_registry()
+        target = self.tmp_dir / "nested" / "file.txt"
+        target.parent.mkdir(exist_ok=True)
+
+        keys_from_path = registry._resource_lock_keys("DELETE_PATH", {"path": target})
+        keys_from_str = registry._resource_lock_keys("DELETE_PATH", {"path": str(target)})
+
+        self.assertEqual(keys_from_path, keys_from_str)
+        self.assertEqual(len(keys_from_path), 1)
+
     def test_an_unrelated_resource_key_is_never_blocked_by_a_slow_filesystem_mutation(self):
         """Il lock e' per RESOURCE KEY, non un lock unico globale sul filesystem: un MOVE_PATH
         lento su una cartella non deve mai bloccare un CREATE_PATH concorrente su una cartella

@@ -257,6 +257,8 @@ class SkillRegistry:
         if parameters:
             for name in self.PATH_PARAMETERS:
                 value = parameters.get(name)
+                if isinstance(value, os.PathLike):
+                    value = os.fspath(value)
                 if isinstance(value, str) and value.strip():
                     resolved = resolve_user_path(value, prefer_existing=intent != "CREATE_PATH")
                     if resolved != value:
@@ -314,6 +316,8 @@ class SkillRegistry:
         keys = []
         for name in self.PATH_PARAMETERS:
             value = parameters.get(name)
+            if isinstance(value, os.PathLike):
+                value = os.fspath(value)
             if not isinstance(value, str) or not value.strip():
                 continue
             try:
