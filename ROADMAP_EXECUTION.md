@@ -5252,6 +5252,43 @@ Criterio di uscita: ogni fallback è osservabile e non produce duplicazioni nei 
   privato incluso in questo commit). Task 3/5 restano dichiarati NON completabili senza un vero
   gradino "vision" nella scala di ripiego - lavoro futuro sostanziale, non un incremento minore.
 
+- `F3.5.1` (gradino "vision"/OCR, MAI costruito prima d'ora) + Task 3/10 completato end-to-end —
+  19/09/2026: nuovo `core/computer_use/vision_verify.py::word_visible_in_window` - il gradino
+  "OCR" dichiarato dall'ordine "API/app adapter -> UIA -> browser DOM -> OCR -> vision ->
+  coordinate" (F3.5.1), motivato direttamente dal buco trovato nell'incremento precedente (UI
+  Automation non rivela mai i figli di un `QTreeWidgetItem`). Legge SOLO la porzione di schermo
+  dentro i bordi della finestra data (coordinate da UI Automation, F3.2), mai lo schermo intero -
+  scelta di privacy deliberata, motivata proprio dall'incidente del ritaglio sbagliato
+  dell'incremento precedente. Corrispondenza ESATTA di una singola parola OCR (non una
+  sottostringa, non una frase multi-parola) - un primo gradino deliberatamente stretto, non
+  un'estensione generica di `ComputerAgent.locate_text` gia' esistente.
+
+  **Buco reale trovato SCRIVENDO il test end-to-end di Task 3, non ipotizzato**: la prima azione
+  tentata per espandere "Categoria A" - un doppio click reale a coordinate pixel, la scorciatoia
+  Qt piu' ovvia - si e' rivelata INAFFIDABILE, riprodotto su 3 esecuzioni consecutive dopo un
+  primo tentativo isolato riuscito per caso. Non un limite del ponte di accessibilita' come i
+  buchi gia' documentati, ma una vera race condition di TIMING: `pyautogui.doubleClick()` viene a
+  volte interpretato da Qt come due click SINGOLI indipendenti (che si annullano a vicenda -
+  espandi poi ricollassa) invece di un vero doppio click, coerente con un `change_ratio` rimasto
+  vicino a zero invece che il salto atteso. Sostituito con un click singolo (seleziona/mette a
+  fuoco l'elemento, gia' verificato affidabile per un `TreeItem`) seguito dalla freccia DESTRA (la
+  scorciatoia da tastiera standard di Qt per espandere un nodo collassato con il fuoco) - verificato
+  affidabile su prove ripetute, nessun fallimento riprodotto.
+
+  Con questo, Task 3/10 e' completato per DAVVERO end-to-end in
+  `tests/test_computer_use_integration.py::ExpandCategoryEndToEndTests` - **il primo caso in
+  questo intero filone in cui NESSUNA parte del flusso finale passa da UI Automation**: ne'
+  l'azione (pixel + tastiera) ne' la verifica (OCR). Bilancio aggiornato: 4/10 task ora verificati
+  end-to-end (Task 1, 2, 3, 4). Task 5 resta lo stesso genere di buco (Scroll) - completabile in
+  linea di principio con lo stesso gradino "vision" appena costruito, non affrontato in questo
+  incremento. Deliberatamente NON affrontati qui: corrispondenza di frasi multi-parola,
+  localizzazione delle coordinate del testo trovato (resta compito di `ComputerAgent.locate_text`),
+  collegamento di `word_visible_in_window` come gradino automatico dentro
+  `try_strategies_in_order` (oggi e' solo una funzione libera passabile come `verify`). Prova: 6
+  test nuovi in `tests/test_vision_verify.py` (con finti deterministici, inclusa la verifica che
+  SOLO i bordi della finestra vengano catturati, mai lo schermo intero) + 1 test end-to-end contro
+  la fixture vera. 2.983/2.983 test, ruff verde.
+
 ### F3.6 — Browser adapter
 
 Dipende da: F1.5 e F3.5.
