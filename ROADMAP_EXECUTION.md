@@ -4812,6 +4812,39 @@ Dipende da: F3.2.
 
 Criterio di uscita: gli stessi task passano dopo resize, tema e spostamento finestra.
 
+- `F3.3.1`/`F3.3.3` (prima fetta - selettore per name/control_type/automation_id, rifiuto
+  dell'ambiguita') — 18/09/2026: nuovo `core/computer_use/selector.py::ElementSelector`/
+  `SelectorEngine`, sopra `UIAutomationAdapter` (F3.2) - non lega le skill direttamente a
+  `comtypes`. `UIAutomationAdapter.find_matching_elements()` (nuovo metodo, F3.2) usa le
+  condizioni NATIVE di UI Automation (`FindAll` + `CreateAndCondition`) invece di camminare
+  l'albero in Python e confrontare a mano - una singola chiamata COM filtrata da Windows, non
+  centinaia (vedi la latenza gia' misurata in F3.2, circa 1ms per elemento con una camminata
+  completa: una ricerca nativa mirata costa una frazione di quello). `find_unique()` (F3.3.3)
+  solleva `NoMatchError`/`AmbiguousSelectionError` invece di restituire un candidato indovinato
+  quando la ricerca non produce esattamente un risultato - l'API sicura per una futura azione ad
+  alto impatto (F3.4, non ancora costruita), che non deve MAI agire su un elemento scelto a caso
+  tra piu' possibilita' ambigue.
+
+  Verificato contro la fixture VERA di F3.1.1 (lanciata in un processo separato, stesso schema di
+  F3.2 - non c'e' altro modo onesto di verificare condizioni COM native): un selettore per nome+
+  control_type trova esattamente il bottone "Aggiungi"; l'automation_id qualificato di Qt (gia'
+  documentato in F3.2) basta da solo a disambiguare; una ricerca senza corrispondenze solleva
+  `NoMatchError`; cercare tutti i `TreeItem` senza un nome (le due voci "Categoria A"/"Categoria
+  B" condividono lo stesso control_type) solleva correttamente `AmbiguousSelectionError`; "Tab 1"
+  compare sia come `Tab` (il contenitore) sia come `TabItem` (la linguetta) - serve il
+  control_type per scegliere quello giusto, provato esplicitamente. Un test scritto con
+  l'automation_id parziale (solo `fixture_reset_button`, non l'intero percorso qualificato) e'
+  fallito per davvero prima della correzione (`CreatePropertyCondition` confronta per uguaglianza
+  ESATTA, non una sottostringa) - corretto usando il percorso completo, non assunto.
+
+  Deliberatamente NON affrontati qui, passi successivi dichiarati: F3.3.1 (resto - selettori per
+  app/process/window/ancestor, oggi solo i tre criteri gia' in `ElementInfo`), F3.3.2 (un vero
+  punteggio/spiegazione tra candidati, oggi solo "unico o rifiutato"), F3.3.4 (resto - nessun
+  formato di salvataggio su disco ancora), F3.3.5 (invalidazione - nessuna cache di selettori
+  ancora), F3.3.6 (inspector nell'HUD), F3.3.7 (test espliciti dopo resize/tema/traduzione - l'uso
+  del nome invece delle coordinate lo rende plausibile per costruzione, ma non ancora provato).
+  Prova: 11 test nuovi in `tests/test_selector.py`. 2.932/2.932 test, ruff verde.
+
 ### F3.4 — Executor semantico
 
 Dipende da: F3.3 e F1.3.
