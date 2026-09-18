@@ -7,8 +7,16 @@ from unittest import mock
 from PIL import Image
 
 from core.computer_agent import EVIDENCE_NONE, EVIDENCE_PIXEL_DIFF, ComputerAgent
+from core.computer_use.executor import ElementNotInteractableError
+from core.computer_use.selector import AmbiguousSelectionError, NoMatchError
+from core.computer_use.ui_automation_adapter import ElementInfo, WindowNotFoundError
 
 WORDS = [{"text": "Accedi", "line": 0, "x": 100, "y": 200, "w": 60, "h": 20}]
+
+_BUTTON_INFO = ElementInfo(
+    name="Aggiungi", automation_id="fixture_add_button", control_type="Button",
+    bounds=(100, 200, 60, 20), enabled=True, selected=None, toggle_state=None, focused=False,
+)
 
 
 class ObserveAndLocateTests(unittest.TestCase):
@@ -134,6 +142,124 @@ class ClickTextTests(unittest.TestCase):
         click.assert_called_once_with(130, 210, button="left")
         self.assertTrue(result.success)
         self.assertEqual(result.matched, "Accedi")
+
+
+class ClickElementTests(unittest.TestCase):
+    """F3.4.2: click_element trova un elemento via UI Automation (F3.2/F3.3) e lo clicca tramite
+    Invoke (F3.4), con ripiego a un click pixel se Invoke non funziona (F3.5) - nessuna
+    dipendenza da uno schermo reale, ogni pezzo della catena e' mockato al proprio punto di
+    ingresso, come gia' fatto per il resto di questa classe."""
+
+    def _mocked_adapter_and_engine(self, MockAdapter, MockEngine, *, element=mock.sentinel.element):
+        adapter = MockAdapter.return_value
+        adapter.find_window_by_title.return_value = mock.sentinel.window
+        adapter.describe_element.return_value = _BUTTON_INFO
+        engine = MockEngine.return_value
+        engine.wait_for_unique_element.return_value = element
+        return adapter, engine
+
+    def test_window_not_found_is_reported_without_touching_the_mouse(self):
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("pyautogui.click") as click:
+            MockAdapter.return_value.find_window_by_title.side_effect = WindowNotFoundError("no window")
+            result = ComputerAgent().click_element(window_title="Non esiste", name="Aggiungi")
+
+        click.assert_not_called()
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "WINDOW_NOT_FOUND")
+
+    def test_no_match_is_reported_without_touching_the_mouse(self):
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("pyautogui.click") as click:
+            MockAdapter.return_value.find_window_by_title.return_value = mock.sentinel.window
+            MockEngine.return_value.wait_for_unique_element.side_effect = NoMatchError("nessuno")
+            result = ComputerAgent().click_element(window_title="Jake Computer Use Fixture", name="Non c'e'")
+
+        click.assert_not_called()
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "NOT_FOUND")
+
+    def test_an_ambiguous_match_is_reported_without_touching_the_mouse(self):
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("pyautogui.click") as click:
+            MockAdapter.return_value.find_window_by_title.return_value = mock.sentinel.window
+            MockEngine.return_value.wait_for_unique_element.side_effect = AmbiguousSelectionError("troppi")
+            result = ComputerAgent().click_element(window_title="Jake Computer Use Fixture", control_type="Button")
+
+        click.assert_not_called()
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "AMBIGUOUS_MATCH")
+
+    def test_a_successful_invoke_with_a_visible_change_reports_verified(self):
+        before = Image.new("RGB", (10, 10), (0, 0, 0))
+        after = Image.new("RGB", (10, 10), (255, 255, 255))
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("core.computer_use.executor.ActionExecutor") as MockExecutor, \
+             mock.patch("core.vision.screen.capture_screenshot_image", side_effect=[before, after]), \
+             mock.patch("pyautogui.click") as click, mock.patch("time.sleep"):
+            self._mocked_adapter_and_engine(MockAdapter, MockEngine)
+            result = ComputerAgent().click_element(window_title="Jake Computer Use Fixture", name="Aggiungi")
+
+        MockExecutor.return_value.invoke.assert_called_once_with(mock.sentinel.element)
+        click.assert_not_called()
+        self.assertTrue(result.success)
+        self.assertTrue(result.verified)
+        self.assertEqual(result.evidence, EVIDENCE_PIXEL_DIFF)
+        self.assertEqual((result.x, result.y), (130, 210), "il centro deve venire dai bounds letti via UI Automation")
+
+    def test_a_successful_invoke_without_any_visible_change_still_reports_success(self):
+        """Stessa distinzione gia' seguita da click_point (F3.5.5): un'azione davvero eseguita
+        che non cambia nulla di visibile (es. un bottone il cui effetto non e' visivo) resta
+        success=True, solo verified=False - mai trattata come un fallimento."""
+        same = Image.new("RGB", (10, 10), (0, 0, 0))
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("core.computer_use.executor.ActionExecutor") as MockExecutor, \
+             mock.patch("core.vision.screen.capture_screenshot_image", side_effect=[same, same.copy(), same.copy()]), \
+             mock.patch("pyautogui.click") as click, mock.patch("time.sleep"):
+            self._mocked_adapter_and_engine(MockAdapter, MockEngine)
+            result = ComputerAgent().click_element(window_title="Jake Computer Use Fixture", name="Aggiungi")
+
+        self.assertTrue(MockExecutor.return_value.invoke.called)
+        # Senza verifica, la scala tenta anche il ripiego pixel (verify() fallisce dopo invoke).
+        click.assert_called_once_with(130, 210)
+        self.assertTrue(result.success)
+        self.assertFalse(result.verified)
+
+    def test_invoke_failing_falls_back_to_a_pixel_click_at_the_same_coordinates(self):
+        """`invoke()` che SOLLEVA non chiama mai `verify()` per quel tentativo (F3.5.3, "verify()
+        dopo l'azione" - un'azione mai eseguita non ha nulla da verificare) - solo il ripiego
+        pixel_click produce una cattura schermo "dopo", oltre a quella "prima" iniziale."""
+        after = Image.new("RGB", (10, 10), (255, 255, 255))
+        before = Image.new("RGB", (10, 10), (0, 0, 0))
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("core.computer_use.executor.ActionExecutor") as MockExecutor, \
+             mock.patch("core.vision.screen.capture_screenshot_image", side_effect=[before, after]), \
+             mock.patch("pyautogui.click") as click, mock.patch("time.sleep"):
+            self._mocked_adapter_and_engine(MockAdapter, MockEngine)
+            MockExecutor.return_value.invoke.side_effect = ElementNotInteractableError("disabilitato")
+            result = ComputerAgent().click_element(window_title="Jake Computer Use Fixture", name="Aggiungi")
+
+        click.assert_called_once_with(130, 210)
+        self.assertTrue(result.success)
+        self.assertTrue(result.verified)
+
+    def test_a_bounds_read_failure_is_reported_without_touching_the_mouse(self):
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("pyautogui.click") as click:
+            MockAdapter.return_value.find_window_by_title.return_value = mock.sentinel.window
+            MockAdapter.return_value.describe_element.return_value = None
+            MockEngine.return_value.wait_for_unique_element.return_value = mock.sentinel.element
+            result = ComputerAgent().click_element(window_title="Jake Computer Use Fixture", name="Aggiungi")
+
+        click.assert_not_called()
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "OPERATION_FAILED")
 
 
 if __name__ == "__main__":

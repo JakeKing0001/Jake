@@ -14,6 +14,36 @@ Oggi copre solo il click (la parte piu' soggetta ad ambiguita': coordinate legge
 bersaglio, bottoni disabilitati); digitazione e scorrimento restano skill isolate (TYPE_TEXT,
 PRESS_KEY, SCROLL) e sono un possibile prossimo passo di questa fase.
 
+`click_element` (F3.4.2, prima fetta - "unificare click... nel ComputerAgent", adozione): trova
+un elemento per nome/ruolo/automation_id DENTRO una finestra data (F3.3, `SelectorEngine`) e lo
+clicca semanticamente tramite il pattern Invoke di UI Automation (F3.4, `ActionExecutor`) invece
+di coordinate pixel ASSOLUTE fornite dal chiamante - le coordinate restano un dettaglio interno,
+LETTE da UI Automation, non indovinate ne' passate dall'esterno come in `click_point`. Se Invoke
+non e' disponibile o non produce un effetto visibile, ripiega su un click pixel alle STESSE
+coordinate lette da UI Automation (F3.5, `try_strategies_in_order`) - non un secondo metodo
+separato, la stessa scala di ripiego gia' costruita e testata in questa sessione. Nessun campo
+`ElementSelector`/pattern e' passato dal chiamante oltre nome/ruolo/automation_id: un primo
+gradino deliberatamente per il caso piu' comune (bottoni/link, dove Invoke e' gia' verificato
+affidabile in F3.4) - elementi dove Invoke NON si applica (es. una voce di lista che va
+selezionata, non "premuta") restano fuori da questo metodo, non affrontati qui.
+
+**Assunzione dichiarata esplicitamente, NON verificata empiricamente per Invoke** (a differenza
+della scoperta gia' fatta per SelectionItem, vedi `core/computer_use/fallback.py`): incatenare un
+tentativo Invoke fallito prima di un click pixel sullo STESSO elemento potrebbe in teoria
+"avvelenare" lo stato allo stesso modo gia' trovato per SelectionItem su un `QListWidgetItem` -
+non ancora messo alla prova con un test dedicato per Invoke specificamente, quindi la strategia
+Invoke qui NON e' marcata `unsafe_after_failure` (il comportamento di default, incatenare) invece
+di assumere il limite peggiore senza prova. Se un futuro test dovesse trovare lo stesso
+avvelenamento anche per Invoke, questa scelta andrebbe rivista.
+
+La VERIFICA resta la stessa evidenza DEBOLE gia' dichiarata in F3.5.5 (pixel diff, `evidence=
+EVIDENCE_PIXEL_DIFF`) - questo metodo non conosce il dominio dell'app target, a differenza dei
+test end-to-end di F3.1-F3.5 (ognuno con un secondo segnale indipendente specifico del caso, es.
+il bottone "Rimuovi selezionato" che si abilita). I metodi esistenti (`click_text`/`click_point`/
+`locate_text`/`observe`) restano INVARIATI - `click_element` e' additivo, non ancora usato da
+nessuna skill esistente (CLICK_TEXT/CLICK_ELEMENT restano sul vecchio percorso a coordinate pixel/
+OCR - collegarli e' una decisione di adozione a parte, non affrontata qui).
+
 `evidence` (F3.5.5, "usare pixel diff soltanto come evidenza debole", adozione): `verified=True`
 qui viene SEMPRE da un pixel diff (`core/vision/screen_diff.py`), l'UNICO segnale disponibile a
 questa classe - a differenza della verifica basata su UI Automation costruita in `core/
@@ -106,4 +136,85 @@ class ComputerAgent:
         return ComputerActionResult(
             success=True, x=x, y=y, matched=matched, verified=verified, change_ratio=round(ratio, 4),
             evidence=evidence,
+        )
+
+    def click_element(
+        self, *, window_title: str, name: str | None = None, control_type: str | None = None,
+        automation_id: str | None = None, timeout_seconds: float = 5.0,
+    ) -> ComputerActionResult:
+        """F3.4.2: trova un elemento per nome/ruolo/automation_id dentro `window_title` e lo
+        clicca via UI Automation (Invoke, F3.4), con ripiego a un click pixel alle stesse
+        coordinate se Invoke fallisce o non ha un effetto visibile (F3.5). Vedi il docstring del
+        modulo per le scelte e i limiti dichiarati."""
+        from core.computer_use.executor import ActionExecutor
+        from core.computer_use.fallback import try_strategies_in_order
+        from core.computer_use.selector import AmbiguousSelectionError, ElementSelector, NoMatchError, SelectorEngine
+        from core.computer_use.ui_automation_adapter import UIAutomationAdapter, WindowNotFoundError
+        from core.vision.screen import capture_screenshot_image
+        from core.vision.screen_diff import pixel_change_ratio, screen_visibly_changed
+
+        adapter = UIAutomationAdapter()
+        try:
+            window = adapter.find_window_by_title(window_title, timeout_seconds=timeout_seconds)
+        except WindowNotFoundError:
+            return ComputerActionResult(success=False, error="WINDOW_NOT_FOUND")
+
+        engine = SelectorEngine(adapter)
+        selector = ElementSelector(name=name, control_type=control_type, automation_id=automation_id)
+        try:
+            element = engine.wait_for_unique_element(window, selector, timeout_seconds=timeout_seconds)
+        except NoMatchError:
+            return ComputerActionResult(success=False, error="NOT_FOUND")
+        except AmbiguousSelectionError:
+            return ComputerActionResult(success=False, error="AMBIGUOUS_MATCH")
+
+        info = adapter.describe_element(element)
+        if info is None:
+            return ComputerActionResult(success=False, error="OPERATION_FAILED")
+        left, top, width, height = info.bounds
+        center_x, center_y = left + width // 2, top + height // 2
+        executor = ActionExecutor()
+
+        try:
+            before = capture_screenshot_image()
+        except Exception:
+            before = None
+        last_ratio = [0.0]
+        # F3.5.5/click_point: "success" (l'azione e' stata davvero ESEGUITA, mai sollevato) resta
+        # un fatto diverso da "verified" (l'evidenza debole del pixel diff l'ha confermato) -
+        # stessa distinzione gia' seguita da click_point, un click legittimo che non cambia nulla
+        # di visibile (es. un link verso una pagina gia' aperta) non deve diventare un fallimento.
+        action_performed = [False]
+
+        def _verify() -> bool:
+            if before is None:
+                return False
+            try:
+                time.sleep(POST_ACTION_SETTLE_SECONDS)
+                after = capture_screenshot_image()
+                last_ratio[0] = pixel_change_ratio(before, after)
+                return screen_visibly_changed(before, after)
+            except Exception:
+                return False
+
+        def _uia_invoke() -> None:
+            executor.invoke(element)
+            action_performed[0] = True
+
+        def _pixel_click() -> None:
+            import pyautogui
+            pyautogui.click(center_x, center_y)
+            action_performed[0] = True
+
+        outcome = try_strategies_in_order(
+            [("uia_invoke", _uia_invoke), ("pixel_click", _pixel_click)],
+            verify=_verify,
+        )
+
+        if not action_performed[0]:
+            return ComputerActionResult(success=False, error="OPERATION_FAILED")
+        return ComputerActionResult(
+            success=True, x=center_x, y=center_y, matched=name,
+            verified=outcome.succeeded, change_ratio=round(last_ratio[0], 4),
+            evidence=EVIDENCE_PIXEL_DIFF if before is not None else EVIDENCE_NONE,
         )
