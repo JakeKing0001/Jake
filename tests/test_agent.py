@@ -1130,6 +1130,98 @@ class UndoStoreWiringTests(unittest.TestCase):
         self.assertIs(agent_general.undo_store, agent_coding.undo_store)
 
 
+class TaskRiskBudgetWiringTests(unittest.TestCase):
+    """F1.5.8 (adozione, vedi core/task_risk_budget.py per il buco reale che chiude): run()
+    ora ferma un passo che, combinato con quanto gia' osservato in QUESTO compito, costituirebbe
+    un'escalation - anche quando ne' PolicyEngine ne' la skill stessa lo richiederebbero mai da
+    sole. tests/test_task_risk_budget.py copre gia' il motore in isolamento; qui si verifica che
+    TaskAgent.run() lo consulti DAVVERO prima di eseguire ogni passo, non solo letto a codice."""
+
+    _CAPABILITIES = {
+        "RECALL": {"intent": "RECALL", "description": "Richiama un ricordo.", "parameters": {
+            "key": {"type": "string", "required": True, "description": "Chiave del ricordo."},
+        }},
+        "OPEN_URL": {"intent": "OPEN_URL", "description": "Apre un URL.", "parameters": {
+            "url": {"type": "string", "required": True, "description": "URL da aprire."},
+        }},
+        "GET_TIME": {"intent": "GET_TIME", "description": "Ora corrente.", "parameters": {}},
+    }
+
+    class _RecordingRegistry:
+        def __init__(self, capabilities):
+            self._capabilities = capabilities
+            self.calls = []
+
+        def list_capabilities(self):
+            return list(self._capabilities.values())
+
+        def execute(self, intent, parameters=None, policy_engine=None, *, action_id=None, private=False):
+            self.calls.append((intent, dict(parameters or {})))
+            return SkillResult(success=True, data={**(parameters or {})})
+
+    def test_reading_private_data_then_an_external_action_is_stopped_before_executing(self):
+        registry = self._RecordingRegistry(self._CAPABILITIES)
+        client = ScriptedOllamaClient([
+            {"thought": "Leggo il ricordo", "action": {"intent": "RECALL", "parameters": {"key": "compleanno"}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "Lo apro online", "action": {"intent": "OPEN_URL", "parameters": {"url": "https://example.com"}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto.", "ask_user": ""},
+        ])
+        agent = TaskAgent(
+            registry, None, client, model_provider=lambda: "fake-model",
+            format_result=lambda intent, result: str(result.data),
+            fixed_tools=["RECALL", "OPEN_URL"], policy_engine=PolicyEngine(),
+        )
+
+        outcome = agent.run("richiama il compleanno e aprilo online")
+
+        self.assertEqual([call[0] for call in registry.calls], ["RECALL"], "OPEN_URL non deve mai eseguire")
+        self.assertIsNotNone(outcome.pending_confirmation)
+        self.assertEqual(outcome.pending_confirmation["intent"], "OPEN_URL")
+        self.assertEqual(outcome.pending_confirmation["parameters"], {"url": "https://example.com"})
+        self.assertEqual(outcome.pending_confirmation["kind"], "CONFIRMATION_REQUIRED")
+
+    def test_an_external_action_alone_without_any_prior_private_read_executes_normally(self):
+        """La specifica riguarda la CATENA, non il singolo passo isolato - lo stesso test
+        negativo gia' fatto in isolamento (tests/test_task_risk_budget.py), qui end-to-end."""
+        registry = self._RecordingRegistry(self._CAPABILITIES)
+        client = ScriptedOllamaClient([
+            {"thought": "Apro l'url", "action": {"intent": "OPEN_URL", "parameters": {"url": "https://example.com"}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto.", "ask_user": ""},
+        ])
+        agent = TaskAgent(
+            registry, None, client, model_provider=lambda: "fake-model",
+            format_result=lambda intent, result: str(result.data),
+            fixed_tools=["OPEN_URL"], policy_engine=PolicyEngine(),
+        )
+
+        outcome = agent.run("apri l'url")
+
+        self.assertEqual([call[0] for call in registry.calls], ["OPEN_URL"])
+        self.assertIsNone(outcome.pending_confirmation)
+
+    def test_two_unrelated_read_only_steps_never_trigger_an_escalation(self):
+        registry = self._RecordingRegistry(self._CAPABILITIES)
+        client = ScriptedOllamaClient([
+            {"thought": "", "action": {"intent": "GET_TIME", "parameters": {}}, "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "RECALL", "parameters": {"key": "compleanno"}},
+             "final_answer": "", "ask_user": ""},
+            {"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto.", "ask_user": ""},
+        ])
+        agent = TaskAgent(
+            registry, None, client, model_provider=lambda: "fake-model",
+            format_result=lambda intent, result: str(result.data),
+            fixed_tools=["GET_TIME", "RECALL"], policy_engine=PolicyEngine(),
+        )
+
+        outcome = agent.run("che ore sono, poi richiama il compleanno")
+
+        self.assertEqual([call[0] for call in registry.calls], ["GET_TIME", "RECALL"])
+        self.assertIsNone(outcome.pending_confirmation)
+
+
 class SnapshotWiringTests(unittest.TestCase):
     """F1.3.4 (adozione - quinta fetta, vedi core/action_snapshot.py e
     core/request_context.py::current_action_id per il perche' di un contextvar): l'executor di

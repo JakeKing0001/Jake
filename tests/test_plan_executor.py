@@ -296,6 +296,80 @@ class SnapshotWiringTests(unittest.TestCase):
             self.assertEqual(len(snapshots), 1, "l'action_id generato da execute() ha comunque etichettato la cattura")
 
 
+class TaskRiskBudgetWiringTests(unittest.TestCase):
+    """F1.5.8 (adozione, vedi core/task_risk_budget.py per il buco reale che chiude): execute()
+    ora ferma un passo che, combinato con quanto gia' osservato in QUESTO piano, costituirebbe
+    un'escalation - anche quando PolicyEngine da solo lo lascerebbe passare. tests/
+    test_task_risk_budget.py copre gia' il motore in isolamento; qui si verifica che
+    PlanExecutor.execute() lo consulti DAVVERO prima di eseguire ogni passo."""
+
+    class _RecordingRegistry:
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, intent, parameters=None, policy_engine=None, *, action_id=None, private=False):
+            self.calls.append((intent, dict(parameters or {})))
+            return SkillResult(success=True, data=dict(parameters or {}))
+
+    def test_reading_private_data_then_an_external_action_is_stopped_before_executing(self):
+        registry = self._RecordingRegistry()
+        plan = Plan(steps=[
+            PlanStep(intent="RECALL", parameters={"key": "compleanno"}),
+            PlanStep(intent="OPEN_URL", parameters={"url": "https://example.com"}),
+        ])
+
+        outcome = PlanExecutor(registry).execute(plan, policy_engine=PolicyEngine())
+
+        self.assertEqual([call[0] for call in registry.calls], ["RECALL"], "OPEN_URL non deve mai eseguire")
+        self.assertEqual(len(outcome.completed), 1)
+        self.assertEqual(outcome.stopped_step.step.intent, "OPEN_URL")
+        self.assertEqual(outcome.stopped_step.result.error, "ESCALATION_DETECTED")
+
+    def test_an_external_action_alone_without_any_prior_private_read_executes_normally(self):
+        registry = self._RecordingRegistry()
+        plan = Plan(steps=[PlanStep(intent="OPEN_URL", parameters={"url": "https://example.com"})])
+
+        outcome = PlanExecutor(registry).execute(plan, policy_engine=PolicyEngine())
+
+        self.assertEqual([call[0] for call in registry.calls], ["OPEN_URL"])
+        self.assertTrue(outcome.success)
+
+    def test_escalation_does_not_roll_back_the_already_completed_steps(self):
+        """A differenza di BLOCK (che annulla tutto il piano), un'escalation ferma solo il
+        PROSSIMO passo - i passi gia' riusciti singolarmente autorizzati restano validi, stessa
+        semantica gia' scelta per CONFIRM."""
+        with tempfile.TemporaryDirectory() as tmp:
+            target = str(Path(tmp) / "nuovo.txt")
+            registry = FakeRegistry()
+            plan = Plan(steps=[
+                PlanStep(intent="CREATE_PATH", parameters={"path": target}),
+                PlanStep(intent="RUN_COMMAND", parameters={"command": "echo x"}),
+            ])
+
+            outcome = PlanExecutor(registry).execute(plan, policy_engine=PolicyEngine())
+
+            self.assertEqual(outcome.stopped_step.result.error, "ESCALATION_DETECTED")
+            self.assertEqual(outcome.rolled_back, [])
+            self.assertTrue(Path(target).exists(), "il file creato dal primo passo non deve mai sparire")
+
+    def test_a_dry_run_also_detects_escalation_across_simulated_steps(self):
+        """Il budget deve aggiornarsi anche per i passi SIMULATI (mai eseguiti davvero) - senza
+        questo, un dry-run a piu' passi non vedrebbe mai un'escalation tra il primo e il terzo
+        passo, mostrando una sequenza diversa da quella che accadrebbe per davvero."""
+        registry = self._RecordingRegistry()
+        plan = Plan(steps=[
+            PlanStep(intent="RECALL", parameters={"key": "compleanno"}),
+            PlanStep(intent="OPEN_URL", parameters={"url": "https://example.com"}),
+        ])
+
+        outcome = PlanExecutor(registry).execute(plan, policy_engine=PolicyEngine(), dry_run=True)
+
+        self.assertEqual(registry.calls, [], "nessuna skill deve essere eseguita davvero in dry-run")
+        self.assertEqual(len(outcome.completed), 1, "solo RECALL simulato, OPEN_URL mai raggiunto")
+        self.assertEqual(outcome.stopped_step.step.intent, "OPEN_URL")
+        self.assertEqual(outcome.stopped_step.result.error, "ESCALATION_DETECTED")
+
+
 class StructuredLoggingTests(unittest.TestCase):
     def test_verifiable_intent_records_verified_true_on_real_success(self):
         registry = FakeRegistry()

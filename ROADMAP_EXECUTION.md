@@ -6581,3 +6581,63 @@ dello stesso `run()` ricevono due id DIVERSI). Con questo, F1.3.4 e' **chiusa** 
 chokepoint reali (comando diretto/confermato, agente a passi, piano automatico) - resta
 dichiaratamente fuori scope solo il RIPRISTINO da uno snapshot (nessun intent/flusso di conferma
 ancora deciso per farlo). 2.866/2.866 test, ruff/mypy/compileall verdi.
+
+**Aggiornamento 18/09/2026 (F1.5.8, adozione - CHIUSURA su entrambi i chokepoint reali)**:
+verificato con l'utente lo stato del progetto dopo la chiusura di F1.3.4 sopra - il Gate G1 era
+gia' stato dichiarato SUPERATO il 16/09/2026 (vedi sotto, sezione "Gate G1"), quindi F2/F3/F4
+(Onda 2) sono gia' sbloccate. L'utente ha scelto esplicitamente di restare su una rifinitura di F1
+invece di aprire una fase nuova. Riletto `core/task_risk_budget.py::TaskRiskBudget` (F1.5.8, fase
+8/10 del piano multi-device, chiuso il 16/09/2026 come motore puro isolato - vedi la voce datata
+sopra): il modulo stesso dichiarava "deliberatamente NON affrontato qui... il collegamento vero a
+`TaskAgent`/`PlanExecutor`" come passo successivo - stesso schema "prima il meccanismo, poi
+l'adozione" di `UndoStore`/`ResourceLockManager`/`ActionSnapshot` in questa sessione, mai fatto per
+questo meccanismo specifico.
+
+`TaskAgent.run()`: un `TaskRiskBudget` per run (mai condiviso tra compiti), `max_authorized_risk=
+RiskLevel.READ_ONLY` (placeholder neutro - il campo non e' consultato da nessuna delle sei regole,
+una richiesta libera non ha comunque un unico intent "originale" da cui derivarlo). Controllato
+`escalation_reason(intent)` PRIMA di eseguire ogni passo (stesso punto in cui gia' si controllano
+`missing`/parametri obbligatori): un motivo non-None costruisce un `pending_confirmation` con la
+STESSA forma gia' usata per un `CONFIRMATION_REQUIRED` vero restituito da una skill (stesso schema
+che `JakeCore._run_agent` gia' sa interpretare) - intent/parametri restano quelli del passo
+proposto (nessuna riscrittura), il passo NON viene mai eseguito. `record_step()` chiamato dopo un
+successo VERIFICATO (dopo l'eventuale downgrade a `VERIFICATION_FAILED` di F1.3, non prima).
+
+`PlanExecutor.execute()`: stesso identico principio, controllato DOPO che `PolicyEngine` ha gia'
+approvato il passo da solo, PRIMA di eseguirlo - un `ESCALATION_DETECTED` (nuovo codice, non
+ancora esistente nel catalogo) con la STESSA semantica gia' scelta per `CONFIRM` (pausa, **nessun
+rollback** dei passi gia' riusciti - a differenza di `BLOCK`, che annulla tutto: un'escalation
+ferma solo il PROSSIMO passo, non nega retroattivamente quelli gia' autorizzati e riusciti
+singolarmente). **Buco reale trovato scrivendo il test del dry-run, non ipotizzato**: il
+`dry_run=True` esistente simula un passo con `continue` PRIMA di raggiungere il punto dove
+`record_step()` viene chiamato per un'esecuzione vera - senza una correzione, un dry-run a piu'
+passi non avrebbe MAI rilevato un'escalation tra il primo e il terzo passo simulato (il budget
+sarebbe rimasto vuoto per l'intera simulazione), contraddicendo la garanzia gia' dichiarata nel
+docstring di `execute()` ("il dry-run mostra la sequenza REALE che accadrebbe, non una finta in
+cui tutto va sempre bene"). Corretto chiamando `record_step()` anche nel ramo `dry_run`, prima del
+`continue` - riprodotto scrivendo prima il test (che falliva contro il codice senza la correzione,
+mostrando `outcome.completed` con 2 passi invece di 1), poi applicato il fix.
+
+`core/action_ledger.py`: aggiunto `"ESCALATION_DETECTED"` sia a `_KNOWN_RESULT_CATEGORIES`
+(`ERROR_CATEGORY_PENDING`, stessa categoria di `CONFIRMATION_REQUIRED` - l'utente non ha ancora
+detto no, semplicemente non gli e' stato ancora chiesto) sia a `authorization_of()`
+(`AUTHORIZATION_PENDING`) - senza questo, il codice nuovo sarebbe caduto silenziosamente su
+`ERROR_CATEGORY_UNCATEGORIZED`/`AUTHORIZATION_NONE`, tecnicamente non un crash ma una
+classificazione fuorviante nel ledger per un evento di sicurezza che merita una categoria vera.
+
+Prova: 10 test nuovi - 3 in `tests/test_agent.py::TaskRiskBudgetWiringTests` (la catena
+"RECALL poi OPEN_URL" ferma OPEN_URL prima di eseguire, con `pending_confirmation` corretto;
+OPEN_URL isolato senza lettura precedente esegue normalmente; due passi READ_ONLY scollegati non
+scatenano nulla), 4 in `tests/test_plan_executor.py::TaskRiskBudgetWiringTests` (stessa catena
+ferma il piano con `ESCALATION_DETECTED`; nessun rollback del passo gia' riuscito, verificato con
+un vero `CREATE_PATH` il cui file sopravvive; un dry-run a due passi rileva comunque l'escalation,
+la prova diretta del buco del dry-run sopra), 2 in `tests/test_action_ledger.py` (categorizzazione
+`ERROR_CATEGORY_PENDING`/`AUTHORIZATION_PENDING` del nuovo codice, sia nudo sia con prefisso
+`error:`), 1 rieseguito senza modifiche (`test_a_forged_skill_cannot_spawn_an_unbounded_number_of_
+child_processes` in `tests/test_sandboxed_skill_worker.py`, un flake gia' di categoria nota -
+dipendente dal carico di sistema sotto suite piena, non da questa modifica - passa isolato e passa
+di nuovo in una corsa completa successiva, mai toccato da questo incremento). 2.875/2.875 test,
+ruff/mypy/compileall verdi. F1.5.8 e' ora **chiusa** su entrambi i chokepoint reali (agente a
+passi, piano automatico) - il percorso a comando diretto di `JakeCore` non ha bisogno di questo
+gate (un comando diretto e' un SINGOLO intent scelto dall'utente, non una catena di passi decisi
+da un modello: non c'e' "storia del task" da cui un'escalation possa emergere).

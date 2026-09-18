@@ -13,9 +13,10 @@ from core.logger import log_action, new_trace_id
 from core.planner import PlanStep
 from core.policy_engine import PolicyDecision, strip_authorization_signals
 from core.request_context import current_device_id
-from core.risk import risk_of
+from core.risk import RiskLevel, risk_of
 from core.session_recorder import SessionRecorder
 from core.skill_result import SkillResult
+from core.task_risk_budget import TaskRiskBudget
 from core.undo_store import UndoStore, generate_undo_descriptor
 
 
@@ -125,6 +126,13 @@ class PlanExecutor:
         log_action/ricevuta nel ledger per un passo simulato: non e' mai successo per davvero."""
         trace_id = trace_id or new_trace_id()
         outcome = PlanOutcome(trace_id=trace_id)
+        # F1.5.8 (adozione, vedi core/task_risk_budget.py per il buco che chiude - una catena di
+        # passi individualmente sotto soglia puo' comunque costituire un'escalation): un
+        # TaskRiskBudget per QUESTA esecuzione del piano, mai condiviso tra piani diversi.
+        # max_authorized_risk e' READ_ONLY (placeholder neutro, stesso principio gia' applicato
+        # in TaskAgent.run() - il campo non e' oggi consultato da nessuna delle sei regole, vedi
+        # il docstring della dataclass, quindi il valore esatto non cambia alcun comportamento).
+        risk_budget = TaskRiskBudget(max_authorized_risk=RiskLevel.READ_ONLY)
         for step in plan.steps:
             # F1: mai i parametri originali del passo da qui in poi (esecuzione E logging) - vedi
             # core/policy_engine.py sul perche' un piano automatico non puo' mai arrivare gia'
@@ -191,12 +199,43 @@ class PlanExecutor:
                     )
                 return outcome
 
+            # F1.5.8 (adozione): controllato DOPO che PolicyEngine ha gia' approvato questo passo
+            # da solo, PRIMA di eseguirlo - un motivo non-None segnala che eseguirlo ADESSO
+            # costituirebbe un'escalation rispetto ai passi GIA' completati in questo piano,
+            # indipendentemente da cosa decide PolicyEngine per l'intent isolato (che non conosce
+            # la storia del piano - vedi il docstring di core/task_risk_budget.py sul buco reale
+            # che questo chiude). Stessa semantica di CONFIRM sopra (pausa, nessun rollback dei
+            # passi gia' riusciti - nessuno e' pronto a rispondere "confermi?" in un percorso
+            # automatico, ma i passi gia' fatti restano validi cosi' come sono), non quella di
+            # BLOCK: un'escalation ferma il PROSSIMO passo, non nega retroattivamente quelli gia'
+            # autorizzati e riusciti singolarmente.
+            escalation_reason = risk_budget.escalation_reason(step.intent)
+            if escalation_reason is not None:
+                outcome.stopped_step = StepOutcome(
+                    step=step,
+                    result=SkillResult(success=False, data={"message": escalation_reason}, error="ESCALATION_DETECTED"),
+                    attempts=0,
+                )
+                if not dry_run:
+                    self._log_step(
+                        trace_id, private, model, requested_by, time.monotonic(), step.intent, safe_parameters,
+                        result="escalation_detected", verified=None, policy_reason=None,
+                    )
+                return outcome
+
             if dry_run:
                 outcome.completed.append(StepOutcome(
                     step=step,
                     result=SkillResult(success=True, data={"dry_run": True, "intent": step.intent, "parameters": safe_parameters}),
                     attempts=0,
                 ))
+                # F1.5.8 (adozione): un dry-run non esegue nulla per davvero, ma deve comunque
+                # aggiornare il budget con cio' che il passo AVREBBE fatto - altrimenti una
+                # simulazione a piu' passi non rileverebbe mai un'escalation tra il primo e il
+                # terzo passo simulato (risk_budget resterebbe vuoto per l'intera simulazione),
+                # contraddicendo la garanzia gia' dichiarata sopra ("il dry-run mostra la
+                # sequenza REALE che accadrebbe").
+                risk_budget.record_step(step.intent, safe_parameters)
                 continue
 
             step_started = time.monotonic()
@@ -225,6 +264,10 @@ class PlanExecutor:
 
             if step_outcome.result.success:
                 outcome.completed.append(step_outcome)
+                # F1.5.8 (adozione): lo stato di escalation si aggiorna osservando un effetto
+                # GIA' avvenuto con successo (dopo l'eventuale downgrade a VERIFICATION_FAILED
+                # sopra) - mai un tentativo fallito - PRIMA di decidere il passo successivo.
+                risk_budget.record_step(step.intent, safe_parameters)
                 # F1.3.5 (adozione - terzo chokepoint): stesso principio identico gia' visto in
                 # JakeCore/TaskAgent - un passo riuscito il cui intent ha un inverso naturale
                 # genera un vero UndoDescriptor. Lo stesso action_id gia' generato sopra (prima

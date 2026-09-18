@@ -61,7 +61,7 @@ def authorization_of(result: str, parameters: dict | None) -> str:
         return AUTHORIZATION_BLOCKED
     if result_code in ("DENIED_AUTH", "DENIED_CONFIRMATION"):
         return AUTHORIZATION_DENIED
-    if result_code in ("CONFIRMATION_REQUIRED", "AUTH_REQUIRED"):
+    if result_code in ("CONFIRMATION_REQUIRED", "AUTH_REQUIRED", "ESCALATION_DETECTED"):
         return AUTHORIZATION_PENDING
     if parameters.get("authenticated"):
         if parameters.get("authenticated_via") == "windows_hello":
@@ -151,6 +151,12 @@ _KNOWN_RESULT_CATEGORIES: dict[str, str] = {
     "SUCCESS": ERROR_CATEGORY_SUCCESS,
     "CONFIRMATION_REQUIRED": ERROR_CATEGORY_PENDING,
     "AUTH_REQUIRED": ERROR_CATEGORY_PENDING,
+    # F1.5.8 (adozione): stessa categoria di CONFIRMATION_REQUIRED sopra - una catena di passi
+    # ha reso il prossimo troppo rischioso da eseguire senza una conferma FRESCA (core/
+    # task_risk_budget.py), concettualmente identico a "in attesa di conferma", non un diniego
+    # gia' avvenuto (l'utente non ha ancora detto no, semplicemente non gli e' ancora stato
+    # chiesto).
+    "ESCALATION_DETECTED": ERROR_CATEGORY_PENDING,
     "BLOCKED_BY_POLICY": ERROR_CATEGORY_DENIED,
     "POLICY_BLOCKED": ERROR_CATEGORY_DENIED,
     "DENIED_AUTH": ERROR_CATEGORY_DENIED,
