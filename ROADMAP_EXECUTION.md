@@ -5148,6 +5148,35 @@ Criterio di uscita: ogni fallback è osservabile e non produce duplicazioni nei 
   corretti per Invoke, testo non incluso per Value, timestamp reale e recente, nessuna ricevuta
   falsa su precondizione fallita, pattern corretto per Toggle). 2.963/2.963 test, ruff verde.
 
+- `F3.5.7` (conservare il resource lock durante il cambio strategia) — 18/09/2026: nuovi
+  parametri opzionali `resource_key`/`lock_manager` su `try_strategies_in_order`
+  (`core/computer_use/fallback.py`) - prima connessione MAI fatta tra `core/computer_use/` e
+  `core/resource_lock.py` (F1.8.1). Se forniti ENTRAMBI, l'intera scala (ogni strategia tentata
+  PIU' `verify()` dopo ciascuna) gira dentro un UNICO `ResourceLockManager.acquire_write
+  (resource_key)`, acquisito una volta sola prima della prima strategia e rilasciato una volta
+  sola dopo l'ultima - MAI rilasciato e riacquisito tra un tentativo e il successivo. Motivazione:
+  la scala e' concettualmente UN'azione logica (raggiungere un esito verificato per un intento),
+  non una sequenza di azioni indipendenti - se il lock venisse rilasciato tra un tentativo e il
+  successivo, un'altra azione concorrente sulla STESSA risorsa (un secondo passo dello stesso
+  agente, o un'automazione in background) potrebbe intromettersi esattamente nella finestra piu'
+  fragile gia' documentata in F3.5 (dopo un tentativo fallito che ha potenzialmente lasciato lo
+  stato a meta'), rendendo la corruzione ancora piu' difficile da diagnosticare.
+
+  Entrambi opzionali e `None` di default - cambio retrocompatibile, nessun chiamante esistente
+  modificato. Fornire UN SOLO dei due solleva `ValueError` invece di ignorare silenziosamente
+  l'intento del chiamante di voler bloccare la risorsa. Verificato con thread VERI (stesso
+  principio gia' seguito da `tests/test_resource_lock.py`, non solo leggendo l'ordine delle
+  chiamate): un secondo scrittore sulla STESSA resource key, avviato mentre la prima strategia
+  della scala e' ancora a meta' della propria azione (bloccata su un `threading.Event`), resta
+  in attesa fino a quando l'intera scala non e' finita, non solo fino alla fine del primo
+  tentativo. Deliberatamente NON affrontato qui: quale `resource_key` derivare da un elemento/
+  finestra reale (nessun chiamante di produzione usa ancora questo modulo), il collegamento ai
+  quattro chokepoint (`core/resource_lock.py` lo dichiara gia' esplicitamente fuori scope finche'
+  non esiste un censimento dedicato). Prova: 3 test nuovi in
+  `tests/test_fallback.py::ResourceLockAcrossTheLadderTests` (un secondo scrittore attende
+  l'intera scala non solo il primo tentativo, comportamento invariato senza lock manager,
+  fornire un solo parametro dei due viene rifiutato). 2.973/2.973 test, ruff verde.
+
 ### F3.6 — Browser adapter
 
 Dipende da: F1.5 e F3.5.

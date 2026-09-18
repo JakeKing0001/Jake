@@ -7,10 +7,12 @@ solo test end-to-end contro la fixture VERA dimostra il caso reale che ha motiva
 gia' verificata NON "avvelenarsi" a vicenda - vedi il docstring del modulo per la coppia che
 invece lo fa (UIA SelectionItem poi click pixel sullo STESSO elemento), deliberatamente non
 usata qui perche' gia' provata inaffidabile."""
+import threading
 import time
 import unittest
 
 from core.computer_use.fallback import FallbackAttempt, FallbackOutcome, try_strategies_in_order
+from core.resource_lock import ResourceLockManager
 
 
 class TryStrategiesInOrderTests(unittest.TestCase):
@@ -131,6 +133,67 @@ class TryStrategiesInOrderTests(unittest.TestCase):
         )
 
         self.assertEqual(order, ["action", "verify"])
+
+
+class ResourceLockAcrossTheLadderTests(unittest.TestCase):
+    """F3.5.7: se `resource_key`/`lock_manager` sono forniti, il lock resta acquisito per
+    l'INTERA scala (thread VERI, non solo l'ordine delle chiamate - stesso principio gia' usato in
+    tests/test_resource_lock.py per verificare davvero la concorrenza, non solo leggerla dal
+    codice)."""
+
+    def test_a_second_writer_on_the_same_key_waits_for_the_whole_ladder_to_finish(self):
+        manager = ResourceLockManager()
+        order = []
+        first_strategy_started = threading.Event()
+        release_first_strategy = threading.Event()
+
+        def _slow_first_strategy():
+            order.append("ladder_strategy_start")
+            first_strategy_started.set()
+            release_first_strategy.wait(timeout=5)
+            order.append("ladder_strategy_end")
+
+        def _run_ladder():
+            try_strategies_in_order(
+                [("slow", _slow_first_strategy)], verify=lambda: True,
+                resource_key="window:fixture", lock_manager=manager,
+            )
+
+        def _competing_writer():
+            first_strategy_started.wait(timeout=5)
+            with manager.acquire_write("window:fixture"):
+                order.append("competing_writer_start")
+
+        ladder_thread = threading.Thread(target=_run_ladder)
+        competing_thread = threading.Thread(target=_competing_writer)
+        ladder_thread.start()
+        first_strategy_started.wait(timeout=5)
+        competing_thread.start()
+        time.sleep(0.1)  # da' tempo al secondo scrittore di tentare e restare bloccato
+
+        self.assertNotIn(
+            "competing_writer_start", order,
+            "un secondo scrittore e' entrato mentre la scala era ancora a META' di un tentativo",
+        )
+
+        release_first_strategy.set()
+        ladder_thread.join(timeout=5)
+        competing_thread.join(timeout=5)
+
+        self.assertEqual(order, ["ladder_strategy_start", "ladder_strategy_end", "competing_writer_start"])
+
+    def test_without_a_lock_manager_the_ladder_behaves_exactly_as_before(self):
+        outcome = try_strategies_in_order([("only", lambda: None)], verify=lambda: True)
+
+        self.assertTrue(outcome.succeeded)
+
+    def test_providing_only_one_of_the_pair_is_rejected(self):
+        manager = ResourceLockManager()
+
+        with self.assertRaises(ValueError):
+            try_strategies_in_order([("only", lambda: None)], verify=lambda: True, resource_key="k")
+        with self.assertRaises(ValueError):
+            try_strategies_in_order([("only", lambda: None)], verify=lambda: True, lock_manager=manager)
 
 
 class DataclassBehaviorTests(unittest.TestCase):
