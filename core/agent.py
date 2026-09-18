@@ -29,11 +29,12 @@ from core.request_context import (
     current_action_id, current_device_id, reset_current_action_id, reset_current_agent_name,
     set_current_action_id, set_current_agent_name,
 )
-from core.risk import risk_of
+from core.risk import RiskLevel, risk_of
 from core.schema_validation import validate_confirm_envelope
 from core.session_recorder import SessionRecorder
 from core.skill_result import SkillResult
 from core.taint import EXTERNAL_CONTENT_INTENTS, wrap_external_content
+from core.task_risk_budget import TaskRiskBudget
 from core.undo_store import UndoStore, generate_undo_descriptor
 
 # Strumenti sempre offerti all'agente, oltre a quelli pertinenti alla richiesta: sono i
@@ -453,6 +454,15 @@ class TaskAgent:
         # tutte quelle viste nel run: un legame causale diretto (il passo appena prima), non
         # "qualche osservazione lontana nel tempo l'ha mai toccato".
         last_external_content_source: str | None = None
+        # F1.5.8 (adozione, vedi core/task_risk_budget.py per il buco che chiude - una catena di
+        # passi individualmente sotto soglia puo' comunque costituire un'escalation): un
+        # TaskRiskBudget per QUESTO run, mai condiviso tra compiti diversi (un compito composto
+        # nuovo riparte da zero, niente memoria di escalation tra richieste scollegate).
+        # max_authorized_risk e' READ_ONLY (il piu' basso, un placeholder neutro) perche' una
+        # richiesta libera in linguaggio naturale non ha un unico intent "originale" da cui
+        # derivarlo - il campo non e' oggi consultato da nessuna delle sei regole (vedi il
+        # docstring della dataclass), quindi il valore esatto non cambia alcun comportamento.
+        risk_budget = TaskRiskBudget(max_authorized_risk=RiskLevel.READ_ONLY)
 
         for step_index in range(1, self.MAX_STEPS + 1):
             if self.kill_switch.is_active():
@@ -520,10 +530,44 @@ class TaskAgent:
 
             missing = [name for name, meta in metadata.items() if meta.get("required") and name not in parameters]
             step_started = time.monotonic()
+            # F1.5.8 (adozione): controllato PRIMA di eseguire, non dopo - un motivo non-None
+            # segnala che ESEGUIRE questo intent ADESSO costituirebbe un'escalation rispetto ai
+            # passi gia' osservati in questo compito, indipendentemente da cosa deciderebbe
+            # PolicyEngine per l'intent da solo (che non conosce la storia del task - vedi il
+            # docstring di core/task_risk_budget.py per il buco reale che questo chiude).
+            escalation_reason = None if missing else risk_budget.escalation_reason(intent)
             if missing:
                 observation = f"FALLITO: mancano i parametri obbligatori {missing}. Chiedi all'utente (ask_user) se non li puoi ricavare."
                 step = AgentStep(intent=intent, parameters=parameters, thought=thought, result=None, observation=observation)
                 self._log_step(trace_id, private, step_started, model, intent, parameters, result="missing_parameters", verified=None)
+            elif escalation_reason is not None:
+                # Stessa forma di pending_confirmation gia' costruita piu' sotto per un
+                # CONFIRMATION_REQUIRED vero restituito da una skill (stesso schema che JakeCore.
+                # _run_agent gia' sa interpretare) - qui pero' la richiesta di conferma FRESCA
+                # nasce dall'orchestrazione, non dalla skill stessa: intent/parameters restano
+                # gli STESSI del passo proposto (nessuna riscrittura), cosi' un si' dell'utente fa
+                # eseguire per davvero esattamente il passo che il modello aveva scelto, non un
+                # sostituto. Il passo NON viene eseguito (nessuna chiamata a self.executor) - lo
+                # stesso principio "un passo che richiede conferma mette in pausa il piano senza
+                # eseguirlo" gia' applicato a PlanExecutor.
+                step = AgentStep(
+                    intent=intent, parameters=parameters, thought=thought, result=None,
+                    observation=f"Richiede conferma aggiuntiva: {escalation_reason}.",
+                )
+                outcome.steps.append(step)
+                outcome.pending_confirmation = {
+                    "intent": intent,
+                    "parameters": parameters,
+                    "message": f"Confermi? {escalation_reason}.",
+                    "kind": "CONFIRMATION_REQUIRED",
+                    "policy_reason": None,
+                    "suggested_by_external_content": last_external_content_source,
+                }
+                self._log_step(
+                    trace_id, private, step_started, model, intent, parameters,
+                    result="escalation_detected", verified=None,
+                )
+                return outcome
             else:
                 if self.on_step is not None:
                     try:
@@ -633,6 +677,12 @@ class TaskAgent:
                 outcome_label = "success" if (result is not None and result.success) else f"error:{result.error}" if result is not None else "no_result"
                 correlated_action_id = None
                 if result is not None and result.success:
+                    # F1.5.8 (adozione): lo stato di escalation si aggiorna osservando un effetto
+                    # GIA' avvenuto con successo - mai per un tentativo fallito/in attesa di
+                    # conferma - PRIMA di decidere il passo successivo (vedi il commento sopra
+                    # dove escalation_reason() viene controllato, e il docstring di record_step()
+                    # in core/task_risk_budget.py sul perche' dell'ordine).
+                    risk_budget.record_step(intent, parameters)
                     # F1.3.5 (adozione - secondo chokepoint, dopo il pilota su JakeCore): stesso
                     # principio identico - un passo riuscito il cui intent ha un inverso naturale
                     # genera un vero UndoDescriptor. Lo stesso step_action_id gia' generato sopra

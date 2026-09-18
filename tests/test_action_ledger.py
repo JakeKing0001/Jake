@@ -93,6 +93,13 @@ class AuthorizationOfTests(unittest.TestCase):
     def test_none_parameters_does_not_crash(self):
         self.assertEqual(authorization_of("success", None), AUTHORIZATION_NONE)
 
+    def test_escalation_detected_is_pending_not_denied(self):
+        """F1.5.8 (adozione): stessa categoria di CONFIRMATION_REQUIRED - una catena di passi ha
+        reso il prossimo troppo rischioso senza una conferma FRESCA (core/task_risk_budget.py),
+        concettualmente 'in attesa', non un diniego gia' avvenuto."""
+        self.assertEqual(authorization_of("escalation_detected", {}), AUTHORIZATION_PENDING)
+        self.assertEqual(authorization_of("error:ESCALATION_DETECTED", {}), AUTHORIZATION_PENDING)
+
 
 class IdempotencyKeyOfTests(unittest.TestCase):
     def test_same_intent_and_parameters_produce_the_same_key(self):
@@ -183,6 +190,12 @@ class ErrorCategoryOfTests(unittest.TestCase):
     def test_confirmation_required_and_auth_required_are_pending(self):
         self.assertEqual(error_category_of("confirmation_required"), ERROR_CATEGORY_PENDING)
         self.assertEqual(error_category_of("auth_required"), ERROR_CATEGORY_PENDING)
+
+    def test_escalation_detected_is_also_pending(self):
+        """F1.5.8 (adozione): stessa categoria di CONFIRMATION_REQUIRED sopra - vedi
+        AuthorizationOfTests.test_escalation_detected_is_pending_not_denied per il perche'."""
+        self.assertEqual(error_category_of("escalation_detected"), ERROR_CATEGORY_PENDING)
+        self.assertEqual(error_category_of("error:ESCALATION_DETECTED"), ERROR_CATEGORY_PENDING)
 
     def test_policy_and_auth_denials_are_denied(self):
         for result in ("blocked_by_policy", "policy_blocked", "denied_auth", "denied_confirmation"):
