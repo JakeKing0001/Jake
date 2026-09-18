@@ -54,10 +54,12 @@ virtualizzato/nascosto in un'app Qt, UI Automation da sola non basta MAI, non e'
 
 Deliberatamente NON affrontati qui, passi successivi dichiarati (stesso principio "un incremento
 alla volta" di questa sessione):
-- F3.4.1 (resto): Window pattern - non ancora implementato (Invoke/Value/Toggle/SelectionItem
-  coprono quattro dei cinque task dichiarati da F3.1.2; ExpandCollapse/Scroll sono implementati ma
-  non verificati funzionanti contro Qt, vedi sopra - il quinto task, "scorri e seleziona l'ultima
-  riga", resta quindi non completabile per un `QListWidget` Qt anche con questo incremento);
+- F3.4.1 (resto): minimizzare/massimizzare/ripristinare via `SetWindowVisualState` - non ancora
+  implementato (`close_window()`, aggiunto in un incremento successivo, e' l'unica azione Window
+  con un effetto univocamente verificabile senza dipendere da `CurrentWindowVisualState`, un
+  segnale che un ponte di accessibilita' potrebbe non onorare fedelmente, lo stesso genere di buco
+  gia' trovato per ExpandCollapse/Scroll sopra - non riverificato per Window, dichiarato onesto
+  invece di assunto);
 - F3.4.2 (unificare in `ComputerAgent` - `core/computer_agent.py` resta INVARIATO qui: il
   collegamento tra UIA e il controllo a pixel/OCR esistente e' la scala di ripiego di F3.5, non
   affrontata in questo incremento);
@@ -92,7 +94,19 @@ reale resta una responsabilita' del chiamante (lo stesso principio gia' seguito 
 NON e' incluso nella ricevuta (solo l'identita' dell'elemento target) - un campo testo libero qui
 rischierebbe di far finire una password o un dato sensibile digitato dall'utente in una ricevuta
 che potrebbe un giorno essere loggata (F3.6.7, "redigere password e campi sensibili", non ancora
-affrontato, ma gia' evitato qui per costruzione invece di rimandato)."""
+affrontato, ma gia' evitato qui per costruzione invece di rimandato).
+
+`close_window()` (F3.4.1, resto - il pattern Window, l'ultimo dei sette pattern dichiarati da
+F3.4.1 non ancora coperto): chiude una finestra tramite `Close()`, verificato contro la fixture
+VERA (non ipotizzato) con una prova indipendente FORTE - non solo che la chiamata COM non sollevi,
+ma che la finestra sparisca DAVVERO dall'albero UI Automation (`find_window_by_title` solleva
+`WindowNotFoundError` subito dopo) e che il PROCESSO stesso termini (`subprocess.Popen.wait()`
+restituisce un codice di uscita reale, non un `terminate()` forzato dal test). A differenza di
+`expand()`/`scroll_to_bottom()` sopra, qui non c'e' alcun buco: il ponte di accessibilita' di Qt
+onora `Close()` correttamente, lo stesso comportamento del bottone nativo di chiusura della
+finestra. Le altre azioni del pattern Window (minimizzare/massimizzare/ripristinare via
+`SetWindowVisualState`) restano deliberatamente FUORI da questo incremento (vedi sopra) - dipendono
+da `CurrentWindowVisualState`, un segnale non ancora verificato contro Qt."""
 import time
 from dataclasses import dataclass, field
 
@@ -246,6 +260,17 @@ class ActionExecutor:
         pattern = self._scroll(element)
         receipt = self._receipt("scroll_to_top", "Scroll", element)
         pattern.SetScrollPercent(_SCROLL_NO_CHANGE, 0.0)
+        return receipt
+
+    def close_window(self, element) -> ElementActionReceipt:
+        """Finestra di primo livello (o altro elemento Window) - "chiudi". A differenza di
+        `expand()`/`scroll_to_bottom()`, VERIFICATO funzionante contro un vero processo Qt (vedi
+        il docstring del modulo): la finestra sparisce davvero dall'albero UI Automation e il
+        processo stesso termina, non solo che `Close()` non sollevi."""
+        self._require_enabled(element)
+        pattern = self._require_pattern(element, UIA.UIA_WindowPatternId, UIA.IUIAutomationWindowPattern, "Window")
+        receipt = self._receipt("close_window", "Window", element)
+        pattern.Close()
         return receipt
 
     def _receipt(self, action: str, pattern_name: str, element) -> ElementActionReceipt:
