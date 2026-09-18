@@ -5380,6 +5380,48 @@ Criterio di uscita: ogni fallback è osservabile e non produce duplicazioni nei 
   passo dichiarato per una diagnosi vera, non affrontato qui. 2.989/2.989 test in locale, nessun
   test nuovo (solo lo skip esplicito).
 
+- `F3.4.2` (prima fetta - "unificare click... nel ComputerAgent", adozione) — 19/09/2026: nuovo
+  `ComputerAgent.click_element(*, window_title, name=None, control_type=None, automation_id=None,
+  timeout_seconds=5.0)` - trova un elemento per nome/ruolo/automation_id DENTRO una finestra data
+  (F3.3, `SelectorEngine`) e lo clicca semanticamente tramite il pattern Invoke di UI Automation
+  (F3.4, `ActionExecutor`) invece di coordinate pixel ASSOLUTE fornite dal chiamante - le
+  coordinate restano un dettaglio interno, LETTE da UI Automation (`describe_element(element).
+  bounds`), non indovinate ne' passate dall'esterno come nel gia' esistente `click_point`. Se
+  Invoke non e' disponibile o non produce un effetto visibile, ripiega su un click pixel alle
+  STESSE coordinate lette da UI Automation (F3.5, `try_strategies_in_order`) - non un secondo
+  meccanismo separato, la stessa scala di ripiego gia' costruita e testata in questa sessione.
+
+  **Distinzione "success" vs "verified" preservata da `click_point`** (F3.5.5): un'azione
+  VERAMENTE eseguita (Invoke o il click pixel di ripiego, mai sollevato) che non produce un
+  cambiamento visibile resta `success=True`/`verified=False`, non un fallimento - lo stesso
+  principio gia' seguito da `click_point` per un click legittimo su un link verso una pagina gia'
+  aperta, ora esteso al percorso semantico.
+
+  **Assunzione dichiarata esplicitamente come NON verificata** (a differenza della scoperta gia'
+  fatta per SelectionItem): incatenare un tentativo Invoke fallito prima di un click pixel sullo
+  STESSO elemento potrebbe in teoria "avvelenare" lo stato come gia' trovato per SelectionItem su
+  un `QListWidgetItem` - non ancora messo alla prova con un test dedicato per Invoke
+  specificamente, quindi la strategia Invoke qui NON e' marcata `unsafe_after_failure` (il
+  comportamento di default, incatenare) invece di assumere il limite peggiore senza prova.
+
+  Scoperto un vero bug di editing scrivendo il docstring del modulo (non del codice): un `"""` di
+  chiusura inserito per errore a meta' del docstring esistente ha causato un `SyntaxError`
+  immediato in `ruff`/`mypy` - trovato e corretto PRIMA di eseguire qualunque test, lo stesso
+  principio "verificare, non assumere" applicato anche alla propria scrittura.
+
+  Elementi dove Invoke NON si applica (es. una voce di lista che va selezionata, non "premuta")
+  restano fuori da questo metodo - un primo gradino deliberatamente per il caso piu' comune
+  (bottoni/link). I metodi esistenti (`click_text`/`click_point`/`locate_text`/`observe`) restano
+  INVARIATI - `click_element` e' additivo, non ancora usato da nessuna skill esistente
+  (CLICK_TEXT/CLICK_ELEMENT restano sul vecchio percorso a coordinate pixel/OCR - collegarli e'
+  una decisione di adozione a parte, non affrontata qui, cosi' come F3.4.3/F3.4.6). Verificato
+  anche contro la fixture VERA (non solo con finti): lo stesso Task 1/10 gia' dimostrato a mano in
+  `RemoveWithConfirmationEndToEndTests`, qui guidato dal metodo unificato - dimostra che i finti
+  usati nei test unitari corrispondono davvero al comportamento di UI Automation reale, non solo
+  a se stessi. Prova: 7 test nuovi in `tests/test_computer_agent.py::ClickElementTests` (con
+  finti) + 2 test nuovi in `tests/test_computer_use_integration.py::ClickElementRealFixtureTests`
+  (contro la fixture vera). 2.998/2.998 test, ruff verde.
+
 ### F3.6 — Browser adapter
 
 Dipende da: F1.5 e F3.5.

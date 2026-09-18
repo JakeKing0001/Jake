@@ -366,5 +366,53 @@ class ScrollAndSelectLastRowEndToEndTests(unittest.TestCase):
         self.assertTrue(outcome.succeeded, outcome.attempts)
 
 
+class ClickElementRealFixtureTests(unittest.TestCase):
+    """F3.4.2 (adozione): `ComputerAgent.click_element` - lo stesso Task 1/10 gia' dimostrato in
+    `RemoveWithConfirmationEndToEndTests` (digita e clicca Aggiungi), ma guidato dal metodo
+    UNIFICATO invece che assemblando adapter/selector/executor a mano - dimostra che i mock
+    di `tests/test_computer_agent.py::ClickElementTests` corrispondono davvero al comportamento
+    di UI Automation reale, non solo a se stessi."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.computer_agent = ComputerAgent()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_click_element_clicks_the_real_add_button_via_invoke_not_pixel_coordinates(self):
+        input_field = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_input"),
+        )
+        self.executor.set_value(input_field, "via click_element")
+
+        result = self.computer_agent.click_element(window_title=_FIXTURE_WINDOW_TITLE, name="Aggiungi", control_type="Button")
+
+        self.assertTrue(result.success)
+        item = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(name="via click_element", control_type="ListItem"), timeout_seconds=3.0,
+        )
+        self.assertEqual(item.CurrentName, "via click_element")
+
+    def test_click_element_reports_not_found_for_a_name_that_does_not_exist(self):
+        result = self.computer_agent.click_element(window_title=_FIXTURE_WINDOW_TITLE, name="Questo bottone non esiste XYZ")
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "NOT_FOUND")
+
+
 if __name__ == "__main__":
     unittest.main()
