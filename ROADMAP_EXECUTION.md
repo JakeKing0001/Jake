@@ -5317,6 +5317,35 @@ Criterio di uscita: ogni fallback è osservabile e non produce duplicazioni nei 
   fixture stessa, non un incremento di verifica, resta lavoro futuro. Prova: 1 test nuovo.
   2.984/2.984 test, ruff verde.
 
+- `F3.5.1` (fix di un fallimento REALE in CI, trovato dopo la pubblicazione - non ipotizzato) —
+  19/09/2026: il test end-to-end di Task 3 (gradino OCR) passava in modo affidabile in locale
+  (6+ esecuzioni consecutive) ma falliva SEMPRE sul runner CI (GitHub Actions windows-latest, 2
+  esecuzioni, entrambe le versioni Python 3.11/3.12). Due ipotesi tentate PRIMA di trovare la
+  causa vera, entrambe corrette ma insufficienti da sole: `SetFocus()` esplicito via UI
+  Automation prima del tasto freccia (un click pixel da solo potrebbe non garantire il fuoco
+  tastiera su un runner CI condiviso) e un'attesa a polling per l'OCR invece di un singolo
+  controllo (`word_visible_in_window_eventually`, nuovo in `core/computer_use/vision_verify.py`) -
+  pubblicate, ma il fallimento e' PERSISTITO identico su un secondo push.
+
+  **Causa vera**: il runner CI condiviso non ha un motore OCR disponibile affatto (`OcrEngine.
+  try_create_from_user_profile_languages()` restituisce `None` - nessun profilo utente
+  interattivo reale su quella macchina) - non un problema di timing/fuoco tastiera come le due
+  ipotesi precedenti (entrambe corrette per il LORO problema, ma non la causa di QUESTO
+  fallimento). Un ambiente senza OCR non e' un buco del codice - e' una caratteristica GIA'
+  anticipata altrove nel progetto (`skills/screen_click.py::OCR_UNAVAILABLE`, esistente ben prima
+  di questa sessione), qui semplicemente non ancora collegata ai test end-to-end nuovi.
+
+  Nuovo `core/vision/screen.py::ocr_available()` - una prova su un'immagine sintetica minuscola
+  (mai una cattura reale dello schermo) per rispondere "l'OCR funziona qui?" prima di lanciare un
+  test che ne dipende. Il test di Task 3 ora si SALTA esplicitamente (`self.skipTest(...)`)
+  quando l'OCR non e' disponibile, invece di fallire - `SetFocus()`/l'attesa a polling RESTANO nel
+  codice (corretti per il loro problema originale, verificati localmente), solo la premessa "l'OCR
+  e' sempre disponibile" era sbagliata. Prova: 2 test nuovi in `tests/test_screen.py`
+  (`OcrAvailableTests`, con finti deterministici). 2.989/2.989 test in locale (dove l'OCR e'
+  disponibile, il test di Task 3 gira per davvero, non salta) - conteggio CI atteso 1 test in meno
+  (2.988) quando l'ambiente non ha OCR, dichiarato onestamente diverso invece di un numero fisso
+  universale.
+
 ### F3.6 — Browser adapter
 
 Dipende da: F1.5 e F3.5.
