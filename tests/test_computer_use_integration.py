@@ -14,7 +14,26 @@ differenza di Task 2, qui non serve alcuna scala di ripiego: sia `select()` su u
 (F3.4, verificato affidabile con la prova indipendente del checkbox raggiungibile) sia `toggle()`
 (F3.4.1) funzionano gia' in modo affidabile via UI Automation pura - questo test li combina in
 un unico flusso end-to-end DAVVERO guidato dall'esterno, invece di restare due fatti verificati
-separatamente in `tests/test_executor.py`."""
+separatamente in `tests/test_executor.py`.
+
+`ExpandCategoryEndToEndTests` completa Task 3/10 ("espandi categoria") - qui invece la scala di
+ripiego serve DAVVERO per entrambi i lati, non solo per l'azione: un'indagine empirica (vedi
+ROADMAP_EXECUTION.md) ha trovato che UI Automation non rivela MAI i figli di un `QTreeWidgetItem`
+di Qt, nemmeno dopo un'espansione reale - la VERIFICA usa quindi OCR
+(`core/computer_use/vision_verify.py`, il gradino "vision" della scala F3.5.1 costruito in
+questo stesso incremento), non UI Automation - il primo caso in questo intero filone in cui
+NESSUNA parte del flusso passa da UI Automation per il segnale finale di successo.
+
+**Buco reale trovato scrivendo questo test, non ipotizzato**: la prima azione tentata (un doppio
+click reale a coordinate pixel sulla riga, la scorciatoia Qt piu' ovvia) si e' rivelata
+INAFFIDABILE - non per un limite del ponte di accessibilita' come i buchi gia' documentati, ma per
+una vera race condition di TIMING: `pyautogui.doubleClick()` a volte viene interpretato da Qt come
+due CLICK SINGOLI indipendenti invece di un vero doppio click (verificato riproducendo il
+fallimento piu' volte: `change_ratio` restava vicino a zero, coerente con "espandi-poi-ricollassa"
+anziche' con nessun effetto). Un click singolo (che seleziona/mette a fuoco l'elemento, gia'
+verificato affidabile per un `TreeItem`) seguito dalla freccia DESTRA (la scorciatoia da tastiera
+standard di Qt per espandere un nodo collassato con il fuoco) si e' invece dimostrato affidabile
+su prove ripetute - usata qui al posto del doppio click."""
 import subprocess
 import sys
 import time
@@ -26,6 +45,7 @@ from core.computer_use.executor import ActionExecutor
 from core.computer_use.fallback import try_strategies_in_order
 from core.computer_use.selector import ElementSelector, SelectorEngine
 from core.computer_use.ui_automation_adapter import UIAutomationAdapter
+from core.computer_use.vision_verify import word_visible_in_window
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _FIXTURE_WINDOW_TITLE = "Jake Computer Use Fixture"
@@ -157,6 +177,50 @@ class ChangeTabAndToggleEndToEndTests(unittest.TestCase):
             self.adapter.describe_element(checkbox_after).toggle_state, "on",
             "il checkbox deve essere davvero spuntato, non solo la chiamata COM non sollevata",
         )
+
+
+class ExpandCategoryEndToEndTests(unittest.TestCase):
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.computer_agent = ComputerAgent()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_selecting_the_category_then_pressing_right_reveals_its_children_verified_via_ocr_not_uia(self):
+        category = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Categoria A", control_type="TreeItem"))
+        left, top, width, height = self.adapter.describe_element(category).bounds
+        center_x, center_y = left + width // 2, top + height // 2
+
+        # Prima dell'azione: "Elemento" (parte del nome dei figli "Elemento A1"/"Elemento A2",
+        # mai presente altrove nella fixture - verificato nell'indagine che ha motivato questo
+        # test) non deve essere visibile.
+        self.assertFalse(word_visible_in_window(self.adapter, self.window, "Elemento"))
+
+        def _select_then_expand_via_keyboard():
+            import pyautogui
+            self.computer_agent.click_point(center_x, center_y)
+            pyautogui.press("right")
+
+        outcome = try_strategies_in_order(
+            [("pixel_click_then_right_arrow", _select_then_expand_via_keyboard)],
+            verify=lambda: word_visible_in_window(self.adapter, self.window, "Elemento"),
+        )
+
+        self.assertTrue(outcome.succeeded, outcome.attempts)
+        self.assertEqual(outcome.successful_strategy, "pixel_click_then_right_arrow")
 
 
 if __name__ == "__main__":
