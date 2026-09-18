@@ -25,6 +25,7 @@ from core.risk import risk_of
 from core.logger import get_logger
 from core.resource_lock import ResourceLockManager
 from core.sandboxed_skill_worker import SandboxedSkillWorker
+from core.action_snapshot import capture_snapshot, SnapshotStore
 from core.skill_result import SkillResult
 from copy import deepcopy
 from pathlib import Path
@@ -68,6 +69,10 @@ class SkillRegistry:
         # F1.8.1 (ultimo pezzo, "una coda per azioni concorrenti"): vedi _resource_lock_keys() più
         # sotto per quali intent lo usano davvero e perché.
         self._resource_locks = ResourceLockManager()
+        # F1.3.4 (adozione - prima fetta, vedi core/action_snapshot.py): un'istanza propria,
+        # stesso principio minimale gia' usato per self._resource_locks sopra - nulla la
+        # inietta ancora dall'esterno perche' oggi solo execute() la consuma.
+        self.snapshot_store = SnapshotStore()
 
         # Client Ollama condiviso (v3.0: 127.0.0.1, keep_alive lungo) e rubrica.
         self.ollama_client = OllamaClient()
@@ -232,8 +237,22 @@ class SkillRegistry:
         except Exception:
             return []
 
-    def execute(self, intent: str, parameters: dict | None = None, policy_engine=None):
-        """F1.2.1 (percorso 7, l'ultimo dei tre "percorso N" dichiarati aperti - i percorsi 3 e 6
+    def execute(
+        self, intent: str, parameters: dict | None = None, policy_engine=None, *,
+        action_id: str | None = None, private: bool = False,
+    ):
+        """F1.3.4 (adozione - prima fetta, vedi core/action_snapshot.py): action_id/private sono
+        opzionali (default None/False, nessun cambio di comportamento per chi non li passa ancora
+        - oggi l'agente/PlanExecutor, vedi il docstring di JakeCore._resolve_and_execute per quale
+        chiamante passa gia' cosa) - quando presenti e l'intent e' DELETE_PATH, cattura un
+        ActionSnapshot del file PRIMA di chiamare la skill vera (vedi _maybe_capture_snapshot
+        sotto), DENTRO lo stesso lock per resource key gia' acquisito per questa mutazione (vedi
+        _resource_lock_keys) - senza quel lock un'altra mutazione concorrente sullo stesso
+        percorso potrebbe intervenire esattamente nella finestra tra la cattura e la cancellazione
+        vera, lo stesso principio "mutare esattamente nel punto giusto" gia' applicato al buco
+        reale di F1.8.1 per il lock stesso.
+
+        F1.2.1 (percorso 7, l'ultimo dei tre "percorso N" dichiarati aperti - i percorsi 3 e 6
         sono gia' fail-closed, vedi docs/action-execution-paths.md): questo dispatcher grezzo non
         controllava MAI la policy da solo - un chiamante che lo invoca direttamente, saltando
         `JakeCore._authorize_command()` (o `PlanExecutor`/`decide_automated`), eseguiva la skill
@@ -280,8 +299,30 @@ class SkillRegistry:
 
         if lock_keys:
             with self._acquire_all_writes(lock_keys):
+                self._maybe_capture_snapshot(intent, parameters, action_id, private)
                 return skill.execute(parameters)
+        self._maybe_capture_snapshot(intent, parameters, action_id, private)
         return skill.execute(parameters)
+
+    def _maybe_capture_snapshot(
+        self, intent: str, parameters: dict | None, action_id: str | None, private: bool,
+    ) -> None:
+        """F1.3.4 (adozione - prima fetta): DELETE_PATH e' oggi l'unico candidato - e' l'unica
+        delle quattro mutazioni filesystem senza un rollback naturale (vedi
+        core/execution_safety.py::INTENT_SAFETY_REGISTRY, "cancellare non ha un inverso
+        naturale"), quindi solo uno snapshot del contenuto PRIMA della cancellazione rende un
+        futuro ripristino possibile - CREATE_PATH/RENAME_PATH/MOVE_PATH hanno gia' un rollback
+        vero (ri-eseguire l'inverso), non serve loro anche uno snapshot. `action_id=None` (il
+        default di execute()) preserva il comportamento di sempre - nessuno snapshot - per ogni
+        chiamante che non ne passa ancora uno."""
+        if intent != "DELETE_PATH" or action_id is None or not parameters:
+            return
+        path = parameters.get("path")
+        if not isinstance(path, str) or not path.strip():
+            return
+        snapshot = capture_snapshot(action_id, path, private=private)
+        if snapshot is not None:
+            self.snapshot_store.save(snapshot)
 
     def _resource_lock_keys(self, intent: str, parameters: dict | None) -> tuple[str, ...]:
         """Le resource key da serializzare per QUESTA chiamata - vuoto per ogni intent che non è

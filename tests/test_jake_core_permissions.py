@@ -46,7 +46,7 @@ class FakeRegistry:
     def has_skill(self, intent):
         return intent in self._skills
 
-    def execute(self, intent, parameters=None, policy_engine=None):
+    def execute(self, intent, parameters=None, policy_engine=None, *, action_id=None, private=False):
         skill = self.get_skill(intent)
         return None if skill is None else skill.execute(parameters)
 
@@ -56,6 +56,7 @@ def _bare_core(
 ) -> JakeCore:
     core = JakeCore.__new__(JakeCore)
     core.skill_registry = skill_registry
+    core.private_mode = False
     core.auth_gate = auth_gate or AuthGate()  # disabilitata per default: nessuna passphrase
     core.policy_engine = PolicyEngine(
         auth_gate=core.auth_gate, blocked_intents=blocked_intents,

@@ -6461,3 +6461,67 @@ per la capability filesystem di `F1.2.2` su cosa "destination" rappresenta. Con 
 pezzo ancora aperto in tutta `F1.8` e' chiuso, e l'intera sezione `F1.8` e' **chiusa**. Vedi la
 voce datata 16/09/2026 in F1.8 sopra per il dettaglio completo. Prova: 2.755/2.755 test,
 ruff/mypy verdi.
+
+**Aggiornamento 17-18/09/2026 (F1.3.4, meccanismo + prima/seconda fetta di adozione)**: nuovo
+candidato aperto da `F1.3` - "salvare snapshot minimo prima dell'azione, rispettando privacy e
+dimensione". Diverso da `F1.3.5`/`core/undo_store.py` (gia' chiuso, vedi sopra): li' si CALCOLA
+l'intent compensatorio DOPO un'azione riuscita (un inverso naturale, es. `DELETE_PATH` per
+annullare un `CREATE_PATH`) - non richiede aver visto lo stato PRIMA. `DELETE_PATH` non ha pero'
+nessun inverso naturale (`core/execution_safety.py::INTENT_SAFETY_REGISTRY`, "cancellare non ha
+un inverso naturale") - senza aver salvato il contenuto PRIMA della cancellazione, non c'e' modo
+di recuperarlo dopo, qualunque intent compensatorio si inventi. Stesso principio "prima il
+meccanismo, poi l'adozione" gia' seguito per `UndoStore`/`ResourceLockManager`/`TaskRiskBudget` in
+questa sessione, in due fette separate:
+
+Prima fetta (17/09/2026, mai documentata qui all'epoca): `core/action_snapshot.py`
+(`capture_snapshot`/`ActionSnapshot`/`SnapshotStore`) - uno snapshot VERO del contenuto di un file
+prima che un'azione lo muti, `None` (mai un valore parziale/indovinato) se la modalita' privata e'
+attiva (esce PRIMA di toccare il filesystem, non solo prima di persistere - stessa garanzia gia'
+data altrove), il percorso non e' un file esistente, o il file supera un tetto di 2MB (uno
+snapshot TRONCATO sarebbe peggio di nessuno snapshot). Deliberatamente ristretto ai FILE, non alle
+cartelle ("minimo" esclude una copia ricorsiva non limitata). Nessun collegamento a un chokepoint
+reale ne' un modo di RIPRISTINARLO in questa fetta - solo catturare e conservare. Prova: 11 test
+nuovi (`tests/test_action_snapshot.py`), incluso un test di concorrenza vera con 100 thread.
+
+Seconda fetta (18/09/2026, adozione): collegato ai chokepoint reali. `SkillRegistry.execute()`
+(`core/skill_registry.py`) e' l'UNICO punto che fa gia' la risoluzione del percorso "parlato" per
+le quattro mutazioni filesystem (`resolve_user_path`) PRIMA di chiamare la skill vera - a
+differenza di `UndoStore` (che si attacca a valle, con `result.data` gia' pronto, e per questo ha
+richiesto adozione separata in tre chiamanti esterni), uno snapshot deve catturare il contenuto
+PRIMA, con il percorso GIA' risolto: capirlo di nuovo al livello di `JakeCore` avrebbe rischiato di
+catturare il file SBAGLIATO se il percorso grezzo passato dall'utente fosse anche, per caso, un
+percorso relativo valido rispetto alla cwd del processo ma diverso da quello risolto davvero (es.
+un riferimento parlato "quel file" o "desktop\nota.txt"). `execute()` prende ora due parametri
+opzionali (`action_id`/`private`, default `None`/`False`, **nessun cambio di comportamento** per
+chi non li passa ancora) e cattura lo snapshot DENTRO lo stesso lock per resource key gia'
+acquisito per la mutazione (`_resource_lock_keys`/F1.8.1) cosi' un'altra mutazione concorrente
+sullo stesso percorso non puo' intervenire nella finestra tra cattura e cancellazione vera - stesso
+principio "mutare esattamente nel punto giusto" del buco di F1.8.1.
+
+Collegati i DUE chiamanti REALI che eseguono davvero un'azione gia' autorizzata in `core/
+jake_core.py` (non l'agente/`PlanExecutor`, entrambi passano ancora da qui SENZA un `action_id` -
+prossima fetta dichiarata, non fatta oggi): `_resolve_and_execute` (percorso diretto - l'`action_id`
+di correlazione ledger/undo, prima generato solo DOPO un successo, e' ora generato PRIMA di
+eseguire cosi' lo stesso identificatore puo' anche etichettare lo snapshot; nessun cambio
+osservabile sulla ricevuta nel ledger, che continua a riceverlo solo su successo esattamente come
+prima) e `_finalize_pending_action` (il VERO percorso per le azioni DESTRUCTIVE/ADMIN come
+`DELETE_PATH`, che chiedono conferma quasi sempre - scoperto verificando end-to-end, non
+ipotizzato, che senza questa seconda fetta un `DELETE_PATH` confermato dall'utente reale non
+avrebbe MAI prodotto uno snapshot, perche' quel percorso chiama `skill_registry.execute()`
+direttamente, bypassando `_resolve_and_execute` per intero - lo stesso punto cieco gia' documentato
+per il ledger/undo store in F1 prima di essere corretto la' sopra). Nessun collegamento ancora al
+ledger ne' a `UndoStore` su questo secondo percorso (un `action_id` locale, usato solo per lo
+snapshot) - gap preesistente e diverso, non toccato qui.
+
+Ancora deliberatamente FUORI scope, come dichiarato dal modulo stesso: nessun modo di ripristinare
+un file da uno snapshot (quale intent lo farebbe? con quale conferma? - un problema a se'), e
+l'adozione per l'agente a passi/`PlanExecutor` (terza fetta dichiarata, stesso schema seguito da
+`UndoStore`: pilota su `JakeCore` prima, altri due chokepoint dopo in incrementi separati). Prova:
+19 test nuovi end-to-end (non solo il meccanismo isolato, gia' coperto dalla prima fetta) - 5 in
+`tests/test_skill_registry.py::DeletePathSnapshotAdoptionTests` (snapshot catturato con contenuto
+vero PRIMA della cancellazione; nessuno snapshot senza `action_id`; nessuno in modalita' privata
+anche con `action_id`; nessuno per le altre tre mutazioni filesystem, che hanno gia' un rollback
+vero; uno snapshot catturato ma innocuo quando l'azione non e' ancora confermata) e 3 in
+`tests/test_jake_core_pipeline.py::ExecuteCommandSnapshotWiringTests` (percorso diretto E percorso
+di conferma reali via `core.answer()`, correlazione con lo stesso `action_id` del ledger, privacy
+end-to-end sull'intero flusso di conferma). 2.859/2.859 test, ruff/mypy/compileall verdi.

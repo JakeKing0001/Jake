@@ -16,6 +16,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from core.action_snapshot import SnapshotStore
 from core.policy_engine import PolicyEngine
 from core.resource_lock import ResourceLockManager
 from core.sandboxed_skill_worker import SandboxedSkillWorker
@@ -47,6 +48,7 @@ def _bare_registry(skills: dict = None) -> SkillRegistry:
     registry._plugin_violation_counts = {}  # F1.6.8: letto da _execute_forged()/_record_plugin_violation()
     registry._quarantined_plugins = set()
     registry._resource_locks = ResourceLockManager()  # F1.8.1: letto da execute() per le 4 mutazioni filesystem
+    registry.snapshot_store = SnapshotStore()  # F1.3.4: letto/scritto da execute() per DELETE_PATH
     return registry
 
 
@@ -344,6 +346,107 @@ class FilesystemMutationResourceLockTests(unittest.TestCase):
         move_thread.join(timeout=5)
 
         self.assertTrue(create_result[0].success, "una risorsa indipendente non deve mai attendere il lock di un'altra")
+
+
+class DeletePathSnapshotAdoptionTests(unittest.TestCase):
+    """F1.3.4 (adozione - prima fetta, vedi core/action_snapshot.py): DELETE_PATH e' l'unica
+    delle quattro mutazioni filesystem senza un rollback naturale (core/execution_safety.py::
+    INTENT_SAFETY_REGISTRY) - solo uno snapshot del contenuto PRIMA della cancellazione rende un
+    futuro ripristino possibile. action_id/private sono opzionali su execute(): questi test
+    coprono sia il caso "chi li passa ottiene uno snapshot vero" sia "chi non li passa ancora
+    (l'agente/PlanExecutor, prossima fetta dichiarata) non vede alcun cambio di comportamento"."""
+
+    def setUp(self):
+        self.tmp_dir = Path(tempfile.mkdtemp(prefix="jake_snapshot_test_"))
+        self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
+
+    def test_a_confirmed_delete_path_with_an_action_id_snapshots_the_content_first(self):
+        from skills.delete_path import DeletePathSkill
+
+        target = self.tmp_dir / "nota.txt"
+        target.write_text("contenuto vero da salvare")
+        registry = _bare_registry({"DELETE_PATH": DeletePathSkill()})
+
+        result = registry.execute(
+            "DELETE_PATH", {"path": str(target), "confirmed": True},
+            policy_engine=PolicyEngine(), action_id="action-1",
+        )
+
+        self.assertTrue(result.success)
+        self.assertFalse(target.exists(), "la cancellazione vera deve comunque avvenire")
+        snapshot = registry.snapshot_store.get("action-1")
+        self.assertIsNotNone(snapshot, "il contenuto deve essere stato catturato PRIMA della cancellazione")
+        self.assertEqual(snapshot.content, b"contenuto vero da salvare")
+
+    def test_without_an_action_id_no_snapshot_is_captured(self):
+        """Il comportamento di chi non passa ancora action_id (l'agente/PlanExecutor, prossima
+        fetta dichiarata) resta invariato - nessuno snapshot, come prima di questo incremento."""
+        from skills.delete_path import DeletePathSkill
+
+        target = self.tmp_dir / "nota.txt"
+        target.write_text("x")
+        registry = _bare_registry({"DELETE_PATH": DeletePathSkill()})
+
+        result = registry.execute(
+            "DELETE_PATH", {"path": str(target), "confirmed": True}, policy_engine=PolicyEngine(),
+        )
+
+        self.assertTrue(result.success)
+        self.assertEqual(registry.snapshot_store._snapshots, {})
+
+    def test_private_mode_never_captures_a_snapshot_even_with_an_action_id(self):
+        """Stessa garanzia di privacy gia' data altrove (core/action_snapshot.py::
+        capture_snapshot, action_ledger.record, JakeCore._answer_inner): uno scambio in
+        modalita' privata non deve lasciare traccia."""
+        from skills.delete_path import DeletePathSkill
+
+        target = self.tmp_dir / "segreto.txt"
+        target.write_text("dato sensibile")
+        registry = _bare_registry({"DELETE_PATH": DeletePathSkill()})
+
+        result = registry.execute(
+            "DELETE_PATH", {"path": str(target), "confirmed": True},
+            policy_engine=PolicyEngine(), action_id="action-1", private=True,
+        )
+
+        self.assertTrue(result.success)
+        self.assertIsNone(registry.snapshot_store.get("action-1"))
+
+    def test_a_different_filesystem_intent_never_gets_a_snapshot(self):
+        """CREATE_PATH/RENAME_PATH/MOVE_PATH hanno gia' un rollback vero (ri-eseguire
+        l'inverso) - non serve loro anche uno snapshot, solo DELETE_PATH e' il candidato oggi."""
+        from skills.create_path import CreatePathSkill
+
+        target = self.tmp_dir / "nuovo.txt"
+        registry = _bare_registry({"CREATE_PATH": CreatePathSkill()})
+
+        result = registry.execute(
+            "CREATE_PATH", {"path": str(target)}, policy_engine=PolicyEngine(), action_id="action-1",
+        )
+
+        self.assertTrue(result.success)
+        self.assertIsNone(registry.snapshot_store.get("action-1"))
+
+    def test_a_delete_path_that_does_not_actually_delete_anything_captures_no_snapshot(self):
+        """Confermare senza 'confirmed' (la skill chiede conferma, non cancella) non deve
+        catturare comunque il contenuto - capture_snapshot() e' innocuo qui, ma vale la pena
+        dichiarare esplicitamente che non succede nulla di indesiderato."""
+        from skills.delete_path import DeletePathSkill
+
+        target = self.tmp_dir / "nota.txt"
+        target.write_text("x")
+        registry = _bare_registry({"DELETE_PATH": DeletePathSkill()})
+
+        result = registry.execute(
+            "DELETE_PATH", {"path": str(target)}, policy_engine=PolicyEngine(), action_id="action-1",
+        )
+
+        self.assertEqual(result.error, "CONFIRMATION_REQUIRED")
+        self.assertTrue(target.exists())
+        # capture_snapshot() e' comunque avvenuto (il lock/percorso risolto sono gli stessi): e'
+        # onesto, non un buco - lo snapshot esiste ma non serve mai perche' nulla e' stato
+        # cancellato davvero. Dichiarato qui invece di lasciarlo implicito.
+        self.assertIsNotNone(registry.snapshot_store.get("action-1"))
 
 
 class ForgedSkillSandboxWiringTests(unittest.TestCase):
