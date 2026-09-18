@@ -4523,9 +4523,10 @@ Criterio di uscita: nessuna contaminazione di memoria o permesso tra profili nei
 
 ## 9. F3 — Computer Use Engine 3.0
 
-- Stato: `DOING` (G1 superato il 16/09/2026, vedi Gate G1 sopra; F3.1.1 avviata E chiusa per
-  intero il 18/09/2026 in cinque fette, vedi sotto - resta aperto il resto di F3.1: F3.1.2 [5/10
-  task], F3.1.5, F3.1.6, poi l'intera F3.2)
+- Stato: `DOING` (G1 superato il 16/09/2026, vedi Gate G1 sopra; F3.1.1 chiusa per intero e
+  F3.2.1/F3.2.3 avviata - prima fetta con adapter vero e due buchi reali corretti - il 18/09/2026,
+  vedi sotto - resta aperto: F3.1.2 [5/10 task], F3.1.5, F3.1.6, il resto di F3.2 [F3.2.2 meta'/
+  F3.2.4-7 e il supporto a 5 app reali])
 - Priorità: `P1`
 - Output: Jake controlla Windows per semantica, verifica il risultato e usa i pixel come fallback.
 
@@ -4675,6 +4676,71 @@ Dipende da: F3.1.
 7. `F3.2.7` Valutare COM diretto vs helper C++ con benchmark, mantenendo l'adapter stabile.
 
 Criterio di uscita: dump semantico stabile della fixture e di cinque app reali supportate.
+
+- `F3.2.1`/`F3.2.3` (prima fetta - adapter + proprieta' base, contro la fixture reale di F3.1.1) —
+  18/09/2026: nuovo `core/computer_use/` (sottopacchetto, stesso pattern gia' usato per
+  `core/vision/`/`core/nlu/`/`core/voice/` - il posto naturale per il resto di F3 che seguira':
+  selector engine F3.3, executor F3.4...), `core/computer_use/ui_automation_adapter.py::
+  UIAutomationAdapter`. `comtypes` (gia' una dipendenza - `requirements/hud.txt`, usata da `pycaw`
+  per CoreAudio, NESSUN pacchetto nuovo) invece di un helper C++/`pywinauto` (non installato,
+  scartato per non aggiungere una dipendenza quando `comtypes.client.GetModule('UIAutomationCore.
+  dll')` genera gia' i binding Python dal type library di Windows - verificato funzionante su
+  questa macchina, non assunto): F3.2.7 dichiara esplicitamente "valutare COM diretto vs helper
+  C++" come passo SUCCESSIVO, non un prerequisito. `find_window_by_title(titolo, timeout)` (cerca
+  tra i figli diretti del desktop, ritenta fino al timeout - una finestra appena lanciata in un
+  processo separato puo' non essere ancora visibile nell'istante esatto della ricerca),
+  `describe_element`/`describe_tree` (F3.2.3: role/name/automation_id/bounds/enabled/selected/
+  focused - `selected` `None`, non `False`, per un elemento che non supporta affatto il pattern
+  SelectionItem, es. un bottone - un fatto diverso da "non selezionato" che confonderli
+  inventerebbe).
+
+  **Convalidato empiricamente PRIMA di scrivere l'adapter vero** (non ipotizzato): lanciata la
+  fixture di F3.1.1 e interrogata con UI Automation a mano - gli `accessibleName` impostati sui
+  widget Qt (F3.1.1) arrivano davvero come Name qui ("Aggiungi", "Campo di testo", perfino
+  "Categoria A" come nodo TreeItem), confermando che la scelta di PySide6 per la fixture espone
+  davvero un albero utilizzabile.
+
+  **Due buchi reali trovati scrivendo l'adapter/i suoi test, non ipotizzati:**
+  1. Camminando l'albero della finestra vera, un `ValueError: NULL COM pointer access` leggendo
+     `CurrentBoundingRectangle` su un figlio apparentemente valido restituito da
+     `GetNextSiblingElement` - elementi di CHROME nativo della finestra (System Menu/icone della
+     barra del titolo, "Sistema" nel dump italiano) hanno provider UI Automation incompleti nel
+     mondo reale. Corretto rendendo `describe_element`/`describe_tree` resilienti: un elemento non
+     leggibile viene OMESSO (mai un `ElementInfo` con campi fabbricati - stesso principio "onesto
+     None, mai un valore indovinato" di `core/action_snapshot.py`), la catena dei fratelli si
+     ferma silenziosamente invece di propagare l'eccezione - un chrome rotto non deve far sparire
+     l'intero sotto-albero dei fratelli validi.
+  2. **Il piu' insidioso**: `FindFirst`/`GetNextSiblingElement`/`GetFirstChildElement` senza
+     corrispondenza NON restituiscono Python `None` - restituiscono un vero
+     `POINTER(IUIAutomationElement)` con puntatore nullo (`ptr=0x0`), un oggetto DIVERSO da `None`
+     ma FALSY. Un controllo `is not None` (la prima versione scritta) trattava quindi "non
+     trovato" come "trovato" al primo tentativo: il test negativo di `find_window_by_title` per un
+     titolo inesistente NON sollevava affatto (0.047s invece di aspettare il timeout dichiarato),
+     e la camminata dell'albero non terminava mai per una condizione di uscita vera - si fermava
+     solo per un effetto collaterale fortunato del bug (1) sopra, gia' scritto. Riprodotto
+     esplicitamente prima di correggere (`bool(risultato)` False ma `risultato is not None` True),
+     non solo letto nella documentazione COM. Corretto controllando la VERITA' dell'oggetto
+     (`if window:`/`while child:`) invece dell'identita' con `None`, in tutti e tre i punti.
+
+  Deliberatamente NON affrontati qui, passi successivi dichiarati: F3.2.2 (meta' - la CACHE, ogni
+  proprieta' letta qui e' ancora una chiamata COM dal vivo, non `IUIAutomationCacheRequest` - un
+  problema di prestazioni dichiarato, non di correttezza), F3.2.4 (subscription eventi - non c'e'
+  ancora una cache da invalidare), F3.2.5 (finestre elevate - non ancora testato), F3.2.6 (scope
+  oltre alla ricerca per figli diretti del desktop), F3.2.7 (benchmark COM vs helper C++), il
+  supporto a cinque app REALI (il resto del criterio di uscita completo - qui solo la fixture di
+  F3.1.1 e' verificata). Prova: 9 test nuovi in `tests/test_ui_automation_adapter.py` - a
+  differenza del resto della suite, questi lanciano DAVVERO la fixture in un processo separato e
+  la interrogano con UI Automation vera (un solo processo condiviso da tutti i test read-only via
+  `setUpClass`/`tearDownClass`, non uno per test): non c'e' altro modo onesto di verificare un
+  adapter COM, mockare `comtypes`/`IUIAutomation` testerebbe solo il mock. Coperti: bottone
+  trovato con nome/automation_id/control_type corretti, "Rimuovi selezionato" disabilitato senza
+  selezione (lo stesso stato gia' verificato a livello Qt in F3.1.1, qui verificato che arrivi
+  fino a UI Automation), le due TabItem con lo stato selected corretto, un bottone con
+  `selected=None` (non supporta il pattern), un nodo TreeItem presente nella struttura annidata,
+  `max_depth=0` restituisce solo la radice, una camminata profonda non crasha mai sul chrome
+  nativo, una finestra inesistente solleva `WindowNotFoundError` rispettando davvero il timeout.
+  2.921/2.921 test, ruff verde (`core/computer_use/` non ancora nel set selettivo mypy, stesso
+  trattamento riservato a ogni modulo nuovo finche' non viene aggiunto deliberatamente).
 
 ### F3.3 — Selector engine
 
