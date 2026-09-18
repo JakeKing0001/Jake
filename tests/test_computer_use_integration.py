@@ -35,6 +35,18 @@ verificato affidabile per un `TreeItem`) seguito dalla freccia DESTRA (la scorci
 standard di Qt per espandere un nodo collassato con il fuoco) si e' invece dimostrato affidabile
 su prove ripetute - usata qui al posto del doppio click.
 
+**Secondo buco reale, trovato SUL RUNNER CI dopo aver pubblicato questo test, non ipotizzato**:
+il test passava in modo affidabile in locale (6+ esecuzioni consecutive) ma falliva SEMPRE su
+GitHub Actions windows-latest, anche dopo aver aggiunto `SetFocus()` esplicito e un'attesa a
+polling (entrambi correggono un problema di TIMING, non l'assenza di una capacita' intera). La
+causa vera: il runner CI condiviso non ha un motore OCR disponibile (nessun profilo utente
+interattivo reale per `OcrEngine.try_create_from_user_profile_languages()`) - un ambiente senza
+OCR, non un bug del codice, la stessa categoria gia' anticipata altrove nel progetto
+(`skills/screen_click.py::OCR_UNAVAILABLE`). Il test ora si salta esplicitamente
+(`core.vision.screen.ocr_available()`) invece di fallire quando l'OCR non c'e' - `SetFocus()` e
+l'attesa a polling RESTANO (corretti per il loro problema originale, verificati localmente), solo
+la premessa "l'OCR e' sempre disponibile" era sbagliata.
+
 `ScrollAndSelectLastRowEndToEndTests` completa Task 5/10 ("scorri e seleziona l'ultima riga") -
 **a differenza di Task 3, qui la verifica torna a essere UI Automation pura, non OCR**: un click
 sulla lista (mette a fuoco) seguito dal tasto FINE (`End`, la scorciatoia standard di Qt per
@@ -61,6 +73,7 @@ from core.computer_use.fallback import try_strategies_in_order
 from core.computer_use.selector import ElementSelector, SelectorEngine
 from core.computer_use.ui_automation_adapter import UIAutomationAdapter
 from core.computer_use.vision_verify import word_visible_in_window, word_visible_in_window_eventually
+from core.vision.screen import ocr_available
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _FIXTURE_WINDOW_TITLE = "Jake Computer Use Fixture"
@@ -196,6 +209,16 @@ class ChangeTabAndToggleEndToEndTests(unittest.TestCase):
 
 class ExpandCategoryEndToEndTests(unittest.TestCase):
     def setUp(self):
+        # Fix di un fallimento reale in CI, non ipotizzato (vedi ROADMAP_EXECUTION.md): il
+        # runner CI condiviso di questo progetto (GitHub Actions windows-latest) non ha un
+        # motore OCR disponibile (nessun profilo utente interattivo reale, verificato dopo che
+        # ne' un fuoco tastiera esplicito ne' un'attesa a polling avevano risolto il fallimento -
+        # entrambi correggono un problema di TIMING, non l'assenza dell'intera capacita' OCR).
+        # Saltato esplicitamente, non fatto fallire: un ambiente senza OCR non e' un buco del
+        # codice, e' una caratteristica NOTA e gia' gestita altrove nel progetto
+        # (skills/screen_click.py::OCR_UNAVAILABLE).
+        if not ocr_available():
+            self.skipTest("OCR non disponibile in questo ambiente (probabile mancanza del language pack su CI)")
         self.process = subprocess.Popen(
             [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
             cwd=str(_REPO_ROOT),

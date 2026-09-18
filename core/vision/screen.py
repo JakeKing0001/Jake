@@ -51,6 +51,27 @@ def read_screen_words(image_path: Path | None = None) -> list[dict] | None:
     return lines
 
 
+def ocr_available() -> bool:
+    """Vero se un motore OCR e' davvero disponibile in QUESTO ambiente (non solo se il codice
+    "prova" a usarlo) - `OcrEngine.try_create_from_user_profile_languages()` (`_ocr_async` sopra)
+    restituisce `None` quando manca il language pack OCR di Windows, un componente NON garantito
+    su ogni installazione (a differenza di UI Automation, sempre presente nel sistema operativo).
+    Usata per SALTARE esplicitamente (non far fallire) i test che dipendono dall'OCR quando
+    l'ambiente non lo supporta - trovato empiricamente vero per il runner CI condiviso di questo
+    progetto (GitHub Actions windows-latest, senza un profilo utente interattivo reale), non
+    ipotizzato. Prova su un'immagine sintetica minuscola (mai una cattura reale dello schermo) -
+    questa funzione serve solo a rispondere "l'OCR funziona qui?", non a leggere nulla di
+    reale."""
+    import tempfile
+
+    from PIL import Image
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        probe_path = Path(tmp_dir) / "ocr_probe.png"
+        Image.new("RGB", (10, 10)).save(probe_path)
+        return read_screen_words(image_path=probe_path) is not None
+
+
 async def _ocr_async(path: Path):
     from winsdk.windows.graphics.imaging import BitmapDecoder
     from winsdk.windows.media.ocr import OcrEngine
