@@ -64,8 +64,13 @@ class InvokeAndSetValueTests(_ExecutorFixtureTestCase):
 
 
 class SelectionItemTests(_ExecutorFixtureTestCase):
-    """Task 4/10 di F3.1.2 (prima meta' - "cambia tab"): il pattern SelectionItem, verificato
-    leggendo `CurrentIsSelected` prima e dopo, non solo che Select() non sollevi."""
+    """Task 4/10 di F3.1.2 (prima meta' - "cambia tab"): il pattern SelectionItem su un `TabItem`,
+    verificato con una prova INDIPENDENTE dal solo `CurrentIsSelected` - il checkbox della tab 2
+    (`ToggleTests._checkbox_after_selecting_tab_two` sotto lo riusa gia') diventa davvero
+    raggiungibile via UI Automation solo se la tab e' VERAMENTE cambiata a livello Qt, non solo
+    "selected" secondo UI Automation. Contrasto deliberato con
+    `SelectionItemKnownLimitationTests` sotto, dove la STESSA prova indipendente su un
+    `QListWidgetItem` smaschera l'esatto opposto."""
 
     def tearDown(self):
         self._reset_fixture()
@@ -83,6 +88,41 @@ class SelectionItemTests(_ExecutorFixtureTestCase):
         tab_two_after = self._element(name="Tab 2", control_type="TabItem")
         self.assertFalse(self.adapter.describe_element(tab_one_after).selected)
         self.assertTrue(self.adapter.describe_element(tab_two_after).selected)
+
+
+class SelectionItemKnownLimitationTests(_ExecutorFixtureTestCase):
+    """**Il buco piu' insidioso dei tre trovati in questo incremento - una vera trappola, non
+    ipotizzata**: a differenza di `SelectionItemTests` sopra (`TabItem`, verificato funzionante
+    con una prova indipendente), su un `QListWidgetItem` `CurrentIsSelected` cambia correttamente
+    da `False` a `True` dopo `select()` - SEMBREREBBE quindi funzionare - ma il bottone "Rimuovi
+    selezionato" della fixture, la cui abilitazione dipende dal VERO stato di selezione di Qt
+    (`itemSelectionChanged`, non da UI Automation), resta disabilitato. Lo stato riportato da UI
+    Automation e quello reale dell'app si sono desincronizzati: fidarsi del solo `selected` come
+    prova sarebbe stato un errore, scoperto qui SOLO perche' esisteva un secondo modo indipendente
+    di controllare - la stessa lezione "mai fidarsi del successo auto-dichiarato, verificarlo in
+    modo indipendente" gia' imparata ripetutamente per le skill di Jake in F1
+    (`core/execution_safety.py::verify_effect`), qui riscoperta per UI Automation stesso."""
+
+    def tearDown(self):
+        self._reset_fixture()
+
+    def test_selecting_a_list_item_reports_selected_but_does_not_really_select_it(self):
+        item = self._element(name="Riga 1", control_type="ListItem")
+        self.assertFalse(self.adapter.describe_element(item).selected)
+
+        self.executor.select(item)
+        time.sleep(_SETTLE_SECONDS)
+
+        item_after = self._element(name="Riga 1", control_type="ListItem")
+        self.assertTrue(
+            self.adapter.describe_element(item_after).selected,
+            "UI Automation SI' riporta la selezione come riuscita - questo e' il punto della trappola",
+        )
+        remove_button = self._element(name="Rimuovi selezionato", control_type="Button")
+        self.assertFalse(
+            self.adapter.describe_element(remove_button).enabled,
+            "ma Qt non ha davvero selezionato nulla - il bottone che dipende dalla selezione VERA resta disabilitato",
+        )
 
 
 class ToggleTests(_ExecutorFixtureTestCase):
