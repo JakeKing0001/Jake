@@ -6,20 +6,20 @@ deterministico e ripetibile - mai un'app o un dato personale reale (criterio di 
 dichiarato dalla roadmap: "benchmark deterministico eseguibile senza toccare dati o app
 personali").
 
-Quarta fetta (due tab, la seconda con una casella di spunta - il pattern Toggle che F3.4.1
-dichiara insieme a ExpandCollapse/Selection, ancora senza un bersaglio nella fixture): cambiare
-tab e' un compito DIVERSO da espandere un albero o selezionare in una lista - il contenuto della
-tab non attiva non e' nell'albero UI Automation come "non visibile ma presente" allo stesso modo
-di un elemento in una lista con scorrimento, e' un intero sotto-albero che appare/scompare.
-Stesso principio "un incremento alla volta" gia' seguito per tutta la fase F1 in questa sessione
-- deliberatamente NON affrontati qui, passi successivi dichiarati:
-- il resto di F3.1.1 (scrolling - non ancora presente);
-- F3.1.2 (6 dei 10 task rimangono - quattro dimostrati qui: "aggiungi", "rimuovi con conferma",
-  "espandi e seleziona", "cambia tab e spunta l'opzione");
+Quinta fetta (una lista con scorrimento, 30 righe in un'area alta poche righe - il pattern Scroll
+che F3.4.1 dichiara insieme agli altri, l'ultimo del gruppo "Invoke, Value, Selection, Toggle,
+ExpandCollapse, Scroll" ancora senza un bersaglio nella fixture): con questa, `F3.1.1` e' chiuso
+per intero - button/input/list/dialog/tree/tabs/scrolling, esattamente l'elenco letterale della
+roadmap ("Creare una app fixture Windows con button, input, list, dialog, tree, tabs e
+scrolling"). Stesso principio "un incremento alla volta" gia' seguito per tutta la fase F1 in
+questa sessione - deliberatamente NON affrontati qui, passi successivi dichiarati:
+- F3.1.2 (5 dei 10 task rimangono - cinque dimostrati qui: "aggiungi", "rimuovi con conferma",
+  "espandi e seleziona", "cambia tab e spunta l'opzione", "scorri e seleziona l'ultima riga");
 - F3.1.5 (DPI, piu' monitor, finestre sovrapposte, temi diversi);
 - F3.1.6 (controlli ambigui e dinamici - i controlli DISABILITATI hanno gia' un primo assaggio
   col bottone "Rimuovi selezionato", disabilitato senza una selezione, ma non e' l'intero punto
-  dichiarato da quella fetta).
+  dichiarato da quella fetta);
+- l'intera F3.2 (`UIAutomationAdapter`, ancora da costruire).
 
 PySide6 invece di Win32/WinForms nativo: gia' una dipendenza del progetto
 (requirements/hud.txt, usata dall'HUD - vedi core/gui/hud/), ed espone i propri widget a UI
@@ -43,6 +43,11 @@ _TREE_STRUCTURE = {
     "Categoria B": ["Elemento B1", "Elemento B2"],
 }
 
+# Quinta fetta (scorrimento): abbastanza righe da superare qualunque altezza ragionevole
+# dell'area visibile (impostata sotto a poche righe con setMaximumHeight), cosi' l'ultima riga
+# e' garantita fuori vista finche' qualcuno non scorre davvero, non solo in teoria.
+_SCROLL_LIST_ROW_COUNT = 30
+
 
 class ComputerUseFixtureWindow(QWidget):
     """Finestra fixture: un campo di testo + un bottone 'Aggiungi' che sposta il testo digitato
@@ -59,7 +64,7 @@ class ComputerUseFixtureWindow(QWidget):
         super().__init__()
         self.setWindowTitle(self.WINDOW_TITLE)
         self.setObjectName("jake_fixture_window")
-        self.resize(360, 560)
+        self.resize(360, 640)
 
         self.input_field = QLineEdit()
         self.input_field.setObjectName("fixture_input")
@@ -110,6 +115,12 @@ class ComputerUseFixtureWindow(QWidget):
         QVBoxLayout(second_tab).addWidget(self.option_checkbox)
         self.tabs.addTab(second_tab, "Tab 2")
 
+        self.scroll_list = QListWidget()
+        self.scroll_list.setObjectName("fixture_scroll_list")
+        self.scroll_list.setAccessibleName("Elenco con scorrimento")
+        self.scroll_list.setMaximumHeight(90)
+        self.scroll_list.addItems([f"Riga {i}" for i in range(1, _SCROLL_LIST_ROW_COUNT + 1)])
+
         buttons_row = QHBoxLayout()
         buttons_row.addWidget(self.add_button)
         buttons_row.addWidget(self.reset_button)
@@ -121,6 +132,7 @@ class ComputerUseFixtureWindow(QWidget):
         layout.addWidget(self.item_list)
         layout.addWidget(self.tree)
         layout.addWidget(self.tabs)
+        layout.addWidget(self.scroll_list)
 
     def _add_current_text(self) -> None:
         """Task 1/10 di F3.1.2 (gli altri 9 restano un passo successivo dichiarato): digitare un
@@ -176,6 +188,20 @@ class ComputerUseFixtureWindow(QWidget):
         `list_items()`/`selected_tree_item_text()`."""
         return self.option_checkbox.isChecked()
 
+    def is_scrolled_to_bottom(self) -> bool:
+        """Task 5/10 di F3.1.2 (prima meta': "scorri..."): vero solo quando la barra di
+        scorrimento e' davvero al suo valore massimo - non un'approssimazione su quante righe
+        sono state costruite, il pattern Scroll (F3.4.1) riguarda la POSIZIONE dello scorrimento,
+        non l'esistenza del contenuto (che c'e' gia' tutto fin dall'inizio, solo non visibile)."""
+        bar = self.scroll_list.verticalScrollBar()
+        return bar.value() >= bar.maximum()
+
+    def selected_scroll_item_text(self) -> str | None:
+        """Task 5/10 di F3.1.2 (seconda meta': "...e seleziona l'ultima riga"). Stato osservabile
+        IN PROCESSO, stesso ripiego onesto di `list_items()`/`selected_tree_item_text()`."""
+        current = self.scroll_list.currentItem()
+        return current.text() if current is not None else None
+
     def reset_state(self) -> None:
         """F3.1.3: riporta la fixture allo stato iniziale - lo stesso stato ad ogni avvio di un
         nuovo task, cosi' un task non eredita mai residui lasciati da quello precedente."""
@@ -186,6 +212,14 @@ class ComputerUseFixtureWindow(QWidget):
         self._populate_tree()
         self.tabs.setCurrentIndex(0)
         self.option_checkbox.setChecked(False)
+        # Buco reale trovato scrivendo il test di reset, non ipotizzato: clearSelection() da
+        # solo NON basta - in Qt "selezione" e "elemento corrente" (currentItem/currentRow) sono
+        # due concetti distinti, e selected_scroll_item_text() legge il secondo. Senza
+        # setCurrentRow(-1), l'ultima riga scelta restava "corrente" (quindi ancora restituita
+        # da selected_scroll_item_text()) anche dopo un reset che sembrava completo.
+        self.scroll_list.clearSelection()
+        self.scroll_list.setCurrentRow(-1)
+        self.scroll_list.scrollToTop()
 
     def _update_remove_button_enabled(self) -> None:
         """Un piccolo assaggio anticipato di F3.1.6 ("controlli disabilitati"): senza una

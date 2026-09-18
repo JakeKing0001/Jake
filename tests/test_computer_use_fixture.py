@@ -35,12 +35,13 @@ class AutomationPropertiesTests(unittest.TestCase):
         self.assertEqual(window.tree.objectName(), "fixture_tree")
         self.assertEqual(window.tabs.objectName(), "fixture_tabs")
         self.assertEqual(window.option_checkbox.objectName(), "fixture_checkbox")
+        self.assertEqual(window.scroll_list.objectName(), "fixture_scroll_list")
 
     def test_every_control_has_a_non_empty_accessible_name(self):
         window = ComputerUseFixtureWindow()
         for widget in (
             window.input_field, window.add_button, window.reset_button, window.item_list, window.tree,
-            window.tabs, window.option_checkbox,
+            window.tabs, window.option_checkbox, window.scroll_list,
         ):
             self.assertTrue(widget.accessibleName(), f"{widget.objectName()} non ha un accessibleName")
 
@@ -354,6 +355,55 @@ class SwitchTabAndToggleTests(unittest.TestCase):
 
         self.assertEqual(window.current_tab_name(), "Tab 1")
         self.assertFalse(window.is_option_checked())
+
+
+class ScrollListTests(unittest.TestCase):
+    """Task 5/10 di F3.1.2: scorrere fino in fondo e selezionare l'ultima riga - il pattern
+    Scroll (F3.4.1). A DIFFERENZA di ogni altra classe in questo file, qui la finestra viene
+    davvero mostrata (`show()`): buco empirico trovato scrivendo questi test, non ipotizzato -
+    `QScrollBar.maximum()` resta 0 finche' il widget non ha una geometria vera assegnata da un
+    vero layout pass, che Qt non esegue mai per un widget mai mostrato (verificato: `resize()`/
+    `adjustSize()`/`processEvents()` senza `show()` non bastano, `maximum()` resta 0 comunque).
+    Senza mostrare la finestra, `is_scrolled_to_bottom()` sarebbe banalmente sempre vero
+    (`0 >= 0`), un test che passa senza aver provato nulla. `addCleanup(window.close)` per non
+    lasciare finestre aperte tra un test e l'altro."""
+
+    def _shown_window(self) -> ComputerUseFixtureWindow:
+        window = ComputerUseFixtureWindow()
+        window.show()
+        self.addCleanup(window.close)
+        _app.processEvents()
+        return window
+
+    def test_a_fresh_window_is_not_scrolled_to_the_bottom(self):
+        window = self._shown_window()
+        self.assertFalse(window.is_scrolled_to_bottom())
+
+    def test_nothing_is_selected_on_a_fresh_window(self):
+        window = self._shown_window()
+        self.assertIsNone(window.selected_scroll_item_text())
+
+    def test_scrolling_to_the_bottom_and_selecting_the_last_row(self):
+        window = self._shown_window()
+
+        window.scroll_list.scrollToBottom()
+        _app.processEvents()
+        last_row = window.scroll_list.item(window.scroll_list.count() - 1)
+        window.scroll_list.setCurrentItem(last_row)
+
+        self.assertTrue(window.is_scrolled_to_bottom())
+        self.assertEqual(window.selected_scroll_item_text(), "Riga 30")
+
+    def test_reset_scrolls_back_to_the_top_and_clears_the_selection(self):
+        window = self._shown_window()
+        window.scroll_list.scrollToBottom()
+        _app.processEvents()
+        window.scroll_list.setCurrentItem(window.scroll_list.item(window.scroll_list.count() - 1))
+
+        window.reset_state()
+
+        self.assertFalse(window.is_scrolled_to_bottom())
+        self.assertIsNone(window.selected_scroll_item_text())
 
 
 if __name__ == "__main__":
