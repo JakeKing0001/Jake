@@ -4594,6 +4594,26 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   manuale aggiuntiva: `python -m benchmarks.computer_use_fixture --auto-close-after 2` termina
   pulito (exit code 0), nessuna eccezione all'avvio con il nuovo codice del dialogo.
   2.896/2.896 test, ruff verde.
+- `F3.1.1` (terza fetta - albero a due livelli) — 18/09/2026: `QTreeWidget` con due categorie
+  ("Categoria A"/"Categoria B"), due figli ciascuna, TUTTE collassate per default (`setExpanded
+  (False)` esplicito, non un'assunzione sul comportamento di default di Qt). Motivazione: il
+  pattern ExpandCollapse (`F3.4.1`, "Implementare Invoke, Value, Selection, Toggle,
+  ExpandCollapse..."), da solo, non ha ancora un bersaglio nella fixture - un nodo figlio non e'
+  nemmeno nella struttura visibile finche' il genitore non viene espanso, un problema DIVERSO
+  dalla semplice Selection gia' coperta da `item_list`. Un `QTreeWidgetItem` non e' un `QObject`
+  (nessun `objectName` proprio possibile) - il nome della colonna 0 e' gia' l'identificatore
+  stabile che UI Automation esporrebbe come Name di un TreeItem, dichiarato esplicitamente nel
+  docstring invece di lasciarlo implicito. Task 3/10 di F3.1.2: espandere "Categoria A" e
+  selezionare "Elemento A1". Prova: 6 test nuovi in `tests/test_computer_use_fixture.py`
+  (entrambe le categorie collassate/nessuna selezione su una finestra fresca; un nome categoria
+  sconosciuto solleva invece di restituire silenziosamente `False`; espandere una categoria non
+  espande l'altra; selezionare un figlio dopo aver espanso il genitore restituisce il testo
+  giusto; `reset_state()` ricollassa e deseleziona) + 2 test estesi
+  (`test_every_control_has_a_stable_object_name`/`..._non_empty_accessible_name` ora coprono
+  anche l'albero). Verifica manuale: lanciata la finestra in un processo separato, confermata
+  aperta tramite `list_open_window_titles()`, screenshot reale catturato e ispezionato -
+  l'albero renderizza con le frecce di espansione e entrambe le categorie visibili e collassate.
+  2.902/2.902 test, ruff verde.
 
 ### F3.2 — Windows UI Automation adapter
 
