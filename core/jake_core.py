@@ -824,18 +824,28 @@ class JakeCore:
             ), policy_reason
         return resolved, None, policy_reason
 
-    def _resolve_and_execute(self, command: Command) -> ActionExecution:
+    def _resolve_and_execute(self, command: Command, action_id: str | None = None) -> ActionExecution:
         """Riscrive, autorizza ed esegue per comando diretto e agente.
 
         Restituisce comando eseguito, risultato, nota e motivazione per-azione, non stato globale.
         I fallback hanno un gate proprio;
         la ripresa di un consenso usa invece _authorize_command senza cambiare il bersaglio.
+
+        F1.3.4 (adozione, percorso a comando diretto): action_id opzionale, passato a
+        SkillRegistry.execute() cosi' un DELETE_PATH puo' avere uno snapshot del contenuto
+        catturato prima della cancellazione vera (vedi core/action_snapshot.py). None (il
+        default) preserva il comportamento di sempre per il percorso dell'agente, che passa da
+        qui (vedi executor di TaskAgent/PlanExecutor in __init__) senza ancora passarne uno -
+        prossima fetta dichiarata, non fatta in questo incremento.
         """
         resolved = fallbacks.pre_execution_rewrite(command, self.skill_registry)
         resolved, policy_result, policy_reason = self._authorize_command(resolved)
         if policy_result is not None:
             return ActionExecution(resolved, policy_result, policy_reason=policy_reason)
-        result = self.skill_registry.execute(resolved.intent, resolved.parameters, policy_engine=self.policy_engine)
+        result = self.skill_registry.execute(
+            resolved.intent, resolved.parameters, policy_engine=self.policy_engine,
+            action_id=action_id, private=self.private_mode,
+        )
         if result is not None and not result.success and result.error != "CONFIRMATION_REQUIRED":
             alt_command, note = fallbacks.alternative_for(resolved, result, self.skill_registry)
             if alt_command is not None:
@@ -849,7 +859,10 @@ class JakeCore:
                 # richiesta di conferma per qualcosa che l'utente non ha chiesto direttamente.
                 alt_decision, alt_reason = self.policy_engine.decide_interactive_with_reason(alt_command.intent, alt_command.parameters)
                 if alt_decision == PolicyDecision.ALLOW:
-                    alt_result = self.skill_registry.execute(alt_command.intent, alt_command.parameters, policy_engine=self.policy_engine)
+                    alt_result = self.skill_registry.execute(
+                        alt_command.intent, alt_command.parameters, policy_engine=self.policy_engine,
+                        private=self.private_mode,
+                    )
                     if alt_result is not None and alt_result.success:
                         return ActionExecution(alt_command, alt_result, note, alt_reason)
             else:
@@ -987,7 +1000,16 @@ class JakeCore:
             self._log_action_outcome(trace_id, started, intent, command.parameters, result="skill_not_found")
             return f"Skill non trovata per {intent}"
 
-        execution = self._resolve_and_execute(command)
+        # F1.3.4 (adozione - prima fetta): generato PRIMA di eseguire, non solo dopo un successo
+        # come faceva finora l'action_id di correlazione ledger/undo qui sotto, cosi'
+        # SkillRegistry.execute() puo' etichettare con questo id uno snapshot di DELETE_PATH
+        # prima della cancellazione vera. Un'azione bloccata o non ancora confermata non
+        # raggiunge mai skill_registry.execute() (vedi _resolve_and_execute/_authorize_command),
+        # quindi generarlo comunque qui non ha alcun costo osservabile ne' cambia la ricevuta nel
+        # ledger sotto, che continua a ricevere un action_id solo per un successo, esattamente
+        # come prima di questo incremento.
+        action_id = new_action_id()
+        execution = self._resolve_and_execute(command, action_id=action_id)
         resolved, result, note = execution.command, execution.result, execution.note
         if result is not None and result.error in ("CONFIRMATION_REQUIRED", "AUTH_REQUIRED"):
             reason = "auth_required" if result.error == "AUTH_REQUIRED" else "confirmation_required"
@@ -1017,7 +1039,7 @@ class JakeCore:
         response = format_skill_result(resolved.intent, result, self.skill_registry)
         if note:
             response = f"{note} {response}"
-        action_id = None
+        correlated_action_id = None
         if result is not None and result.success:
             self.conversation_state.remember_entities(resolved.intent, resolved.parameters, result.data or {})
             # F1.5.2: segnala a answer() che QUESTA risposta puo' contenere contenuto esterno
@@ -1026,20 +1048,20 @@ class JakeCore:
             set_current_command_source_intent(resolved.intent)
             # F1.3.5 (adozione - prima fetta): un'azione riuscita il cui intent ha un inverso
             # naturale (core/execution_safety.py::UNDO_PARAMS_BY_INTENT) genera un vero
-            # UndoDescriptor - None per un intent senza inverso, mai inventato. action_id generato
-            # QUI (non dentro _log_action_outcome) cosi' lo stesso identificatore correla la
-            # ricevuta nel ledger con il descrittore salvato in self.undo_store.
-            action_id = new_action_id()
+            # UndoDescriptor - None per un intent senza inverso, mai inventato. Lo stesso
+            # action_id gia' generato sopra (prima di eseguire, per l'eventuale snapshot) correla
+            # anche qui la ricevuta nel ledger con il descrittore salvato in self.undo_store.
             undo_descriptor = generate_undo_descriptor(action_id, resolved.intent, result.data or {})
             if undo_descriptor is not None:
                 self.undo_store.save(undo_descriptor)
+            correlated_action_id = action_id
         if learn:
             self.learning.observe(text, resolved, result, route=self.router.last_route)
         self._remember_exchange(text, resolved, response)
         outcome = "success" if (result is not None and result.success) else f"error:{result.error}" if result is not None else "no_result"
         self._log_action_outcome(
             trace_id, started, resolved.intent, resolved.parameters, result=outcome, policy_reason=execution.policy_reason,
-            action_id=action_id,
+            action_id=correlated_action_id,
         )
         return response
 
@@ -1259,7 +1281,18 @@ class JakeCore:
             parameters.update(authenticated=True, authenticated_via="passphrase")
         command, result, policy_reason = self._authorize_command(Command(action["intent"], parameters))
         if result is None:
-            result = self.skill_registry.execute(command.intent, command.parameters, policy_engine=self.policy_engine)
+            # F1.3.4 (adozione - seconda fetta, il percorso di conferma - DESTRUCTIVE/ADMIN come
+            # DELETE_PATH passano quasi sempre da qui, non da _resolve_and_execute, vedi il
+            # docstring del metodo): action_id generato solo per etichettare un eventuale
+            # snapshot catturato da SkillRegistry.execute() prima della cancellazione vera - non
+            # ancora collegato al ledger ne' a UndoStore su questo percorso (nessuno dei due
+            # correla oggi un'azione confermata qui, un gap preesistente e diverso da questo
+            # incremento, non toccato).
+            action_id = new_action_id()
+            result = self.skill_registry.execute(
+                command.intent, command.parameters, policy_engine=self.policy_engine,
+                action_id=action_id, private=self.private_mode,
+            )
         # Una conferma puo' chiederne un'altra (CREATE_SKILL: "provo a imparare?" -> codice
         # scritto -> "lo attivo?"): stessa gestione del percorso normale.
         if result is not None and result.error in ("CONFIRMATION_REQUIRED", "AUTH_REQUIRED"):

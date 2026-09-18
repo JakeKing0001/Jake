@@ -38,6 +38,7 @@ from core.session_recorder import SessionRecorder
 from core.skill_result import SkillResult
 from core.undo_store import UndoStore
 from skills.delete_path import DeletePathSkill
+from tests.test_skill_registry import _bare_registry
 
 
 class FakeSkill:
@@ -63,7 +64,7 @@ class FakeRegistry:
     def has_skill(self, intent):
         return intent in self._skills
 
-    def execute(self, intent, parameters=None, policy_engine=None):
+    def execute(self, intent, parameters=None, policy_engine=None, *, action_id=None, private=False):
         skill = self.get_skill(intent)
         return None if skill is None else skill.execute(parameters)
 
@@ -569,6 +570,72 @@ class ExecuteCommandUndoStoreWiringTests(_JakeCoreTestCase):
         # Nessun action_id noto per un'azione mai eseguita: nessun descrittore da cercare, il
         # punto e' che undo_store.save() non e' mai stato chiamato (verificato indirettamente -
         # nessun errore, nessuna eccezione, il flusso normale di blocco resta invariato).
+
+
+class ExecuteCommandSnapshotWiringTests(_JakeCoreTestCase):
+    """F1.3.4 (adozione - prima e seconda fetta, percorso a comando diretto/confermato): il
+    meccanismo (core/action_snapshot.py) esisteva gia', mai collegato a nessun chokepoint reale
+    prima di questo incremento. A differenza di ExecuteCommandUndoStoreWiringTests sopra, qui
+    serve il vero SkillRegistry (non FakeRegistry, che chiama skill.execute() direttamente
+    saltando path resolution/lock/cattura) - vedi tests/test_skill_registry.py per la copertura
+    isolata di SkillRegistry.execute()/_maybe_capture_snapshot() gia' fatta li'; questi test
+    verificano invece che i due chokepoint REALI di JakeCore lo popolino davvero."""
+
+    def test_a_direct_confirmed_delete_path_snapshots_the_content_first(self):
+        target = Path(self._tmp.name) / "nota.txt"
+        target.write_text("contenuto vero", encoding="utf-8")
+        registry = _bare_registry({"DELETE_PATH": DeletePathSkill()})
+        core = self._core(
+            skill_registry=registry,
+            router=FakeRouter(Command("DELETE_PATH", {"path": str(target), "confirmed": True})),
+        )
+
+        core._execute_command("elimina nota.txt (confermato)", Command("DELETE_PATH", {"path": str(target), "confirmed": True}))
+
+        self.assertFalse(target.exists())
+        receipt = core.action_ledger.read_all()[-1]
+        snapshot = registry.snapshot_store.get(receipt["action_id"])
+        self.assertIsNotNone(snapshot, "un'azione riuscita deve avere uno snapshot correlato allo stesso action_id del ledger")
+        self.assertEqual(snapshot.content, b"contenuto vero")
+
+    def test_the_normal_confirmation_flow_also_snapshots_the_content_first(self):
+        """Le azioni DESTRUCTIVE come DELETE_PATH passano quasi sempre da qui
+        (_finalize_pending_action), non dal percorso diretto sopra - vedi il suo docstring."""
+        target = Path(self._tmp.name) / "fixture.txt"
+        target.write_text("da recuperare", encoding="utf-8")
+        registry = _bare_registry({"DELETE_PATH": DeletePathSkill()})
+        core = self._core(
+            skill_registry=registry,
+            router=FakeRouter(Command("DELETE_PATH", {"path": str(target)})),
+            always_confirm_intents={"DELETE_PATH"},
+        )
+
+        core.answer("elimina fixture.txt")
+        self.assertTrue(core.conversation_state.has_pending_action())
+        core.answer("si")
+
+        self.assertFalse(target.exists())
+        success_receipt = core.action_ledger.read_all()[-1]
+        self.assertEqual(success_receipt["result"], "success")
+        snapshots = list(registry.snapshot_store._snapshots.values())
+        self.assertEqual(len(snapshots), 1, "esattamente uno snapshot, catturato una sola volta")
+        self.assertEqual(snapshots[0].content, b"da recuperare")
+
+    def test_private_mode_snapshots_nothing_across_the_whole_confirmation_flow(self):
+        target = Path(self._tmp.name) / "segreto.txt"
+        target.write_text("dato sensibile", encoding="utf-8")
+        registry = _bare_registry({"DELETE_PATH": DeletePathSkill()})
+        core = self._core(
+            skill_registry=registry,
+            router=FakeRouter(Command("DELETE_PATH", {"path": str(target)})),
+            always_confirm_intents={"DELETE_PATH"}, private_mode=True,
+        )
+
+        core.answer("elimina segreto.txt")
+        core.answer("si")
+
+        self.assertFalse(target.exists(), "l'azione confermata deve comunque eseguire davvero")
+        self.assertEqual(registry.snapshot_store._snapshots, {})
 
 
 class ConcurrentPendingActionConfirmationTests(_JakeCoreTestCase):
