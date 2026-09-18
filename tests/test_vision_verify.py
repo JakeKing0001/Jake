@@ -4,13 +4,14 @@ deterministici (adapter/OCR mockati, nessuna dipendenza da uno schermo reale) - 
 fixture VERA (`tests/test_computer_use_integration.py`, non qui) dimostra il caso concreto che ha
 motivato questo modulo: Task 3/10 di F3.1.2 ("espandi categoria"), bloccato per UI Automation ma
 verificabile via OCR."""
+import time
 import unittest
 from unittest import mock
 
 from PIL import Image
 
 from core.computer_use.ui_automation_adapter import ElementInfo
-from core.computer_use.vision_verify import word_visible_in_window
+from core.computer_use.vision_verify import word_visible_in_window, word_visible_in_window_eventually
 
 _WINDOW_INFO = ElementInfo(
     name="Finestra", automation_id="win", control_type="Window",
@@ -77,6 +78,45 @@ class WordVisibleInWindowTests(unittest.TestCase):
             word_visible_in_window(adapter, mock.sentinel.window, "Elemento")
 
         self.assertEqual(captured_sizes, [(100, 50)], "il ritaglio OCR deve corrispondere ai bounds della finestra, non allo schermo intero")
+
+
+class WordVisibleInWindowEventuallyTests(unittest.TestCase):
+    """Fix di un fallimento reale in CI (vedi il docstring del modulo): polling con timeout
+    invece di un singolo controllo OCR ottimistico - stesso principio gia' usato da
+    `SelectorEngine.wait_for_unique_element` (F3.4.7)."""
+
+    def test_returns_true_immediately_when_the_word_is_already_there(self):
+        adapter = mock.Mock()
+        adapter.describe_element.return_value = _WINDOW_INFO
+        with mock.patch("core.vision.screen.capture_screenshot_image", return_value=Image.new("RGB", (200, 200))), \
+             mock.patch("core.vision.screen.read_screen_words", return_value=[{"text": "Elemento", "line": 0, "x": 0, "y": 0, "w": 1, "h": 1}]):
+            self.assertTrue(word_visible_in_window_eventually(adapter, mock.sentinel.window, "Elemento", timeout_seconds=1.0))
+
+    def test_finds_a_word_that_appears_only_after_a_short_delay(self):
+        adapter = mock.Mock()
+        adapter.describe_element.return_value = _WINDOW_INFO
+        call_count = 0
+
+        def _delayed_words(image_path):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                return []
+            return [{"text": "Elemento", "line": 0, "x": 0, "y": 0, "w": 1, "h": 1}]
+
+        with mock.patch("core.vision.screen.capture_screenshot_image", return_value=Image.new("RGB", (200, 200))), \
+             mock.patch("core.vision.screen.read_screen_words", side_effect=_delayed_words):
+            self.assertTrue(word_visible_in_window_eventually(adapter, mock.sentinel.window, "Elemento", timeout_seconds=3.0))
+        self.assertGreaterEqual(call_count, 3)
+
+    def test_returns_false_after_the_timeout_when_the_word_never_appears(self):
+        adapter = mock.Mock()
+        adapter.describe_element.return_value = _WINDOW_INFO
+        started = time.monotonic()
+        with mock.patch("core.vision.screen.capture_screenshot_image", return_value=Image.new("RGB", (200, 200))), \
+             mock.patch("core.vision.screen.read_screen_words", return_value=[]):
+            self.assertFalse(word_visible_in_window_eventually(adapter, mock.sentinel.window, "Elemento", timeout_seconds=0.5))
+        self.assertGreaterEqual(time.monotonic() - started, 0.5, "deve rispettare davvero il timeout dato")
 
 
 if __name__ == "__main__":

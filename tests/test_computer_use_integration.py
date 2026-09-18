@@ -60,7 +60,7 @@ from core.computer_use.executor import ActionExecutor
 from core.computer_use.fallback import try_strategies_in_order
 from core.computer_use.selector import ElementSelector, SelectorEngine
 from core.computer_use.ui_automation_adapter import UIAutomationAdapter
-from core.computer_use.vision_verify import word_visible_in_window
+from core.computer_use.vision_verify import word_visible_in_window, word_visible_in_window_eventually
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _FIXTURE_WINDOW_TITLE = "Jake Computer Use Fixture"
@@ -227,11 +227,19 @@ class ExpandCategoryEndToEndTests(unittest.TestCase):
         def _select_then_expand_via_keyboard():
             import pyautogui
             self.computer_agent.click_point(center_x, center_y)
+            # SetFocus() via UI Automation, non solo il click pixel - un runner CI condiviso puo'
+            # attivare la finestra in modo diverso da una sessione desktop interattiva, e un tasto
+            # freccia inviato senza fuoco tastiera garantito non raggiungerebbe l'elemento giusto
+            # (fix di un fallimento reale in CI, non ipotizzato - vedi ROADMAP_EXECUTION.md).
+            category.SetFocus()
             pyautogui.press("right")
 
         outcome = try_strategies_in_order(
             [("pixel_click_then_right_arrow", _select_then_expand_via_keyboard)],
-            verify=lambda: word_visible_in_window(self.adapter, self.window, "Elemento"),
+            # Polling con timeout (fix dello stesso fallimento CI), non un singolo controllo OCR:
+            # un rendering piu' lento su una macchina condivisa puo' far arrivare il primo
+            # controllo prima che i figli siano davvero ridisegnati.
+            verify=lambda: word_visible_in_window_eventually(self.adapter, self.window, "Elemento", timeout_seconds=3.0),
         )
 
         self.assertTrue(outcome.succeeded, outcome.attempts)
@@ -273,11 +281,26 @@ class ScrollAndSelectLastRowEndToEndTests(unittest.TestCase):
         def _focus_then_jump_to_end():
             import pyautogui
             self.computer_agent.click_point(center_x, center_y)
+            # SetFocus() via UI Automation, non solo il click pixel - un runner CI condiviso puo'
+            # attivare la finestra in modo diverso da una sessione desktop interattiva, e un tasto
+            # inviato senza fuoco tastiera garantito non raggiungerebbe l'elemento giusto (stesso
+            # fix del fallimento reale gia' trovato in CI per Task 3, applicato qui in via
+            # preventiva - vedi ROADMAP_EXECUTION.md).
+            scroll_list.SetFocus()
             pyautogui.press("end")
 
         def _last_row_is_really_selected():
-            matches = self.engine.find_all(self.window, ElementSelector(name="Riga 30", control_type="ListItem"))
-            return len(matches) == 1 and matches[0].selected is True
+            # Polling con timeout invece di un singolo controllo (stesso principio del fix CI di
+            # Task 3): un rendering piu' lento su una macchina condivisa puo' far arrivare il
+            # primo controllo prima che lo scorrimento sia davvero completato.
+            deadline = time.monotonic() + 3.0
+            while True:
+                matches = self.engine.find_all(self.window, ElementSelector(name="Riga 30", control_type="ListItem"))
+                if len(matches) == 1 and matches[0].selected is True:
+                    return True
+                if time.monotonic() >= deadline:
+                    return False
+                time.sleep(0.2)
 
         outcome = try_strategies_in_order(
             [("pixel_click_then_end_key", _focus_then_jump_to_end)],
