@@ -33,7 +33,22 @@ fallimento piu' volte: `change_ratio` restava vicino a zero, coerente con "espan
 anziche' con nessun effetto). Un click singolo (che seleziona/mette a fuoco l'elemento, gia'
 verificato affidabile per un `TreeItem`) seguito dalla freccia DESTRA (la scorciatoia da tastiera
 standard di Qt per espandere un nodo collassato con il fuoco) si e' invece dimostrato affidabile
-su prove ripetute - usata qui al posto del doppio click."""
+su prove ripetute - usata qui al posto del doppio click.
+
+`ScrollAndSelectLastRowEndToEndTests` completa Task 5/10 ("scorri e seleziona l'ultima riga") -
+**a differenza di Task 3, qui la verifica torna a essere UI Automation pura, non OCR**: un click
+sulla lista (mette a fuoco) seguito dal tasto FINE (`End`, la scorciatoia standard di Qt per
+saltare all'ultimo elemento di una lista) scorre DAVVERO fino in fondo E seleziona l'ultima riga
+in un solo gesto - indagato empiricamente PRIMA di scrivere questo test: un tentativo con la
+rotellina del mouse (`pyautogui.scroll`) si e' rivelato goffo (ogni chiamata avanza solo ~2 righe,
+indipendentemente dalla magnitudine richiesta - mai investigato oltre, dato che `End` risolve il
+problema in un solo passo affidabile). Trovato inoltre che, a differenza del caso dell'albero
+(F3.4/F3.5, i figli di un `QTreeWidgetItem` non compaiono MAI in UI Automation), una riga di un
+`QListWidget` scorsa DAVVERO in vista con un'interazione reale (non ipotizzata: verificato che
+'Riga 30' non era presente PRIMA e lo e' DOPO) diventa visibile E riporta `selected=True`
+correttamente - lo stesso limite di "contenuto virtualizzato" gia' documentato per lo Scroll
+(F3.4) riguardava solo l'assenza PRIMA di un vero scorrimento, non una desincronizzazione
+permanente come per SelectionItem su un `QListWidgetItem` gia' selezionato senza scorrimento."""
 import subprocess
 import sys
 import time
@@ -221,6 +236,55 @@ class ExpandCategoryEndToEndTests(unittest.TestCase):
 
         self.assertTrue(outcome.succeeded, outcome.attempts)
         self.assertEqual(outcome.successful_strategy, "pixel_click_then_right_arrow")
+
+
+class ScrollAndSelectLastRowEndToEndTests(unittest.TestCase):
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.computer_agent = ComputerAgent()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_pressing_end_scrolls_to_the_bottom_and_selects_the_last_row_for_real(self):
+        scroll_list = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_scroll_list", control_type="List"),
+        )
+        left, top, width, height = self.adapter.describe_element(scroll_list).bounds
+        center_x, center_y = left + width // 2, top + height // 2
+
+        # Prima dell'azione: "Riga 30" (l'ultima delle 30 righe, F3.1.1) non e' fuori vista solo
+        # concettualmente - non e' presente nell'albero UI Automation affatto (F3.4, gia'
+        # documentato per lo Scroll).
+        self.assertEqual(self.engine.find_all(self.window, ElementSelector(name="Riga 30")), [])
+
+        def _focus_then_jump_to_end():
+            import pyautogui
+            self.computer_agent.click_point(center_x, center_y)
+            pyautogui.press("end")
+
+        def _last_row_is_really_selected():
+            matches = self.engine.find_all(self.window, ElementSelector(name="Riga 30", control_type="ListItem"))
+            return len(matches) == 1 and matches[0].selected is True
+
+        outcome = try_strategies_in_order(
+            [("pixel_click_then_end_key", _focus_then_jump_to_end)],
+            verify=_last_row_is_really_selected,
+        )
+
+        self.assertTrue(outcome.succeeded, outcome.attempts)
 
 
 if __name__ == "__main__":
