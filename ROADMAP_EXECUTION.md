@@ -5177,6 +5177,27 @@ Criterio di uscita: ogni fallback è osservabile e non produce duplicazioni nei 
   l'intera scala non solo il primo tentativo, comportamento invariato senza lock manager,
   fornire un solo parametro dei due viene rifiutato). 2.973/2.973 test, ruff verde.
 
+- `F3.4.1` (resto - pattern Window, `close_window()`) — 18/09/2026: nuovo
+  `ActionExecutor.close_window()` (`core/computer_use/executor.py`) - chiude una finestra tramite
+  il pattern Window (`Close()`), l'ultimo dei sette pattern dichiarati da F3.4.1 non ancora
+  coperto. **A differenza di ExpandCollapse/Scroll (F3.4, buchi reali gia' trovati), qui NON c'e'
+  alcun buco**: verificato con una prova indipendente FORTE contro la fixture VERA, non solo che
+  `Close()` non sollevi - la finestra sparisce DAVVERO dall'albero UI Automation
+  (`find_window_by_title` solleva `WindowNotFoundError` subito dopo) E il PROCESSO stesso termina
+  da solo (`subprocess.Popen.wait()` restituisce un codice di uscita reale, non un `terminate()`
+  forzato dal test). Il ponte di accessibilita' di Qt onora `Close()` correttamente, lo stesso
+  comportamento del bottone nativo di chiusura - non tutti i pattern Qt hanno il limite gia'
+  trovato per altri, e questo incremento lo dimostra invece di darlo per scontato in un senso o
+  nell'altro.
+
+  Un processo fixture DEDICATO per questi due test (non quello condiviso di `_RealFixtureTestCase`
+  usato dal resto di `tests/test_executor.py`) - chiudere la finestra e' un'azione irreversibile
+  che romperebbe ogni altro test se condivisa. Deliberatamente NON affrontate qui: minimizzare/
+  massimizzare/ripristinare via `SetWindowVisualState` (dipendono da `CurrentWindowVisualState`,
+  un segnale non ancora verificato contro Qt - potrebbe avere lo stesso genere di buco gia' trovato
+  altrove, dichiarato onesto invece di assunto in nessuna delle due direzioni). Prova: 2 test nuovi
+  in `tests/test_executor.py::WindowPatternTests`. 2.975/2.975 test, ruff verde.
+
 ### F3.6 — Browser adapter
 
 Dipende da: F1.5 e F3.5.

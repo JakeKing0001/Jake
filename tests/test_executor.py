@@ -4,13 +4,19 @@ lancia davvero la fixture di F3.1.1 in un processo separato e agisce su di essa 
 vera, poi rilegge lo stato con l'adapter per verificare che l'azione abbia avuto un EFFETTO
 reale, non solo che la chiamata non abbia sollevato un errore - la stessa distinzione che ha
 trovato il buco reale documentato in ExpandCollapseKnownLimitationTests sotto."""
+import subprocess
+import sys
 import time
 import unittest
+from pathlib import Path
 
 from core.computer_use.executor import ActionExecutor, ElementActionReceipt, ElementNotInteractableError
+from core.computer_use.ui_automation_adapter import UIAutomationAdapter, WindowNotFoundError
 from tests.test_ui_automation_adapter import _RealFixtureTestCase
 
 _SETTLE_SECONDS = 0.3
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_FIXTURE_WINDOW_TITLE = "Jake Computer Use Fixture"
 
 
 class _ExecutorFixtureTestCase(_RealFixtureTestCase):
@@ -231,6 +237,51 @@ class ScrollKnownLimitationTests(_ExecutorFixtureTestCase):
         matches = self.adapter.find_matching_elements(self.window, name="Riga 30")
 
         self.assertEqual(matches, [], "una riga fuori vista non deve comparire nell'albero UI Automation")
+
+
+class WindowPatternTests(unittest.TestCase):
+    """F3.4.1 (resto): il pattern Window - `close_window()`, l'ultima azione tra i sette pattern
+    dichiarati da F3.4.1 non ancora coperta. Un processo fixture DEDICATO per test (non quello
+    condiviso di `_RealFixtureTestCase`/`_ExecutorFixtureTestCase`): chiudere la finestra e'
+    un'azione irreversibile che romperebbe ogni altro test se condivisa con loro."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._cleanup_process)
+        self.adapter = UIAutomationAdapter()
+        self.executor = ActionExecutor()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _cleanup_process(self):
+        if self.process.poll() is None:
+            self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_closing_the_window_makes_it_really_disappear_and_the_process_really_exit(self):
+        """A differenza di `ExpandCollapseKnownLimitationTests` sotto, qui NON c'e' un buco - il
+        ponte di accessibilita' di Qt onora `Close()` davvero: la finestra sparisce dall'albero UI
+        Automation E il processo termina da solo, non solo che `Close()` non abbia sollevato."""
+        self.executor.close_window(self.window)
+
+        with self.assertRaises(WindowNotFoundError):
+            self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=2.0)
+        exit_code = self.process.wait(timeout=5)
+        self.assertIsNotNone(exit_code, "il processo deve terminare da solo, non solo la sua finestra sparire")
+
+    def test_close_window_returns_a_receipt_naming_the_window_pattern(self):
+        receipt = self.executor.close_window(self.window)
+        self.process.wait(timeout=5)
+
+        self.assertEqual(receipt.action, "close_window")
+        self.assertEqual(receipt.pattern, "Window")
+        self.assertEqual(receipt.element_name, _FIXTURE_WINDOW_TITLE)
 
 
 class ActionReceiptTests(_ExecutorFixtureTestCase):
