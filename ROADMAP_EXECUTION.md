@@ -5028,6 +5028,42 @@ Criterio di uscita: ogni fallback è osservabile e non produce duplicazioni nei 
   (pixel diff come evidenza debole), F3.5.6 (fermarsi con diagnosi quando rischioso), F3.5.7
   (resource lock durante il cambio strategia). 2.953/2.953 test, ruff verde.
 
+- `F3.4.7` (adozione - attesa a polling invece di sleep fissi) — **CAPSTONE: Task 2/10 di F3.1.2
+  ("rimuovi con conferma") completato per DAVVERO end-to-end, la prima volta in questo intero
+  filone di lavoro** — 18/09/2026: nuovo `SelectorEngine.wait_for_unique_element()`
+  (`core/computer_use/selector.py`) - come `find_unique_element` ma RITENTA con un breve
+  intervallo fino al timeout, stesso principio gia' usato da `UIAutomationAdapter.
+  find_window_by_title` (F3.2) generalizzato a QUALUNQUE elemento, non solo una finestra di primo
+  livello. Un'ambiguita' (piu' di un match) fa fallire SUBITO, non dopo il timeout - aspettare non
+  la risolverebbe mai.
+
+  **Buco reale trovato cercando il dialogo di conferma, non ipotizzato**: un `QMessageBox` modale
+  di Qt e' una VERA finestra top-level separata secondo `win32gui.EnumWindows` (usato da
+  `core/vision/screen.py::list_open_window_titles`) - ma nell'albero di CONTROLLO di UI Automation
+  compare come DISCENDENTE della finestra GENITRICE, non come figlio del desktop - verificato
+  cercandolo in entrambi i modi (fallito come figlio del desktop, trovato come discendente della
+  finestra fixture), non assunto. `UIAutomationAdapter.find_window_by_title` (che cerca solo tra i
+  figli diretti del desktop) non l'avrebbe mai trovato.
+
+  Con questo, l'intera catena costruita in questa sessione (F3.1 fixture -> F3.2 adapter -> F3.3
+  selector -> F3.4 executor -> F3.5 fallback) si combina per completare DAVVERO Task 2/10 di
+  F3.1.2 end-to-end, in un nuovo `tests/test_computer_use_integration.py` (non un test unitario di
+  un singolo modulo - un capstone dell'intero filone): digita e clicca Aggiungi (Invoke/Value),
+  seleziona l'elemento con un click reale (la scala di ripiego per il buco di SelectionItem - un
+  SOLO gradino, deliberatamente SENZA un tentativo UIA prima: F3.5 ha gia' trovato che incatenare
+  un tentativo UIA fallito prima di un click reale sullo STESSO elemento "avvelena" lo stato anche
+  per il click, quindi qui si dimostra il flusso reale con la strategia gia' nota funzionare,
+  senza reintrodurre il buco per amore di "usare la scala"), invoca "Rimuovi selezionato", attende
+  il dialogo modale (F3.4.7), invoca "Sì", verifica che l'elemento sia DAVVERO sparito - **zero
+  `time.sleep()` fissi in tutto il flusso**, solo attese con timeout che si fermano appena la
+  condizione e' vera. L'intero test gira in meno di 2 secondi.
+
+  Prova: 4 test nuovi in `tests/test_selector.py::WaitForUniqueElementTests` (ritorno immediato se
+  gia' presente; un elemento che appare dopo un ritardo reale simulato da un thread separato;
+  `NoMatchError` che rispetta davvero il timeout dato quando nulla appare mai; un'ambiguita' che
+  fallisce SUBITO, non dopo il timeout intero) + 1 test capstone end-to-end. 2.958/2.958 test,
+  ruff verde.
+
 ### F3.6 — Browser adapter
 
 Dipende da: F1.5 e F3.5.

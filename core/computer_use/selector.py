@@ -4,6 +4,17 @@ ruolo/automation id invece che per coordinate assolute (F3.3.4, "salvare selecto
 senza coordinate assolute" - un click a coordinate fisse si rompe al primo resize/spostamento
 finestra, un selettore che cerca per NOME sopravvive).
 
+`wait_for_unique_element` (F3.4.7, adozione - "gestire dialoghi modali... come eventi, non sleep
+fissi"): polling con timeout, non un singolo tentativo ottimistico ne' uno `sleep()` fisso -
+generalizza lo stesso principio gia' usato da `UIAutomationAdapter.find_window_by_title` (F3.2) a
+QUALUNQUE elemento, non solo una finestra di primo livello. Motivato da un buco reale trovato
+verificando il flusso di conferma della fixture (F3.1.1) end-to-end: un dialogo `QMessageBox`
+modale e' una VERA finestra top-level separata secondo `win32gui.EnumWindows` (usato da
+`core/vision/screen.py::list_open_window_titles`), ma nell'albero di CONTROLLO di UI Automation
+compare come DISCENDENTE della finestra genitrice, non come figlio del desktop - verificato
+cercandolo in entrambi i modi, non assunto. `find_window_by_title` (che cerca solo tra i figli
+DIRETTI del desktop) non l'avrebbe mai trovato.
+
 Deliberatamente NON affrontati qui, passi successivi dichiarati (stesso principio "un incremento
 alla volta" di questa sessione):
 - F3.3.1 (resto): selettori per app/process, window, ancestor - solo name/control_type/
@@ -19,6 +30,7 @@ alla volta" di questa sessione):
 - F3.3.7 (testare la localizzazione dopo resize/reorder/traduzione/tema - non ancora testato
   esplicitamente, anche se l'uso di NOME invece di coordinate lo rende plausibile per
   costruzione)."""
+import time
 from dataclasses import dataclass
 
 from core.computer_use.ui_automation_adapter import ElementInfo, UIAutomationAdapter
@@ -81,6 +93,28 @@ class SelectorEngine:
                 f"{len(matches)} elementi corrispondono a {selector!r}: servono criteri piu' precisi"
             )
         return matches[0]
+
+    def wait_for_unique_element(self, root, selector: ElementSelector, timeout_seconds: float = 5.0):
+        """F3.4.7 (adozione): come `find_unique_element`, ma RITENTA con un breve intervallo fino
+        al timeout invece di un singolo tentativo - per un elemento che potrebbe non essere
+        ancora presente nell'albero (es. un dialogo modale appena aperto, vedi il docstring del
+        modulo). Un'ambiguita' (piu' di un match) fa fallire SUBITO, non dopo il timeout - aspettare
+        non la risolverebbe mai da sola, e' un problema del selettore, non di tempismo."""
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            matches = self._adapter.find_matching_elements(
+                root, name=selector.name, control_type=selector.control_type,
+                automation_id=selector.automation_id,
+            )
+            if len(matches) > 1:
+                raise AmbiguousSelectionError(
+                    f"{len(matches)} elementi corrispondono a {selector!r}: servono criteri piu' precisi"
+                )
+            if len(matches) == 1:
+                return matches[0]
+            if time.monotonic() >= deadline:
+                raise NoMatchError(f"nessun elemento corrisponde a {selector!r} entro {timeout_seconds}s")
+            time.sleep(0.1)
 
     def find_unique_element(self, root, selector: ElementSelector):
         """Come `find_unique`, ma restituisce l'elemento COM GREZZO (non `ElementInfo`) -
