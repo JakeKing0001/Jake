@@ -4614,6 +4614,26 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   aperta tramite `list_open_window_titles()`, screenshot reale catturato e ispezionato -
   l'albero renderizza con le frecce di espansione e entrambe le categorie visibili e collassate.
   2.902/2.902 test, ruff verde.
+- `F3.1.1` (quarta fetta - due tab, la seconda con una casella di spunta) — 18/09/2026: `QTabWidget`
+  ("Tab 1" con solo un'etichetta, "Tab 2" con un `QCheckBox` "Opzione"). Motivazione: cambiare tab
+  e' un compito diverso da espandere un albero o selezionare in lista - il contenuto di una tab
+  non attiva sparisce/appare come un intero sotto-albero, non un elemento "presente ma fuori
+  vista" come in una lista con scorrimento; la casella di spunta da' finalmente un bersaglio al
+  pattern Toggle (F3.4.1), l'ultimo dei tre (insieme a ExpandCollapse/Selection) ancora senza uno
+  fino a questa fetta. Task 4/10 di F3.1.2: cambiare tab e spuntare l'opzione. `current_tab_name()`
+  usa l'API diretta di `QTabWidget` per cambiare tab nei test (lo stesso stato che un click reale
+  sulla barra delle tab produrrebbe - un click pixel-preciso su una `QTabBar` richiederebbe
+  coordinate dipendenti dal layout, non ancora affrontato, stesso limite gia' dichiarato per le
+  altre osservazioni "in processo" della fixture); il click sulla casella invece e' un vero evento
+  Qt (`QTest.mouseClick`), come per gli altri bottoni. Prova: 6 test nuovi in `tests/
+  test_computer_use_fixture.py` (tab 1 attiva e opzione deselezionata su una finestra fresca;
+  cambiare tab aggiorna il nome; il click sulla casella la spunta/despunta; `reset_state()` torna
+  alla prima tab e deseleziona) + 2 test estesi per i nomi di automazione. Verifica manuale:
+  lanciata la finestra, confermata aperta, screenshot reale catturato - le due tab renderizzano
+  correttamente con "Tab 1" attiva e il suo contenuto visibile. 2.908/2.908 test, ruff verde (un
+  fallimento isolato di `test_sandboxed_skill_worker.py` nella corsa completa, stessa categoria di
+  flake gia' vista due volte in questa sessione - dipendente dal carico di sistema, non da questo
+  incremento - non riprodotto in una corsa pulita successiva).
 
 ### F3.2 — Windows UI Automation adapter
 

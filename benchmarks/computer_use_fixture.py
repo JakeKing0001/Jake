@@ -6,16 +6,16 @@ deterministico e ripetibile - mai un'app o un dato personale reale (criterio di 
 dichiarato dalla roadmap: "benchmark deterministico eseguibile senza toccare dati o app
 personali").
 
-Terza fetta (un albero a due livelli, collassato per default - il pattern ExpandCollapse che
-F3.4.1 dichiara esplicitamente tra quelli da implementare, insieme a Selection): espandere una
-categoria e selezionare un figlio e' un compito che NESSUN altro controllo della fixture prova
-ancora (Selection da sola non basta: senza espandere prima, il nodo figlio non e' nemmeno nella
-"struttura visibile" che un selettore percettivo puo' trovare). Stesso principio "un incremento
-alla volta" gia' seguito per tutta la fase F1 in questa sessione - deliberatamente NON
-affrontati qui, passi successivi dichiarati:
-- il resto di F3.1.1 (tabs, scrolling - non ancora presenti);
-- F3.1.2 (7 dei 10 task rimangono - tre dimostrati qui: "aggiungi", "rimuovi con conferma",
-  "espandi e seleziona");
+Quarta fetta (due tab, la seconda con una casella di spunta - il pattern Toggle che F3.4.1
+dichiara insieme a ExpandCollapse/Selection, ancora senza un bersaglio nella fixture): cambiare
+tab e' un compito DIVERSO da espandere un albero o selezionare in una lista - il contenuto della
+tab non attiva non e' nell'albero UI Automation come "non visibile ma presente" allo stesso modo
+di un elemento in una lista con scorrimento, e' un intero sotto-albero che appare/scompare.
+Stesso principio "un incremento alla volta" gia' seguito per tutta la fase F1 in questa sessione
+- deliberatamente NON affrontati qui, passi successivi dichiarati:
+- il resto di F3.1.1 (scrolling - non ancora presente);
+- F3.1.2 (6 dei 10 task rimangono - quattro dimostrati qui: "aggiungi", "rimuovi con conferma",
+  "espandi e seleziona", "cambia tab e spunta l'opzione");
 - F3.1.5 (DPI, piu' monitor, finestre sovrapposte, temi diversi);
 - F3.1.6 (controlli ambigui e dinamici - i controlli DISABILITATI hanno gia' un primo assaggio
   col bottone "Rimuovi selezionato", disabilitato senza una selezione, ma non e' l'intero punto
@@ -32,8 +32,8 @@ import argparse
 import sys
 
 from PySide6.QtWidgets import (
-    QApplication, QHBoxLayout, QLineEdit, QListWidget, QMessageBox, QPushButton, QTreeWidget,
-    QTreeWidgetItem, QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QHBoxLayout, QLabel, QLineEdit, QListWidget, QMessageBox, QPushButton,
+    QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 # Terza fetta (albero): due categorie, due figli ciascuna - nomi stabili anche per i dati, non
@@ -59,7 +59,7 @@ class ComputerUseFixtureWindow(QWidget):
         super().__init__()
         self.setWindowTitle(self.WINDOW_TITLE)
         self.setObjectName("jake_fixture_window")
-        self.resize(360, 480)
+        self.resize(360, 560)
 
         self.input_field = QLineEdit()
         self.input_field.setObjectName("fixture_input")
@@ -93,6 +93,23 @@ class ComputerUseFixtureWindow(QWidget):
         self.tree.setHeaderHidden(True)
         self._populate_tree()
 
+        self.tabs = QTabWidget()
+        self.tabs.setObjectName("fixture_tabs")
+        self.tabs.setAccessibleName("Schede")
+
+        first_tab = QWidget()
+        first_tab.setObjectName("fixture_tab_one_content")
+        QVBoxLayout(first_tab).addWidget(QLabel("Contenuto del Tab 1"))
+        self.tabs.addTab(first_tab, "Tab 1")
+
+        second_tab = QWidget()
+        second_tab.setObjectName("fixture_tab_two_content")
+        self.option_checkbox = QCheckBox("Opzione")
+        self.option_checkbox.setObjectName("fixture_checkbox")
+        self.option_checkbox.setAccessibleName("Opzione")
+        QVBoxLayout(second_tab).addWidget(self.option_checkbox)
+        self.tabs.addTab(second_tab, "Tab 2")
+
         buttons_row = QHBoxLayout()
         buttons_row.addWidget(self.add_button)
         buttons_row.addWidget(self.reset_button)
@@ -103,6 +120,7 @@ class ComputerUseFixtureWindow(QWidget):
         layout.addLayout(buttons_row)
         layout.addWidget(self.item_list)
         layout.addWidget(self.tree)
+        layout.addWidget(self.tabs)
 
     def _add_current_text(self) -> None:
         """Task 1/10 di F3.1.2 (gli altri 9 restano un passo successivo dichiarato): digitare un
@@ -144,6 +162,20 @@ class ComputerUseFixtureWindow(QWidget):
                 return item.isExpanded()
         raise ValueError(f"categoria sconosciuta: {category_name}")
 
+    def current_tab_name(self) -> str:
+        """Task 4/10 di F3.1.2 (prima meta': "cambia tab"): il nome della tab ATTIVA - lo stesso
+        testo che UI Automation esporrebbe come Name di un TabItem selezionato."""
+        return self.tabs.tabText(self.tabs.currentIndex())
+
+    def is_option_checked(self) -> bool:
+        """Task 4/10 di F3.1.2 (seconda meta': "spunta l'opzione") - il pattern Toggle (F3.4.1),
+        senza ancora un bersaglio nella fixture prima di questa fetta. La casella vive nella
+        seconda tab: leggerla senza aver prima cambiato tab e' comunque possibile qui (stato
+        Qt sempre presente anche per una tab non visibile), a differenza di un vero click che
+        richiederebbe la tab davvero attiva - lo stesso limite gia' dichiarato per
+        `list_items()`/`selected_tree_item_text()`."""
+        return self.option_checkbox.isChecked()
+
     def reset_state(self) -> None:
         """F3.1.3: riporta la fixture allo stato iniziale - lo stesso stato ad ogni avvio di un
         nuovo task, cosi' un task non eredita mai residui lasciati da quello precedente."""
@@ -152,6 +184,8 @@ class ComputerUseFixtureWindow(QWidget):
         self.remove_button.setEnabled(False)
         self.tree.clearSelection()
         self._populate_tree()
+        self.tabs.setCurrentIndex(0)
+        self.option_checkbox.setChecked(False)
 
     def _update_remove_button_enabled(self) -> None:
         """Un piccolo assaggio anticipato di F3.1.6 ("controlli disabilitati"): senza una
