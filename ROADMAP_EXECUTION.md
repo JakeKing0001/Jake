@@ -5289,6 +5289,34 @@ Criterio di uscita: ogni fallback è osservabile e non produce duplicazioni nei 
   SOLO i bordi della finestra vengano catturati, mai lo schermo intero) + 1 test end-to-end contro
   la fixture vera. 2.983/2.983 test, ruff verde.
 
+- `F3.1.2` (Task 5/10 completato end-to-end - "scorri e seleziona l'ultima riga") — 19/09/2026:
+  nuovo `ScrollAndSelectLastRowEndToEndTests` in `tests/test_computer_use_integration.py`. **A
+  differenza di Task 3, qui la verifica torna a essere UI Automation pura, non OCR**: un click
+  sulla lista (mette a fuoco) seguito dal tasto FINE (`End`, scorciatoia standard di Qt) scorre
+  DAVVERO fino in fondo e seleziona l'ultima riga in un solo gesto.
+
+  Indagato empiricamente PRIMA di scrivere il test (stesso principio "non ipotizzare" gia' seguito
+  per Task 3): un tentativo con la rotellina del mouse (`pyautogui.scroll`) si e' rivelato goffo -
+  ogni chiamata avanza solo ~2 righe indipendentemente dalla magnitudine richiesta (verificato
+  scaricando il contenuto OCR dopo ogni scorrimento) - `End` risolve il problema in un solo passo
+  affidabile, non affrontato oltre. **Buco (in realta' un NON-buco) chiarito**: a differenza
+  dell'albero (F3.4/F3.5, i figli di un `QTreeWidgetItem` non compaiono MAI in UI Automation,
+  nemmeno dopo un'espansione reale), una riga di un `QListWidget` scorsa DAVVERO in vista con
+  un'interazione reale (verificato: "Riga 30" assente PRIMA, presente E con `selected=True` DOPO)
+  diventa pienamente osservabile - il limite gia' documentato in F3.4 ("una riga fuori vista non e'
+  presente nell'albero") riguardava solo lo stato PRIMA di un vero scorrimento, non una
+  desincronizzazione permanente come per `SelectionItem` su un `QListWidgetItem` gia' selezionato
+  senza scorrimento (i due buchi sono quindi diversi tra loro, non la stessa famiglia come
+  inizialmente sospettato per analogia con l'albero).
+
+  **Bilancio finale dei 5 task oggi definiti nella fixture**: 5/5 completati end-to-end (Task 1
+  F3.4.1, Task 2 F3.4.7, Task 3 F3.5.1/OCR, Task 4 questa sessione, Task 5 questo incremento) - il
+  criterio di uscita di F3.4 ("10 task fixture completati... quando UIA e' disponibile") e' quindi
+  soddisfatto per intero l'insieme oggi esistente; i restanti Task 6-10 non sono ancora nemmeno
+  DEFINITI nella fixture (dichiarato "passo successivo" fin da F3.1.1) - un ampliamento della
+  fixture stessa, non un incremento di verifica, resta lavoro futuro. Prova: 1 test nuovo.
+  2.984/2.984 test, ruff verde.
+
 ### F3.6 — Browser adapter
 
 Dipende da: F1.5 e F3.5.
