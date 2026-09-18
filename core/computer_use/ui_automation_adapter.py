@@ -94,6 +94,12 @@ class ElementInfo:
     bounds: tuple[int, int, int, int]
     enabled: bool
     selected: bool | None
+    # F3.4 (adozione - trovato verificando core/computer_use/executor.py::ActionExecutor.toggle,
+    # non pianificato in anticipo): "on"/"off"/"indeterminate", None per un elemento che non
+    # supporta affatto il pattern Toggle (stesso principio "onesto None" di `selected` sopra) -
+    # senza questo campo non c'era modo di VERIFICARE che Toggle() avesse davvero cambiato lo
+    # stato di una casella di spunta, solo che la chiamata non avesse sollevato un errore.
+    toggle_state: str | None
     focused: bool
     children: tuple["ElementInfo", ...] = field(default_factory=tuple)
 
@@ -171,8 +177,26 @@ class UIAutomationAdapter:
             name=name, automation_id=automation_id,
             control_type=_CONTROL_TYPE_NAMES.get(control_type, str(control_type)),
             bounds=(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top),
-            enabled=enabled, selected=self._selection_state_of(element), focused=focused,
+            enabled=enabled, selected=self._selection_state_of(element),
+            toggle_state=self._toggle_state_of(element), focused=focused,
         )
+
+    def _toggle_state_of(self, element) -> str | None:
+        """None (non una stringa a caso) per un elemento che non supporta affatto il pattern
+        Toggle - stesso principio di `_selection_state_of` sotto. "on"/"off"/"indeterminate"
+        (mai l'intero opaco `UIA_ToggleState_*`) per coerenza con `control_type`, gia' una
+        stringa leggibile invece di un intero."""
+        try:
+            pattern = element.GetCurrentPattern(UIA.UIA_TogglePatternId)
+            if not pattern:
+                return None
+            toggle = pattern.QueryInterface(UIA.IUIAutomationTogglePattern)
+            state = toggle.CurrentToggleState
+        except (ValueError, comtypes.COMError):
+            return None
+        return {
+            UIA.ToggleState_On: "on", UIA.ToggleState_Off: "off", UIA.ToggleState_Indeterminate: "indeterminate",
+        }.get(state, str(state))
 
     def _selection_state_of(self, element) -> bool | None:
         """None (non False) per un elemento che non supporta affatto il pattern SelectionItem

@@ -81,3 +81,26 @@ class SelectorEngine:
                 f"{len(matches)} elementi corrispondono a {selector!r}: servono criteri piu' precisi"
             )
         return matches[0]
+
+    def find_unique_element(self, root, selector: ElementSelector):
+        """Come `find_unique`, ma restituisce l'elemento COM GREZZO (non `ElementInfo`) -
+        `core/computer_use/executor.py` (F3.4) ne ha bisogno per AGIRE su un elemento (i pattern
+        UI Automation si invocano sull'elemento COM vero), non solo per osservarlo.
+
+        Stessa logica "rifiuta l'ambiguita'" di `find_unique`, ma valutata sui match GREZZI
+        (prima del filtro "leggibile" di `describe_element`) - le due funzioni NON sono state
+        unificate per non cambiare il comportamento gia' testato di `find_unique`/`find_all` su
+        un caso limite raro (un match grezzo non leggibile mescolato a uno leggibile: la versione
+        gia' spedita conta solo i leggibili, questa conterebbe anche quello illeggibile come
+        ambiguita' - una scelta deliberatamente diversa, non un refactor silenzioso della prima)."""
+        matches = self._adapter.find_matching_elements(
+            root, name=selector.name, control_type=selector.control_type,
+            automation_id=selector.automation_id,
+        )
+        if not matches:
+            raise NoMatchError(f"nessun elemento corrisponde a {selector!r}")
+        if len(matches) > 1:
+            raise AmbiguousSelectionError(
+                f"{len(matches)} elementi corrispondono a {selector!r}: servono criteri piu' precisi"
+            )
+        return matches[0]

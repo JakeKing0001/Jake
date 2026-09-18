@@ -4859,6 +4859,57 @@ Dipende da: F3.3 e F1.3.
 
 Criterio di uscita: 10 task fixture completati senza coordinate pixel quando UIA è disponibile.
 
+- `F3.4.1`/`F3.4.4` (prima fetta - Invoke/Value/Toggle/SelectionItem, precondizione enabled) —
+  18/09/2026: nuovo `core/computer_use/executor.py::ActionExecutor`, sopra `SelectorEngine`
+  (F3.3) - trova un elemento per nome/ruolo, poi lo AZIONA tramite il pattern UI Automation giusto
+  invece di simulare click/digitazione a coordinate pixel. Ogni metodo rilegge `CurrentIsEnabled`
+  al MOMENTO dell'azione (F3.4.4), non si fida dello stato osservato quando l'elemento e' stato
+  trovato. `SelectorEngine.find_unique_element()` (nuovo metodo) restituisce l'elemento COM
+  GREZZO invece di `ElementInfo` - serve per agire, non solo osservare; la stessa logica "rifiuta
+  l'ambiguita'" di `find_unique()` ma valutata sui match grezzi, deliberatamente NON unificata con
+  `find_unique()` per non cambiare il comportamento gia' testato di quest'ultima su un caso limite
+  raro (vedi il docstring del metodo).
+
+  **Verificato end-to-end contro la fixture VERA, non un finto**: digitare del testo (pattern
+  Value) e cliccare "Aggiungi" (pattern Invoke) tramite UI Automation fa comparire davvero
+  l'elemento nella lista - la stessa Task 1/10 di F3.1.2 gia' provata a livello Qt in F3.1.1, qui
+  guidata per la prima volta dall'ESTERNO, senza coordinate pixel. Invocare "Rimuovi selezionato"
+  (disabilitato senza selezione) solleva `ElementNotInteractableError` PRIMA di toccare l'elemento,
+  non dopo un fallimento silenzioso lato Qt.
+
+  **Esteso anche `ElementInfo`** (F3.2.3, in questo stesso incremento): un nuovo campo
+  `toggle_state` ("on"/"off"/"indeterminate", `None` per un elemento senza il pattern Toggle,
+  stesso principio "onesto None" di `selected`) - senza questo non c'era modo di VERIFICARE che
+  `toggle()` avesse davvero cambiato lo stato di una casella di spunta, solo che la chiamata non
+  avesse sollevato un errore. Trovato mentre si scriveva il test del Toggle, non pianificato in
+  anticipo.
+
+  **Buco reale trovato verificando ExpandCollapse, non ipotizzato - la scoperta piu' importante
+  di questo incremento**: a differenza di Invoke/Value/Toggle/SelectionItem (tutti e quattro
+  verificati funzionanti DAVVERO, con lo stato che cambia sul serio), il pattern ExpandCollapse su
+  un `QTreeWidgetItem` di Qt e' PRESENTE (`GetCurrentPattern` lo trova, `Expand()`/`Collapse()`
+  non sollevano mai) ma NON HA ALCUN EFFETTO: `CurrentExpandCollapseState` resta invariato prima e
+  dopo la chiamata, verificato leggendo esplicitamente la proprieta' (non assunto dal "successo"
+  della chiamata COM, che di per se' non prova nulla). Il ponte di accessibilita' di Qt implementa
+  l'INTERFACCIA del pattern senza implementarne il comportamento per questo widget - un limite del
+  toolkit, non di questo codice (l'implementazione e' lo stesso identico pattern COM corretto
+  usato con successo per gli altri quattro). `expand()`/`collapse()` restano nel modulo (il
+  contratto COM e' generale, una diversa app/toolkit potrebbe onorarlo davvero) ma NON sono
+  dichiarati verificati funzionanti - un test dedicato (`ExpandCollapseKnownLimitationTests`)
+  codifica ESATTAMENTE il comportamento oggi osservato come un canarino, non un risultato
+  ignorato: se l'implementazione di Qt migliorasse in futuro, quel test fallirebbe e andrebbe
+  aggiornato. Conferma empirica concreta del perche' la scala di ripiego di F3.5 esiste ("API/app
+  adapter -> UIA -> browser DOM -> OCR -> vision -> coordinate"): UI Automation da sola non basta
+  sempre, anche quando il pattern giusto e' formalmente presente.
+
+  Deliberatamente NON affrontati qui, passi successivi dichiarati: F3.4.1 (resto - Scroll/Window
+  pattern, ExpandCollapse non verificato funzionante), F3.4.2 (collegamento a `ComputerAgent`
+  esistente - `core/computer_agent.py` resta invariato), F3.4.3 (collegamento a
+  `core/policy_engine.py` - questo modulo esegue un'azione GIA' autorizzata da chi lo chiama),
+  F3.4.5 (`ActionReceipt`/ledger), F3.4.6 (retry), F3.4.7 (dialoghi modali/focus come eventi,
+  oltre alla precondizione enabled). Prova: 8 test nuovi in `tests/test_executor.py`.
+  2.940/2.940 test, ruff verde.
+
 ### F3.5 — Fallback ladder
 
 Dipende da: F3.4.
