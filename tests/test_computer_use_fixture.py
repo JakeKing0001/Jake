@@ -33,11 +33,14 @@ class AutomationPropertiesTests(unittest.TestCase):
         self.assertEqual(window.reset_button.objectName(), "fixture_reset_button")
         self.assertEqual(window.item_list.objectName(), "fixture_list")
         self.assertEqual(window.tree.objectName(), "fixture_tree")
+        self.assertEqual(window.tabs.objectName(), "fixture_tabs")
+        self.assertEqual(window.option_checkbox.objectName(), "fixture_checkbox")
 
     def test_every_control_has_a_non_empty_accessible_name(self):
         window = ComputerUseFixtureWindow()
         for widget in (
             window.input_field, window.add_button, window.reset_button, window.item_list, window.tree,
+            window.tabs, window.option_checkbox,
         ):
             self.assertTrue(widget.accessibleName(), f"{widget.objectName()} non ha un accessibleName")
 
@@ -298,6 +301,59 @@ class TreeExpandAndSelectTests(unittest.TestCase):
 
         self.assertIsNone(window.selected_tree_item_text())
         self.assertFalse(window.is_category_expanded("Categoria A"))
+
+
+class TabsInitialStateTests(unittest.TestCase):
+    def test_tab_one_is_active_by_default(self):
+        window = ComputerUseFixtureWindow()
+        self.assertEqual(window.current_tab_name(), "Tab 1")
+
+    def test_the_option_is_unchecked_by_default(self):
+        window = ComputerUseFixtureWindow()
+        self.assertFalse(window.is_option_checked())
+
+
+class SwitchTabAndToggleTests(unittest.TestCase):
+    """Task 4/10 di F3.1.2: cambiare tab e spuntare l'opzione - il pattern Toggle (F3.4.1), senza
+    ancora un bersaglio nella fixture prima di questa fetta. Il click sulla casella e' simulato
+    con QTest.mouseClick (un evento Qt vero), il cambio tab con l'API diretta di QTabWidget (lo
+    stesso stato che un click reale sulla barra delle tab produrrebbe - QTest.mouseClick su una
+    QTabBar richiederebbe coordinate pixel che dipendono dal layout, non ancora affrontato qui,
+    stesso limite gia' dichiarato per le osservazioni "in processo" del resto della fixture)."""
+
+    def test_switching_to_tab_two_updates_the_current_tab_name(self):
+        window = ComputerUseFixtureWindow()
+
+        window.tabs.setCurrentIndex(1)
+
+        self.assertEqual(window.current_tab_name(), "Tab 2")
+
+    def test_checking_the_option_on_tab_two(self):
+        window = ComputerUseFixtureWindow()
+        window.tabs.setCurrentIndex(1)
+
+        QTest.mouseClick(window.option_checkbox, Qt.LeftButton)
+
+        self.assertTrue(window.is_option_checked())
+
+    def test_clicking_the_checkbox_twice_unchecks_it_again(self):
+        window = ComputerUseFixtureWindow()
+        window.tabs.setCurrentIndex(1)
+
+        QTest.mouseClick(window.option_checkbox, Qt.LeftButton)
+        QTest.mouseClick(window.option_checkbox, Qt.LeftButton)
+
+        self.assertFalse(window.is_option_checked())
+
+    def test_reset_returns_to_tab_one_and_unchecks_the_option(self):
+        window = ComputerUseFixtureWindow()
+        window.tabs.setCurrentIndex(1)
+        QTest.mouseClick(window.option_checkbox, Qt.LeftButton)
+
+        window.reset_state()
+
+        self.assertEqual(window.current_tab_name(), "Tab 1")
+        self.assertFalse(window.is_option_checked())
 
 
 if __name__ == "__main__":
