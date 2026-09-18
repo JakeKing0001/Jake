@@ -4523,8 +4523,9 @@ Criterio di uscita: nessuna contaminazione di memoria o permesso tra profili nei
 
 ## 9. F3 — Computer Use Engine 3.0
 
-- Stato: `DOING` (G1 superato il 16/09/2026, vedi Gate G1 sopra; F3.1.1 prima fetta avviata il
-  18/09/2026, vedi sotto)
+- Stato: `DOING` (G1 superato il 16/09/2026, vedi Gate G1 sopra; F3.1.1 avviata E chiusa per
+  intero il 18/09/2026 in cinque fette, vedi sotto - resta aperto il resto di F3.1: F3.1.2 [5/10
+  task], F3.1.5, F3.1.6, poi l'intera F3.2)
 - Priorità: `P1`
 - Output: Jake controlla Windows per semantica, verifica il risultato e usa i pixel come fallback.
 
@@ -4634,6 +4635,32 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   fallimento isolato di `test_sandboxed_skill_worker.py` nella corsa completa, stessa categoria di
   flake gia' vista due volte in questa sessione - dipendente dal carico di sistema, non da questo
   incremento - non riprodotto in una corsa pulita successiva).
+- `F3.1.1` (quinta fetta - lista con scorrimento - **CHIUSURA di F3.1.1 per intero**) — 18/09/2026:
+  `fixture_scroll_list`, 30 righe ("Riga 1".."Riga 30") in un'area alta poche righe
+  (`setMaximumHeight(90)`). Con questa, `F3.1.1` copre l'intero elenco letterale della roadmap
+  (button/input/list/dialog/tree/tabs/scrolling). Task 5/10 di F3.1.2: scorrere fino in fondo e
+  selezionare l'ultima riga - il pattern Scroll, l'ultimo dei sei che F3.4.1 dichiara ("Invoke,
+  Value, Selection, Toggle, ExpandCollapse, Scroll") ad avere finalmente un bersaglio nella
+  fixture. **Buco reale trovato scrivendo i test, non ipotizzato, in due punti**: (1)
+  `QScrollBar.maximum()` resta 0 finche' il widget non ha una geometria vera da un vero layout
+  pass, che Qt non esegue MAI per un widget non mostrato - verificato empiricamente che
+  `resize()`/`adjustSize()`/`processEvents()` senza `show()` non bastano. A differenza di ogni
+  altro test in questo file (mai una finestra vera, per lo stesso motivo di sicurezza gia'
+  dichiarato in `tests/test_hud_overlay.py` per `HudOverlay` - qui pero' una finestra normale,
+  non sempre-in-primo-piano/schermo-intero, quindi il rischio e' assai minore), la nuova classe
+  `ScrollListTests` mostra DAVVERO la finestra (`show()` + `addCleanup(window.close)`) - l'unico
+  modo per una prova vera, non un test che passa senza aver controllato nulla (`0 >= 0` sarebbe
+  sempre vero). (2) `reset_state()`: `clearSelection()` da solo NON cancellava la riga "corrente"
+  (in Qt, "selezione" e "elemento corrente" - `currentItem()`/`currentRow()` - sono due concetti
+  DISTINTI) - un test scritto PRIMA della correzione ha fallito per davvero mostrando "Riga 30"
+  ancora restituita da `selected_scroll_item_text()` dopo un reset apparentemente completo.
+  Corretto aggiungendo `setCurrentRow(-1)`. Lo stesso buco NON esiste per `item_list`/`tree` (i
+  loro reset già ricostruiscono gli elementi da zero via `clear()`/`_populate_tree()`, azzerando
+  `currentItem()` come effetto collaterale) - verificato leggendo il codice esistente prima di
+  dichiararlo non affetto, non assunto per somiglianza. Prova: 4 test nuovi + 2 estesi per i nomi
+  di automazione. Verifica manuale: lanciata la finestra, confermata aperta, screenshot reale
+  catturato - la lista con scorrimento renderizza con la barra visibile e "Riga 1"/"Riga 2"/
+  "Riga 3" in vista. 2.912/2.912 test, ruff verde.
 
 ### F3.2 — Windows UI Automation adapter
 
