@@ -4742,6 +4742,43 @@ Criterio di uscita: dump semantico stabile della fixture e di cinque app reali s
   2.921/2.921 test, ruff verde (`core/computer_use/` non ancora nel set selettivo mypy, stesso
   trattamento riservato a ogni modulo nuovo finche' non viene aggiunto deliberatamente).
 
+- `F3.2` (prima app reale verificata a mano - 1/5 del criterio di uscita) — 18/09/2026:
+  **incidente reale durante la verifica, non un rischio teorico**: tentato di lanciare Blocco
+  note per testare l'adapter contro un'app Win32 reale (non Qt/WinUI3) - Windows 11 lo ha
+  riaperto ripristinando l'ultima sessione, mostrando nel titolo della finestra il nome di un
+  file personale vero dell'utente ("*Account Google [nome cognome].txt - Blocco note",
+  intenzionalmente non riportato per intero nemmeno qui). Chiuso IMMEDIATAMENTE senza mai leggere
+  il contenuto ne' catturare uno screenshot di quella finestra - nessun dato personale toccato,
+  ma la lezione resta: lanciare un'app reale "a caso" per un test rischia di esporre lo stato di
+  sessione dell'utente (file recenti, cronologia, bozze), lo stesso genere di rischio gia'
+  dichiarato esplicitamente nel criterio di uscita di F3.1 ("senza toccare dati o app personali")
+  ma qui rilevante anche per F3.2 - non solo per la fixture controllata. D'ora in poi, ogni app
+  reale scelta per verificare l'adapter va prima valutata per questo rischio (stateless per
+  natura, come Calcolatrice - o esplicitamente puntata a un percorso/contesto nuovo e vuoto).
+
+  Scelta invece Calcolatrice (Windows 11, WinUI3/XAML - un framework UI COMPLETAMENTE diverso da
+  Qt, mai un file recente ne' uno stato personale da ripristinare): l'adapter ha camminato
+  l'intero albero (oltre 60 elementi - tastierino numerico, operatori, pannelli di memoria,
+  funzioni scientifiche) senza un solo crash, con `automation_id` stabili e leggibili
+  (`num5Button`, `equalButton`, `ClearMemoryButton`...) e lo stato `enabled` gia' corretto
+  all'apertura (`ClearMemoryButton`/`MemRecall`/`MemoryButton` correttamente disabilitati, la
+  memoria e' vuota all'avvio). Un apparente problema di codifica dei caratteri accentati nel
+  dump ("L'espressione � ") e' stato verificato ESSERE solo un artefatto del terminale usato per
+  ispezionare il risultato (`repr(nome).encode('utf-8')` mostra i byte UTF-8 corretti per "è",
+  `\xc3\xa8`) - i dati letti dall'adapter sono corretti, dichiarato qui invece di lasciare un
+  dubbio non verificato.
+
+  **Deliberatamente NON aggiunto un test automatico per questo**: a differenza della fixture di
+  F3.1.1 (un processo lanciato da questo stesso repository, garantito presente ovunque venga
+  eseguita la suite), Calcolatrice/Blocco note/qualunque altra app di sistema reale NON sono
+  garantite installate sul runner Windows di CI (le immagini `windows-latest` di GitHub Actions
+  sono basate su Windows Server, che storicamente non include molte app UWP di base) - un test
+  che ne dipendesse fallirebbe in CI per un motivo estraneo alla correttezza del codice, esattamente
+  il tipo di fragilita' ambientale che `benchmarks/` (vedi il suo README, "Wake word"/"Accuratezza
+  del click") gia' tiene fuori da `tests/`. Questa verifica resta quindi manuale, come
+  `bench_stt.py` per la trascrizione vocale - 1 delle 5 app reali del criterio di uscita
+  completo di F3.2, verificata ma non automatizzata.
+
 ### F3.3 — Selector engine
 
 Dipende da: F3.2.
