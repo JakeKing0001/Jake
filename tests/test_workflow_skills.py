@@ -44,7 +44,7 @@ class _RecordingRegistry:
     def __init__(self):
         self.executed_intents: list[str] = []
 
-    def execute(self, intent, parameters=None, policy_engine=None):
+    def execute(self, intent, parameters=None, policy_engine=None, *, action_id=None, private=False):
         self.executed_intents.append(intent)
         return SkillResult(success=True, data={})
 

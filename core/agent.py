@@ -25,7 +25,10 @@ from core.identity import current_windows_user
 from core.kill_switch import KillSwitch
 from core.logger import log_action, new_trace_id
 from core.ollama_client import OllamaClient, OllamaError
-from core.request_context import current_device_id, reset_current_agent_name, set_current_agent_name
+from core.request_context import (
+    current_action_id, current_device_id, reset_current_action_id, reset_current_agent_name,
+    set_current_action_id, set_current_agent_name,
+)
 from core.risk import risk_of
 from core.schema_validation import validate_confirm_envelope
 from core.session_recorder import SessionRecorder
@@ -166,8 +169,17 @@ class TaskAgent:
         # (PolicyEngine non esiste ancora quando i tre TaskAgent vengono creati), quindi la
         # chiusura deve leggerlo da self a ogni chiamata, non catturarne il valore iniziale (quasi
         # sempre None) - altrimenti F1.2.1 (percorso 7, SkillRegistry.execute() ora fail-closed di
-        # default) bloccherebbe ogni esecuzione passata da questo ripiego di default.
-        self.executor = executor or (lambda intent, parameters: registry.execute(intent, parameters, policy_engine=self.policy_engine))
+        # default) bloccherebbe ogni esecuzione passata da questo ripiego di default. F1.3.4:
+        # action_id letto dal contextvar (core/request_context.py::current_action_id, impostato
+        # da run() solo intorno alla chiamata all'executor) per lo stesso motivo - un TaskAgent
+        # costruito senza JakeCore (uno strumento, un test) ottiene comunque la cattura dello
+        # snapshot di un DELETE_PATH riuscito, senza che questo ripiego debba sapere nulla di
+        # come JakeCore lo fa per il proprio executor personalizzato.
+        self.executor = executor or (
+            lambda intent, parameters: registry.execute(
+                intent, parameters, policy_engine=self.policy_engine, action_id=current_action_id(),
+            )
+        )
         self.on_step = None  # callable(step_index, description)
         # F1.8.4 ("checkpoint... da cui riprendere"): callable(outcome: AgentOutcome), chiamato
         # DOPO ogni passo (riuscito o fallito) che si aggiunge a outcome.steps - a differenza di
@@ -528,10 +540,22 @@ class TaskAgent:
                 # chiamata (non per l'intera durata di run(), vedi core/request_context.py) -
                 # l'unico punto in cui questo passo puo' davvero eseguire un intent.
                 agent_name_token = set_current_agent_name(self.agent_name)
+                # F1.3.4 (adozione - quinta fetta, vedi core/request_context.py::current_action_id
+                # per il perche' di un secondo contextvar invece di un terzo parametro su
+                # self.executor): generato PRIMA di eseguire, non solo dopo un successo come
+                # faceva finora l'action_id di correlazione ledger/undo piu' sotto, cosi' lo
+                # stesso identificatore puo' anche etichettare un eventuale snapshot di
+                # DELETE_PATH catturato dai due executor reali di JakeCore prima della
+                # cancellazione vera (vedi core/action_snapshot.py). Nessun cambio osservabile
+                # sulla ricevuta nel ledger, che continua a riceverlo solo su successo,
+                # esattamente come prima di questo incremento.
+                step_action_id = new_action_id()
+                action_id_token = set_current_action_id(step_action_id)
                 try:
                     execution, attempts = execute_action_with_retry(self.executor, intent, parameters)
                 finally:
                     reset_current_agent_name(agent_name_token)
+                    reset_current_action_id(action_id_token)
                 intent, parameters = execution.command.intent, execution.command.parameters or {}
                 result = execution.result
                 verified = None
@@ -607,19 +631,20 @@ class TaskAgent:
                     else None
                 )
                 outcome_label = "success" if (result is not None and result.success) else f"error:{result.error}" if result is not None else "no_result"
-                step_action_id = None
+                correlated_action_id = None
                 if result is not None and result.success:
                     # F1.3.5 (adozione - secondo chokepoint, dopo il pilota su JakeCore): stesso
                     # principio identico - un passo riuscito il cui intent ha un inverso naturale
-                    # genera un vero UndoDescriptor, correlato alla ricevuta nel ledger tramite lo
-                    # stesso action_id (generato QUI, non dentro _log_step).
-                    step_action_id = new_action_id()
+                    # genera un vero UndoDescriptor. Lo stesso step_action_id gia' generato sopra
+                    # (prima di eseguire, per l'eventuale snapshot) correla anche qui la ricevuta
+                    # nel ledger con il descrittore salvato in self.undo_store.
                     step_undo_descriptor = generate_undo_descriptor(step_action_id, intent, result.data or {})
                     if step_undo_descriptor is not None:
                         self.undo_store.save(step_undo_descriptor)
+                    correlated_action_id = step_action_id
                 self._log_step(
                     trace_id, private, step_started, model, intent, parameters, result=outcome_label,
-                    verified=verified, policy_reason=execution.policy_reason, action_id=step_action_id,
+                    verified=verified, policy_reason=execution.policy_reason, action_id=correlated_action_id,
                 )
             outcome.steps.append(step)
             if self.logger:

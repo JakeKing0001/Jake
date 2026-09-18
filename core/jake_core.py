@@ -33,8 +33,8 @@ from core.orchestrator import JakeOrchestrator
 from core.policy_engine import POLICY_REASONS, PolicyDecision, PolicyEngine, strip_authorization_signals
 from core.plugin_loader import load_plugins
 from core.request_context import (
-    current_command_source_intent, current_device_id, reset_current_command_source_intent,
-    set_current_command_source_intent,
+    current_action_id, current_command_source_intent, current_device_id,
+    reset_current_command_source_intent, set_current_command_source_intent,
 )
 from core.taint import wrap_external_content
 from core.response_formatter import format_plan_outcome, format_skill_result
@@ -188,7 +188,12 @@ class JakeCore:
             format_result=lambda intent, result: format_skill_result(intent, result, self.skill_registry),
             logger=self.logger,
             context_provider=lambda: self._agent_context(),
-            executor=lambda intent, parameters: self._resolve_and_execute(Command(intent, parameters)),
+            # F1.3.4: action_id letto da core.request_context.current_action_id(), impostato da
+            # TaskAgent.run() solo intorno a questa chiamata - vedi il docstring di
+            # _resolve_and_execute e quello del contextvar per il perche'.
+            executor=lambda intent, parameters: self._resolve_and_execute(
+                Command(intent, parameters), action_id=current_action_id(),
+            ),
             session_recorder=self.session_recorder, action_ledger=self.action_ledger, agent_name="general",
             kill_switch=self.kill_switch, undo_store=self.undo_store,
         )
@@ -207,7 +212,9 @@ class JakeCore:
             "format_result": lambda intent, result: format_skill_result(intent, result, self.skill_registry),
             "logger": self.logger,
             "context_provider": lambda: self._agent_context(),
-            "executor": lambda intent, parameters: self._resolve_and_execute(Command(intent, parameters)),
+            "executor": lambda intent, parameters: self._resolve_and_execute(
+                Command(intent, parameters), action_id=current_action_id(),
+            ),
             "session_recorder": self.session_recorder, "action_ledger": self.action_ledger,
             "kill_switch": self.kill_switch, "undo_store": self.undo_store,
         }

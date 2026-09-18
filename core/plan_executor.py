@@ -200,7 +200,16 @@ class PlanExecutor:
                 continue
 
             step_started = time.monotonic()
-            step_outcome = self._execute_step(step, safe_parameters, policy_engine)
+            # F1.3.4 (adozione - terza fetta, vedi core/action_snapshot.py): generato PRIMA di
+            # eseguire, non solo dopo un successo come faceva finora l'action_id di correlazione
+            # ledger/undo qui sotto, cosi' SkillRegistry.execute() puo' etichettare con questo id
+            # uno snapshot di DELETE_PATH prima della cancellazione vera. Un passo bloccato/che
+            # richiede conferma non raggiunge mai questo punto (vedi i return sopra), quindi
+            # generarlo comunque qui non ha alcun costo osservabile ne' cambia la ricevuta nel
+            # ledger sotto, che continua a riceverlo solo per un passo riuscito, esattamente come
+            # prima di questo incremento.
+            step_action_id = new_action_id()
+            step_outcome = self._execute_step(step, safe_parameters, policy_engine, action_id=step_action_id, private=private)
             verified = None
             if step_outcome.result.success:
                 effect_confirmed = verify_effect(step.intent, step_outcome.result.data)
@@ -218,9 +227,9 @@ class PlanExecutor:
                 outcome.completed.append(step_outcome)
                 # F1.3.5 (adozione - terzo chokepoint): stesso principio identico gia' visto in
                 # JakeCore/TaskAgent - un passo riuscito il cui intent ha un inverso naturale
-                # genera un vero UndoDescriptor, correlato alla ricevuta nel ledger tramite lo
-                # stesso action_id (generato QUI, non dentro _log_step).
-                step_action_id = new_action_id()
+                # genera un vero UndoDescriptor. Lo stesso action_id gia' generato sopra (prima
+                # di eseguire, per l'eventuale snapshot) correla anche qui la ricevuta nel ledger
+                # con il descrittore salvato in self.undo_store.
                 step_undo_descriptor = generate_undo_descriptor(
                     step_action_id, step.intent, step_outcome.result.data or {},
                 )
@@ -297,7 +306,10 @@ class PlanExecutor:
                 risk_decision=risk, private=private,
             )
 
-    def _execute_step(self, step, parameters: dict | None = None, policy_engine=None) -> StepOutcome:
+    def _execute_step(
+        self, step, parameters: dict | None = None, policy_engine=None, *,
+        action_id: str | None = None, private: bool = False,
+    ) -> StepOutcome:
         """parameters e' quello che va davvero eseguito (sanificato da execute(), vedi sopra);
         step.parameters resta quello originale del piano solo per riferimento/descrizione -
         StepOutcome.step lo conserva per format_plan_outcome, non per essere rieseguito.
@@ -305,10 +317,20 @@ class PlanExecutor:
         F1.2.1 (percorso 7): policy_engine e' lo stesso gia' verificato ALLOW poco sopra in
         execute() - non un secondo controllo diverso, solo rifornito a SkillRegistry.execute()
         (ora fail-closed di default sul proprio blocked_intents) perche' non si blocchi da solo su
-        un passo gia' approvato."""
+        un passo gia' approvato.
+
+        F1.3.4 (adozione - terza fetta): action_id/private opzionali, passati a
+        SkillRegistry.execute() cosi' un passo DELETE_PATH puo' avere uno snapshot del contenuto
+        catturato prima della cancellazione vera (vedi core/action_snapshot.py). execute_with_
+        retry() puo' chiamare la lambda piu' volte (un errore transitorio ritentabile) - lo
+        stesso action_id etichetta ogni tentativo, coerente con SnapshotStore.save() che sostituisce
+        (non accumula) lo snapshot per lo stesso id: nessun problema, il contenuto catturato e'
+        lo stesso file non ancora cancellato con successo."""
         parameters = step.parameters if parameters is None else parameters
         result, attempts = execute_with_retry(
-            lambda intent, params: self.skill_registry.execute(intent, params, policy_engine=policy_engine),
+            lambda intent, params: self.skill_registry.execute(
+                intent, params, policy_engine=policy_engine, action_id=action_id, private=private,
+            ),
             step.intent, parameters,
         )
         return StepOutcome(step=step, result=result, attempts=attempts)
