@@ -6421,6 +6421,34 @@ aprire un incremento dedicato solo per quello), visto quante ne sono emerse in q
 sessione con la stessa tecnica (`sys.setswitchinterval()` abbassato per forzare la
 sovrapposizione reale).
 
+**Nota di correzione (18/09/2026)**: il paragrafo "Candidati piccoli ancora aperti in F1" appena
+sopra (14/09/2026) non e' mai stato aggiornato dopo, e oggi descrive come aperti diversi punti
+chiusi in incrementi successivi - stesso genere di scollamento gia' segnalato altrove in questo
+documento per F1.6.5/F1.6.6. Per chi legge oggi: `F1.2.2` ("durata") e' chiuso per intero dal
+15/09/2026 (ottava e ultima capability, vedi la voce datata in F1.2.2); `F1.2.3` (intersezione
+skill/sessione) e' chiuso per intero dal 15/09/2026 (vedi la voce datata "quinta e ultima
+capability: sessione"); `F1.4.4`-`F1.4.6` (passkey/WebAuthn, pairing QR, rotazione token) sono
+chiusi dal 16/09/2026 come parte del piano in 10 fasi (vedi "decisione di prodotto completa" in
+F1.4); `F1.8.5` e `F1.8.7` risultano gia' **chiusi** in una voce anche PIU' vecchia di questo
+stesso paragrafo (13/09/2026, vedi lo Stato in cima a F1.8) - la chiusura di F1.8.7 per "undo"
+era pero' per DISPOSIZIONE (esaminato e dichiarato non ancora testabile, non rimandato: al 13/09
+`UndoDescriptor` - F1.3.5 - era solo un contratto dati, nessuno store condiviso da race-testare
+esisteva ancora). Quella precondizione e' cambiata il giorno dopo: `core/undo_store.py::UndoStore`
+(costruito il 16/09/2026, vedi F1.3.5 sopra) e' oggi un vero store condiviso tra thread, con un
+proprio test di concorrenza reale (100 thread, `tests/test_undo_store.py::
+test_concurrent_saves_and_reads_from_real_threads_never_corrupt_the_store`) - la copertura esiste
+gia', semplicemente non e' mai stata ricollegata esplicitamente alla chiusura dichiarata di
+F1.8.7. F1.5.8 (risk budget) e' chiuso e adottato dal 18/09/2026 (vedi la voce datata sopra).
+L'unico gap REALE rimasto tra i candidati elencati sopra e' la coda letterale di `F1.5.7`
+(injection dentro PDF/commenti di codice) - dichiarato esplicitamente "un gap architetturale
+diverso: serve un parser nuovo, non solo un censimento" (vedi la voce datata 16/09/2026 in F1.5) -
+Jake non estrae oggi testo da un PDF ne' distingue un commento di codice dal resto di un file in
+NESSUN percorso, quindi chiuderlo davvero significherebbe prima costruire una capacita' di
+lettura che oggi non esiste, non semplicemente aggiungere un intent a un insieme gia' pronto come
+per gli altri punti di F1.5 - una decisione di prodotto (vuole Jake un parser PDF? per quale
+scopo, oltre alla sicurezza?) piu' che un incremento di sicurezza stretto, riportata all'utente
+invece di essere decisa qui.
+
 **Aggiornamento 15/09/2026 (F1.8.2, risolutore app)**: quel "altro giro di ricerca mirata" ha
 trovato un buco vero in `core/app_resolver.py::AppResolver.resolve()` - non incluso nell'elenco
 degli store gia' chiusi da F1.8.2 (mai esaminato prima). Prima di arrivarci, due candidati diversi
