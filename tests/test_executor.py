@@ -156,5 +156,42 @@ class ExpandCollapseKnownLimitationTests(_ExecutorFixtureTestCase):
         self.assertEqual(tree.children, (), "limite noto: Qt non espone i figli anche dopo Expand()")
 
 
+class ScrollKnownLimitationTests(_ExecutorFixtureTestCase):
+    """**Documenta lo STESSO buco reale di ExpandCollapseKnownLimitationTests sopra, con una
+    manifestazione diversa e piu' onesta**: a differenza di ExpandCollapse (dichiarato disponibile
+    da Qt ma senza effetto), il ponte di accessibilita' di Qt riporta correttamente
+    `IsScrollPatternAvailable=False` per un `QListWidget` - `GetCurrentPattern` restituisce
+    nessun pattern, quindi `scroll_to_bottom()` solleva `ElementNotInteractableError` invece di
+    eseguire un'azione senza effetto. La conseguenza pratica e' la stessa: una riga fuori vista
+    resta irraggiungibile via UI Automation."""
+
+    def _scroll_list_container(self):
+        """Buco reale trovato scrivendo questo test, non ipotizzato: Qt assegna lo STESSO
+        automation_id sia al contenitore `QListWidget` sia ai suoi `ListItem` figli visibili (gia'
+        osservato anche per `fixture_tree`/`TreeItem` in F3.2) - l'automation_id da solo non basta
+        a isolare il contenitore, serve anche il control_type."""
+        return self._element(automation_id="QApplication.jake_fixture_window.fixture_scroll_list", control_type="List")
+
+    def test_scroll_to_bottom_raises_because_qt_does_not_support_the_pattern(self):
+        scroll_list = self._scroll_list_container()
+
+        with self.assertRaises(ElementNotInteractableError):
+            self.executor.scroll_to_bottom(scroll_list)
+
+    def test_scroll_to_top_raises_for_the_same_reason(self):
+        scroll_list = self._scroll_list_container()
+
+        with self.assertRaises(ElementNotInteractableError):
+            self.executor.scroll_to_top(scroll_list)
+
+    def test_a_row_scrolled_out_of_view_is_simply_absent_from_the_tree(self):
+        """La ragione per cui il limite sopra conta davvero: 'Riga 30' esiste nel modello Qt (la
+        lista ha 30 righe, F3.1.1) ma non e' raggiungibile ne' osservabile finche' qualcosa non
+        la scorre in vista - e niente in UI Automation puo' farlo per questo widget."""
+        matches = self.adapter.find_matching_elements(self.window, name="Riga 30")
+
+        self.assertEqual(matches, [], "una riga fuori vista non deve comparire nell'albero UI Automation")
+
+
 if __name__ == "__main__":
     unittest.main()

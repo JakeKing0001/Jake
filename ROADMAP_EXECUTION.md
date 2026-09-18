@@ -4910,6 +4910,33 @@ Criterio di uscita: 10 task fixture completati senza coordinate pixel quando UIA
   oltre alla precondizione enabled). Prova: 8 test nuovi in `tests/test_executor.py`.
   2.940/2.940 test, ruff verde.
 
+- `F3.4.1` (Scroll pattern - CHIUDE la copertura dei pattern dichiarati tranne Window) —
+  18/09/2026: `ActionExecutor.scroll_to_bottom()`/`scroll_to_top()` (`SetScrollPercent`, con
+  `-1.0` per l'asse orizzontale = "non toccarlo", `UIA_ScrollPatternNoScroll` documentato da
+  Microsoft ma senza una costante nominata nel type library generato). **Buco reale trovato
+  verificando Scroll contro la fixture, non ipotizzato - lo STESSO limite sottostante gia' trovato
+  per ExpandCollapse, con una manifestazione piu' onesta**: `IsScrollPatternAvailable` e'
+  esplicitamente `False` per un `QListWidget` (verificato leggendo la proprieta'), quindi
+  `GetCurrentPattern` restituisce correttamente nessun pattern - a differenza di ExpandCollapse
+  (che Qt dichiara disponibile ma poi non onora), qui il ponte di accessibilita' di Qt e' onesto
+  sulla propria limitazione, e il codice solleva `ElementNotInteractableError` invece di eseguire
+  un'azione senza effetto. La conseguenza pratica e' pero' la stessa gravita': verificato che una
+  riga fuori vista ("Riga 30" su 30) NON E' PRESENTE nell'albero UI Automation affatto (una
+  ricerca per nome non la trova) - ne' il pattern Scroll (contenitore) ne' `ScrollItem`/
+  `ScrollIntoView` (elemento, provato anche quello) sono disponibili per rivelarla. Due pattern
+  diversi, stesso limite sottostante: **Qt non rivela contenuto virtualizzato/nascosto tramite i
+  pattern UI Automation pensati apposta per farlo** - una conferma RIPETUTA, non un caso isolato,
+  del perche' F3.5 (scala di ripiego) e' necessaria per app Qt (inclusa l'HUD nativo dello stesso
+  Jake, se mai dovesse essere ispezionato da un futuro agente).
+
+  **Buco minore trovato scrivendo il test, non ipotizzato**: Qt assegna lo STESSO
+  `automation_id` sia al contenitore `QListWidget` sia ai suoi `ListItem` figli visibili (gia'
+  osservato anche per `fixture_tree`/`TreeItem` in F3.2, mai generalizzato prima d'ora) -
+  l'automation_id da solo non basta a isolare il contenitore da un test scritto ingenuamente
+  (fallito con "4 != 1" prima della correzione), serve combinarlo con il `control_type`. Prova: 3
+  test nuovi in `tests/test_executor.py::ScrollKnownLimitationTests`. 2.943/2.943 test, ruff
+  verde.
+
 ### F3.5 — Fallback ladder
 
 Dipende da: F3.4.

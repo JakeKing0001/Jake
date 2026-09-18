@@ -5,27 +5,41 @@ simulare click/digitazione a coordinate pixel - la richiesta arriva direttamente
 COM, niente coordinate che si romperebbero al primo resize/spostamento finestra (lo stesso motivo
 per cui `core/computer_use/selector.py` cerca per nome, F3.3.4).
 
-**Buco reale trovato verificando ExpandCollapse contro la fixture, non ipotizzato**: a differenza
-di Invoke/Value/Toggle/SelectionItem (tutti e quattro verificati funzionanti DAVVERO - lo stato
-cambia sul serio, non solo "la chiamata non solleva"), il pattern ExpandCollapse su un
-`QTreeWidgetItem` di Qt e' presente (`GetCurrentPattern` lo trova, `Expand()`/`Collapse()` non
-sollevano mai un errore) ma NON HA ALCUN EFFETTO: `CurrentExpandCollapseState` resta invariato
-prima e dopo la chiamata, verificato leggendolo esplicitamente (non assunto dal "successo" della
-chiamata) - il ponte di accessibilita' di Qt implementa l'INTERFACCIA del pattern senza
-implementarne il COMPORTAMENTO per questo widget. `expand()`/`collapse()` restano nel codice
-sotto (l'implementazione e' corretta per il contratto COM in generale, non specifica di Qt - una
-diversa app/toolkit potrebbe onorarla per davvero), ma NON sono oggi verificati funzionanti contro
-QUALUNQUE albero reale, solo contro se stessi come chiamata COM che non solleva - la prova esatta
-del limite, non ignorato ne' nascosto, e' nel test dedicato (`tests/test_executor.py::
-ExpandCollapseKnownLimitationTests`). Conferma empirica concreta del perche' la scala di ripiego
-di F3.5 esiste ("API/app adapter -> UIA -> browser DOM -> OCR -> vision -> coordinate"): UI
-Automation da sola non basta sempre, anche quando il pattern giusto e' formalmente presente.
+**Buco reale trovato verificando ExpandCollapse E Scroll contro la fixture, non ipotizzato - lo
+STESSO limite sottostante in entrambi**: a differenza di Invoke/Value/Toggle/SelectionItem (tutti
+e quattro verificati funzionanti DAVVERO - lo stato cambia sul serio, non solo "la chiamata non
+solleva"), Qt non rivela contenuto VIRTUALIZZATO/nascosto tramite i pattern UI Automation pensati
+apposta per farlo:
+- ExpandCollapse su un `QTreeWidgetItem`: il pattern e' presente (`GetCurrentPattern` lo trova,
+  `Expand()`/`Collapse()` non sollevano mai) ma NON HA ALCUN EFFETTO - `CurrentExpandCollapseState`
+  resta invariato prima e dopo la chiamata, verificato leggendolo esplicitamente (non assunto dal
+  "successo" della chiamata COM, che di per se' non prova nulla);
+- Scroll su un `QListWidget`: qui il ponte di accessibilita' di Qt e' piu' onesto -
+  `IsScrollPatternAvailable` e' esplicitamente `False` (verificato leggendo la proprieta', non
+  assunto), quindi `GetCurrentPattern` restituisce correttamente nessun pattern, senza fingere di
+  averlo. La conseguenza pratica e' la stessa: una riga fuori dall'area visibile ("Riga 30" in una
+  lista di 30) NON E' PRESENTE nell'albero UI Automation affatto (una ricerca per nome non la
+  trova, verificato) finche' qualcosa non la rende visibile - e niente in UI Automation puo' farlo
+  per un `QListWidget`, ne' il pattern Scroll (non disponibile) ne' `ScrollItem`/`ScrollIntoView`
+  (nemmeno quello disponibile su un elemento gia' fuori vista, verificato).
+
+`expand()`/`collapse()`/`scroll_to_bottom()`/`scroll_to_top()` restano nel codice sotto (le
+implementazioni sono corrette per il contratto COM in generale, non specifiche di Qt - un'app/
+toolkit diversa potrebbe onorarle per davvero), ma NON sono oggi verificate funzionanti contro
+QUALUNQUE albero/lista reale, solo contro se stesse come chiamata COM che non solleva (Expand) o
+che fallisce onestamente con un errore chiaro (Scroll, pattern assente) - la prova esatta del
+limite, non ignorata ne' nascosta, e' nei test dedicati (`tests/test_executor.py::
+ExpandCollapseKnownLimitationTests`/`ScrollKnownLimitationTests`). Conferma empirica concreta e
+RIPETUTA (due pattern diversi, stesso limite sottostante) del perche' la scala di ripiego di F3.5
+esiste ("API/app adapter -> UIA -> browser DOM -> OCR -> vision -> coordinate"): per contenuto
+virtualizzato/nascosto in un'app Qt, UI Automation da sola non basta MAI, non e' un caso isolato.
 
 Deliberatamente NON affrontati qui, passi successivi dichiarati (stesso principio "un incremento
 alla volta" di questa sessione):
-- F3.4.1 (resto): Scroll e Window pattern - non ancora implementati (Invoke/Value/Toggle/
-  SelectionItem coprono gia' quattro dei cinque task dichiarati da F3.1.2, ma non ancora "scorri
-  fino in fondo"; ExpandCollapse e' implementato ma non verificato funzionante, vedi sopra);
+- F3.4.1 (resto): Window pattern - non ancora implementato (Invoke/Value/Toggle/SelectionItem
+  coprono quattro dei cinque task dichiarati da F3.1.2; ExpandCollapse/Scroll sono implementati ma
+  non verificati funzionanti contro Qt, vedi sopra - il quinto task, "scorri e seleziona l'ultima
+  riga", resta quindi non completabile per un `QListWidget` Qt anche con questo incremento);
 - F3.4.2 (unificare in `ComputerAgent` - `core/computer_agent.py` resta INVARIATO qui: il
   collegamento tra UIA e il controllo a pixel/OCR esistente e' la scala di ripiego di F3.5, non
   affrontata in questo incremento);
@@ -43,6 +57,11 @@ import comtypes.client
 
 comtypes.client.GetModule("UIAutomationCore.dll")
 from comtypes.gen import UIAutomationClient as UIA  # noqa: E402 (deve seguire GetModule)
+
+# UIA_ScrollPatternNoScroll (documentato da Microsoft come -1, non una costante nominata nel
+# type library generato da comtypes): passato a SetScrollPercent() per l'asse che non si vuole
+# toccare, invece di un "magic number" silenzioso senza spiegazione.
+_SCROLL_NO_CHANGE = -1.0
 
 
 class ElementNotInteractableError(Exception):
@@ -104,6 +123,23 @@ class ActionExecutor:
         return self._require_pattern(
             element, UIA.UIA_ExpandCollapsePatternId, UIA.IUIAutomationExpandCollapsePattern, "ExpandCollapse",
         )
+
+    def scroll_to_bottom(self, element) -> None:
+        """Lista/area con scorrimento verticale - il pattern Scroll, impostato al 100% verticale
+        (fondo). **Non verificato funzionante contro un vero `QListWidget`** (vedi il docstring
+        del modulo): il ponte di accessibilita' di Qt riporta onestamente
+        `IsScrollPatternAvailable=False` per questo widget, quindi questo metodo solleva
+        `ElementNotInteractableError` invece di eseguire un'azione senza effetto (a differenza di
+        `expand()`, dove Qt SI' dichiara il pattern disponibile ma poi non lo onora)."""
+        self._scroll(element).SetScrollPercent(_SCROLL_NO_CHANGE, 100.0)
+
+    def scroll_to_top(self, element) -> None:
+        """Come `scroll_to_bottom`, verso l'inizio (0% verticale). Stesso limite non verificato."""
+        self._scroll(element).SetScrollPercent(_SCROLL_NO_CHANGE, 0.0)
+
+    def _scroll(self, element):
+        self._require_enabled(element)
+        return self._require_pattern(element, UIA.UIA_ScrollPatternId, UIA.IUIAutomationScrollPattern, "Scroll")
 
     def _require_enabled(self, element) -> None:
         try:
