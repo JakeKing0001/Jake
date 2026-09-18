@@ -76,6 +76,50 @@ class TryStrategiesInOrderTests(unittest.TestCase):
         self.assertEqual(outcome.attempts, ())
         self.assertEqual(verify_calls, [])
 
+    def test_a_strategy_marked_unsafe_after_failure_stops_the_ladder_instead_of_continuing(self):
+        """F3.5.6: se la strategia marcata ESEGUE senza sollevare ma verify() non conferma, le
+        strategie successive non devono nemmeno essere TENTATE - fermarsi con una diagnosi invece
+        di incatenare alla cieca su un bersaglio potenzialmente gia' corrotto."""
+        calls = []
+        outcome = try_strategies_in_order(
+            [
+                ("risky", lambda: calls.append("risky"), True),
+                ("never_reached", lambda: calls.append("never_reached")),
+            ],
+            verify=lambda: False,
+        )
+
+        self.assertFalse(outcome.succeeded)
+        self.assertEqual(calls, ["risky"], "la seconda strategia non deve essere eseguita affatto")
+        self.assertEqual(len(outcome.attempts), 1)
+        self.assertIn("F3.5.6", outcome.attempts[0].reason)
+
+    def test_a_strategy_not_marked_unsafe_still_falls_through_as_before(self):
+        """Retrocompatibilita': una tupla a due elementi (senza il terzo flag) si comporta
+        esattamente come prima di questo incremento - il default e' `False`, non interrompere."""
+        outcome = try_strategies_in_order(
+            [("first", lambda: None), ("second", lambda: None)],
+            verify=lambda: False,
+        )
+
+        self.assertEqual(len(outcome.attempts), 2, "senza il marcatore, entrambe le strategie devono essere tentate")
+
+    def test_an_unsafe_strategy_that_raises_does_not_stop_the_ladder(self):
+        """Il marcatore riguarda solo il caso 'eseguita ma non verificata' - un'eccezione (la
+        strategia non ha nemmeno agito) non lascia nulla da 'incatenare pericolosamente', quindi
+        le successive vengono comunque tentate."""
+        calls = []
+        outcome = try_strategies_in_order(
+            [
+                ("risky_but_raises", (lambda: (_ for _ in ()).throw(RuntimeError("non trovato"))), True),
+                ("reached", lambda: calls.append("reached")),
+            ],
+            verify=lambda: True,
+        )
+
+        self.assertTrue(outcome.succeeded)
+        self.assertEqual(calls, ["reached"])
+
     def test_verify_is_called_after_the_action_not_before(self):
         """F3.5.3 ('ri-osservare PRIMA di cambiare strategia'): verify() deve vedere lo stato
         DOPO l'azione, mai prima - un ordine di chiamata sbagliato invaliderebbe l'intero scopo
@@ -186,6 +230,53 @@ class RealFixtureFallbackTests(unittest.TestCase):
         self.assertTrue(outcome.succeeded)
         self.assertEqual(outcome.successful_strategy, "pixel_click")
         self.assertFalse(outcome.attempts[0].succeeded)
+
+    def test_marking_uia_select_unsafe_stops_the_ladder_instead_of_reproducing_the_poisoning_bug(self):
+        """F3.5.6, dimostrato contro il buco REALE (non un finto): incatenare `select()` via UIA
+        poi un click pixel sullo STESSO `QListWidgetItem` (a differenza della coppia "selettore
+        sbagliato poi click pixel" del test sopra, che NON si avvelena) e' esattamente la coppia
+        che il docstring del modulo documenta come inaffidabile - il click pixel, di per se'
+        affidabile, smette di funzionare se preceduto da questo tentativo UIA fallito. Marcando
+        'uia_select' come `unsafe_after_failure`, la scala si ferma DOPO il primo tentativo invece
+        di eseguire comunque il click pixel e scoprire solo alla fine che non ha funzionato -
+        `pixel_click` non deve nemmeno essere chiamato."""
+        from core.computer_use.selector import ElementSelector
+
+        input_field = self.engine.find_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_input"),
+        )
+        self.executor.set_value(input_field, "da non toccare")
+        add_button = self.engine.find_unique_element(self.window, ElementSelector(name="Aggiungi", control_type="Button"))
+        self.executor.invoke(add_button)
+        time.sleep(0.3)
+
+        item = self.engine.find_unique_element(self.window, ElementSelector(name="da non toccare", control_type="ListItem"))
+        left, top, width, height = self.adapter.describe_element(item).bounds
+        center_x, center_y = left + width // 2, top + height // 2
+        pixel_click_calls = []
+
+        def _pixel_click():
+            pixel_click_calls.append(True)
+            self.computer_agent.click_point(center_x, center_y)
+
+        def _verify_selected():
+            remove_button = self.engine.find_unique_element(
+                self.window, ElementSelector(name="Rimuovi selezionato", control_type="Button"),
+            )
+            return self.adapter.describe_element(remove_button).enabled
+
+        outcome = try_strategies_in_order(
+            [
+                ("uia_select", lambda: self.executor.select(item), True),
+                ("pixel_click", _pixel_click),
+            ],
+            verify=_verify_selected,
+        )
+
+        self.assertFalse(outcome.succeeded)
+        self.assertEqual(pixel_click_calls, [], "pixel_click non deve essere tentato dopo uno stop di sicurezza")
+        self.assertEqual(len(outcome.attempts), 1)
+        self.assertIn("F3.5.6", outcome.attempts[0].reason)
 
 
 if __name__ == "__main__":
