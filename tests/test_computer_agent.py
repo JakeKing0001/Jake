@@ -6,7 +6,7 @@ from unittest import mock
 
 from PIL import Image
 
-from core.computer_agent import ComputerAgent
+from core.computer_agent import EVIDENCE_NONE, EVIDENCE_PIXEL_DIFF, ComputerAgent
 
 WORDS = [{"text": "Accedi", "line": 0, "x": 100, "y": 200, "w": 60, "h": 20}]
 
@@ -80,6 +80,42 @@ class ClickPointTests(unittest.TestCase):
         click.assert_called_once()
         self.assertTrue(result.success)
         self.assertFalse(result.verified)
+
+
+class EvidenceStrengthTests(unittest.TestCase):
+    """F3.5.5: `evidence` rende esplicita la FONTE del campo `verified` - sempre pixel diff in
+    questa classe (mai una verifica basata su stato reale dell'app, quella e' F3.4/F3.5), e mai
+    dichiarato quando nessun controllo e' davvero avvenuto."""
+
+    def test_a_completed_pixel_diff_check_is_reported_as_pixel_diff_evidence(self):
+        before = Image.new("RGB", (10, 10), (0, 0, 0))
+        after = Image.new("RGB", (10, 10), (255, 255, 255))
+        with mock.patch("core.vision.screen.capture_screenshot_image", side_effect=[before, after]), \
+             mock.patch("pyautogui.click"), mock.patch("time.sleep"):
+            result = ComputerAgent().click_point(5, 5)
+
+        self.assertEqual(result.evidence, EVIDENCE_PIXEL_DIFF)
+
+    def test_an_unverified_click_from_no_visible_change_is_still_pixel_diff_evidence(self):
+        """Il controllo E' avvenuto (le due schermate sono state confrontate) - solo non ha
+        rilevato un cambiamento. EVIDENCE_PIXEL_DIFF descrive che tipo di controllo e' avvenuto,
+        non se ha trovato qualcosa."""
+        same = Image.new("RGB", (10, 10), (0, 0, 0))
+        with mock.patch("core.vision.screen.capture_screenshot_image", side_effect=[same, same.copy()]), \
+             mock.patch("pyautogui.click"), mock.patch("time.sleep"):
+            result = ComputerAgent().click_point(5, 5)
+
+        self.assertFalse(result.verified)
+        self.assertEqual(result.evidence, EVIDENCE_PIXEL_DIFF)
+
+    def test_no_evidence_at_all_when_the_initial_screenshot_capture_fails(self):
+        """Nessun controllo e' stato davvero possibile - EVIDENCE_NONE, mai EVIDENCE_PIXEL_DIFF
+        indovinato per un confronto che non e' mai avvenuto."""
+        with mock.patch("core.vision.screen.capture_screenshot_image", side_effect=RuntimeError("no screen")), \
+             mock.patch("pyautogui.click"):
+            result = ComputerAgent().click_point(5, 5)
+
+        self.assertEqual(result.evidence, EVIDENCE_NONE)
 
 
 class ClickTextTests(unittest.TestCase):
