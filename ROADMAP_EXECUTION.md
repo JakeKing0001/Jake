@@ -5218,6 +5218,40 @@ Criterio di uscita: ogni fallback è osservabile e non produce duplicazioni nei 
   mouse sulla lista), non ancora costruita. Task 6-10 non ancora nemmeno definiti nella fixture
   (dichiarato "passo successivo" fin da F3.1.1). Prova: 1 test nuovo. 2.976/2.976 test, ruff verde.
 
+- `F3.1.2` (Task 3/10, INDAGATO non completato - correzione di un'affermazione troppo ottimistica
+  fatta nell'incremento precedente) — 19/09/2026: prima di costruire una scala di ripiego a
+  coordinate pixel per "espandi categoria" (come suggerito sopra), verificato EMPIRICAMENTE se
+  avrebbe funzionato - **non lo fa, per una ragione diversa e piu' profonda di quanto assunto**.
+  Un doppio click REALE (non una chiamata COM `Expand()`) sulla riga di "Categoria A" produce un
+  cambiamento visivo genuino (pixel diff positivo, verificato) - l'espansione avviene DAVVERO a
+  livello Qt. Ma `describe_tree()` subito dopo continua a riportare ZERO figli
+  (`tree.children == ()`), esattamente come dopo la chiamata `Expand()` via UIA gia' documentata
+  come senza effetto. La differenza cruciale, non vista prima: qui il problema NON e' che l'azione
+  UIA non abbia effetto (un click reale HA un effetto reale) - e' che **UI Automation non rivela
+  MAI i figli di un `QTreeWidgetItem` a Qt, indipendentemente da COME l'espansione e' stata
+  ottenuta**. Stessa famiglia di buco gia' trovata per lo Scroll di un `QListWidget` (F3.4:
+  "Qt non rivela contenuto virtualizzato/nascosto tramite i pattern UI Automation"), qui estesa da
+  "una riga fuori vista" a "qualunque figlio non gia' mostrato, anche dopo un'espansione VERA e
+  verificata visivamente".
+
+  Conseguenza pratica: una scala di ripiego a coordinate pixel per Task 3 potrebbe risolvere
+  l'AZIONE (il doppio click funziona), ma non la VERIFICA - non esiste oggi alcun modo di
+  confermare via UI Automation che l'espansione sia riuscita, l'unico segnale possibile sarebbe
+  visivo (OCR/vision, F3.5.1 - un gradino della scala dichiarato ma MAI costruito). Lo stesso vale
+  quindi anche per Task 5 ("scorri e seleziona l'ultima riga" - "Riga 30" non e' presente
+  nell'albero UI Automation nemmeno dopo uno scorrimento reale, per lo stesso motivo, gia' plausibile
+  dal finding di F3.4 ma non riverificato empiricamente qui). **Correzione esplicita** della frase
+  "completabili in un futuro incremento SOLO con una vera strategia di ripiego a coordinate pixel"
+  scritta nell'incremento precedente: falsa per omissione, la strategia pixel risolverebbe solo
+  META' del problema (l'azione, non la verifica). Nessun codice di produzione toccato in questo
+  incremento (solo indagine con script usa-e-getta, cancellati) - **nota sulla privacy dello
+  schermo reale**: un tentativo iniziale di ispezionare visivamente il cambiamento ha catturato
+  screenshot dello schermo DESKTOP reale dell'utente (non solo della finestra della fixture, per
+  via dello z-order) - cancellati immediatamente senza essere ulteriormente ispezionati o
+  conservati, e l'indagine e' proseguita usando solo segnali UI Automation (nessun contenuto
+  privato incluso in questo commit). Task 3/5 restano dichiarati NON completabili senza un vero
+  gradino "vision" nella scala di ripiego - lavoro futuro sostanziale, non un incremento minore.
+
 ### F3.6 — Browser adapter
 
 Dipende da: F1.5 e F3.5.
