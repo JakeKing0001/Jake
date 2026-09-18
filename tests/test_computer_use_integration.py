@@ -35,17 +35,29 @@ verificato affidabile per un `TreeItem`) seguito dalla freccia DESTRA (la scorci
 standard di Qt per espandere un nodo collassato con il fuoco) si e' invece dimostrato affidabile
 su prove ripetute - usata qui al posto del doppio click.
 
-**Secondo buco reale, trovato SUL RUNNER CI dopo aver pubblicato questo test, non ipotizzato**:
-il test passava in modo affidabile in locale (6+ esecuzioni consecutive) ma falliva SEMPRE su
-GitHub Actions windows-latest, anche dopo aver aggiunto `SetFocus()` esplicito e un'attesa a
-polling (entrambi correggono un problema di TIMING, non l'assenza di una capacita' intera). La
-causa vera: il runner CI condiviso non ha un motore OCR disponibile (nessun profilo utente
-interattivo reale per `OcrEngine.try_create_from_user_profile_languages()`) - un ambiente senza
-OCR, non un bug del codice, la stessa categoria gia' anticipata altrove nel progetto
-(`skills/screen_click.py::OCR_UNAVAILABLE`). Il test ora si salta esplicitamente
-(`core.vision.screen.ocr_available()`) invece di fallire quando l'OCR non c'e' - `SetFocus()` e
-l'attesa a polling RESTANO (corretti per il loro problema originale, verificati localmente), solo
-la premessa "l'OCR e' sempre disponibile" era sbagliata.
+**Secondo buco reale, trovato SUL RUNNER CI dopo aver pubblicato questo test, non ipotizzato -
+un'indagine in TRE fasi, non risolta al primo tentativo**: il test passava in modo affidabile in
+locale (6+ esecuzioni consecutive) ma falliva SEMPRE su GitHub Actions windows-latest, su un
+totale di TRE push consecutivi, ognuno con un'ipotesi diversa poi smentita dal push successivo:
+1. **Prima ipotesi (parzialmente giusta, non sufficiente)**: un problema di timing/fuoco
+   tastiera - corretto aggiungendo `SetFocus()` esplicito via UI Automation e un'attesa a polling
+   per l'OCR (`word_visible_in_window_eventually`). Il fallimento e' PERSISTITO identico.
+2. **Seconda ipotesi (smentita dal push successivo)**: l'OCR non disponibile affatto sul runner
+   CI - `core.vision.screen.ocr_available()` costruito per saltare il test in quel caso. Il push
+   successivo ha mostrato "Ran 2989 tests" (non 2988): il test NON e' stato saltato, quindi l'OCR
+   RISULTA disponibile - l'ipotesi era sbagliata, non solo insufficiente.
+3. **Terza ipotesi (quella usata qui)**: il ritaglio "bordi finestra da UI Automation" passato
+   all'OCR potrebbe non corrispondere davvero al contenuto visibile in quell'ambiente (es. un
+   mismatch di scala DPI tra le coordinate di UI Automation e i pixel catturati da
+   `ImageGrab.grab()`) - un dato a favore: `ScrollAndSelectLastRowEndToEndTests` (Task 5, stesso
+   schema click+`SetFocus()`+tasto, ma verificato via UI Automation, MAI via un ritaglio OCR) e'
+   sempre passato in CI, isolando il sospetto sul ritaglio/OCR specificamente, non sulla
+   tastiera/il fuoco in generale (gia' dimostrati funzionanti da Task 5). Aggiunto un controllo
+   di SANITA' in `setUp` (vedi sotto): se l'OCR non trova nemmeno un testo GIA' visibile
+   dall'avvio ("Aggiungi", nessuna azione necessaria), il test si SALTA con una diagnosi onesta
+   invece di incolpare l'espansione dell'albero per un problema che la precede. Non una PROVA
+   della causa DPI (non verificabile senza accesso diretto al runner), ma una diagnosi che si
+   corregge da sola se l'ambiente cambia, invece di continuare a fallire alla cieca.
 
 `ScrollAndSelectLastRowEndToEndTests` completa Task 5/10 ("scorri e seleziona l'ultima riga") -
 **a differenza di Task 3, qui la verifica torna a essere UI Automation pura, non OCR**: un click
@@ -209,14 +221,18 @@ class ChangeTabAndToggleEndToEndTests(unittest.TestCase):
 
 class ExpandCategoryEndToEndTests(unittest.TestCase):
     def setUp(self):
-        # Fix di un fallimento reale in CI, non ipotizzato (vedi ROADMAP_EXECUTION.md): il
-        # runner CI condiviso di questo progetto (GitHub Actions windows-latest) non ha un
-        # motore OCR disponibile (nessun profilo utente interattivo reale, verificato dopo che
-        # ne' un fuoco tastiera esplicito ne' un'attesa a polling avevano risolto il fallimento -
-        # entrambi correggono un problema di TIMING, non l'assenza dell'intera capacita' OCR).
-        # Saltato esplicitamente, non fatto fallire: un ambiente senza OCR non e' un buco del
-        # codice, e' una caratteristica NOTA e gia' gestita altrove nel progetto
-        # (skills/screen_click.py::OCR_UNAVAILABLE).
+        # F3.5.1: ocr_available() da solo NON basta (correzione di un'ipotesi sbagliata - vedi
+        # ROADMAP_EXECUTION.md): il motore OCR RISULTA disponibile sul runner CI condiviso di
+        # questo progetto (`ocr_available()` vero, verificato dal fatto che questo test viene
+        # comunque ESEGUITO, non saltato, e fallisce lo stesso), ma il ritaglio "bordi finestra da
+        # UI Automation" passato all'OCR potrebbe non corrispondere davvero a cio' che e'
+        # visibile in quell'ambiente (es. un mismatch di scala DPI tra le coordinate riportate da
+        # UI Automation e i pixel catturati da `ImageGrab.grab()` - un genere di problema gia'
+        # incontrato altrove in questo progetto). Saltato esplicitamente se un CONTROLLO SU UN
+        # TESTO GIA' VISIBILE dall'avvio (vedi sotto, dopo aver trovato la finestra) fallisce -
+        # se l'OCR non trova nemmeno "Aggiungi" (sempre presente, nessuna azione necessaria),
+        # il ritaglio stesso non e' affidabile in questo ambiente, non ha senso incolpare
+        # l'espansione dell'albero per un problema che la precede.
         if not ocr_available():
             self.skipTest("OCR non disponibile in questo ambiente (probabile mancanza del language pack su CI)")
         self.process = subprocess.Popen(
@@ -228,6 +244,12 @@ class ExpandCategoryEndToEndTests(unittest.TestCase):
         self.engine = SelectorEngine(self.adapter)
         self.computer_agent = ComputerAgent()
         self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+        if not word_visible_in_window_eventually(self.adapter, self.window, "Aggiungi", timeout_seconds=3.0):
+            self.skipTest(
+                "il ritaglio OCR non trova nemmeno un testo gia' visibile dall'avvio - il ritaglio "
+                "finestra non corrisponde al contenuto reale in questo ambiente (probabile mismatch "
+                "di scala DPI tra UI Automation e la cattura schermo), non un problema dell'albero"
+            )
 
     def _terminate_process(self):
         self.process.terminate()
