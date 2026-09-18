@@ -54,6 +54,20 @@ _CONTROL_TYPE_NAMES: dict[int, str] = {
     for _name in dir(UIA)
     if _name.startswith("UIA_") and _name.endswith("ControlTypeId")
 }
+# L'inverso della mappa sopra (F3.3.1, usata da core/computer_use/selector.py per costruire una
+# condizione UIA nativa da un nome leggibile come "Button" invece dell'intero opaco).
+_CONTROL_TYPE_IDS: dict[str, int] = {_name: _id for _id, _name in _CONTROL_TYPE_NAMES.items()}
+
+
+def control_type_id_for(control_type_name: str) -> int:
+    """L'inverso di `ElementInfo.control_type` - solleva `ValueError` per un nome sconosciuto
+    invece di restituire un intero indovinato che non corrisponde a nessun vero UIA_ControlTypeId
+    (una condizione di ricerca con un intero a caso non solleverebbe un errore COM, semplicemente
+    non troverebbe mai nulla - un fallimento silenzioso peggiore di un errore esplicito subito)."""
+    try:
+        return _CONTROL_TYPE_IDS[control_type_name]
+    except KeyError:
+        raise ValueError(f"control_type sconosciuto: {control_type_name!r}") from None
 
 
 class WindowNotFoundError(Exception):
@@ -221,3 +235,31 @@ class UIAutomationAdapter:
         # un nuovo oggetto con solo children cambiato, senza ripetere gli altri campi a mano (che
         # potrebbero disallinearsi se un campo viene aggiunto in futuro).
         return replace(info, children=tuple(children))
+
+    def find_matching_elements(
+        self, root, *, name: str | None = None, control_type: str | None = None,
+        automation_id: str | None = None,
+    ) -> list:
+        """F3.3.1 (fondamenta): elementi COM GREZZI (non `ElementInfo` - il chiamante decide se e
+        come descriverli, vedi `core/computer_use/selector.py::SelectorEngine`) tra i discendenti
+        di `root` che soddisfano TUTTI i criteri dati, tramite le condizioni NATIVE di UI
+        Automation (`FindAll` + `CreateAndCondition`) - una singola chiamata COM che filtra
+        internamente a Windows, non una camminata Python + confronto manuale su ogni elemento
+        (che per un albero grande costerebbe quanto l'intera `describe_tree`, gia' misurata a
+        circa 1ms per elemento su un'app reale - vedi ROADMAP_EXECUTION.md sezione F3.2)."""
+        conditions = []
+        if name is not None:
+            conditions.append(self._uia.CreatePropertyCondition(UIA.UIA_NamePropertyId, name))
+        if control_type is not None:
+            conditions.append(self._uia.CreatePropertyCondition(
+                UIA.UIA_ControlTypePropertyId, control_type_id_for(control_type),
+            ))
+        if automation_id is not None:
+            conditions.append(self._uia.CreatePropertyCondition(UIA.UIA_AutomationIdPropertyId, automation_id))
+        if not conditions:
+            raise ValueError("find_matching_elements richiede almeno un criterio (name/control_type/automation_id)")
+        combined = conditions[0]
+        for extra_condition in conditions[1:]:
+            combined = self._uia.CreateAndCondition(combined, extra_condition)
+        results = root.FindAll(UIA.TreeScope_Descendants, combined)
+        return [results.GetElement(i) for i in range(results.Length)]
