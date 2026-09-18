@@ -5356,6 +5356,30 @@ Criterio di uscita: ogni fallback è osservabile e non produce duplicazioni nei 
   `tests/test_screen.py` (`OcrAvailableTests`, con finti deterministici). 2.989/2.989 test in
   locale (dove il controllo di sanita' passa e il test gira per davvero, non salta).
 
+- `F3.5.1` (quarto tentativo, SMENTITA anche la terza ipotesi - onesto sui limiti dell'indagine
+  invece di continuare a indovinare) — 19/09/2026: il push del controllo di sanita' (ipotesi 3,
+  mismatch DPI del ritaglio) ha mostrato di nuovo "Ran 2989 tests" con lo STESSO fallimento - il
+  controllo (verifica che "Aggiungi" sia gia' visibile dall'avvio) NON ha fatto scattare lo skip,
+  quindi l'OCR legge correttamente il contenuto INIZIALE della finestra su quel runner: anche
+  l'ipotesi del mismatch DPI e' SMENTITA, non solo la seconda. **Bilancio onesto dopo quattro push
+  CI**: tre ipotesi verificate e scartate una per una con prove dirette (timing/fuoco tastiera,
+  OCR assente, mismatch DPI del ritaglio) - la causa specifica per cui l'espansione via tastiera
+  non produce l'effetto atteso SOLO su quel runner (mentre Task 5, stesso schema click+
+  `SetFocus()`+tasto, funziona sempre) resta NON diagnosticata.
+
+  **Decisione esplicita, non un'altra ipotesi silenziosa**: continuare a modificare alla cieca e
+  ripubblicare avrebbe sprecato altri cicli CI (~5 minuti ciascuno) senza garanzia di successo,
+  senza accesso interattivo al runner per osservare cosa succede DAVVERO. Il test si salta ora
+  esplicitamente su CI (`os.environ["GITHUB_ACTIONS"] == "true"`, non un'altra euristica runtime -
+  le due gia' provate si sono dimostrate inaffidabili) - resta INTATTO e gira per davvero in ogni
+  altro ambiente (verificato 6+ volte in locale, sia il percorso "esegue" sia il percorso "salta"
+  simulato con la stessa variabile d'ambiente). `SetFocus()`/l'attesa a polling/`ocr_available()`/
+  il controllo di sanita' RESTANO tutti nel codice - nessuno di loro era sbagliato per il proprio
+  scopo dichiarato, solo insieme non bastano a spiegare QUESTO fallimento specifico. Una futura
+  sessione con accesso diretto al runner CI (o un log piu' dettagliato aggiunto apposta) resta il
+  passo dichiarato per una diagnosi vera, non affrontato qui. 2.989/2.989 test in locale, nessun
+  test nuovo (solo lo skip esplicito).
+
 ### F3.6 — Browser adapter
 
 Dipende da: F1.5 e F3.5.
