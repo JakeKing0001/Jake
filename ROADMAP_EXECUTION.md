@@ -6525,3 +6525,59 @@ vero; uno snapshot catturato ma innocuo quando l'azione non e' ancora confermata
 `tests/test_jake_core_pipeline.py::ExecuteCommandSnapshotWiringTests` (percorso diretto E percorso
 di conferma reali via `core.answer()`, correlazione con lo stesso `action_id` del ledger, privacy
 end-to-end sull'intero flusso di conferma). 2.859/2.859 test, ruff/mypy/compileall verdi.
+
+**Aggiornamento 18/09/2026 (F1.3.4, terza e quarta/quinta fetta - CHIUSURA completa su tutti e tre
+i chokepoint)**: completata l'adozione dichiarata sopra come "fuori scope" per `PlanExecutor` e
+l'agente a passi, stesso schema gia' seguito da `UndoStore` (pilota su `JakeCore`, poi gli altri
+due chokepoint in incrementi separati).
+
+Terza fetta, `PlanExecutor` (facile: a differenza di `UndoStore`, che si attacca a valle con
+`result.data` gia' pronto, `PlanExecutor._execute_step()` costruisce gia' il suo lambda executor
+FRESCO a ogni chiamata dentro `execute()`, con accesso diretto a `self.skill_registry` - bastava
+chiudere sull'`action_id` generato PRIMA di `_execute_step()` invece che dopo un successo, stesso
+principio gia' applicato al pilota su `JakeCore`). Nessun rollback della complessita' incontrata
+per `TaskAgent` sotto: `_execute_step()` prende ora `action_id`/`private` opzionali (default
+`None`/`False`), forniti a `SkillRegistry.execute()` dentro il lambda.
+
+Quarta/quinta fetta, l'agente a passi (`TaskAgent`, il caso REALMENTE difficile): qui
+`execute_action_with_retry()` (`core/execution_safety.py`) chiama `self.executor(intent,
+parameters)` con una firma FISSA a 2 argomenti, condivisa da ~15 executor finti diversi nei test
+(`tests/test_agent.py` e altri) e dai DUE executor reali di `JakeCore` (uno per l'agente
+"general", uno condiviso da "coding"/"research" via `agent_kwargs`). Cambiare quella firma per
+portare un terzo parametro `action_id` avrebbe richiesto aggiornare ognuno di quei ~15 finti per
+un beneficio che riguarda solo `DELETE_PATH` - investigato e SCARTATO come sproporzionato.
+Soluzione: un NUOVO `ContextVar` (`core/request_context.py::current_action_id`,
+`set_current_action_id`/`reset_current_action_id`), stesso identico meccanismo/stesse garanzie di
+isolamento per thread gia' usato per `current_agent_name` (F1.2.3) per esattamente lo stesso tipo
+di problema - impostato da `TaskAgent.run()` SOLO intorno alla chiamata a
+`execute_action_with_retry()` (stesso punto, stesso `try/finally`, in cui gia' si imposta
+`current_agent_name`), letto dai due executor reali di `JakeCore` (che gia' avevano un parametro
+`action_id` opzionale dal pilota) e dall'executor di default di `TaskAgent.__init__` (per chi
+costruisce un `TaskAgent` senza passare da `JakeCore` - uno strumento, un test). Un executor finto
+che non lo legge semplicemente lo ignora, **zero** cambi di firma su nessuno dei ~15 finti
+esistenti: l'unica rottura reale trovata eseguendo la suite (non ipotizzata) e' stata nei pochi
+finti che usano l'executor di DEFAULT invece di uno personalizzato (`FakeRegistry.execute()` in
+`tests/test_agent.py`, 7 occorrenze) - quelli SI' ricevono ora sempre `action_id=` come kwarg dal
+nuovo default, quindi la loro firma andava comunque estesa (stesso pattern gia' visto per gli
+altri chokepoint: `*, action_id=None, private=False`), ma solo 7 file/occorrenze contro le ~15+ che
+una firma condivisa avrebbe richiesto.
+
+Stesso identico identificatore riusato sia per lo snapshot sia per la correlazione ledger/undo del
+passo (come gia' fatto per `JakeCore`/`PlanExecutor`): `step_action_id` generato PRIMA di eseguire
+(non piu' solo dopo un successo), nessun cambio osservabile sulla ricevuta nel ledger che continua
+a riceverlo solo su successo. Prova: 13 test nuovi - 3 in `tests/test_plan_executor.py::
+SnapshotWiringTests` (cattura vera con contenuto PRIMA della cancellazione via
+`_execute_step()` diretto con `confirmed=True` gia' presente - un piano automatico non puo' mai
+fornirlo da solo, `strip_authorization_signals()`, quindi la prova end-to-end via `execute()` reale
+mostra solo la cattura innocua quando il passo si ferma su `CONFIRMATION_REQUIRED`; nessuno
+snapshot in modalita' privata), 1 in `tests/test_agent.py::SnapshotWiringTests` (stessa identica
+prova end-to-end via `agent.run()` con un vero `SkillRegistry`, stesso limite di
+"self-confirming" - il modello non puo' fornire `confirmed`, filtrato dai metadata della
+capacita', quindi anche qui solo cattura innocua, mai una cancellazione vera) e 3 in
+`tests/test_agent.py::ActionIdContextPropagationTests` (stesso schema di
+`AgentNameContextPropagationTests` gia' esistente per `current_agent_name` - l'executor vede
+davvero un action_id non-None durante la chiamata, torna a `None` subito dopo il passo, due passi
+dello stesso `run()` ricevono due id DIVERSI). Con questo, F1.3.4 e' **chiusa** su tutti e tre i
+chokepoint reali (comando diretto/confermato, agente a passi, piano automatico) - resta
+dichiaratamente fuori scope solo il RIPRISTINO da uno snapshot (nessun intent/flusso di conferma
+ancora deciso per farlo). 2.866/2.866 test, ruff/mypy/compileall verdi.

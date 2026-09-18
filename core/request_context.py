@@ -129,3 +129,38 @@ def set_current_command_source_intent(intent: str | None) -> contextvars.Token:
 
 def reset_current_command_source_intent(token: contextvars.Token) -> None:
     _current_command_source_intent.reset(token)
+
+
+# F1.3.4 (adozione - quinta fetta, ActionSnapshot per TaskAgent - vedi core/action_snapshot.py e
+# core/skill_registry.py::SkillRegistry.execute()): stesso identico meccanismo/stesse garanzie di
+# isolamento per thread di current_agent_name sopra, usato per lo STESSO identico problema -
+# TaskAgent.run() non puo' passare un action_id per-passo attraverso self.executor(intent,
+# parameters), un callable a firma FISSA a 2 argomenti condiviso da execute_action_with_retry()
+# (core/execution_safety.py) e da ~15 executor finti nei test (tests/test_agent.py e altri):
+# cambiare quella firma per portare un terzo parametro avrebbe richiesto aggiornare ognuno di
+# quei finti, per un beneficio che riguarda solo il singolo intent DELETE_PATH. Un ContextVar
+# impostato SOLO intorno alla chiamata a execute_action_with_retry() (come current_agent_name)
+# risolve lo stesso problema senza toccare quella firma condivisa: i due executor reali di
+# JakeCore (core/jake_core.py, che chiamano _resolve_and_execute) lo leggono per etichettare un
+# eventuale snapshot; un executor finto che non lo legge semplicemente lo ignora, esattamente
+# come gia' fa con current_agent_name. None (il default) significa "nessun action_id noto per
+# questo passo" - il caso normale finche' TaskAgent.run() non lo imposta.
+_current_action_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("current_action_id", default=None)
+
+
+def current_action_id() -> str | None:
+    """L'action_id del passo dell'agente in esecuzione su QUESTO thread in questo momento (solo
+    durante la chiamata all'executor dentro TaskAgent.run(), vedi core/agent.py), o None se
+    nessun passo e' in corso (comando diretto, o un'automazione via PlanExecutor - entrambi
+    passano gia' il proprio action_id direttamente come parametro, non tramite questo contextvar)."""
+    return _current_action_id.get()
+
+
+def set_current_action_id(action_id: str | None) -> contextvars.Token:
+    """Imposta l'action_id per il resto dell'esecuzione su QUESTO thread. Restituisce un Token da
+    passare a reset_current_action_id() per ripristinare il valore precedente."""
+    return _current_action_id.set(action_id)
+
+
+def reset_current_action_id(token: contextvars.Token) -> None:
+    _current_action_id.reset(token)

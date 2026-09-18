@@ -15,6 +15,8 @@ from core.policy_engine import PolicyEngine
 from core.request_context import reset_current_device_id, set_current_device_id
 from core.session_recorder import SessionRecorder
 from core.skill_result import SkillResult
+from skills.delete_path import DeletePathSkill
+from tests.test_skill_registry import _bare_registry
 
 
 class FakeRegistry:
@@ -25,7 +27,7 @@ class FakeRegistry:
         self._add_note_queue = list(add_note_results or [])
         self.calls = []
 
-    def execute(self, intent, parameters=None, policy_engine=None):
+    def execute(self, intent, parameters=None, policy_engine=None, *, action_id=None, private=False):
         parameters = parameters or {}
         self.calls.append((intent, dict(parameters)))
         if intent == "CREATE_PATH":
@@ -130,7 +132,7 @@ class PolicyReasonInTheLedgerTests(unittest.TestCase):
 class IndependentVerificationTests(unittest.TestCase):
     def test_success_claim_without_real_effect_is_downgraded_to_verification_failed(self):
         class LyingRegistry(FakeRegistry):
-            def execute(self, intent, parameters=None, policy_engine=None):
+            def execute(self, intent, parameters=None, policy_engine=None, *, action_id=None, private=False):
                 self.calls.append((intent, parameters))
                 return SkillResult(success=True, data={"path": parameters["path"]})
 
@@ -229,6 +231,69 @@ class UndoStoreWiringTests(unittest.TestCase):
             self.assertIs(executor.undo_store, shared_store)
             receipt = executor.action_ledger.read_all()[0]
             self.assertIsNotNone(shared_store.get(receipt["action_id"]))
+
+
+class SnapshotWiringTests(unittest.TestCase):
+    """F1.3.4 (adozione - quarta fetta, vedi core/action_snapshot.py): stesso principio identico
+    gia' visto per JakeCore (tests/test_jake_core_pipeline.py::ExecuteCommandSnapshotWiringTests)
+    - execute()/_execute_step() passano ora action_id/private a SkillRegistry.execute() cosi' un
+    passo DELETE_PATH puo' avere uno snapshot del contenuto catturato prima della cancellazione
+    vera. Serve il vero SkillRegistry (_bare_registry di tests/test_skill_registry.py), non
+    FakeRegistry di questo file (che chiama skill.execute() direttamente saltando la cattura)."""
+
+    def test_execute_step_forwards_action_id_and_private_to_a_real_registry(self):
+        """Un piano automatico non puo' mai fornire 'confirmed' (strip_authorization_signals,
+        vedi AuthorizationSignalStrippingTests sopra), quindi DELETE_PATH non cancella mai
+        davvero via execute() - qui si chiama _execute_step() direttamente con 'confirmed' gia'
+        presente per provare il collegamento vero e proprio, non la policy che lo impedisce a
+        monte (gia' coperta altrove)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "nota.txt"
+            target.write_text("contenuto vero", encoding="utf-8")
+            registry = _bare_registry({"DELETE_PATH": DeletePathSkill()})
+            executor = PlanExecutor(registry)
+            step = PlanStep(intent="DELETE_PATH", parameters={"path": str(target), "confirmed": True})
+
+            outcome = executor._execute_step(step, step.parameters, PolicyEngine(), action_id="action-1", private=False)
+
+            self.assertTrue(outcome.result.success)
+            self.assertFalse(target.exists())
+            snapshot = registry.snapshot_store.get("action-1")
+            self.assertIsNotNone(snapshot, "il contenuto deve essere stato catturato PRIMA della cancellazione")
+            self.assertEqual(snapshot.content, b"contenuto vero")
+
+    def test_private_mode_never_captures_a_snapshot_even_with_an_action_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "segreto.txt"
+            target.write_text("dato sensibile", encoding="utf-8")
+            registry = _bare_registry({"DELETE_PATH": DeletePathSkill()})
+            executor = PlanExecutor(registry)
+            step = PlanStep(intent="DELETE_PATH", parameters={"path": str(target), "confirmed": True})
+
+            outcome = executor._execute_step(step, step.parameters, PolicyEngine(), action_id="action-1", private=True)
+
+            self.assertTrue(outcome.result.success)
+            self.assertIsNone(registry.snapshot_store.get("action-1"))
+
+    def test_a_full_automated_run_still_generates_the_action_id_before_executing(self):
+        """Anche se una skill DESTRUCTIVE self-confirming rifiuta sempre un passo automatico (il
+        file sopravvive, CONFIRMATION_REQUIRED), execute() deve generare comunque l'action_id
+        PRIMA di chiamare _execute_step() - la prova end-to-end che il collegamento nel percorso
+        REALE (non solo la chiamata diretta sopra) e' davvero cablato."""
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "nota.txt"
+            target.write_text("x", encoding="utf-8")
+            registry = _bare_registry({"DELETE_PATH": DeletePathSkill()})
+            executor = PlanExecutor(registry)
+            executor.action_ledger = ActionLedger(path=Path(tmp) / "ledger.jsonl")
+            plan = Plan(steps=[PlanStep(intent="DELETE_PATH", parameters={"path": str(target)})])
+
+            outcome = executor.execute(plan, policy_engine=PolicyEngine())
+
+            self.assertEqual(outcome.stopped_step.result.error, "CONFIRMATION_REQUIRED")
+            self.assertTrue(target.exists(), "senza conferma vera, il file non deve mai sparire")
+            snapshots = list(registry.snapshot_store._snapshots.values())
+            self.assertEqual(len(snapshots), 1, "l'action_id generato da execute() ha comunque etichettato la cattura")
 
 
 class StructuredLoggingTests(unittest.TestCase):
@@ -525,8 +590,8 @@ class KillSwitchStopsThePlanTests(unittest.TestCase):
                 super().__init__()
                 self.kill_switch = kill_switch
 
-            def execute(self, intent, parameters=None, policy_engine=None):
-                result = super().execute(intent, parameters, policy_engine=policy_engine)
+            def execute(self, intent, parameters=None, policy_engine=None, *, action_id=None, private=False):
+                result = super().execute(intent, parameters, policy_engine=policy_engine, action_id=action_id, private=private)
                 self.kill_switch.activate()
                 return result
 
@@ -566,8 +631,8 @@ class KillSwitchStopsThePlanTests(unittest.TestCase):
                     super().__init__()
                     self.kill_switch = kill_switch
 
-                def execute(self, intent, parameters=None, policy_engine=None):
-                    result = super().execute(intent, parameters, policy_engine=policy_engine)
+                def execute(self, intent, parameters=None, policy_engine=None, *, action_id=None, private=False):
+                    result = super().execute(intent, parameters, policy_engine=policy_engine, action_id=action_id, private=private)
                     self.kill_switch.activate()
                     return result
 
@@ -653,7 +718,7 @@ class AuthorizationSignalStrippingTests(unittest.TestCase):
             def __init__(self):
                 self.skill = DeletePathSkill()
 
-            def execute(self, intent, parameters=None, policy_engine=None):
+            def execute(self, intent, parameters=None, policy_engine=None, *, action_id=None, private=False):
                 assert intent == "DELETE_PATH"
                 return self.skill.execute(parameters or {})
 
