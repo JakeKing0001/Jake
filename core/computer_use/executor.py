@@ -5,11 +5,8 @@ simulare click/digitazione a coordinate pixel - la richiesta arriva direttamente
 COM, niente coordinate che si romperebbero al primo resize/spostamento finestra (lo stesso motivo
 per cui `core/computer_use/selector.py` cerca per nome, F3.3.4).
 
-**Buco reale trovato verificando ExpandCollapse E Scroll contro la fixture, non ipotizzato - lo
-STESSO limite sottostante in entrambi**: a differenza di Invoke/Value/Toggle/SelectionItem (tutti
-e quattro verificati funzionanti DAVVERO - lo stato cambia sul serio, non solo "la chiamata non
-solleva"), Qt non rivela contenuto VIRTUALIZZATO/nascosto tramite i pattern UI Automation pensati
-apposta per farlo:
+**Tre buchi reali trovati verificando ExpandCollapse, Scroll E SelectionItem contro la fixture,
+non ipotizzati - il terzo e' il PIU' insidioso dei tre, una vera trappola**:
 - ExpandCollapse su un `QTreeWidgetItem`: il pattern e' presente (`GetCurrentPattern` lo trova,
   `Expand()`/`Collapse()` non sollevano mai) ma NON HA ALCUN EFFETTO - `CurrentExpandCollapseState`
   resta invariato prima e dopo la chiamata, verificato leggendolo esplicitamente (non assunto dal
@@ -21,7 +18,28 @@ apposta per farlo:
   lista di 30) NON E' PRESENTE nell'albero UI Automation affatto (una ricerca per nome non la
   trova, verificato) finche' qualcosa non la rende visibile - e niente in UI Automation puo' farlo
   per un `QListWidget`, ne' il pattern Scroll (non disponibile) ne' `ScrollItem`/`ScrollIntoView`
-  (nemmeno quello disponibile su un elemento gia' fuori vista, verificato).
+  (nemmeno quello disponibile su un elemento gia' fuori vista, verificato);
+- **SelectionItem su un `QListWidgetItem` (a differenza di un `TabItem` di `QTabBar`, verificato
+  funzionante con una prova INDIPENDENTE - vedi `tests/test_executor.py::SelectionItemTests`, il
+  checkbox della tab 2 diventa davvero raggiungibile dopo `select()` sulla sua `TabItem`, non solo
+  "selected" riportato True)**: chiamare `Select()` su un elemento della lista FA CAMBIARE
+  `CurrentIsSelected` da `False` a `True` (verificato leggendo la proprieta') - sembrerebbe quindi
+  funzionare. Ma il bottone "Rimuovi selezionato" della fixture, la cui abilitazione dipende dal
+  VERO stato di selezione di Qt (`itemSelectionChanged`, non da UI Automation), RESTA
+  disabilitato dopo la stessa chiamata - verificato esplicitamente, non assunto. Lo stato riportato
+  da UI Automation e quello REALE dell'applicazione si sono DESINCRONIZZATI: fidarsi del solo
+  `selected` di `ElementInfo` come prova che un'azione ha avuto un effetto vero sarebbe stato un
+  errore, scoperto qui perche' esisteva un secondo modo indipendente di controllare (il bottone),
+  non perche' la prima verifica sembrasse sospetta. **La stessa identica lezione che il progetto
+  Jake ha gia' imparato ripetutamente in F1 per le skill** (mai fidarsi del "successo" dichiarato
+  da chi esegue un'azione, verificarlo in modo indipendente - `core/execution_safety.py::
+  verify_effect`) - qui riscoperta per UI Automation stesso, non solo per le skill di Jake:
+  un'azione UIA "riuscita" secondo UIA stesso NON e' automaticamente riuscita per l'app target.
+  Per un `TreeItem` (`QTreeWidgetItem`), `CurrentIsSelected` cambia correttamente e con semantica
+  di selezione singola rispettata (selezionare "Categoria A" deseleziona "Categoria B") - ma senza
+  un secondo segnale indipendente come il bottone della lista, questo NON e' dichiarato verificato
+  per l'effetto REALE su Qt, solo per lo stato riportato da UI Automation - onesto "non provato",
+  non un'estensione ottimistica della prova gia' fatta per `TabItem`.
 
 `expand()`/`collapse()`/`scroll_to_bottom()`/`scroll_to_top()` restano nel codice sotto (le
 implementazioni sono corrette per il contratto COM in generale, non specifiche di Qt - un'app/
@@ -99,7 +117,17 @@ class ActionExecutor:
     def select(self, element) -> None:
         """Voce di lista/albero/tab - il pattern SelectionItem ("seleziona questo"), diverso da
         Invoke: selezionare una voce non e' "premerla" (una voce puo' essere selezionabile senza
-        avere alcun significato di "azione", es. una riga di una lista)."""
+        avere alcun significato di "azione", es. una riga di una lista).
+
+        **`CurrentIsSelected=True` dopo questa chiamata NON e' prova sufficiente che l'azione
+        abbia avuto un effetto reale sull'app target** (vedi il docstring del modulo): su un
+        `QListWidgetItem` di Qt lo stato riportato da UI Automation e quello VERO dell'app si
+        DESINCRONIZZANO - verificato che il bottone "Rimuovi selezionato" della fixture resta
+        disabilitato anche dopo una `select()` "riuscita" secondo UI Automation. Un chiamante che
+        deve sapere se l'azione ha avuto effetto DAVVERO deve verificarlo in modo indipendente
+        (un secondo segnale che dipende dallo stato VERO dell'app, non da UI Automation stesso) -
+        lo stesso principio "mai fidarsi del successo auto-dichiarato" gia' seguito per le skill
+        di Jake (`core/execution_safety.py::verify_effect`, F1)."""
         self._require_enabled(element)
         pattern = self._require_pattern(
             element, UIA.UIA_SelectionItemPatternId, UIA.IUIAutomationSelectionItemPattern, "SelectionItem",

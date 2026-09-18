@@ -4937,6 +4937,41 @@ Criterio di uscita: 10 task fixture completati senza coordinate pixel quando UIA
   test nuovi in `tests/test_executor.py::ScrollKnownLimitationTests`. 2.943/2.943 test, ruff
   verde.
 
+- `F3.4` (buco reale, il PIU' insidioso dei tre trovati in questo incremento - SelectionItem su
+  un `QListWidgetItem`) — 18/09/2026: provando a completare Task 2/10 di F3.1.2 ("rimuovi con
+  conferma") DAVVERO end-to-end via UI Automation - selezionare "da rimuovere" nella lista, poi
+  invocare "Rimuovi selezionato" - il bottone e' rimasto DISABILITATO, sollevando
+  `ElementNotInteractableError` (F3.4.4, precondizione "enabled") invece di procedere. Indagato
+  invece di scartato: `select()` su un `QListWidgetItem` fa DAVVERO cambiare
+  `CurrentIsSelected` da `False` a `True` (verificato leggendo la proprieta') - sembrerebbe quindi
+  funzionare, ESATTAMENTE come per `select()` su una `TabItem` (gia' verificato funzionante in
+  questa stessa sessione, con una prova indipendente: il checkbox della tab 2 diventa davvero
+  raggiungibile dopo). Ma qui il bottone "Rimuovi selezionato", la cui abilitazione dipende dal
+  VERO stato di selezione di Qt (`itemSelectionChanged`), resta disabilitato anche dopo una
+  `select()` "riuscita" secondo UI Automation - lo stato riportato da UI Automation e quello REALE
+  dell'app si sono DESINCRONIZZATI. Scoperto SOLO perche' esisteva un secondo segnale indipendente
+  da controllare (il bottone), non perche' la prima verifica (`CurrentIsSelected`) sembrasse
+  sospetta di per se' - **la stessa identica lezione che questa sessione ha gia' imparato
+  ripetutamente in F1 per le skill di Jake** (mai fidarsi del successo auto-dichiarato da chi
+  esegue un'azione, verificarlo in modo indipendente - `core/execution_safety.py::verify_effect`),
+  qui riscoperta per UI Automation STESSO, non solo per le skill costruite sopra di esso: un'azione
+  UIA "riuscita" secondo UIA non e' automaticamente riuscita per l'app target.
+
+  Conseguenza pratica dichiarata onestamente: Task 2/10 di F3.1.2 ("rimuovi con conferma") NON e'
+  oggi completabile via `SelectionItem.Select()` + `Invoke()` puri contro un `QListWidget` - una
+  futura fetta di F3.5 (scala di ripiego) dovrebbe intervenire con un click reale a coordinate
+  pixel per la sola fase di selezione, poi tornare a UI Automation per il resto (`Invoke` sul
+  bottone, il dialogo di conferma). `select()` NON e' stato rimosso dal codice (funziona per
+  davvero su altri controlli, es. `TabItem`) - il suo docstring e quello del modulo dichiarano ora
+  esplicitamente che `selected=True` da solo non e' mai prova sufficiente di un effetto reale,
+  senza una verifica indipendente. `TreeItem` (`Categoria A`/`Categoria B`) cambia
+  `CurrentIsSelected` con la stessa semantica corretta di selezione singola, ma senza un segnale
+  indipendente equivalente al bottone della lista NON e' dichiarato verificato per l'effetto reale
+  su Qt - onesto "non provato", non un'estensione ottimistica della prova gia' fatta per `TabItem`.
+  Prova: 1 test nuovo in `tests/test_executor.py::SelectionItemKnownLimitationTests`, e la classe
+  esistente `SelectionItemTests` rinominata concettualmente nel proprio docstring per chiarire il
+  contrasto deliberato tra i due casi. 2.944/2.944 test, ruff verde.
+
 ### F3.5 — Fallback ladder
 
 Dipende da: F3.4.
