@@ -65,16 +65,44 @@ alla volta" di questa sessione):
   `core/policy_engine.py` ancora: questo modulo esegue un'azione GIA' autorizzata da chi lo
   chiama, lo stesso principio gia' seguito da `SkillRegistry.execute()` per le skill esistenti,
   che non ricontrolla la policy da solo);
-- F3.4.5 (produrre un `ActionReceipt` con elemento target e pattern usato - nessun collegamento
-  al ledger ancora);
 - F3.4.6 (evitare doppia esecuzione sui retry - nessun meccanismo di retry ancora qui);
 - F3.4.7 (dialoghi modali/focus change come eventi - nessuna gestione esplicita ancora, oltre
-  alla precondizione "enabled" di F3.4.4)."""
+  alla precondizione "enabled" di F3.4.4).
+
+`ElementActionReceipt` (F3.4.5, "produrre un ActionReceipt con elemento target e pattern usato"):
+DELIBERATAMENTE un nome diverso da `core.action_ledger.ActionReceipt` (un oggetto piu' pesante,
+con `trace_id`/`risk_decision`/`authorization`/`idempotency_key` - i concetti giusti per UNA
+skill gia' AUTORIZZATA a livello di `JakeCore`/`TaskAgent`/`PlanExecutor`, non per una singola
+chiamata di pattern UIA dentro questo executor, che non sa nulla di autorizzazione). Un futuro
+collegamento al ledger (non affrontato qui) tradurrebbe questo in un INGREDIENTE dei metadati/
+result di quello, non lo sostituirebbe - restano due oggetti distinti con scopi distinti, non
+un refactor silenzioso del primo.
+
+**Onesto per costruzione, non solo per convenzione**: la ricevuta viene costruita SOLO dopo che
+`_require_enabled`/`_require_pattern` sono gia' passati, e viene restituita SOLO se la chiamata al
+pattern COM stesso non solleva - un fallimento (`ElementNotInteractableError`, o un `COMError`
+dalla chiamata al pattern) continua a propagarsi come eccezione esattamente come prima di questo
+incremento, MAI una ricevuta con un campo "riuscito=False" inventato al suo posto. Questo NON e'
+pero' prova che l'azione abbia avuto un EFFETTO reale sull'app target - solo che QUEL pattern e'
+stato invocato su QUELL'elemento senza errori COM. La trappola di SelectionItem documentata sopra
+(la chiamata "riesce" secondo UI Automation ma il bottone che dipende dallo stato VERO di Qt resta
+disabilitato) si applica identica qui: la ricevuta registra il TENTATIVO, la verifica dell'effetto
+reale resta una responsabilita' del chiamante (lo stesso principio gia' seguito da
+`core/execution_safety.py::verify_effect` per le skill di Jake). Il testo digitato da `set_value`
+NON e' incluso nella ricevuta (solo l'identita' dell'elemento target) - un campo testo libero qui
+rischierebbe di far finire una password o un dato sensibile digitato dall'utente in una ricevuta
+che potrebbe un giorno essere loggata (F3.6.7, "redigere password e campi sensibili", non ancora
+affrontato, ma gia' evitato qui per costruzione invece di rimandato)."""
+import time
+from dataclasses import dataclass, field
+
 import comtypes
 import comtypes.client
 
 comtypes.client.GetModule("UIAutomationCore.dll")
 from comtypes.gen import UIAutomationClient as UIA  # noqa: E402 (deve seguire GetModule)
+
+from core.computer_use.ui_automation_adapter import _CONTROL_TYPE_NAMES  # noqa: E402 (deve seguire GetModule)
 
 # UIA_ScrollPatternNoScroll (documentato da Microsoft come -1, non una costante nominata nel
 # type library generato da comtypes): passato a SetScrollPercent() per l'asse che non si vuole
@@ -87,6 +115,41 @@ class ElementNotInteractableError(Exception):
     richiesto per l'azione (es. il pattern Invoke su un elemento che non e' un bottone/link)."""
 
 
+@dataclass(frozen=True)
+class ElementActionReceipt:
+    """F3.4.5: COSA e' stato tentato - non prova che sia riuscito DAVVERO per l'app target (vedi
+    il docstring del modulo). `element_name`/`element_automation_id`/`element_control_type` letti
+    con lo stesso "onesto None" di `ElementInfo` (F3.2.3, mai un valore indovinato quando il
+    provider UI Automation non li espone)."""
+
+    action: str  # "invoke" / "set_value" / "toggle" / "select" / "expand" / "collapse" / "scroll_to_bottom" / "scroll_to_top"
+    pattern: str  # "Invoke" / "Value" / "Toggle" / "SelectionItem" / "ExpandCollapse" / "Scroll"
+    element_name: str | None
+    element_automation_id: str | None
+    element_control_type: str | None
+    ts: float = field(default_factory=time.time)
+
+
+def _element_identity(element) -> tuple[str | None, str | None, str | None]:
+    """Nome/automation_id/control_type dell'elemento, letti con lo stesso "onesto None" di
+    `UIAutomationAdapter.describe_element` (F3.2) - NON riusato direttamente da li' per non
+    richiedere un'intera istanza di `UIAutomationAdapter` solo per costruire una ricevuta
+    (`ActionExecutor` resta utilizzabile senza un adapter, come prima di questo incremento)."""
+    try:
+        name = element.CurrentName or None
+    except (ValueError, comtypes.COMError):
+        name = None
+    try:
+        automation_id = element.CurrentAutomationId or None
+    except (ValueError, comtypes.COMError):
+        automation_id = None
+    try:
+        control_type = _CONTROL_TYPE_NAMES.get(element.CurrentControlType)
+    except (ValueError, comtypes.COMError):
+        control_type = None
+    return name, automation_id, control_type
+
+
 class ActionExecutor:
     """F3.4.1: un'azione per pattern UI Automation invece di click/digitazione simulati a
     coordinate pixel. Ogni metodo rilegge `CurrentIsEnabled` al momento dell'azione (F3.4.4,
@@ -95,26 +158,32 @@ class ActionExecutor:
     frattempo, lo stesso principio "verifica al momento giusto dell'azione, non prima" gia'
     seguito altrove nel progetto (es. F1.8.1 per le mutazioni filesystem)."""
 
-    def invoke(self, element) -> None:
+    def invoke(self, element) -> ElementActionReceipt:
         """Bottone/link/voce di menu - il pattern Invoke ("premi questo")."""
         self._require_enabled(element)
         pattern = self._require_pattern(element, UIA.UIA_InvokePatternId, UIA.IUIAutomationInvokePattern, "Invoke")
+        receipt = self._receipt("invoke", "Invoke", element)
         pattern.Invoke()
+        return receipt
 
-    def set_value(self, element, text: str) -> None:
+    def set_value(self, element, text: str) -> ElementActionReceipt:
         """Campo di testo - il pattern Value ("imposta il testo a"), non digitazione tasto per
         tasto simulata."""
         self._require_enabled(element)
         pattern = self._require_pattern(element, UIA.UIA_ValuePatternId, UIA.IUIAutomationValuePattern, "Value")
+        receipt = self._receipt("set_value", "Value", element)
         pattern.SetValue(text)
+        return receipt
 
-    def toggle(self, element) -> None:
+    def toggle(self, element) -> ElementActionReceipt:
         """Casella di spunta - il pattern Toggle ("cambia stato")."""
         self._require_enabled(element)
         pattern = self._require_pattern(element, UIA.UIA_TogglePatternId, UIA.IUIAutomationTogglePattern, "Toggle")
+        receipt = self._receipt("toggle", "Toggle", element)
         pattern.Toggle()
+        return receipt
 
-    def select(self, element) -> None:
+    def select(self, element) -> ElementActionReceipt:
         """Voce di lista/albero/tab - il pattern SelectionItem ("seleziona questo"), diverso da
         Invoke: selezionare una voce non e' "premerla" (una voce puo' essere selezionabile senza
         avere alcun significato di "azione", es. una riga di una lista).
@@ -132,19 +201,27 @@ class ActionExecutor:
         pattern = self._require_pattern(
             element, UIA.UIA_SelectionItemPatternId, UIA.IUIAutomationSelectionItemPattern, "SelectionItem",
         )
+        receipt = self._receipt("select", "SelectionItem", element)
         pattern.Select()
+        return receipt
 
-    def expand(self, element) -> None:
+    def expand(self, element) -> ElementActionReceipt:
         """Nodo di un albero (o altro elemento ExpandCollapse) - "espandi". **Non verificato
         funzionante contro un vero `QTreeWidgetItem`** (vedi il docstring del modulo): la chiamata
         non solleva mai, ma su Qt lo stato dell'elemento non cambia davvero - un buco reale del
         ponte di accessibilita' di Qt, non di questo metodo."""
-        self._expand_collapse(element).Expand()
+        pattern = self._expand_collapse(element)
+        receipt = self._receipt("expand", "ExpandCollapse", element)
+        pattern.Expand()
+        return receipt
 
-    def collapse(self, element) -> None:
+    def collapse(self, element) -> ElementActionReceipt:
         """Nodo di un albero (o altro elemento ExpandCollapse) - "collassa". Stesso limite non
         verificato di `expand()` sopra."""
-        self._expand_collapse(element).Collapse()
+        pattern = self._expand_collapse(element)
+        receipt = self._receipt("collapse", "ExpandCollapse", element)
+        pattern.Collapse()
+        return receipt
 
     def _expand_collapse(self, element):
         self._require_enabled(element)
@@ -152,18 +229,31 @@ class ActionExecutor:
             element, UIA.UIA_ExpandCollapsePatternId, UIA.IUIAutomationExpandCollapsePattern, "ExpandCollapse",
         )
 
-    def scroll_to_bottom(self, element) -> None:
+    def scroll_to_bottom(self, element) -> ElementActionReceipt:
         """Lista/area con scorrimento verticale - il pattern Scroll, impostato al 100% verticale
         (fondo). **Non verificato funzionante contro un vero `QListWidget`** (vedi il docstring
         del modulo): il ponte di accessibilita' di Qt riporta onestamente
         `IsScrollPatternAvailable=False` per questo widget, quindi questo metodo solleva
         `ElementNotInteractableError` invece di eseguire un'azione senza effetto (a differenza di
         `expand()`, dove Qt SI' dichiara il pattern disponibile ma poi non lo onora)."""
-        self._scroll(element).SetScrollPercent(_SCROLL_NO_CHANGE, 100.0)
+        pattern = self._scroll(element)
+        receipt = self._receipt("scroll_to_bottom", "Scroll", element)
+        pattern.SetScrollPercent(_SCROLL_NO_CHANGE, 100.0)
+        return receipt
 
-    def scroll_to_top(self, element) -> None:
+    def scroll_to_top(self, element) -> ElementActionReceipt:
         """Come `scroll_to_bottom`, verso l'inizio (0% verticale). Stesso limite non verificato."""
-        self._scroll(element).SetScrollPercent(_SCROLL_NO_CHANGE, 0.0)
+        pattern = self._scroll(element)
+        receipt = self._receipt("scroll_to_top", "Scroll", element)
+        pattern.SetScrollPercent(_SCROLL_NO_CHANGE, 0.0)
+        return receipt
+
+    def _receipt(self, action: str, pattern_name: str, element) -> ElementActionReceipt:
+        name, automation_id, control_type = _element_identity(element)
+        return ElementActionReceipt(
+            action=action, pattern=pattern_name,
+            element_name=name, element_automation_id=automation_id, element_control_type=control_type,
+        )
 
     def _scroll(self, element):
         self._require_enabled(element)
