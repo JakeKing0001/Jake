@@ -4,8 +4,11 @@ davvero la fixture di F3.1.1 in un processo separato e cerca elementi con UI Aut
 selettore che "funziona" solo contro un albero finto (ElementInfo costruiti a mano) non
 proverebbe che le condizioni COM native (FindAll + CreateAndCondition) sono corrette, il punto
 centrale di questo modulo."""
+import threading
+import time
 import unittest
 
+from core.computer_use.executor import ActionExecutor
 from core.computer_use.selector import AmbiguousSelectionError, ElementSelector, NoMatchError, SelectorEngine
 from tests.test_ui_automation_adapter import _RealFixtureTestCase
 
@@ -83,6 +86,71 @@ class FindUniqueAgainstTheRealFixtureTests(_RealFixtureTestCase):
 
         self.assertEqual(tab_item.control_type, "TabItem")
         self.assertTrue(tab_item.selected, "Tab 1 e' attiva per default")
+
+
+class WaitForUniqueElementTests(_RealFixtureTestCase):
+    """F3.4.7 (adozione): polling con timeout invece di uno sleep fisso o un singolo tentativo
+    ottimistico - verificato sia il caso "appare in ritardo" (il punto centrale del metodo) sia i
+    due modi onesti di fallire (nulla entro il timeout, o un'ambiguita' che non aspetta il
+    timeout perche' il tempo non la risolverebbe mai)."""
+
+    def setUp(self):
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+
+    def tearDown(self):
+        reset_button = self.adapter.find_matching_elements(self.window, name="Reset", control_type="Button")[0]
+        self.executor.invoke(reset_button)
+
+    def test_returns_immediately_when_the_element_already_exists(self):
+        result = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(name="Aggiungi", control_type="Button"), timeout_seconds=1.0,
+        )
+
+        self.assertIsNotNone(result)
+
+    def test_finds_an_element_that_appears_only_after_a_short_delay(self):
+        def _add_item_after_a_delay():
+            time.sleep(0.5)
+            input_field = self.adapter.find_matching_elements(
+                self.window, automation_id="QApplication.jake_fixture_window.fixture_input",
+            )[0]
+            self.executor.set_value(input_field, "in ritardo")
+            add_button = self.adapter.find_matching_elements(self.window, name="Aggiungi", control_type="Button")[0]
+            self.executor.invoke(add_button)
+
+        thread = threading.Thread(target=_add_item_after_a_delay)
+        thread.start()
+        try:
+            item = self.engine.wait_for_unique_element(
+                self.window, ElementSelector(name="in ritardo", control_type="ListItem"), timeout_seconds=3.0,
+            )
+        finally:
+            thread.join(timeout=5)
+
+        self.assertEqual(item.CurrentName, "in ritardo")
+
+    def test_raises_no_match_after_the_timeout_when_nothing_ever_appears(self):
+        started = time.monotonic()
+
+        with self.assertRaises(NoMatchError):
+            self.engine.wait_for_unique_element(
+                self.window, ElementSelector(name="questo non apparira' mai"), timeout_seconds=1.0,
+            )
+
+        elapsed = time.monotonic() - started
+        self.assertGreaterEqual(elapsed, 1.0, "deve rispettare davvero il timeout dato")
+
+    def test_an_ambiguous_match_raises_immediately_not_after_the_full_timeout(self):
+        """Le due voci dell'albero condividono lo stesso control_type - aspettare non risolverebbe
+        mai l'ambiguita', quindi non ha senso aspettare l'intero timeout prima di dichiararla."""
+        started = time.monotonic()
+
+        with self.assertRaises(AmbiguousSelectionError):
+            self.engine.wait_for_unique_element(self.window, ElementSelector(control_type="TreeItem"), timeout_seconds=5.0)
+
+        elapsed = time.monotonic() - started
+        self.assertLess(elapsed, 2.0, "l'ambiguita' non deve aspettare il timeout intero")
 
 
 if __name__ == "__main__":
