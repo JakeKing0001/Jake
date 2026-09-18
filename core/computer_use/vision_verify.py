@@ -27,8 +27,18 @@ alla volta" di questa sessione):
   non duplicato qui);
 - collegamento a `try_strategies_in_order` come un gradino DICHIARATO della scala (oggi e' una
   funzione libera che un chiamante puo' gia' passare come `verify`, non ancora un terzo elemento
-  automatico della lista di strategie)."""
+  automatico della lista di strategie).
+
+`word_visible_in_window_eventually` (fix di un fallimento REALE in CI, non ipotizzato): il test
+end-to-end di Task 3 costruito su `word_visible_in_window` passava in modo ripetuto e affidabile
+in locale (3/3 esecuzioni) ma e' fallito sul runner CI (GitHub Actions windows-latest) - un
+rendering piu' lento su una macchina condivisa puo' far si' che un singolo controllo OCR, fatto
+UNA volta subito dopo l'azione, arrivi PRIMA che Qt abbia finito di ridisegnare i figli appena
+rivelati. Stesso principio "polling con timeout invece di un singolo tentativo ottimistico" gia'
+seguito da `SelectorEngine.wait_for_unique_element` (F3.4.7), qui applicato all'OCR invece che a
+UI Automation."""
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -55,3 +65,18 @@ def word_visible_in_window(adapter, window, word: str) -> bool:
     if words is None:
         return False
     return any(entry["text"] == word for entry in words)
+
+
+def word_visible_in_window_eventually(adapter, window, word: str, timeout_seconds: float = 3.0) -> bool:
+    """Come `word_visible_in_window`, ma RITENTA con un breve intervallo fino al timeout invece
+    di un singolo controllo OCR - un rendering lento (una macchina CI condivisa, non la propria)
+    puo' far si' che il primo controllo, fatto subito dopo l'azione, arrivi prima che l'interfaccia
+    abbia finito di aggiornarsi. `False` onesto se `word` non appare mai entro il timeout, mai
+    un'eccezione."""
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        if word_visible_in_window(adapter, window, word):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.2)
