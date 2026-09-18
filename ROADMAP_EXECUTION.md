@@ -4573,6 +4573,27 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   stesso trattamento gia' riservato a `bench_nlu.py`/`bench_agent.py`/`bench_computer_use.py`/
   `bench_stt.py` - i benchmark restano deliberatamente fuori dai controlli stretti di CI, vedi
   `benchmarks/README.md`).
+- `F3.1.1` (seconda fetta - rimozione dietro dialogo MODALE di conferma) — 18/09/2026: aggiunto
+  un bottone "Rimuovi selezionato" (disabilitato senza una selezione nella lista - un primo
+  assaggio di F3.1.6, "controlli disabilitati", non l'intero punto) che apre un `QMessageBox`
+  costruito a mano (non la scorciatoia statica `QMessageBox.question()`, per poter dare
+  `objectName`/`accessibleName` espliciti ai suoi due bottoni PRIMA di mostrarlo) chiedendo
+  conferma - l'elemento sparisce solo se il bottone cliccato per davvero e' "Sì"
+  (`clickedButton()`, mai dedotto da una chiusura qualsiasi del dialogo). Motivazione: un
+  dialogo modale e' esattamente l'ostacolo che F3.4.7 dichiara gia' esplicitamente
+  ("gestire dialoghi modali e focus change come eventi, non sleep fissi") - averlo nella fixture
+  fin da ora da' a quel futuro incremento un bersaglio pronto, invece di scoprire il problema
+  solo quando l'executor semantico ci arrivera' davvero. "No" e' il bottone di default (stesso
+  principio "nessun effetto distruttivo per default" gia' seguito da `DeletePathSkill` nel resto
+  del progetto - un Invio distratto non deve mai cancellare nulla). Prova: 10 test nuovi in
+  `tests/test_computer_use_fixture.py` - inclusi 3 che pilotano il dialogo VERAMENTE modale
+  (`QMessageBox.exec()` blocca in una propria coda di eventi) con un `QTimer.singleShot(0, ...)`
+  schedulato PRIMA di aprirlo per cliccarne un bottone, lo stesso idioma standard Qt per testare
+  un modale senza bloccare il test runner per sempre - verificato sia il "Sì" che rimuove solo
+  l'elemento selezionato (mai altri elementi presenti) sia il "No" che non cambia nulla. Verifica
+  manuale aggiuntiva: `python -m benchmarks.computer_use_fixture --auto-close-after 2` termina
+  pulito (exit code 0), nessuna eccezione all'avvio con il nuovo codice del dialogo.
+  2.896/2.896 test, ruff verde.
 
 ### F3.2 — Windows UI Automation adapter
 
