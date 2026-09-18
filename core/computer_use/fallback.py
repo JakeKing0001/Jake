@@ -39,9 +39,7 @@ alla volta" di questa sessione):
 - F3.5.4 (non ricliccare un'azione non idempotente sui retry - questo modulo tenta ogni strategia
   una volta sola in ordine, mai un retry della STESSA strategia, gia' prima di questo incremento);
 - F3.5.5 (pixel diff come evidenza debole - la verifica qui e' quella fornita dal chiamante,
-  tipicamente uno stato applicativo vero come nella fixture, non un pixel diff);
-- F3.5.7 (conservare il resource lock durante il cambio strategia - nessun collegamento a
-  `core/resource_lock.py` ancora).
+  tipicamente uno stato applicativo vero come nella fixture, non un pixel diff).
 
 `unsafe_after_failure` (F3.5.6, "fermarsi con diagnosi quando un ulteriore tentativo e' troppo
 rischioso", adozione motivata dal buco di poisoning trovato sopra): un marcatore OPZIONALE per
@@ -56,9 +54,27 @@ sopra), ma trasforma un fallimento silenzioso e fuorviante ("nessuna strategia h
 senza dire perche' le successive non sono nemmeno state provate) in una diagnosi esplicita
 (`FallbackAttempt.reason` nomina il rischio) che il chiamante puo' usare per decidere il prossimo
 passo (es. saltare direttamente al click pixel DA SOLO, come gia' fa
-`tests/test_computer_use_integration.py`, invece di scoprire la corruzione tentando comunque)."""
+`tests/test_computer_use_integration.py`, invece di scoprire la corruzione tentando comunque).
+
+`resource_key`/`lock_manager` (F3.5.7, "conservare il resource lock durante il cambio strategia",
+adozione - prima connessione MAI fatta tra `core/computer_use/` e `core/resource_lock.py`,
+entrambi opzionali, `None` di default - retrocompatibile, nessun chiamante esistente modificato):
+se forniti ENTRAMBI, l'intera scala (ogni strategia tentata PIU' `verify()` dopo ciascuna) gira
+dentro un UNICO `ResourceLockManager.acquire_write(resource_key)`, acquisito una volta sola prima
+della prima strategia e rilasciato una volta sola dopo l'ultima - non riacquisito a ogni cambio di
+strategia. Motivazione concreta: la scala e' concettualmente UN'azione logica (raggiungere un esito
+verificato per un intento, non una sequenza di azioni indipendenti) - se il lock venisse rilasciato
+tra un tentativo e il successivo, un'altra azione concorrente sulla STESSA risorsa (es. un secondo
+passo dello stesso agente, o un'automazione in background) potrebbe intromettersi esattamente nella
+finestra piu' fragile gia' documentata sopra (dopo un tentativo fallito che ha potenzialmente
+lasciato lo stato a meta'), rendendo la corruzione ancora piu' difficile da diagnosticare. Fornire
+UN SOLO dei due (solo `resource_key` senza `lock_manager` o viceversa) solleva `ValueError` invece
+di ignorare silenziosamente l'intento del chiamante di voler bloccare la risorsa."""
 from dataclasses import dataclass
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
+
+if TYPE_CHECKING:
+    from core.resource_lock import ResourceLockManager
 
 
 @dataclass(frozen=True)
@@ -91,6 +107,9 @@ class FallbackOutcome:
 def try_strategies_in_order(
     strategies: list[tuple[str, Callable[[], None]] | tuple[str, Callable[[], None], bool]],
     verify: Callable[[], bool],
+    *,
+    resource_key: str | None = None,
+    lock_manager: "ResourceLockManager | None" = None,
 ) -> FallbackOutcome:
     """F3.5.1 (nucleo): tenta ogni strategia IN ORDINE (la lista e' gia' nell'ordine di
     preferenza dichiarato dal chiamante - questa funzione non ne conosce la semantica, solo
@@ -106,7 +125,23 @@ def try_strategies_in_order(
     docstring del modulo, default `False` se omesso - retrocompatibile con le tuple a due elementi
     gia' in uso): se la strategia cosi' marcata ESEGUE senza sollevare ma `verify()` non conferma,
     la scala si ferma li' invece di tentare le successive alla cieca su un bersaglio potenzialmente
-    gia' corrotto da questo stesso tentativo."""
+    gia' corrotto da questo stesso tentativo.
+
+    `resource_key`/`lock_manager` (F3.5.7, vedi il docstring del modulo): se forniti ENTRAMBI,
+    l'intera esecuzione (tutte le strategie tentate PIU' `verify()`) gira dentro un unico
+    `acquire_write`, mai rilasciato e riacquisito tra una strategia e la successiva."""
+    if (resource_key is None) != (lock_manager is None):
+        raise ValueError("resource_key e lock_manager vanno forniti insieme, o nessuno dei due")
+    if resource_key is not None and lock_manager is not None:
+        with lock_manager.acquire_write(resource_key):
+            return _run_ladder(strategies, verify)
+    return _run_ladder(strategies, verify)
+
+
+def _run_ladder(
+    strategies: list[tuple[str, Callable[[], None]] | tuple[str, Callable[[], None], bool]],
+    verify: Callable[[], bool],
+) -> FallbackOutcome:
     attempts: list[FallbackAttempt] = []
     for entry in strategies:
         strategy_name, action, unsafe_after_failure = entry if len(entry) == 3 else (*entry, False)
