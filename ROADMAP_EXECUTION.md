@@ -4523,7 +4523,8 @@ Criterio di uscita: nessuna contaminazione di memoria o permesso tra profili nei
 
 ## 9. F3 — Computer Use Engine 3.0
 
-- Stato: `READY` (G1 superato il 16/09/2026, vedi Gate G1 sopra), mai iniziato
+- Stato: `DOING` (G1 superato il 16/09/2026, vedi Gate G1 sopra; F3.1.1 prima fetta avviata il
+  18/09/2026, vedi sotto)
 - Priorità: `P1`
 - Output: Jake controlla Windows per semantica, verifica il risultato e usa i pixel come fallback.
 
@@ -4539,6 +4540,39 @@ Dipende da: G0.
 6. `F3.1.6` Includere controlli ambigui, disabilitati e dinamici.
 
 Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app personali.
+
+- `F3.1.1` (prima fetta - solo campo di testo/bottoni/lista) — 18/09/2026: dopo la chiusura di
+  F1.5.8, l'utente ha confermato di voler restare su F1 fino a esaurimento, poi ("continua, fai tu
+  il resto, ti do' liberta' d'arbitrio") ha lasciato la scelta della fase successiva a questa
+  sessione - scelto F3 seguendo l'ordine gia' raccomandato dal documento stesso ("prossimo
+  incremento consigliato": DPAPI/Hello fatti, poi `ComputerAgent` su UI Automation prima
+  dell'HUD nativo/voce streaming). `benchmarks/computer_use_fixture.py::ComputerUseFixtureWindow`
+  (PySide6, gia' una dipendenza del progetto via `requirements/hud.txt` per l'HUD - limite
+  dichiarato: non rappresenta app Win32/WinForms/WPF reali, solo i meccanismi generici di
+  selezione/interazione che F3.2+ dovra' costruire): un campo di testo, due bottoni ("Aggiungi"/
+  "Reset"), una lista - ciascun controllo con `objectName`/`accessibleName` ESPLICITI (mai il
+  default Qt, non stabile), perche' F3.2.3 ("esporre role, name, automation id...") dovra' poterli
+  trovare per nome. `reset_state()` (F3.1.3) riporta tutto allo stato iniziale; `_add_current_text`
+  e' il primo di dieci task dichiarati da F3.1.2 (gli altri nove restano un passo successivo).
+  Verificato DAVVERO, non solo scritto: lanciata la finestra in un processo separato
+  (`python -m benchmarks.computer_use_fixture --auto-close-after N`), confermata visibile tramite
+  `core/vision/screen.py::list_open_window_titles()` (gia' esistente, usato da
+  `DesktopContextTracker`), catturato uno screenshot reale con `capture_screenshot()` e ispezionato
+  visivamente - titolo/campo/bottoni/lista renderizzano correttamente - e confermata la chiusura
+  automatica dopo il timeout. Deliberatamente NON affrontati qui, passi successivi dichiarati:
+  resto di `F3.1.1` (dialog/tree/tabs/scrolling), `F3.1.2` (9 task restanti), `F3.1.5`
+  (DPI/multi-monitor/temi), `F3.1.6` (controlli ambigui/disabilitati/dinamici) - e l'intera `F3.2`
+  (`UIAutomationAdapter`, ancora da costruire: oggi nessun codice legge questa fixture tramite UI
+  Automation, solo tramite `list_items()` in-processo, un ripiego dichiarato onesto per verificare
+  la fixture stessa). Prova: 11 test nuovi in `tests/test_computer_use_fixture.py` (nomi di
+  automazione stabili su ogni controllo, stato iniziale vuoto, click simulati con `QTest.
+  mouseClick` - un evento Qt vero sul bottone, non una chiamata diretta al metodo - per
+  aggiungere/azzerare, campo vuoto/solo spazi non aggiunge nulla), stesso schema gia' usato da
+  `tests/test_hud_widgets.py` per i widget Qt esistenti (QApplication condivisa, mai una finestra
+  mostrata nei test). 2.886/2.886 test, ruff verde (`benchmarks/` non e' nel set selettivo mypy,
+  stesso trattamento gia' riservato a `bench_nlu.py`/`bench_agent.py`/`bench_computer_use.py`/
+  `bench_stt.py` - i benchmark restano deliberatamente fuori dai controlli stretti di CI, vedi
+  `benchmarks/README.md`).
 
 ### F3.2 — Windows UI Automation adapter
 
