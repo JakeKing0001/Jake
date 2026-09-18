@@ -7,7 +7,14 @@ ripiego che passa da UI Automation a un click reale quando il primo non ha un ef
 il buco di SelectionItem su QListWidgetItem trovato in F3.4), un'attesa a polling per il dialogo
 modale invece di uno sleep fisso (F3.4.7, adozione via `SelectorEngine.wait_for_unique_element`),
 e l'executor per invocare i bottoni (F3.4). ZERO `time.sleep()` fissi in tutto il flusso - solo
-attese con timeout che si fermano appena la condizione e' vera."""
+attese con timeout che si fermano appena la condizione e' vera.
+
+`ChangeTabAndToggleEndToEndTests` completa Task 4/10 ("cambia tab e spunta l'opzione") - a
+differenza di Task 2, qui non serve alcuna scala di ripiego: sia `select()` su un `TabItem`
+(F3.4, verificato affidabile con la prova indipendente del checkbox raggiungibile) sia `toggle()`
+(F3.4.1) funzionano gia' in modo affidabile via UI Automation pura - questo test li combina in
+un unico flusso end-to-end DAVVERO guidato dall'esterno, invece di restare due fatti verificati
+separatamente in `tests/test_executor.py`."""
 import subprocess
 import sys
 import time
@@ -103,6 +110,53 @@ class RemoveWithConfirmationEndToEndTests(unittest.TestCase):
             time.sleep(0.05)
             remaining = self.engine.find_all(self.window, ElementSelector(name="elemento di prova"))
         self.assertEqual(remaining, [], "l'elemento deve essere davvero rimosso, non solo il dialogo chiuso")
+
+
+class ChangeTabAndToggleEndToEndTests(unittest.TestCase):
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_switching_tab_then_toggling_the_option_completes_for_real(self):
+        # Cambiare tab: SelectionItem su un TabItem funziona davvero (F3.4, a differenza del
+        # QListWidgetItem di Task 2) - nessuna scala di ripiego necessaria qui.
+        tab_two = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 2", control_type="TabItem"))
+        self.executor.select(tab_two)
+
+        tab_one_after = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 1", control_type="TabItem"))
+        tab_two_after = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 2", control_type="TabItem"))
+        self.assertFalse(self.adapter.describe_element(tab_one_after).selected)
+        self.assertTrue(self.adapter.describe_element(tab_two_after).selected)
+
+        # Il checkbox "Opzione" vive nella tab 2 - raggiungibile via UI Automation solo perche' la
+        # tab e' DAVVERO cambiata a livello Qt (la stessa prova indipendente gia' usata in F3.4:
+        # se select() avesse solo "riportato" successo senza un effetto reale, come per
+        # SelectionItem su un QListWidgetItem, questo elemento non sarebbe qui a essere trovato).
+        checkbox = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Opzione", control_type="CheckBox"))
+        self.assertEqual(self.adapter.describe_element(checkbox).toggle_state, "off")
+
+        self.executor.toggle(checkbox)
+
+        checkbox_after = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Opzione", control_type="CheckBox"))
+        self.assertEqual(
+            self.adapter.describe_element(checkbox_after).toggle_state, "on",
+            "il checkbox deve essere davvero spuntato, non solo la chiamata COM non sollevata",
+        )
 
 
 if __name__ == "__main__":

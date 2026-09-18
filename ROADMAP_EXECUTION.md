@@ -5198,6 +5198,26 @@ Criterio di uscita: ogni fallback è osservabile e non produce duplicazioni nei 
   altrove, dichiarato onesto invece di assunto in nessuna delle due direzioni). Prova: 2 test nuovi
   in `tests/test_executor.py::WindowPatternTests`. 2.975/2.975 test, ruff verde.
 
+- `F3.1.2` (Task 4/10 completato end-to-end - "cambia tab e spunta l'opzione") — 18/09/2026: nuovo
+  `ChangeTabAndToggleEndToEndTests` in `tests/test_computer_use_integration.py`, secondo task
+  della fixture completato DAVVERO end-to-end dopo Task 2/10 (F3.4.7). A differenza di Task 2, qui
+  NON serve alcuna scala di ripiego: sia `select()` su un `TabItem` sia `toggle()` sono gia'
+  verificati affidabili via UI Automation pura (F3.4) - questo incremento li combina in un unico
+  flusso guidato DAVVERO dall'esterno, invece di restare due fatti verificati separatamente in
+  `tests/test_executor.py`. Stessa prova indipendente forte gia' usata in F3.4: il checkbox
+  "Opzione" e' raggiungibile via UI Automation SOLO perche' la tab e' davvero cambiata a livello
+  Qt (se `select()` avesse solo "riportato" successo senza un effetto reale, come per
+  `SelectionItem` su un `QListWidgetItem`, l'elemento non sarebbe li' da trovare).
+
+  **Bilancio dei 10 task dichiarati da F3.1.2**: Task 1 (F3.4.1, "aggiungi") e Task 2 (F3.4.7,
+  "rimuovi con conferma") gia' completati, Task 4 ("cambia tab e spunta") completato con questo
+  incremento - 3/10 ora verificati end-to-end. Task 3 ("espandi categoria") e Task 5 ("scorri e
+  seleziona l'ultima riga") restano bloccati dai buchi reali gia' documentati (ExpandCollapse
+  senza effetto, Scroll non disponibile su Qt) - completabili in un futuro incremento SOLO con una
+  vera strategia di ripiego a coordinate pixel (doppio click sul nodo dell'albero, rotellina del
+  mouse sulla lista), non ancora costruita. Task 6-10 non ancora nemmeno definiti nella fixture
+  (dichiarato "passo successivo" fin da F3.1.1). Prova: 1 test nuovo. 2.976/2.976 test, ruff verde.
+
 ### F3.6 — Browser adapter
 
 Dipende da: F1.5 e F3.5.
