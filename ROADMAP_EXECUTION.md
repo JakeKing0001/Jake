@@ -5058,6 +5058,28 @@ Criterio di uscita: ogni fallback è osservabile e non produce duplicazioni nei 
   strategia rischiosa, retrocompatibilita' del default, un'eccezione non attiva lo stop) + 1 test
   reale in `RealFixtureFallbackTests`. 2.967/2.967 test, ruff verde.
 
+- `F3.5.5` (usare pixel diff soltanto come evidenza debole) — 18/09/2026: nuovo campo
+  `ComputerActionResult.evidence` (`core/computer_agent.py`, vocabolario chiuso
+  `EVIDENCE_PIXEL_DIFF`/`EVIDENCE_NONE`) - rende esplicita la FONTE di `verified` invece di
+  lasciare che un futuro chiamante lo legga come equivalente a una verifica basata su stato reale
+  dell'app (quella costruita in `core/computer_use/`, F3.2-F3.5, contro la fixture - es. leggere
+  se "Rimuovi selezionato" e' davvero abilitato). Un pixel diff e' un'evidenza DEBOLE in entrambe
+  le direzioni: ne' necessaria (un click puo' avere un effetto reale senza alcun cambiamento
+  visibile - gia' gestito onestamente da questa classe con `verified=False`) ne' sufficiente
+  (un'animazione indipendente dal click potrebbe far cambiare i pixel producendo un falso
+  positivo che questa classe non puo' distinguere da un vero successo) - `ComputerAgent` (a
+  differenza dell'intero filone F3.2-F3.5 di questa sessione) non legge MAI nulla dello stato
+  reale dell'applicazione, solo pixel.
+
+  `EVIDENCE_NONE` (non `EVIDENCE_PIXEL_DIFF`) quando nessun controllo e' davvero avvenuto (es. la
+  cattura schermo iniziale e' fallita) - onesto per costruzione, non un'evidenza indovinata per un
+  confronto mai fatto. Cambio additivo, retrocompatibile: `verified`/`change_ratio` non toccati,
+  nessun chiamante esistente (`skills/screen_click.py`, gia' verificato) modificato. Deliberatamente
+  NON affrontato qui: un collegamento che faccia effettivamente USARE questa distinzione a valle
+  (es. nel ledger o nella decisione dell'agente a passi) - oggi il campo e' solo informativo, lo
+  stesso principio "prima il meccanismo, poi l'adozione" di questa sessione. Prova: 3 test nuovi in
+  `tests/test_computer_agent.py::EvidenceStrengthTests`. 2.970/2.970 test, ruff verde.
+
 - `F3.4.7` (adozione - attesa a polling invece di sleep fissi) — **CAPSTONE: Task 2/10 di F3.1.2
   ("rimuovi con conferma") completato per DAVVERO end-to-end, la prima volta in questo intero
   filone di lavoro** — 18/09/2026: nuovo `SelectorEngine.wait_for_unique_element()`

@@ -12,11 +12,30 @@ onestamente "non verificato" e lasciare che sia l'agente a decidere il prossimo 
 
 Oggi copre solo il click (la parte piu' soggetta ad ambiguita': coordinate leggermente fuori
 bersaglio, bottoni disabilitati); digitazione e scorrimento restano skill isolate (TYPE_TEXT,
-PRESS_KEY, SCROLL) e sono un possibile prossimo passo di questa fase."""
+PRESS_KEY, SCROLL) e sono un possibile prossimo passo di questa fase.
+
+`evidence` (F3.5.5, "usare pixel diff soltanto come evidenza debole", adozione): `verified=True`
+qui viene SEMPRE da un pixel diff (`core/vision/screen_diff.py`), l'UNICO segnale disponibile a
+questa classe - a differenza della verifica basata su UI Automation costruita in `core/
+computer_use/` (F3.2-F3.5) contro la fixture (es. leggere se il bottone "Rimuovi selezionato" e'
+davvero abilitato), un pixel diff non legge NULLA dello stato reale dell'applicazione, solo se i
+pixel sullo schermo sono cambiati. E' un'evidenza DEBOLE in entrambe le direzioni: ne' necessaria
+(un click puo' avere un effetto reale senza alcun cambiamento visibile, es. un link verso una
+pagina gia' aperta - gia' gestito da questa classe, che riporta onestamente `verified=False` senza
+far fallire il click) ne' sufficiente (un cursore che lampeggia, un orologio che avanza, una
+qualunque animazione indipendente dal click potrebbero far cambiare i pixel senza che il click
+abbia avuto l'effetto voluto - un falso positivo che questa classe non puo' distinguere da un vero
+successo). Il campo rende esplicita la FONTE della verifica invece di lasciare che un futuro
+chiamante legga `verified=True` come se fosse equivalente a una verifica basata su stato reale
+dell'app - non lo e' mai, in questa classe."""
 import time
 from dataclasses import dataclass
 
 POST_ACTION_SETTLE_SECONDS = 0.4
+
+# F3.5.5: vocabolario chiuso per ComputerActionResult.evidence - vedi il docstring del modulo.
+EVIDENCE_PIXEL_DIFF = "pixel_diff"
+EVIDENCE_NONE = "none"
 
 
 @dataclass
@@ -28,6 +47,9 @@ class ComputerActionResult:
     verified: bool = False
     change_ratio: float = 0.0
     error: str | None = None
+    # F3.5.5: EVIDENCE_NONE quando nessun controllo e' stato possibile (es. la cattura schermo
+    # iniziale e' fallita) - mai EVIDENCE_PIXEL_DIFF per un controllo che non e' davvero avvenuto.
+    evidence: str = EVIDENCE_NONE
 
 
 class ComputerAgent:
@@ -71,15 +93,17 @@ class ComputerAgent:
         except Exception:
             return ComputerActionResult(success=False, error="OPERATION_FAILED")
 
-        verified, ratio = False, 0.0
+        verified, ratio, evidence = False, 0.0, EVIDENCE_NONE
         if before is not None:
             try:
                 time.sleep(POST_ACTION_SETTLE_SECONDS)
                 after = capture_screenshot_image()
                 ratio = pixel_change_ratio(before, after)
                 verified = screen_visibly_changed(before, after)
+                evidence = EVIDENCE_PIXEL_DIFF
             except Exception:
                 pass
         return ComputerActionResult(
             success=True, x=x, y=y, matched=matched, verified=verified, change_ratio=round(ratio, 4),
+            evidence=evidence,
         )
