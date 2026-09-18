@@ -36,16 +36,27 @@ alla volta" di questa sessione):
 - F3.5.1 (resto): solo due gradini della scala completa (UIA -> coordinate pixel) - "API/app
   adapter" e "browser DOM" non hanno ancora nulla da collegare (F3.6/F3.7 non iniziate), "OCR"/
   "vision" non ancora inseriti come gradini intermedi tra UIA e le coordinate pixel grezze;
-- F3.5.4 (non ricliccare un'azione non idempotente sui retry - questo modulo non ha ancora
-  nessuna nozione di idempotenza, tenta ogni strategia una volta sola in ordine, mai un retry
-  della STESSA strategia - e non affronta nemmeno il problema IMPARENTATO appena trovato sopra,
-  una strategia fallita che corrompe lo stato per la successiva);
+- F3.5.4 (non ricliccare un'azione non idempotente sui retry - questo modulo tenta ogni strategia
+  una volta sola in ordine, mai un retry della STESSA strategia, gia' prima di questo incremento);
 - F3.5.5 (pixel diff come evidenza debole - la verifica qui e' quella fornita dal chiamante,
   tipicamente uno stato applicativo vero come nella fixture, non un pixel diff);
-- F3.5.6 (fermarsi con diagnosi quando un ulteriore tentativo e' troppo rischioso - nessuna
-  valutazione di rischio qui, ogni strategia data viene tentata);
 - F3.5.7 (conservare il resource lock durante il cambio strategia - nessun collegamento a
-  `core/resource_lock.py` ancora)."""
+  `core/resource_lock.py` ancora).
+
+`unsafe_after_failure` (F3.5.6, "fermarsi con diagnosi quando un ulteriore tentativo e' troppo
+rischioso", adozione motivata dal buco di poisoning trovato sopra): un marcatore OPZIONALE per
+STRATEGIA (terzo elemento della tupla, `False` di default - retrocompatibile con le tuple a due
+elementi gia' in uso da ogni chiamante esistente) - quando la strategia cosi' marcata ESEGUE senza
+sollevare ma `verify()` non conferma un effetto reale, la scala si FERMA li', senza tentare le
+strategie successive, invece di incatenare alla cieca un altro tentativo su un bersaglio che questa
+stessa strategia potrebbe aver gia' corrotto (esattamente il buco concreto documentato sopra -
+UIA `select()` fallito seguito da un click pixel altrimenti affidabile che smette di funzionare).
+Non RISOLVE il buco (nessun modo noto di recuperare lo stato una volta corrotto - dichiarato onesto
+sopra), ma trasforma un fallimento silenzioso e fuorviante ("nessuna strategia ha funzionato",
+senza dire perche' le successive non sono nemmeno state provate) in una diagnosi esplicita
+(`FallbackAttempt.reason` nomina il rischio) che il chiamante puo' usare per decidere il prossimo
+passo (es. saltare direttamente al click pixel DA SOLO, come gia' fa
+`tests/test_computer_use_integration.py`, invece di scoprire la corruzione tentando comunque)."""
 from dataclasses import dataclass
 from typing import Callable
 
@@ -78,7 +89,8 @@ class FallbackOutcome:
 
 
 def try_strategies_in_order(
-    strategies: list[tuple[str, Callable[[], None]]], verify: Callable[[], bool],
+    strategies: list[tuple[str, Callable[[], None]] | tuple[str, Callable[[], None], bool]],
+    verify: Callable[[], bool],
 ) -> FallbackOutcome:
     """F3.5.1 (nucleo): tenta ogni strategia IN ORDINE (la lista e' gia' nell'ordine di
     preferenza dichiarato dal chiamante - questa funzione non ne conosce la semantica, solo
@@ -88,9 +100,16 @@ def try_strategies_in_order(
     QUELLA strategia (con il messaggio dell'eccezione come motivo, F3.5.2), non propagata - le
     strategie successive vengono comunque tentate. Se nessuna strategia riesce, `succeeded=False`
     con tutti i tentativi registrati, mai un'eccezione generica che nasconderebbe quali strategie
-    sono state provate e perche' sono fallite."""
+    sono state provate e perche' sono fallite.
+
+    Ogni tupla accetta un terzo elemento opzionale `unsafe_after_failure` (F3.5.6, vedi il
+    docstring del modulo, default `False` se omesso - retrocompatibile con le tuple a due elementi
+    gia' in uso): se la strategia cosi' marcata ESEGUE senza sollevare ma `verify()` non conferma,
+    la scala si ferma li' invece di tentare le successive alla cieca su un bersaglio potenzialmente
+    gia' corrotto da questo stesso tentativo."""
     attempts: list[FallbackAttempt] = []
-    for strategy_name, action in strategies:
+    for entry in strategies:
+        strategy_name, action, unsafe_after_failure = entry if len(entry) == 3 else (*entry, False)
         try:
             action()
         except Exception as exc:
@@ -99,7 +118,14 @@ def try_strategies_in_order(
         if verify():
             attempts.append(FallbackAttempt(strategy_name=strategy_name, succeeded=True))
             return FallbackOutcome(succeeded=True, attempts=tuple(attempts))
-        attempts.append(
-            FallbackAttempt(strategy_name=strategy_name, succeeded=False, reason="verifica fallita dopo l'azione")
-        )
+        reason = "verifica fallita dopo l'azione"
+        if unsafe_after_failure:
+            reason += (
+                " - scala interrotta qui (F3.5.6): questa strategia e' marcata rischiosa da "
+                "incatenare, il bersaglio potrebbe essere in uno stato che le strategie restanti "
+                "non possono piu' recuperare"
+            )
+        attempts.append(FallbackAttempt(strategy_name=strategy_name, succeeded=False, reason=reason))
+        if unsafe_after_failure:
+            break
     return FallbackOutcome(succeeded=False, attempts=tuple(attempts))

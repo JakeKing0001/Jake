@@ -5028,6 +5028,36 @@ Criterio di uscita: ogni fallback è osservabile e non produce duplicazioni nei 
   (pixel diff come evidenza debole), F3.5.6 (fermarsi con diagnosi quando rischioso), F3.5.7
   (resource lock durante il cambio strategia). 2.953/2.953 test, ruff verde.
 
+- `F3.5.6` (fermarsi con diagnosi quando un ulteriore tentativo e' troppo rischioso) —
+  18/09/2026: `try_strategies_in_order` accetta ora un terzo elemento OPZIONALE per strategia,
+  `unsafe_after_failure` (default `False`, retrocompatibile con ogni tupla a due elementi gia' in
+  uso - nessun chiamante esistente modificato) - quando la strategia cosi' marcata ESEGUE senza
+  sollevare ma `verify()` non conferma un effetto reale, la scala si FERMA li' invece di tentare
+  alla cieca le strategie successive su un bersaglio che questa stessa strategia potrebbe aver
+  gia' corrotto. Motivato dal buco di "poisoning" gia' trovato in F3.5 (`select()` UIA fallito che
+  corrompe anche un click pixel altrimenti affidabile sullo stesso elemento): prima di questo
+  incremento, incatenare quella coppia avrebbe comunque ESEGUITO il click pixel per poi scoprire
+  solo alla fine che non ha funzionato, senza mai spiegare perche' - ora si ferma dopo il primo
+  tentativo con una diagnosi esplicita nel `reason` (menziona F3.5.6) invece di un fallimento
+  silenzioso e fuorviante.
+
+  **Non risolve il buco** (nessun modo noto di recuperare lo stato una volta corrotto, dichiarato
+  onesto nel modulo docstring) - trasforma solo un esito confuso in uno diagnosticabile, cosi' il
+  chiamante puo' decidere di saltare direttamente al click pixel DA SOLO (come gia' fa
+  `tests/test_computer_use_integration.py`) invece di scoprire la corruzione tentando comunque.
+  Verificato contro la fixture VERA, non solo con finti: un nuovo test in
+  `RealFixtureFallbackTests` incatena deliberatamente `select()` UIA (marcato
+  `unsafe_after_failure`) seguito da `pixel_click` sullo STESSO `QListWidgetItem` - la stessa
+  coppia che il modulo documenta gia' come inaffidabile - e verifica che `pixel_click` non venga
+  nemmeno CHIAMATO dopo lo stop di sicurezza.
+
+  Deliberatamente NON affrontati qui: F3.5.4 (idempotenza sui RETRY della stessa strategia - resta
+  un concetto diverso, gia' non riguardato da questo modulo prima di questo incremento), F3.5.5
+  (pixel diff come evidenza debole), F3.5.7 (resource lock durante il cambio strategia). Prova: 3
+  test deterministici nuovi in `tests/test_fallback.py::TryStrategiesInOrderTests` (stop dopo una
+  strategia rischiosa, retrocompatibilita' del default, un'eccezione non attiva lo stop) + 1 test
+  reale in `RealFixtureFallbackTests`. 2.967/2.967 test, ruff verde.
+
 - `F3.4.7` (adozione - attesa a polling invece di sleep fissi) — **CAPSTONE: Task 2/10 di F3.1.2
   ("rimuovi con conferma") completato per DAVVERO end-to-end, la prima volta in questo intero
   filone di lavoro** — 18/09/2026: nuovo `SelectorEngine.wait_for_unique_element()`
