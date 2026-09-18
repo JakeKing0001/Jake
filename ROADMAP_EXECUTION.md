@@ -4779,6 +4779,25 @@ Criterio di uscita: dump semantico stabile della fixture e di cinque app reali s
   `bench_stt.py` per la trascrizione vocale - 1 delle 5 app reali del criterio di uscita
   completo di F3.2, verificata ma non automatizzata.
 
+- `F3.2` (seconda app reale verificata a mano - 2/5; misurata anche la latenza, risposta a F3.2.7)
+  — 18/09/2026: Paint (Windows 11, WinUI3), lanciato controllando prima il titolo ("Senza titolo
+  - Paint", una tela vuota - nessuna sessione precedente ripristinata, stessa cautela imparata da
+  Blocco note sopra). Camminato l'intero albero (124 elementi - barra multifunzione, strumenti di
+  disegno, pulsanti di ritaglio/rotazione/capovolgimento) senza un solo crash, `CropButton`
+  correttamente disabilitato (nessuna selezione da ritagliare su una tela vuota).
+
+  **Misurata anche la latenza** (mai assunta): `describe_tree` su Calcolatrice (74 elementi) ~64-
+  90ms, su Paint (124 elementi) ~154ms - circa 1ms per elemento, con proprieta' lette dal vivo
+  (F3.2.2, la cache, non ancora costruita). Abbastanza veloce per un'azione interattiva di un
+  agente (lo stesso ordine di grandezza o piu' veloce della pipeline screenshot+OCR gia' misurata
+  da `benchmarks/bench_computer_use.py`) - **risponde concretamente a F3.2.7** ("valutare COM
+  diretto vs helper C++ con benchmark"): con questi numeri, un helper C++ risolverebbe un
+  problema di prestazioni che i dati reali non mostrano ancora esistere, non giustificato oggi.
+  F3.2.7 resta comunque aperto come voce dichiarata (una futura app con un albero molto piu'
+  grande, es. un browser con centinaia di elementi DOM, potrebbe cambiare questa conclusione - il
+  benchmark andrebbe ripetuto contro quel caso prima di dichiararlo chiuso per intero), ma la
+  prima evidenza raccolta punta verso "COM diretto basta", non verso "serve un helper".
+
 ### F3.3 — Selector engine
 
 Dipende da: F3.2.
