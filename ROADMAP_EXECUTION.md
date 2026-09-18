@@ -4986,6 +4986,48 @@ Dipende da: F3.4.
 
 Criterio di uscita: ogni fallback è osservabile e non produce duplicazioni nei fault test.
 
+- `F3.5.1`/`F3.5.2`/`F3.5.3` (prima fetta - meccanismo generico, motivato dal buco concreto di
+  SelectionItem trovato in F3.4) — 18/09/2026: nuovo `core/computer_use/fallback.py::
+  try_strategies_in_order`/`FallbackOutcome`/`FallbackAttempt` - tenta una lista di strategie IN
+  ORDINE (F3.5.1, oggi solo due gradini: UIA -> coordinate pixel), ri-osservando DOPO ogni
+  tentativo (F3.5.3, mai prima - lo stesso principio che ha trovato il buco di SelectionItem: una
+  chiamata "non sollevata" non e' prova di successo), registrando il motivo di OGNI scarto (F3.5.2,
+  non solo quale strategia ha funzionato). Un'eccezione da una strategia viene catturata e
+  registrata come fallimento di quella strategia, non propagata - le successive vengono comunque
+  tentate.
+
+  **Buco reale trovato USANDO il modulo per risolvere il caso concreto, non ipotizzato - piu'
+  insidioso del previsto**: la sequenza ovvia "prova SelectionItem via UIA, se non riesce prova un
+  click reale a coordinate pixel sullo STESSO elemento" NON basta contro un `QListWidgetItem`. Il
+  click pixel DA SOLO (mai preceduto da un tentativo UIA sullo stesso elemento) funziona in modo
+  affidabile, riverificato ripetutamente in questo incremento - ma se preceduto da una `Select()`
+  UIA gia' fallita, lo STESSO click pixel, sugli STESSI pixel, con successo dichiarato dal sistema
+  di input, smette di ottenere l'effetto reale (il bottone "Rimuovi selezionato" resta
+  disabilitato) - riprodotto piu' volte, anche provando un click su un punto neutro in mezzo per
+  "resettare" lo stato (non ha aiutato). Un tentativo UIA fallito lascia l'elemento in uno stato
+  che impedisce il RECUPERO anche a un fallback pixel-perfetto successivo - un problema DIVERSO e
+  piu' sottile di F3.5.4 ("non ricliccare la STESSA azione non idempotente"): qui e' una PRIMA
+  strategia fallita a corrompere lo stato per una SECONDA, diversa strategia. Dichiarato
+  esplicitamente come limite del caso specifico, non del meccanismo generico (che e' corretto e
+  verificato con strategie che non si "avvelenano" a vicenda).
+
+  Per il test end-to-end reale contro la fixture, usata deliberatamente una coppia di strategie
+  gia' verificata AFFIDABILE invece di quella "avvelenata" sopra: un selettore intenzionalmente
+  sbagliato (simula un selettore stale/non piu' corrispondente - un caso reale, non di comodo,
+  che solleva `NoMatchError` vera) seguito da un click pixel sull'elemento MAI toccato prima da
+  un tentativo UIA - dimostra la scala di ripiego che funziona per davvero, senza sovra-dichiarare
+  la risoluzione del caso "avvelenato" che resta un limite noto e dichiarato. Prova: 9 test nuovi
+  in `tests/test_fallback.py` (7 con finti deterministici per il meccanismo generico - ordine,
+  interruzione al primo successo, cattura eccezioni, tutte le strategie fallite, lista vuota,
+  verify chiamato DOPO l'azione; 2 con la fixture vera).
+
+  Deliberatamente NON affrontati qui, passi successivi dichiarati: F3.5.1 (resto - "API/app
+  adapter"/"browser DOM" senza nulla da collegare, F3.6/F3.7 non iniziate; "OCR"/"vision" non
+  ancora gradini intermedi), F3.5.4 (idempotenza sui retry - e il problema imparentato appena
+  trovato, una strategia fallita che corrompe lo stato per la successiva, ancora aperto), F3.5.5
+  (pixel diff come evidenza debole), F3.5.6 (fermarsi con diagnosi quando rischioso), F3.5.7
+  (resource lock durante il cambio strategia). 2.953/2.953 test, ruff verde.
+
 ### F3.6 — Browser adapter
 
 Dipende da: F1.5 e F3.5.
