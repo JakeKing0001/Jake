@@ -5064,6 +5064,38 @@ Criterio di uscita: ogni fallback è osservabile e non produce duplicazioni nei 
   fallisce SUBITO, non dopo il timeout intero) + 1 test capstone end-to-end. 2.958/2.958 test,
   ruff verde.
 
+- `F3.4.5` (produrre un `ActionReceipt` con elemento target e pattern usato) — 18/09/2026: nuovo
+  `core/computer_use/executor.py::ElementActionReceipt` - ogni metodo pubblico di `ActionExecutor`
+  (`invoke`/`set_value`/`toggle`/`select`/`expand`/`collapse`/`scroll_to_bottom`/`scroll_to_top`,
+  prima tutti `-> None`) restituisce ora una ricevuta con l'azione, il pattern UI Automation usato
+  e l'identita' dell'elemento target (`name`/`automation_id`/`control_type`, letti con lo stesso
+  "onesto None" di `ElementInfo`, F3.2.3). Nome DELIBERATAMENTE diverso da
+  `core.action_ledger.ActionReceipt` (un oggetto piu' pesante - `trace_id`/`risk_decision`/
+  `authorization`/`idempotency_key`, i concetti giusti per una skill gia' AUTORIZZATA a livello di
+  `JakeCore`/`TaskAgent`/`PlanExecutor`, non per una singola chiamata di pattern dentro questo
+  executor, che non sa nulla di autorizzazione) - un futuro collegamento al ledger (non affrontato
+  qui) tradurrebbe questa ricevuta in un ingrediente dei metadati/result di quella, non la
+  sostituirebbe.
+
+  **Onesto per costruzione**: la ricevuta viene costruita solo DOPO che `_require_enabled`/
+  `_require_pattern` sono gia' passati e viene restituita solo se la chiamata al pattern COM non
+  solleva - un fallimento continua a propagarsi come `ElementNotInteractableError` esattamente
+  come prima di questo incremento, mai una ricevuta con un campo "riuscito=False" inventato al suo
+  posto (verificato con un test dedicato). La ricevuta NON e' pero' prova che l'azione abbia avuto
+  un effetto reale sull'app target - solo che quel pattern e' stato invocato su quell'elemento
+  senza errori COM: la trappola di SelectionItem gia' documentata sopra (la chiamata "riesce"
+  secondo UI Automation ma il bottone che dipende dallo stato VERO di Qt resta disabilitato) si
+  applica identica qui, dichiarato esplicitamente nel docstring invece di lasciarlo implicito. Il
+  testo digitato da `set_value` non e' incluso nella ricevuta (solo l'identita' dell'elemento
+  target) - evita per costruzione che una password o un dato sensibile digitato dall'utente finisca
+  in una ricevuta che potrebbe un giorno essere loggata (F3.6.7, non ancora affrontato).
+
+  Deliberatamente NON affrontati qui: il collegamento vero e proprio al ledger
+  (`core/action_ledger.py`), F3.4.2 (`ComputerAgent`), F3.4.3 (policy), F3.4.6 (idempotenza sui
+  retry). Prova: 5 test nuovi in `tests/test_executor.py::ActionReceiptTests` (pattern/elemento
+  corretti per Invoke, testo non incluso per Value, timestamp reale e recente, nessuna ricevuta
+  falsa su precondizione fallita, pattern corretto per Toggle). 2.963/2.963 test, ruff verde.
+
 ### F3.6 — Browser adapter
 
 Dipende da: F1.5 e F3.5.

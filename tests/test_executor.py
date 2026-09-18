@@ -7,7 +7,7 @@ trovato il buco reale documentato in ExpandCollapseKnownLimitationTests sotto.""
 import time
 import unittest
 
-from core.computer_use.executor import ActionExecutor, ElementNotInteractableError
+from core.computer_use.executor import ActionExecutor, ElementActionReceipt, ElementNotInteractableError
 from tests.test_ui_automation_adapter import _RealFixtureTestCase
 
 _SETTLE_SECONDS = 0.3
@@ -231,6 +231,65 @@ class ScrollKnownLimitationTests(_ExecutorFixtureTestCase):
         matches = self.adapter.find_matching_elements(self.window, name="Riga 30")
 
         self.assertEqual(matches, [], "una riga fuori vista non deve comparire nell'albero UI Automation")
+
+
+class ActionReceiptTests(_ExecutorFixtureTestCase):
+    """F3.4.5: ogni metodo pubblico restituisce ora un `ElementActionReceipt` invece di `None` -
+    CHI ha agito (l'elemento) e CON QUALE pattern, non che l'azione abbia avuto un effetto reale
+    (quello resta una responsabilita' del chiamante, vedi il docstring del modulo per la
+    trappola di SelectionItem che si applica identica qui)."""
+
+    def tearDown(self):
+        self._reset_fixture()
+
+    def test_invoke_returns_a_receipt_naming_the_invoke_pattern_and_the_real_element(self):
+        add_button = self._element(name="Aggiungi", control_type="Button")
+
+        receipt = self.executor.invoke(add_button)
+
+        self.assertIsInstance(receipt, ElementActionReceipt)
+        self.assertEqual(receipt.action, "invoke")
+        self.assertEqual(receipt.pattern, "Invoke")
+        self.assertEqual(receipt.element_name, "Aggiungi")
+        self.assertEqual(receipt.element_control_type, "Button")
+        self.assertTrue(receipt.element_automation_id.endswith("fixture_add_button"))
+
+    def test_set_value_returns_a_receipt_for_the_value_pattern_without_leaking_the_text(self):
+        input_field = self._element(automation_id="QApplication.jake_fixture_window.fixture_input")
+
+        receipt = self.executor.set_value(input_field, "un segreto qualunque")
+
+        self.assertEqual(receipt.action, "set_value")
+        self.assertEqual(receipt.pattern, "Value")
+        self.assertNotIn("un segreto qualunque", str(receipt))
+
+    def test_the_receipt_timestamp_is_a_real_recent_wall_clock_time(self):
+        add_button = self._element(name="Aggiungi", control_type="Button")
+        before = time.time()
+
+        receipt = self.executor.invoke(add_button)
+
+        self.assertGreaterEqual(receipt.ts, before)
+        self.assertLessEqual(receipt.ts, time.time())
+
+    def test_a_failed_precondition_raises_instead_of_returning_a_false_receipt(self):
+        """Nessuna ricevuta con un campo 'riuscito=False' inventato - il fallimento resta
+        un'eccezione, esattamente come prima di questo incremento (F3.4.4)."""
+        remove_button = self._element(name="Rimuovi selezionato", control_type="Button")
+
+        with self.assertRaises(ElementNotInteractableError):
+            self.executor.invoke(remove_button)
+
+    def test_toggle_returns_a_receipt_for_the_toggle_pattern(self):
+        tab_two = self._element(name="Tab 2", control_type="TabItem")
+        self.executor.select(tab_two)
+        time.sleep(_SETTLE_SECONDS)
+        checkbox = self._element(name="Opzione", control_type="CheckBox")
+
+        receipt = self.executor.toggle(checkbox)
+
+        self.assertEqual(receipt.pattern, "Toggle")
+        self.assertEqual(receipt.element_name, "Opzione")
 
 
 if __name__ == "__main__":
