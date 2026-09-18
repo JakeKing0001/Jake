@@ -6,14 +6,16 @@ deterministico e ripetibile - mai un'app o un dato personale reale (criterio di 
 dichiarato dalla roadmap: "benchmark deterministico eseguibile senza toccare dati o app
 personali").
 
-Seconda fetta (rimuovere un elemento dietro un dialogo MODALE di conferma - lo stesso ostacolo
-che F3.4.7 dichiara esplicitamente, "gestire dialoghi modali e focus change come eventi, non
-sleep fissi"): aggiunta cosi' un bersaglio per modal dialog esiste GIA' prima che F3.4 debba
-gestirlo davvero, invece di scoprire il problema solo quando l'executor semantico arrivera' a
-quel punto. Stesso principio "un incremento alla volta" gia' seguito per tutta la fase F1 in
-questa sessione - deliberatamente NON affrontati qui, passi successivi dichiarati:
-- il resto di F3.1.1 (tree, tabs, scrolling - non ancora presenti);
-- F3.1.2 (8 dei 10 task rimangono - due dimostrati qui, "aggiungi" e "rimuovi con conferma");
+Terza fetta (un albero a due livelli, collassato per default - il pattern ExpandCollapse che
+F3.4.1 dichiara esplicitamente tra quelli da implementare, insieme a Selection): espandere una
+categoria e selezionare un figlio e' un compito che NESSUN altro controllo della fixture prova
+ancora (Selection da sola non basta: senza espandere prima, il nodo figlio non e' nemmeno nella
+"struttura visibile" che un selettore percettivo puo' trovare). Stesso principio "un incremento
+alla volta" gia' seguito per tutta la fase F1 in questa sessione - deliberatamente NON
+affrontati qui, passi successivi dichiarati:
+- il resto di F3.1.1 (tabs, scrolling - non ancora presenti);
+- F3.1.2 (7 dei 10 task rimangono - tre dimostrati qui: "aggiungi", "rimuovi con conferma",
+  "espandi e seleziona");
 - F3.1.5 (DPI, piu' monitor, finestre sovrapposte, temi diversi);
 - F3.1.6 (controlli ambigui e dinamici - i controlli DISABILITATI hanno gia' un primo assaggio
   col bottone "Rimuovi selezionato", disabilitato senza una selezione, ma non e' l'intero punto
@@ -30,8 +32,16 @@ import argparse
 import sys
 
 from PySide6.QtWidgets import (
-    QApplication, QHBoxLayout, QLineEdit, QListWidget, QMessageBox, QPushButton, QVBoxLayout, QWidget,
+    QApplication, QHBoxLayout, QLineEdit, QListWidget, QMessageBox, QPushButton, QTreeWidget,
+    QTreeWidgetItem, QVBoxLayout, QWidget,
 )
+
+# Terza fetta (albero): due categorie, due figli ciascuna - nomi stabili anche per i dati, non
+# solo per i controlli, cosi' un task puo' riferirsi a "Elemento A1" senza ambiguita'.
+_TREE_STRUCTURE = {
+    "Categoria A": ["Elemento A1", "Elemento A2"],
+    "Categoria B": ["Elemento B1", "Elemento B2"],
+}
 
 
 class ComputerUseFixtureWindow(QWidget):
@@ -49,7 +59,7 @@ class ComputerUseFixtureWindow(QWidget):
         super().__init__()
         self.setWindowTitle(self.WINDOW_TITLE)
         self.setObjectName("jake_fixture_window")
-        self.resize(360, 320)
+        self.resize(360, 480)
 
         self.input_field = QLineEdit()
         self.input_field.setObjectName("fixture_input")
@@ -77,6 +87,12 @@ class ComputerUseFixtureWindow(QWidget):
         self.item_list.setAccessibleName("Elenco elementi")
         self.item_list.itemSelectionChanged.connect(self._update_remove_button_enabled)
 
+        self.tree = QTreeWidget()
+        self.tree.setObjectName("fixture_tree")
+        self.tree.setAccessibleName("Struttura ad albero")
+        self.tree.setHeaderHidden(True)
+        self._populate_tree()
+
         buttons_row = QHBoxLayout()
         buttons_row.addWidget(self.add_button)
         buttons_row.addWidget(self.reset_button)
@@ -86,6 +102,7 @@ class ComputerUseFixtureWindow(QWidget):
         layout.addWidget(self.input_field)
         layout.addLayout(buttons_row)
         layout.addWidget(self.item_list)
+        layout.addWidget(self.tree)
 
     def _add_current_text(self) -> None:
         """Task 1/10 di F3.1.2 (gli altri 9 restano un passo successivo dichiarato): digitare un
@@ -98,12 +115,43 @@ class ComputerUseFixtureWindow(QWidget):
         self.item_list.addItem(text)
         self.input_field.clear()
 
+    def _populate_tree(self) -> None:
+        """Due categorie, due figli ciascuna, TUTTE collassate per default (`setExpanded(False)`
+        esplicito - il default Qt e' gia' collassato, ma dichiararlo qui rende lo stato iniziale
+        un fatto verificato, non un'assunzione sul comportamento di default della libreria). Il
+        NOME di ogni nodo (colonna 0) e' gia' cio' che UI Automation esporrebbe come Name di un
+        TreeItem - a differenza di un QWidget, un QTreeWidgetItem non e' un QObject e non ha un
+        proprio objectName da impostare, il testo visibile e' gia' l'unico identificatore stabile
+        (per questo i nomi in `_TREE_STRUCTURE` sono tutti diversi tra loro)."""
+        self.tree.clear()
+        for category_name, children in _TREE_STRUCTURE.items():
+            category_item = QTreeWidgetItem([category_name])
+            self.tree.addTopLevelItem(category_item)
+            for child_name in children:
+                category_item.addChild(QTreeWidgetItem([child_name]))
+            category_item.setExpanded(False)
+
+    def selected_tree_item_text(self) -> str | None:
+        """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()` - vedi li' per
+        il perche' non e' ancora un'osservazione vera tramite UI Automation)."""
+        current = self.tree.currentItem()
+        return current.text(0) if current is not None else None
+
+    def is_category_expanded(self, category_name: str) -> bool:
+        for i in range(self.tree.topLevelItemCount()):
+            item = self.tree.topLevelItem(i)
+            if item.text(0) == category_name:
+                return item.isExpanded()
+        raise ValueError(f"categoria sconosciuta: {category_name}")
+
     def reset_state(self) -> None:
         """F3.1.3: riporta la fixture allo stato iniziale - lo stesso stato ad ogni avvio di un
         nuovo task, cosi' un task non eredita mai residui lasciati da quello precedente."""
         self.item_list.clear()
         self.input_field.clear()
         self.remove_button.setEnabled(False)
+        self.tree.clearSelection()
+        self._populate_tree()
 
     def _update_remove_button_enabled(self) -> None:
         """Un piccolo assaggio anticipato di F3.1.6 ("controlli disabilitati"): senza una

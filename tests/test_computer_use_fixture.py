@@ -32,10 +32,13 @@ class AutomationPropertiesTests(unittest.TestCase):
         self.assertEqual(window.add_button.objectName(), "fixture_add_button")
         self.assertEqual(window.reset_button.objectName(), "fixture_reset_button")
         self.assertEqual(window.item_list.objectName(), "fixture_list")
+        self.assertEqual(window.tree.objectName(), "fixture_tree")
 
     def test_every_control_has_a_non_empty_accessible_name(self):
         window = ComputerUseFixtureWindow()
-        for widget in (window.input_field, window.add_button, window.reset_button, window.item_list):
+        for widget in (
+            window.input_field, window.add_button, window.reset_button, window.item_list, window.tree,
+        ):
             self.assertTrue(widget.accessibleName(), f"{widget.objectName()} non ha un accessibleName")
 
     def test_the_window_title_is_stable(self):
@@ -231,6 +234,70 @@ class RemoveWithConfirmationTests(unittest.TestCase):
         QTest.mouseClick(window.remove_button, Qt.LeftButton)
 
         self.assertEqual(window.list_items(), ["secondo"])
+
+
+class TreeInitialStateTests(unittest.TestCase):
+    """F3.4.1 (ExpandCollapse/Selection pattern): un albero a due livelli, TUTTE le categorie
+    collassate per default e nessuna selezione - lo stesso stato ogni volta che la fixture
+    riparte, non un'assunzione sul comportamento di default di Qt (verificato, non presunto)."""
+
+    def test_both_categories_start_collapsed(self):
+        window = ComputerUseFixtureWindow()
+        self.assertFalse(window.is_category_expanded("Categoria A"))
+        self.assertFalse(window.is_category_expanded("Categoria B"))
+
+    def test_nothing_is_selected_on_a_fresh_window(self):
+        window = ComputerUseFixtureWindow()
+        self.assertIsNone(window.selected_tree_item_text())
+
+    def test_an_unknown_category_name_raises_instead_of_silently_returning_false(self):
+        window = ComputerUseFixtureWindow()
+        with self.assertRaises(ValueError):
+            window.is_category_expanded("Categoria inesistente")
+
+
+class TreeExpandAndSelectTests(unittest.TestCase):
+    """Task 3/10 di F3.1.2: espandere 'Categoria A' e selezionare 'Elemento A1' - un compito che
+    richiede DAVVERO il pattern ExpandCollapse (il figlio non e' selezionabile/visibile finche'
+    il genitore resta collassato), non solo Selection da solo come per la lista."""
+
+    def _child_item(self, window: ComputerUseFixtureWindow, category_name: str, child_name: str):
+        for i in range(window.tree.topLevelItemCount()):
+            category = window.tree.topLevelItem(i)
+            if category.text(0) != category_name:
+                continue
+            for j in range(category.childCount()):
+                child = category.child(j)
+                if child.text(0) == child_name:
+                    return child
+        raise AssertionError(f"{child_name} non trovato sotto {category_name}")
+
+    def test_expanding_one_category_does_not_expand_the_other(self):
+        window = ComputerUseFixtureWindow()
+
+        window.tree.topLevelItem(0).setExpanded(True)
+
+        self.assertTrue(window.is_category_expanded("Categoria A"))
+        self.assertFalse(window.is_category_expanded("Categoria B"))
+
+    def test_selecting_a_child_after_expanding_its_category(self):
+        window = ComputerUseFixtureWindow()
+        window.tree.topLevelItem(0).setExpanded(True)
+        child = self._child_item(window, "Categoria A", "Elemento A1")
+
+        window.tree.setCurrentItem(child)
+
+        self.assertEqual(window.selected_tree_item_text(), "Elemento A1")
+
+    def test_reset_collapses_categories_and_clears_the_selection(self):
+        window = ComputerUseFixtureWindow()
+        window.tree.topLevelItem(0).setExpanded(True)
+        window.tree.setCurrentItem(self._child_item(window, "Categoria A", "Elemento A1"))
+
+        window.reset_state()
+
+        self.assertIsNone(window.selected_tree_item_text())
+        self.assertFalse(window.is_category_expanded("Categoria A"))
 
 
 if __name__ == "__main__":
