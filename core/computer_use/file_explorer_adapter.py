@@ -43,7 +43,19 @@ rilevante dal chrome circostante" gia' seguito per `find_page_document` (F3.6.1/
 shell di Windows, non un'etichetta tradotta). `list_files()` esclude quella con
 `automation_id="TabListView"` invece di cercare per nome (che fallirebbe in un Windows non
 italiano, lo stesso genere di buco gia' corretto per la barra degli indirizzi del browser,
-F3.6.5) - un'esclusione STRUTTURALE, non un'euristica sul testo."""
+F3.6.5) - un'esclusione STRUTTURALE, non un'euristica sul testo.
+
+**Sesto buco reale, trovato in CI dopo la pubblicazione, non ipotizzato**: i NOMI restituiti da
+`list_files()` possono includere o NON includere l'estensione del file (es. "documento1.txt"
+oppure solo "documento1"), a seconda di un'impostazione di sistema di Esplora File ("Nascondi le
+estensioni per i tipi di file conosciuti") - VERA di default su un'installazione Windows pulita
+(verificato: il runner CI mostrava i nomi SENZA estensione), FALSA su altre macchine (dove le
+estensioni sono visibili) - entrambi i comportamenti osservati per davvero, non un'assunzione su
+quale sia "normale". `list_files()` non normalizza questo - legge onestamente cio' che Esplora
+File mostra DAVVERO in quel momento su quella macchina, un chiamante che ha bisogno del nome file
+COMPLETO E AFFIDABILE (con estensione garantita) dovrebbe usare l'API del filesystem
+(`pathlib`/`os`), non questo adapter - la stessa distinzione gia' vista altrove in questo
+progetto tra "cio' che l'interfaccia MOSTRA" e "cio' che il sistema SA per certo"."""
 import subprocess
 import time
 from pathlib import Path

@@ -5732,6 +5732,21 @@ Criterio di uscita: cinque workflow reali completati in tre esecuzioni consecuti
   rete di sicurezza esplicita che verifica che NESSUN processo `explorer.exe` pre-esistente venga
   mai toccato). 3.025/3.025 test, ruff verde.
 
+- `F3.7.1` (fix di un fallimento REALE in CI, trovato dopo la pubblicazione - non ipotizzato) —
+  19/09/2026: i nomi restituiti da `list_files()` possono includere o NON includere l'estensione
+  del file (es. "documento1.txt" oppure solo "documento1"), a seconda di un'impostazione di
+  sistema di Esplora File ("Nascondi le estensioni per i tipi di file conosciuti") - VERA di
+  default su un'installazione Windows pulita (verificato: il runner CI mostrava i nomi SENZA
+  estensione), FALSA su questa macchina di sviluppo (dove le estensioni sono visibili) -
+  entrambi i comportamenti osservati per davvero, non un'assunzione su quale sia "normale".
+
+  `list_files()` NON e' stata cambiata - legge onestamente cio' che Esplora File mostra DAVVERO in
+  quel momento su quella macchina, un chiamante che ha bisogno del nome file COMPLETO e affidabile
+  dovrebbe usare l'API del filesystem, non questo adapter. Il test confrontava per uguaglianza
+  esatta ("documento1.txt"), un'assunzione implicita sbagliata sull'ambiente - corretto
+  confrontando solo il NOME BASE (`Path(f).stem`), indipendente da questa impostazione. 3.025/3.025
+  test in locale (dove le estensioni sono visibili, il test resta comunque corretto), ruff verde.
+
 ### F3.8 — Learn by demonstration
 
 Dipende da: F3.3, F3.4 e F5 procedural memory.
