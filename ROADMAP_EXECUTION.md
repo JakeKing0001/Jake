@@ -4531,7 +4531,8 @@ Criterio di uscita: nessuna contaminazione di memoria o permesso tra profili nei
   monitor/temi) non affrontata; F3.1.6 (controlli ambigui/disabilitati/dinamici) solo un assaggio
   via il bottone "Rimuovi selezionato" disabilitato, non l'intero punto; F3.2 [criterio
   "cinque app reali" soddisfatto - Calcolatrice/Paint/Esplora File/Edge/terminale, VS Code
-  investigato e trovato NON idoneo - resta aperto solo F3.2.2 meta'/F3.2.4/F3.2.5/F3.2.6/F3.2.7];
+  investigato e trovato NON idoneo, F3.2.7 chiuso con un benchmark vero e ripetibile - resta
+  aperto solo F3.2.2 meta'/F3.2.4/F3.2.5/F3.2.6];
   F3.3 [F3.3.1/F3.3.3/F3.3.4/F3.3.7 prima fetta/F3.3.2 prima fetta chiusi, resta F3.3.1 resto/
   F3.3.2 resto/F3.3.5/F3.3.6]; F3.4 chiusa per intero (F3.4.1-F3.4.7 tutti affrontati, F3.4.3
   collegamento a policy escluso); F3.5 chiusa per intero (F3.5.1-F3.5.7 tutti affrontati); F3.6
@@ -4833,6 +4834,35 @@ Criterio di uscita: dump semantico stabile della fixture e di cinque app reali s
   conta tra i 5 - il criterio e' comunque soddisfatto dalle altre cinque app sopra, non da VS Code.
   Prova: 1 test nuovo in `tests/test_terminal_adapter.py` + 1 test nuovo (canarino) in
   `tests/test_vscode_adapter.py`. 3.050/3.050 test, ruff verde.
+
+- `F3.2.7` (benchmark COM diretto vs helper C++ - risposta al caso esplicitamente lasciato aperto
+  in F3.2, "una futura app con un albero molto piu' grande... potrebbe cambiare questa
+  conclusione") — 19/09/2026: nuovo `benchmarks/bench_describe_tree.py`, un benchmark VERO e
+  RILANCIABILE (le due misure precedenti, Calcolatrice/Paint, erano manuali e usa-e-getta, non
+  salvate in un modulo) - sostituisce quelle con qualcosa di ripetibile e aggiunge il caso
+  esplicitamente lasciato aperto: un albero MOLTO piu' grande di un'app desktop nativa. Nuova
+  fixture LOCALE `benchmarks/browser_fixture_large.html` (una tabella con 300 righe, ~1.500
+  elementi DOM reali - nessuna dipendenza di rete, nessun sito reale, stesso principio delle altre
+  fixture browser di F3.6.1) aperta tramite `browser_adapter.launch_isolated_browser` gia'
+  verificato sicuro.
+
+  **Risultato reale, misurato due volte per verificare la ripetibilita' prima di fidarsene**: a
+  1.507 elementi (circa 20 volte Paint, il caso piu' grande gia' misurato), `describe_tree` ha
+  impiegato 0.77-0.94 ms per elemento - lo STESSO ordine di grandezza gia' trovato su Calcolatrice/
+  Paint (~1ms/elemento), NESSUN degrado non lineare all'aumentare della dimensione dell'albero.
+  Risponde alla domanda lasciata esplicitamente aperta: la conclusione "COM diretto basta, un
+  helper C++ non e' ancora giustificato" REGGE anche a un albero ~20 volte piu' grande, non solo
+  per le due app piccole gia' misurate.
+
+  **Una distinzione onesta pero'**: il tempo ASSOLUTO per l'albero grande (~1.2-1.4 SECONDI per
+  l'intera pagina) resta un problema reale di latenza interattiva, DIVERSO da "l'efficienza per
+  elemento e' scarsa" (che questo benchmark smentisce) - rinforza il valore gia' dichiarato di
+  F3.2.6 (limitare lo scope alla porzione di albero rilevante, non l'intera pagina/finestra) come
+  la vera leva per la latenza su alberi grandi, non un helper C++ per accelerare ogni singola
+  chiamata COM. Nessun file di report benchmark committato (gia' in `.gitignore`,
+  `benchmarks/results/`) - solo lo script e la fixture. Nessun test nuovo nella suite (i benchmark
+  restano deliberatamente fuori da `tests/`, stesso principio gia' dichiarato in
+  `benchmarks/_report.py`) - 3.050/3.050 test invariato, ruff verde.
 
 ### F3.3 — Selector engine
 
