@@ -31,6 +31,7 @@ import psutil
 
 from core.computer_use.terminal_adapter import (
     close_terminal_window,
+    describe_terminal_window,
     find_terminal_window,
     launch_isolated_terminal,
     read_terminal_text,
@@ -116,6 +117,22 @@ class RealTerminalTests(unittest.TestCase):
         text = read_terminal_text(self.adapter, window)
 
         self.assertIn(marker, text, "il buffer letto deve contenere l'output reale del comando, non solo il titolo")
+
+    def test_describe_terminal_window_produces_a_real_structured_dump_not_an_empty_one(self):
+        """F3.2 (criterio di uscita - "dump semantico stabile di cinque app reali"): a differenza
+        di VS Code (`tests/test_vscode_adapter.py`, un incremento successivo ha trovato che
+        `describe_tree` trova quasi nulla li'), `conhost.exe` e' un host di console LEGACY con un
+        provider di accessibilita' nativo completo - il dump deve contenere elementi REALI
+        (ScrollBar/Document), non solo la finestra vuota."""
+        title = self._distinctive_title("dump")
+        launch_isolated_terminal(title)
+
+        window = find_terminal_window(self.adapter, title, timeout_seconds=10.0)
+        tree = describe_terminal_window(self.adapter, window)
+
+        control_types = {child.control_type for child in tree.children}
+        self.assertIn("ScrollBar", control_types)
+        self.assertIn("Document", control_types)
 
 
 if __name__ == "__main__":

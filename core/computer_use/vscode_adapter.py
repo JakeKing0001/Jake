@@ -43,6 +43,25 @@ richiederebbe o abilitare `editor.accessibilitySupport` nel profilo isolato (non
 o leggere il file direttamente dal filesystem (che rinuncerebbe al punto di "osservare cio' che
 e' mostrato sullo schermo") - dichiarato onestamente NON RISOLTO, non nascosto.
 
+**Secondo buco reale, trovato in un incremento successivo (19/09/2026) mentre si valutava se
+aggiungere un "dump semantico" come gia' fatto per Esplora File/il browser/il terminale - PIU'
+ESTESO del previsto**: il limite di Monaco sopra non e' isolato all'editor - l'INTERA UI di VS
+Code (barra dei menu, barra delle schede, chrome custom) e' risultata QUASI COMPLETAMENTE
+invisibile a `UIAutomationAdapter.describe_tree` (il "control view" via `ControlViewWalker`),
+verificato non ipotizzato: un dump a profondita' 20 di una finestra reale ha trovato solo 5
+elementi con un nome (la finestra stessa, un pannello, e i tre bottoni Minimizza/Ingrandisci/
+Chiudi del chrome nativo) - nessuna voce di menu, nessuna scheda, nessun bottone della UI vera di
+VS Code. Coerente con l'avviso gia' noto di Monaco ("abilita la modalita' ottimizzata per screen
+reader") che probabilmente si applica all'INTERA applicazione Electron, non solo al componente
+editor - VS Code, come molte app Electron/React, disegna la propria UI su canvas/DOM interno e
+la espone a UI Automation solo se esplicitamente in "modalita' accessibilita'", diversamente da
+Edge (F3.6, dove `find_page_document` + un click "sveglia" l'albero di accessibilita' di Chromium
+per la PAGINA, un meccanismo diverso e gia' funzionante) e da Esplora File (controlli Win32
+nativi, sempre esposti). **Conseguenza pratica**: questo modulo NON offre (e non offrirebbe oggi
+un dump utile se lo facesse) una funzione `describe_*window` per VS Code, a differenza di Esplora
+File (`list_files`)/terminale (aggiunto in un incremento successivo) - dichiarato onestamente come
+limite noto invece di spedire una capacita' che produrrebbe quasi sempre un albero vuoto.
+
 Deliberatamente NON affrontati qui, passi successivi dichiarati (stesso principio "un incremento
 alla volta" di questa sessione):
 - Impostazioni (vedi sopra, rimandata per un rischio di sicurezza verificato);

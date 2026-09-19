@@ -154,3 +154,19 @@ def read_terminal_text(adapter: UIAutomationAdapter, window) -> str:
         return text_pattern.DocumentRange.GetText(-1)
     except (ValueError, comtypes.COMError) as exc:
         raise TerminalTextNotFoundError(f"lettura TextPattern fallita: {exc}") from exc
+
+
+def describe_terminal_window(adapter: UIAutomationAdapter, window):
+    """F3.2 (criterio di uscita - "dump semantico stabile... di cinque app reali supportate"):
+    un semplice passaggio a `UIAutomationAdapter.describe_tree` - nessuna logica in piu', il
+    valore di questa funzione e' la PROVA (vedi `tests/test_terminal_adapter.py`) che il dump
+    prodotto per `conhost.exe` e' davvero STABILE e UTILE (contiene `ScrollBar`/`MenuBar`/
+    `Document`, gli stessi elementi reali gia' usati da `read_terminal_text`), a differenza di
+    VS Code (F3.7.1 - un incremento successivo ha trovato che l'INTERA UI di VS Code, non solo
+    l'editor Monaco, e' quasi del tutto invisibile allo stesso `describe_tree`, vedi il docstring
+    di `vscode_adapter.py` - deliberatamente NESSUNA funzione equivalente offerta li', per non
+    spedire una capacita' che produrrebbe quasi sempre un albero vuoto). `conhost.exe` e' un host
+    di console LEGACY (non Electron/Chromium) con un provider di accessibilita' nativo completo -
+    la stessa differenza gia' vista tra Esplora File (controlli Win32 nativi, dump completo) e
+    VS Code (UI custom-disegnata, dump quasi vuoto)."""
+    return adapter.describe_tree(window, max_depth=10)

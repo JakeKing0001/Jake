@@ -75,6 +75,35 @@ class RealVSCodeTests(unittest.TestCase):
         self.assertEqual(closed_pid, window_pid)
         self.assertFalse(psutil.pid_exists(window_pid), "il processo della finestra deve essere davvero terminato - close_vscode_window attende gia' la conferma")
 
+    def test_describe_tree_finds_almost_nothing_a_known_limitation_not_a_silent_regression(self):
+        """Buco reale trovato in un incremento successivo (vedi il docstring del modulo): l'INTERA
+        UI di VS Code, non solo l'editor Monaco, e' quasi del tutto invisibile al "control view" di
+        UI Automation - un dump a profondita' 20 trova solo la finestra/un pannello/i tre bottoni
+        del chrome nativo, nessuna voce di menu ne' scheda. Questo test codifica ESATTAMENTE il
+        comportamento oggi osservato come un CANARINO, non un risultato ignorato (stesso principio
+        gia' seguito da `ExpandCollapseKnownLimitationTests`, F3.4): se una futura versione di VS
+        Code migliorasse il supporto accessibilita' per default, questo test fallirebbe (trovando
+        PIU' di 5 elementi con nome) e andrebbe aggiornato, invece di lasciare che il limite resti
+        silenziosamente sotto-documentato per sempre."""
+        window = find_vscode_window(self.adapter, self.file_path.name, timeout_seconds=15.0)
+
+        tree = self.adapter.describe_tree(window, max_depth=20)
+        named = []
+
+        def collect(node):
+            if node.name:
+                named.append(node.name)
+            for child in node.children:
+                collect(child)
+
+        collect(tree)
+
+        self.assertLessEqual(
+            len(named), 6,
+            "se questo fallisce, l'accessibilita' di VS Code e' probabilmente migliorata - "
+            "aggiornare questo test E valutare se costruire un describe_vscode_window() reale",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4523,10 +4523,23 @@ Criterio di uscita: nessuna contaminazione di memoria o permesso tra profili nei
 
 ## 9. F3 — Computer Use Engine 3.0
 
-- Stato: `DOING` (G1 superato il 16/09/2026, vedi Gate G1 sopra; F3.1.1 chiusa per intero e
-  F3.2.1/F3.2.3 avviata - prima fetta con adapter vero e due buchi reali corretti - il 18/09/2026,
-  vedi sotto - resta aperto: F3.1.2 [5/10 task], F3.1.5, F3.1.6, il resto di F3.2 [F3.2.2 meta'/
-  F3.2.4-7 e il supporto a 5 app reali])
+- Stato: `DOING` (G1 superato il 16/09/2026, vedi Gate G1 sopra - riga NON aggiornata dal 18/09/2026
+  fino al 19/09/2026, quando questo incremento l'ha ricalcolata leggendo l'intera sezione invece di
+  fidarsi del riepilogo stantio: F3.1.1 chiusa per intero; F3.1.2 [4/10 task completati end-to-end
+  (1/2/4/5), Task 3 INDAGATO ma bloccato da un limite Qt reale (ExpandCollapse senza effetto,
+  nessuna strategia di ripiego trovata), Task 6-10 mai definiti nella fixture]; F3.1.5 (DPI/multi-
+  monitor/temi) non affrontata; F3.1.6 (controlli ambigui/disabilitati/dinamici) solo un assaggio
+  via il bottone "Rimuovi selezionato" disabilitato, non l'intero punto; F3.2 [criterio
+  "cinque app reali" soddisfatto - Calcolatrice/Paint/Esplora File/Edge/terminale, VS Code
+  investigato e trovato NON idoneo - resta aperto solo F3.2.2 meta'/F3.2.4/F3.2.5/F3.2.6/F3.2.7];
+  F3.3 [F3.3.1/F3.3.3/F3.3.4/F3.3.7 prima fetta/F3.3.2 prima fetta chiusi, resta F3.3.1 resto/
+  F3.3.2 resto/F3.3.5/F3.3.6]; F3.4 chiusa per intero (F3.4.1-F3.4.7 tutti affrontati, F3.4.3
+  collegamento a policy escluso); F3.5 chiusa per intero (F3.5.1-F3.5.7 tutti affrontati); F3.6
+  avviata (F3.6.1/F3.6.2 resto/F3.6.3/F3.6.5/F3.6.7 prima fetta fatti, resta F3.6.4/F3.6.6/F3.6.7
+  resto, solo Edge); F3.7 avviata (Esplora File/browser/VS Code/terminale fatti, Impostazioni/
+  Office/media rimandati per un rischio verificato o una privacy non autorizzata, messaggistica
+  non affrontata); F3.8 non iniziata - vedi le sezioni sotto per i dettagli e le date esatte di
+  ogni incremento)
 - Priorità: `P1`
 - Output: Jake controlla Windows per semantica, verifica il risultato e usa i pixel come fallback.
 
@@ -4797,6 +4810,29 @@ Criterio di uscita: dump semantico stabile della fixture e di cinque app reali s
   grande, es. un browser con centinaia di elementi DOM, potrebbe cambiare questa conclusione - il
   benchmark andrebbe ripetuto contro quel caso prima di dichiararlo chiuso per intero), ma la
   prima evidenza raccolta punta verso "COM diretto basta", non verso "serve un helper".
+
+- `F3.2` (criterio di uscita "cinque app reali" - CONSOLIDATO, 19/09/2026) — le due app verificate
+  a mano sopra (Calcolatrice, Paint - 2/5) non sono state piu' aggiornate mentre F3.6/F3.7
+  costruivano adapter REALI con un proprio dump `describe_tree` funzionante contro altre tre app:
+  Esplora File (`file_explorer_adapter.py::list_files`), il browser/Edge
+  (`browser_adapter.py::read_page_text`), il terminale (`terminal_adapter.py::
+  describe_terminal_window`, aggiunto in questo stesso incremento, verificato con un test che il
+  dump contiene `ScrollBar`/`Document` reali, non un albero vuoto) - portando il conteggio
+  onesto a 5/5 (Calcolatrice, Paint, Esplora File, Edge, terminale).
+
+  **VS Code investigato per lo stesso scopo in questo incremento, primo caso reale che NON
+  soddisfa il criterio - documentato, non nascosto**: un dump a profondita' 20 di una finestra VS
+  Code reale ha trovato solo 5 elementi con un nome (la finestra, un pannello, i tre bottoni del
+  chrome nativo) - nessuna voce di menu, nessuna scheda. Coerente con l'avviso gia' noto di Monaco
+  ("non accessibile, abilita la modalita' screen reader") esteso probabilmente all'INTERA UI
+  Electron di VS Code, non solo all'editor - vedi `core/computer_use/vscode_adapter.py` per
+  l'analisi completa e `tests/test_vscode_adapter.py::
+  test_describe_tree_finds_almost_nothing_a_known_limitation_not_a_silent_regression` (un test
+  CANARINO, stesso principio di `ExpandCollapseKnownLimitationTests` in F3.4, che fallirebbe da
+  solo se una futura versione di VS Code migliorasse l'accessibilita' per default). VS Code NON
+  conta tra i 5 - il criterio e' comunque soddisfatto dalle altre cinque app sopra, non da VS Code.
+  Prova: 1 test nuovo in `tests/test_terminal_adapter.py` + 1 test nuovo (canarino) in
+  `tests/test_vscode_adapter.py`. 3.050/3.050 test, ruff verde.
 
 ### F3.3 — Selector engine
 
