@@ -4875,6 +4875,31 @@ Criterio di uscita: gli stessi task passano dopo resize, tema e spostamento fine
   solleva lo stesso errore del costruttore; una chiave sconosciuta/un typo viene rifiutata invece
   di ignorata). 3.044/3.044 test, ruff verde.
 
+- `F3.3.7` (prima fetta - "testare la localizzazione dopo resize... e move") — 19/09/2026: nuovo
+  `tests/test_selector.py::LocalizationAfterResizeAndMoveTests`, processo fixture DEDICATO (non il
+  `_RealFixtureTestCase` condiviso usato dal resto del file) perche' questi test MUTANO la
+  geometria della finestra - un side effect che non deve mai fuoriuscire verso altri test.
+
+  **Verificato empiricamente PRIMA di scrivere il test, non assunto**: un probe dedicato ha
+  confermato che la fixture Qt supporta `TransformPattern` (mai usato prima d'ora in questo
+  progetto) - `CurrentCanResize`/`CurrentCanMove` entrambi veri, `Resize()`/`Move()` hanno un
+  effetto REALE (bounds letti via UI Automation prima/dopo confermano il cambiamento, non solo
+  che la chiamata COM non sollevi). Due fatti dimostrati, non uno: (1) un selettore per NOME
+  continua a trovare l'elemento dopo un resize/move reale della finestra (senza questo, il test
+  non proverebbe nulla di piu' della semplice esistenza del metodo `find_unique`, gia' testata
+  altrove); (2) le coordinate lette DOPO il resize sono effettivamente cambiate rispetto a prima
+  - altrimenti un test che si limitasse a "il selettore non solleva" non distinguerebbe un vero
+  successo da un resize silenziosamente ignorato. Un secondo test dimostra che si puo' anche AGIRE
+  correttamente alle coordinate NUOVE (digitare e cliccare "Aggiungi" DOPO il resize, verificando
+  che l'elemento compaia davvero in lista) - non solo osservare la posizione aggiornata: un
+  ipotetico bug che agisse su coordinate lette PRIMA del resize e mai piu' aggiornate (una cache
+  stale) fallirebbe silenziosamente contro il bersaglio sbagliato senza questo secondo test.
+
+  Deliberatamente NON affrontati qui, passi successivi dichiarati: reorder (z-order tra piu'
+  finestre), traduzione (nessuna build multilingua della fixture), tema (nessuna variazione di
+  tema testata) - solo resize/move reali in questo incremento. Prova: 2 test nuovi. 3.046/3.046
+  test, ruff verde.
+
 ### F3.4 — Executor semantico
 
 Dipende da: F3.3 e F1.3.

@@ -4,13 +4,22 @@ davvero la fixture di F3.1.1 in un processo separato e cerca elementi con UI Aut
 selettore che "funziona" solo contro un albero finto (ElementInfo costruiti a mano) non
 proverebbe che le condizioni COM native (FindAll + CreateAndCondition) sono corrette, il punto
 centrale di questo modulo."""
+import subprocess
+import sys
 import threading
 import time
 import unittest
+from pathlib import Path
+
+from comtypes.gen import UIAutomationClient as UIA
 
 from core.computer_use.executor import ActionExecutor
 from core.computer_use.selector import AmbiguousSelectionError, ElementSelector, NoMatchError, SelectorEngine
+from core.computer_use.ui_automation_adapter import UIAutomationAdapter
 from tests.test_ui_automation_adapter import _RealFixtureTestCase
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_FIXTURE_WINDOW_TITLE = "Jake Computer Use Fixture"
 
 
 class ElementSelectorTests(unittest.TestCase):
@@ -186,6 +195,87 @@ class WaitForUniqueElementTests(_RealFixtureTestCase):
 
         elapsed = time.monotonic() - started
         self.assertLess(elapsed, 2.0, "l'ambiguita' non deve aspettare il timeout intero")
+
+
+class LocalizationAfterResizeAndMoveTests(unittest.TestCase):
+    """F3.3.7 ("testare la localizzazione dopo resize, reorder, traduzione e tema") - prima fetta:
+    RESIZE e MOVE reali della finestra, verificati con `TransformPattern` (F3.2, mai usato prima
+    d'ora in questo progetto - verificato con un probe dedicato che la fixture Qt lo supporta,
+    `CanResize`/`CanMove` entrambi veri, prima di scrivere questo test). Processo fixture DEDICATO
+    per classe (non il `_RealFixtureTestCase` condiviso usato sopra) perche' questi test MUTANO la
+    geometria della finestra - un side effect che non deve mai fuoriuscire verso altri test che
+    assumono le dimensioni/posizione di default."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+
+    def _resize_and_move(self, width: int, height: int, x: int, y: int) -> None:
+        pattern = self.window.GetCurrentPattern(UIA.UIA_TransformPatternId)
+        transform = pattern.QueryInterface(UIA.IUIAutomationTransformPattern)
+        transform.Resize(width, height)
+        transform.Move(x, y)
+
+    def test_a_name_based_selector_still_finds_the_element_after_a_real_resize_and_move(self):
+        before = self.engine.find_unique(self.window, ElementSelector(name="Aggiungi", control_type="Button"))
+        bounds_before = before.bounds
+
+        self._resize_and_move(900, 700, 50, 50)
+        deadline = time.monotonic() + 3.0
+        after = None
+        while time.monotonic() < deadline:
+            after = self.engine.find_unique(self.window, ElementSelector(name="Aggiungi", control_type="Button"))
+            if after.bounds != bounds_before:
+                break
+            time.sleep(0.1)
+
+        self.assertIsNotNone(after, "il selettore per nome deve continuare a trovare l'elemento dopo il resize")
+        self.assertNotEqual(
+            after.bounds, bounds_before,
+            "le coordinate DEVONO essere cambiate col resize/move reale - altrimenti il test non proverebbe nulla",
+        )
+
+    def test_a_click_by_name_still_works_at_the_new_coordinates_after_resize(self):
+        """Non basta che il selettore RITROVI l'elemento (test sopra) - deve anche poterci AGIRE
+        alle coordinate NUOVE, non a quelle stale lette prima del resize (il buco che questo test
+        e' pensato a scoprire se mai riapparisse: un click di F3.4 che usasse coordinate cache
+        invece di rileggerle dal vivo dopo un resize fallirebbe silenziosamente contro il bersaglio
+        sbagliato)."""
+        self._resize_and_move(900, 700, 50, 50)
+        # Aspetta che il resize sia davvero applicato (stesso principio a polling di sopra) prima
+        # di agire, non uno sleep fisso.
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            info = self.adapter.describe_element(self.window)
+            if info is not None and info.bounds[2] > 800:
+                break
+            time.sleep(0.1)
+
+        executor = ActionExecutor()
+        input_field = self.engine.find_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_input"),
+        )
+        executor.set_value(input_field, "dopo il resize")
+        add_button = self.engine.find_unique_element(self.window, ElementSelector(name="Aggiungi", control_type="Button"))
+        executor.invoke(add_button)
+
+        item = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(name="dopo il resize", control_type="ListItem"), timeout_seconds=3.0,
+        )
+        self.assertEqual(item.CurrentName, "dopo il resize")
 
 
 if __name__ == "__main__":
