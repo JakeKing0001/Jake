@@ -56,10 +56,7 @@ alla volta" di questa sessione):
   modulo);
 - trovare l'eseguibile del browser SOLO su Edge, un percorso fisso (`_CANDIDATE_EDGE_PATHS`) -
   Chrome/Firefox non ancora supportati, ne' un rilevamento piu' robusto del browser predefinito
-  dell'utente;
-- `read_address_bar_text` cerca l'elemento per NOME localizzato in italiano ("Indirizzo e barra
-  di ricerca") - non funzionerebbe su un Edge installato in un'altra lingua, stesso limite gia'
-  accettato altrove in questo progetto (es. i nomi dei bottoni della fixture Qt)."""
+  dell'utente."""
 import subprocess
 import tempfile
 from pathlib import Path
@@ -160,11 +157,22 @@ def read_address_bar_text(adapter: UIAutomationAdapter, browser_window, timeout_
     letto dal pattern Value - vedi il docstring del modulo per il buco reale gia' trovato (NON e'
     garantito identico all'URL navigato, es. un `file:///` locale viene normalizzato). `None`
     onesto se il pattern Value non e' disponibile (mai un valore indovinato), stesso principio
-    gia' seguito ovunque in questo progetto."""
+    gia' seguito ovunque in questo progetto.
+
+    **Fix di un fallimento reale in CI, non ipotizzato**: la prima versione cercava l'elemento
+    per NOME localizzato in italiano ("Indirizzo e barra di ricerca") - funzionava in locale (Edge
+    in italiano) ma falliva SEMPRE sul runner CI (Edge in inglese, un nome diverso). Corretto
+    cercando SOLO per `control_type` (mai per nome, quindi indipendente dalla lingua), ma
+    ristretto al `ToolBar` del browser invece che all'intera finestra - un `Edit` cercato
+    sull'intera finestra sarebbe ambiguo quando la pagina contiene un proprio campo di testo (es.
+    questa stessa fixture), dato che l'albero della pagina e quello del chrome del browser sono
+    entrambi discendenti della stessa finestra di primo livello."""
     engine = SelectorEngine(adapter)
+    toolbar = engine.wait_for_unique_element(
+        browser_window, ElementSelector(control_type="ToolBar"), timeout_seconds=timeout_seconds,
+    )
     address_bar = engine.wait_for_unique_element(
-        browser_window, ElementSelector(control_type="Edit", name="Indirizzo e barra di ricerca"),
-        timeout_seconds=timeout_seconds,
+        toolbar, ElementSelector(control_type="Edit"), timeout_seconds=timeout_seconds,
     )
     try:
         pattern = address_bar.GetCurrentPattern(UIA.UIA_ValuePatternId)
