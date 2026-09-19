@@ -5676,6 +5676,62 @@ messaggistica. Per ogni adapter:
 
 Criterio di uscita: cinque workflow reali completati in tre esecuzioni consecutive ciascuno.
 
+- `F3.7.1` (prima fetta - Esplora File, primo nell'ordine dichiarato) — 19/09/2026: nuovo
+  `core/computer_use/file_explorer_adapter.py` - apre/localizza/legge/chiude una finestra di
+  Esplora File REALE tramite UI Automation (F3.2), stesso principio "riusa l'infrastruttura gia'
+  costruita" di F3.6, nessuna nuova libreria. Nuovo `UIAutomationAdapter.
+  find_window_by_title_containing()` (F3.2, adozione, fattorizzato insieme agli altri due
+  `find_window_by_*` in `_find_top_level_window`) - cerca per SOTTOSTRINGA invece di uguaglianza
+  esatta, necessario perche' il titolo completo include un suffisso dipendente dalla LINGUA del
+  sistema ("- Esplora file"/"- File Explorer") - evitato PRIMA di scrivere qualunque test reale,
+  non corretto dopo un fallimento in CI come per F3.6.5. Solleva la nuova `AmbiguousWindowError`
+  (non una scelta arbitraria) se piu' di una finestra contiene la sottostringa.
+
+  **Rischio di sicurezza REALE, verificato PRIMA di scrivere qualunque test, non ipotizzato**:
+  `explorer.exe` e' anche il processo SHELL di Windows (gestisce desktop/taskbar) - un SOLO
+  processo esiste normalmente (verificato con `Get-Process explorer`: un solo PID prima di
+  qualunque finestra aperta da Jake). Terminare quel processo per errore chiuderebbe l'INTERO
+  desktop dell'utente. Verificato (non assunto) che aprire una nuova finestra su un percorso
+  specifico crea un processo `explorer.exe` SEPARATO e distinto dal guscio (un secondo PID
+  compare, il primo resta invariato dopo aver chiuso il secondo) - `close_explorer_window()` non
+  accetta MAI un PID passato dal chiamante, lo trova da solo tramite
+  `find_window_by_title_containing` DOPO aver localizzato la finestra, mai per nome processo.
+
+  **Secondo buco reale, coerente con quello gia' trovato per Edge/Qt**:
+  `subprocess.Popen(["explorer.exe", path]).pid` NON corrisponde al PID reale della finestra
+  (verificato, numeri diversi) - lo stesso genere di indirezione gia' trovato per la fixture Qt.
+
+  **Terzo buco reale, un rischio di PRIVACY concreto analogo a F3.6.2**: l'intera finestra
+  contiene anche il riquadro di NAVIGAZIONE a sinistra, che espone i nomi VERI delle scorciatoie
+  personali dell'utente (account OneDrive, cartelle recenti...) - verificato camminando l'albero
+  completo durante l'indagine, mai salvato ne' mostrato oltre la finestra di debug locale.
+  `list_files()` legge quindi SOLO il controllo Lista file, mai l'intera finestra.
+
+  **Quarto buco reale, la stessa famiglia del secondo**: la finestra contiene DUE controlli
+  `List` (la lista file, senza `automation_id`, nome localizzato; e la barra delle SCHEDE,
+  `automation_id="TabListView"`, STABILE e indipendente dalla lingua) - `list_files()` esclude
+  quella con quell'automation_id invece di cercare per nome, un'esclusione STRUTTURALE.
+
+  **Quinto buco reale, trovato dal test di sicurezza stesso durante lo sviluppo**: una prima
+  versione di `close_explorer_window()` lanciava `taskkill` senza attendere la conferma - due
+  test in sequenza (ciascuno con la propria finestra) potevano quindi sovrapporsi (il secondo
+  `setUp` catturava come "gia' esistente" un processo che il primo test stava ancora chiudendo in
+  modo asincrono), facendo scattare per errore la rete di sicurezza del test ("un PID
+  pre-esistente e' sparito"). Corretto facendo attendere a `close_explorer_window()` la
+  terminazione VERA del processo (fino a `timeout_seconds`, altrimenti
+  `ExplorerWindowStillRunningError`) prima di restituirsi - stesso principio "verificare
+  l'effetto, non fidarsi della chiamata" gia' seguito ovunque in questo progetto.
+
+  Deliberatamente NON affrontati qui: F3.7.2 (API ufficiali - oggi solo UI Automation, nessuna
+  IFileOperation/Shell API), F3.7.3 (resto - solo apertura/lettura/chiusura, nessuna selezione/
+  rinomina/spostamento), F3.7.5 (nessuna versione di Esplora File dichiarata esplicitamente),
+  F3.7.7 (nessuna capability per app/profilo collegata). Prova: 3 test nuovi in
+  `tests/test_ui_automation_adapter.py::FindWindowByTitleContainingTests` (con la fixture Qt gia'
+  esistente, incluso un test di ambiguita' con due finestre reali) + 2 test nuovi in
+  `tests/test_file_explorer_adapter.py::RealFileExplorerTests` (contro Esplora File vero, con una
+  rete di sicurezza esplicita che verifica che NESSUN processo `explorer.exe` pre-esistente venga
+  mai toccato). 3.025/3.025 test, ruff verde.
+
 ### F3.8 — Learn by demonstration
 
 Dipende da: F3.3, F3.4 e F5 procedural memory.

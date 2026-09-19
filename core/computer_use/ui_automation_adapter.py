@@ -77,6 +77,15 @@ class WindowNotFoundError(Exception):
     lasciare al chiamante indovinare il perche'.)"""
 
 
+class AmbiguousWindowError(Exception):
+    """F3.7 (adozione, motivata da Esplora File - vedi `find_window_by_title_containing`): piu'
+    di una finestra di primo livello contiene la sottostringa cercata - stesso principio "rifiuta
+    l'ambiguita' invece di sceglierne una a caso" gia' seguito da `SelectorEngine.find_unique`
+    (F3.3.3), qui a livello di finestra: scegliere una finestra SBAGLIATA tra piu' candidate
+    sarebbe particolarmente pericoloso per un'app come Esplora File, dove un'azione (es. chiudere
+    la finestra) potrebbe finire sulla finestra dell'utente invece che su quella creata da Jake."""
+
+
 @dataclass(frozen=True)
 class ElementInfo:
     """F3.2.3: esattamente le proprieta' dichiarate dalla roadmap - "role, name, automation id,
@@ -160,6 +169,47 @@ class UIAutomationAdapter:
                 return window
             if time.monotonic() >= deadline:
                 raise WindowNotFoundError(f"nessuna finestra visibile {description} entro {timeout_seconds}s")
+            time.sleep(0.1)
+
+    def find_window_by_title_containing(self, substring: str, timeout_seconds: float = 5.0):
+        """F3.7 (adozione, motivata da Esplora File): trova una finestra di primo livello il cui
+        titolo CONTIENE `substring` (non uguaglianza esatta come `find_window_by_title`) -
+        necessario quando il titolo completo include un suffisso dipendente dalla LINGUA del
+        sistema (es. "cartella - Esplora file" in italiano, "folder - File Explorer" in inglese -
+        lo stesso genere di buco gia' trovato per la barra degli indirizzi del browser, F3.6.5,
+        qui evitato dall'inizio invece di corretto dopo un fallimento in CI) - un'uguaglianza
+        esatta non potrebbe mai prevedere il suffisso giusto. `substring` deve restare la parte
+        CONTROLLATA dal chiamante (es. il nome di una cartella scelta da Jake), mai il suffisso
+        dipendente dalla lingua.
+
+        Solleva `AmbiguousWindowError` (non una scelta arbitraria) se PIU' di una finestra
+        corrisponde - a differenza di `_find_top_level_window` (usato da `find_window_by_title`/
+        `find_window_by_process_id`, dove una corrispondenza ESATTA per nome o PID e' gia'
+        intrinsecamente univoca), qui una sottostringa generica potrebbe corrispondere a piu'
+        finestre per costruzione, quindi l'ambiguita' e' un caso reale da gestire, non solo
+        teorico."""
+        deadline = time.monotonic() + timeout_seconds
+        true_condition = self._uia.CreateTrueCondition()
+        while True:
+            root = self._uia.GetRootElement()
+            candidates = root.FindAll(UIA.TreeScope_Children, true_condition)
+            matches = []
+            for i in range(candidates.Length):
+                candidate = candidates.GetElement(i)
+                try:
+                    name = candidate.CurrentName
+                except (ValueError, comtypes.COMError):
+                    continue
+                if name and substring in name:
+                    matches.append(candidate)
+            if len(matches) > 1:
+                raise AmbiguousWindowError(
+                    f"{len(matches)} finestre contengono {substring!r}: servono criteri piu' precisi"
+                )
+            if len(matches) == 1:
+                return matches[0]
+            if time.monotonic() >= deadline:
+                raise WindowNotFoundError(f"nessuna finestra visibile contenente {substring!r} entro {timeout_seconds}s")
             time.sleep(0.1)
 
     def describe_element(self, element) -> ElementInfo | None:
