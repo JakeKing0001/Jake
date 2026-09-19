@@ -26,6 +26,17 @@ subito). `launch_isolated_browser` usa quindi flag ESPLICITI di isolamento (`--i
 --disable-sync --disable-features=...`), non solo un profilo vuoto - qualunque futuro codice che
 lanci un browser reale per Jake DEVE passare da qui, non reinventare l'isolamento.
 
+**Terzo buco reale, trovato leggendo davvero la barra degli indirizzi, non ipotizzato**: il testo
+mostrato NON e' sempre l'URL esatto navigato - per un `file:///` locale, Edge lo mostra
+normalizzato (percorso Windows con `/`, senza lo schema `file:///` davanti), verificato
+confrontando il valore letto con l'URL passato a `launch_isolated_browser` (diversi carattere per
+carattere). `read_address_bar_text` restituisce quindi un TESTO VISUALIZZATO, non un URL
+garantito identico a quello navigato - un chiamante che deve VERIFICARE la navigazione (F3.6.5)
+deve confrontare per SOTTOSTRINGA/normalizzazione, mai per uguaglianza esatta stringa-a-stringa.
+Non verificato per `http(s)://` (richiederebbe navigare verso un sito reale, fuori dallo scopo
+"solo fixture locale" di questo incremento - dichiarato onesto "non provato", non esteso per
+analogia).
+
 Deliberatamente NON affrontati qui, passi successivi dichiarati (stesso principio "un incremento
 alla volta" di questa sessione):
 - F3.6.2 (resto): un vocabolario/euristica per "istruzioni dell'utente" dentro la pagina (oggi
@@ -35,20 +46,32 @@ alla volta" di questa sessione):
 - F3.6.4 (collegamento a `core/taint.py::EXTERNAL_CONTENT_INTENTS` - nessun intent/skill ancora
   legge testo di pagina, quindi non c'e' ancora un punto di produzione a cui collegarsi, lo stesso
   principio gia' seguito da F1.5.1 per introdurre un pezzo alla volta);
-- F3.6.5 (verificare URL/stato controllo/risposta del sito);
+- F3.6.5 (resto - "stato controllo"/"risposta del sito": nessun codice di stato HTTP o segnale di
+  caricamento ancora letto, solo il testo della barra degli indirizzi. Un vero stato HTTP
+  richiederebbe Chrome DevTools Protocol, escluso per decisione esplicita con l'utente - resta
+  dichiarato fuori scope, non un'omissione);
 - F3.6.6 (rispettare CAPTCHA/login/protezioni anti-automazione - `launch_isolated_browser` non
   tenta mai login automatico, ma non c'e' ancora una policy esplicita che lo vieti);
 - F3.6.7 (redigere password/campi sensibili - nessun campo password ancora letto da questo
   modulo);
 - trovare l'eseguibile del browser SOLO su Edge, un percorso fisso (`_CANDIDATE_EDGE_PATHS`) -
   Chrome/Firefox non ancora supportati, ne' un rilevamento piu' robusto del browser predefinito
-  dell'utente."""
+  dell'utente;
+- `read_address_bar_text` cerca l'elemento per NOME localizzato in italiano ("Indirizzo e barra
+  di ricerca") - non funzionerebbe su un Edge installato in un'altra lingua, stesso limite gia'
+  accettato altrove in questo progetto (es. i nomi dei bottoni della fixture Qt)."""
 import subprocess
 import tempfile
 from pathlib import Path
 
-from core.computer_use.selector import ElementSelector, SelectorEngine
-from core.computer_use.ui_automation_adapter import UIAutomationAdapter
+import comtypes
+import comtypes.client
+
+comtypes.client.GetModule("UIAutomationCore.dll")
+from comtypes.gen import UIAutomationClient as UIA  # noqa: E402 (deve seguire GetModule)
+
+from core.computer_use.selector import ElementSelector, SelectorEngine  # noqa: E402
+from core.computer_use.ui_automation_adapter import UIAutomationAdapter  # noqa: E402
 
 # F3.6.1 (isolamento, buco reale trovato - vedi il docstring del modulo): un --user-data-dir
 # nuovo da solo non basta a evitare che Edge si colleghi all'account Microsoft reale gia'
@@ -130,3 +153,24 @@ def find_page_document(adapter: UIAutomationAdapter, browser_window, timeout_sec
     return engine.wait_for_unique_element(
         browser_window, ElementSelector(control_type="Document"), timeout_seconds=timeout_seconds,
     )
+
+
+def read_address_bar_text(adapter: UIAutomationAdapter, browser_window, timeout_seconds: float = 5.0) -> str | None:
+    """F3.6.5 (prima fetta - "verificare URL"): il testo MOSTRATO nella barra degli indirizzi,
+    letto dal pattern Value - vedi il docstring del modulo per il buco reale gia' trovato (NON e'
+    garantito identico all'URL navigato, es. un `file:///` locale viene normalizzato). `None`
+    onesto se il pattern Value non e' disponibile (mai un valore indovinato), stesso principio
+    gia' seguito ovunque in questo progetto."""
+    engine = SelectorEngine(adapter)
+    address_bar = engine.wait_for_unique_element(
+        browser_window, ElementSelector(control_type="Edit", name="Indirizzo e barra di ricerca"),
+        timeout_seconds=timeout_seconds,
+    )
+    try:
+        pattern = address_bar.GetCurrentPattern(UIA.UIA_ValuePatternId)
+    except (ValueError, comtypes.COMError):
+        pattern = None
+    if not pattern:
+        return None
+    value_pattern = pattern.QueryInterface(UIA.IUIAutomationValuePattern)
+    return value_pattern.CurrentValue

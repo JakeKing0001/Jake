@@ -5554,6 +5554,29 @@ Criterio di uscita: suite di siti fixture locale verde e zero injection dal cont
   in `tests/test_browser_adapter.py::RealBrowserFixtureTests` (contro Edge vero, capstone).
   3.015/3.015 test in locale, ruff verde.
 
+- `F3.6.5` (prima fetta - "verificare URL") — 19/09/2026: nuovo
+  `browser_adapter.py::read_address_bar_text()` - legge il testo MOSTRATO nella barra degli
+  indirizzi tramite il pattern Value di UI Automation.
+
+  **Buco reale trovato leggendo davvero la barra degli indirizzi, non ipotizzato**: il testo
+  mostrato NON e' l'URL esatto navigato - per un `file:///` locale, Edge lo mostra NORMALIZZATO
+  (percorso Windows con `/`, senza lo schema `file:///` davanti), verificato confrontando il
+  valore letto con l'URL passato a `launch_isolated_browser` (diversi carattere per carattere).
+  La funzione restituisce quindi onestamente un TESTO VISUALIZZATO, non un URL garantito
+  identico a quello navigato - un chiamante che deve verificare la navigazione deve confrontare
+  per SOTTOSTRINGA/normalizzazione, mai per uguaglianza esatta. Non verificato per `http(s)://`
+  (richiederebbe navigare verso un sito reale, fuori dallo scopo "solo fixture locale" di questo
+  incremento - dichiarato onesto "non provato", non esteso per analogia).
+
+  Deliberatamente NON affrontati qui: F3.6.5 (resto - nessun codice di stato HTTP o segnale di
+  caricamento, solo il testo della barra - un vero stato HTTP richiederebbe Chrome DevTools
+  Protocol, escluso per decisione esplicita con l'utente), la ricerca dell'elemento e' per nome
+  localizzato in italiano ("Indirizzo e barra di ricerca" - non funzionerebbe su un Edge in
+  un'altra lingua, stesso limite gia' accettato altrove per i nomi della fixture Qt). Prova: 1
+  test nuovo in `tests/test_browser_adapter.py::RealBrowserFixtureTests` (contro Edge vero,
+  verifica esplicitamente che il testo NON coincida per uguaglianza esatta con l'URL navigato).
+  3.016/3.016 test in locale, ruff verde.
+
 ### F3.7 — Adapter applicativi
 
 Dipende da: F3.4.
