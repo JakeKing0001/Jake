@@ -5843,7 +5843,19 @@ Criterio di uscita: cinque workflow reali completati in tre esecuzioni consecuti
   `conhost.exe` sotto host diversi da `cmd.exe` (es. PowerShell, non verificato). Prova: 3 test
   nuovi in `tests/test_terminal_adapter.py::RealTerminalTests` (contro conhost.exe vero, con la
   stessa rete di sicurezza esplicita gia' usata per Esplora File/VS Code - nessun processo
-  conhost.exe pre-esistente viene mai toccato). 3.029/3.029 test, ruff verde.
+  conhost.exe pre-esistente viene mai toccato). 3.029/3.029 test, ruff verde in locale.
+
+  **CI: un fallimento isolato in `test_file_explorer_adapter.py` (non in questo modulo), stessa
+  categoria di flake gia' documentata due volte in precedenza in questa sessione**: la prima corsa
+  CI ha sollevato `_ctypes.COMError: (-2146233083, ...)` (E_UNEXPECTED, un errore COM generico, non
+  specifico di UI Automation) dentro `find_window_by_title_containing`, in un test gia' passante
+  prima di questo incremento e non toccato da questo commit - coerente con "dipendente dal carico
+  di sistema, non da questo incremento" (la stessa diagnosi gia' data il 18/09/2026 per un flake di
+  `test_sandboxed_skill_worker.py`), plausibilmente perche' questo incremento aggiunge diverse
+  finestre `conhost.exe` reali aperte/chiuse nella stessa corsa, aumentando il carico complessivo
+  di chiamate UI Automation. Rilanciando SOLO il job fallito (`gh run rerun --failed`, nessuna
+  modifica al codice) e' risultato verde pulito - confermando un flake transitorio, non una
+  regressione reale, prima di considerare l'incremento concluso.
 
 ### F3.8 — Learn by demonstration
 
