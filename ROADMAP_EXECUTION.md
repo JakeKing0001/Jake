@@ -5594,6 +5594,30 @@ Criterio di uscita: suite di siti fixture locale verde e zero injection dal cont
   in locale (dove Edge e' in italiano, verificato che la nuova ricerca per solo `control_type`
   funzioni comunque), ruff verde.
 
+- `F3.6.7` (prima fetta - "redigere password e campi sensibili") — 19/09/2026: nuovo
+  `browser_adapter.py::is_password_field()` - vero se l'elemento e' un campo password
+  (`<input type="password">`), verificato via `CurrentIsPassword` (segnale STRUTTURALE di UI
+  Automation, non un'euristica sul nome del campo). Nuovo campo password nella fixture
+  (`benchmarks/browser_fixture.html`) con un valore VERO ("segreto123", non vuoto - un valore
+  vuoto non avrebbe provato nulla).
+
+  **Quarto buco (in realta' una RASSICURAZIONE reale, trovata non assunta)**: il pattern Value di
+  un vero campo password restituisce GIA' caratteri mascherati (`CurrentValue` NON e' mai il
+  testo vero), verificato leggendolo per davvero, non assunto dalla documentazione - Chromium
+  protegge il valore GIA' a livello di UI Automation, prima che questo modulo debba fare
+  qualunque cosa. `is_password_field()` non e' quindi una funzione di redazione (non serve per il
+  pattern Value, gia' mascherato) ma un segnale per un chiamante che debba SAPERE se un campo e'
+  sensibile PRIMA di interagirci (es. per richiedere una policy, F3.6.6, non ancora collegata).
+  Resta NON verificato se un percorso diverso (OCR sullo schermo - i puntini mascherati SONO
+  comunque testo visibile, solo non il valore vero - o il clipboard) esponga il valore vero,
+  entrambi dichiarati fuori scope.
+
+  Deliberatamente NON affrontati qui: F3.6.6 (nessuna policy ancora collegata a
+  `is_password_field()`), redazione per OCR/clipboard (vedi sopra). Prova: 2 test nuovi in
+  `tests/test_browser_adapter.py::RealBrowserFixtureTests` (contro Edge vero - contrasto tra
+  campo password e campo normale, e verifica esplicita che il valore vero "segreto123" non sia
+  MAI leggibile via UI Automation). 3.018/3.018 test in locale, ruff verde.
+
 ### F3.7 — Adapter applicativi
 
 Dipende da: F3.4.
