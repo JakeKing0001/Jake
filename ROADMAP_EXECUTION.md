@@ -4900,6 +4900,28 @@ Criterio di uscita: gli stessi task passano dopo resize, tema e spostamento fine
   tema testata) - solo resize/move reali in questo incremento. Prova: 2 test nuovi. 3.046/3.046
   test, ruff verde.
 
+- `F3.3.2` (prima fetta - "spiegare perche'", il caso NoMatchError) — 19/09/2026: nuovo
+  `SelectorEngine._explain_no_match()` (`core/computer_use/selector.py`), collegato ai tre punti
+  che sollevano `NoMatchError` (`find_unique`, `wait_for_unique_element` dopo il timeout,
+  `find_unique_element`). Quando un selettore con PIU' criteri non trova nulla, il messaggio ora
+  riporta quanti elementi soddisfano OGNUNO dei criteri dati SINGOLARMENTE - non solo "nessun
+  elemento corrisponde", un messaggio opaco che non direbbe MAI quale dei criteri e' il problema
+  reale. Motivazione concreta: un `name` con un refuso (es. "Aggiugni" invece di "Aggiungi")
+  combinato con un `control_type` corretto oggi produce "0 con name='Aggiugni'; N con
+  control_type='Button'" - il refuso diventa visibile immediatamente invece di richiedere di
+  indovinare quale dei due criteri scartare per isolare il problema.
+
+  Query aggiuntive (una per criterio dato) eseguite SOLO nel percorso di fallimento gia' raggiunto
+  - mai sul percorso di successo, ne' a ogni iterazione del polling di `wait_for_unique_element`
+  (solo una volta, dopo la scadenza del timeout) - il costo estra e' accettabile solo quando la
+  ricerca combinata e' gia' fallita, non prima. Resta aperto il caso gemello di F3.3.2 (un vero
+  punteggio tra PIU' candidati quando la ricerca TROVA qualcosa ma e' ambigua, il caso
+  `AmbiguousSelectionError` - diverso da questo, che riguarda solo "non ho trovato nulla").
+  Verificato che nessun chiamante esistente dipenda dal testo ESATTO del vecchio messaggio (solo
+  `tests/test_selector.py` lo asserisce, aggiornato in questo stesso incremento). Prova: 2 test
+  nuovi (`find_unique`/`wait_for_unique_element`, un refuso reale su `name` combinato con un
+  `control_type` corretto contro la fixture vera). 3.048/3.048 test, ruff verde.
+
 ### F3.4 — Executor semantico
 
 Dipende da: F3.3 e F1.3.

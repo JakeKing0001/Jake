@@ -19,9 +19,10 @@ Deliberatamente NON affrontati qui, passi successivi dichiarati (stesso principi
 alla volta" di questa sessione):
 - F3.3.1 (resto): selettori per app/process, window, ancestor - solo name/control_type/
   automation_id qui, gia' le tre proprieta' che `ElementInfo` (F3.2.3) espone oggi;
-- F3.3.2: un vero punteggio/spiegazione del PERCHE' un elemento e' stato scelto tra piu'
-  candidati - oggi `find_unique` rifiuta l'ambiguita' invece di sceglierne uno (F3.3.3), ma non
-  assegna ancora un punteggio a candidati diversi;
+- F3.3.2 (prima fetta - CHIUSA in un incremento successivo, 19/09/2026): il caso NoMatchError
+  spiega ora QUALE criterio sta escludendo tutto (`SelectorEngine._explain_no_match`) - resta
+  aperto il caso gemello (un vero punteggio tra PIU' candidati quando la ricerca trova qualcosa
+  ma e' ambigua, non quando non trova nulla);
 - F3.3.4 (resto - CHIUSO in un incremento successivo, 19/09/2026): `ElementSelector.to_dict()`/
   `.from_dict()` - vedi le loro docstring;
 - F3.3.5 (invalidare selettori quando la struttura/versione dell'app cambia - non c'e' ancora
@@ -104,6 +105,27 @@ class SelectorEngine:
     def __init__(self, adapter: UIAutomationAdapter) -> None:
         self._adapter = adapter
 
+    def _explain_no_match(self, root, selector: ElementSelector) -> str:
+        """F3.3.2 (prima fetta - "spiegare perche' un elemento e' stato scelto", qui il caso
+        gemello "perche' NESSUNO lo e' stato"): per ogni criterio dato SINGOLARMENTE, quanti
+        elementi lo soddisfano DA SOLO - rivela quale criterio specifico sta escludendo tutto
+        (es. un `name` con un refuso: 0 elementi per quello, N>0 per `control_type` dato insieme)
+        invece del solo messaggio opaco "nessun elemento corrisponde". Chiamata SOLO nel percorso
+        di fallimento gia' raggiunto (mai sul percorso di successo, ne' a ogni iterazione di
+        `wait_for_unique_element` - il costo di query aggiuntive e' accettabile solo una volta,
+        dopo che la ricerca combinata e' gia' fallita/scaduta)."""
+        parts = []
+        if selector.name is not None:
+            count = len(self._adapter.find_matching_elements(root, name=selector.name))
+            parts.append(f"{count} con name={selector.name!r}")
+        if selector.control_type is not None:
+            count = len(self._adapter.find_matching_elements(root, control_type=selector.control_type))
+            parts.append(f"{count} con control_type={selector.control_type!r}")
+        if selector.automation_id is not None:
+            count = len(self._adapter.find_matching_elements(root, automation_id=selector.automation_id))
+            parts.append(f"{count} con automation_id={selector.automation_id!r}")
+        return "trovati singolarmente: " + "; ".join(parts)
+
     def find_all(self, root, selector: ElementSelector) -> list[ElementInfo]:
         """Tutti gli elementi tra i discendenti di `root` che soddisfano il selettore, gia'
         descritti (`ElementInfo`, F3.2.3) - un elemento trovato ma non leggibile (lo stesso
@@ -122,7 +144,7 @@ class SelectorEngine:
         quando la ricerca non produce esattamente un risultato."""
         matches = self.find_all(root, selector)
         if not matches:
-            raise NoMatchError(f"nessun elemento corrisponde a {selector!r}")
+            raise NoMatchError(f"nessun elemento corrisponde a {selector!r} ({self._explain_no_match(root, selector)})")
         if len(matches) > 1:
             raise AmbiguousSelectionError(
                 f"{len(matches)} elementi corrispondono a {selector!r}: servono criteri piu' precisi"
@@ -148,7 +170,10 @@ class SelectorEngine:
             if len(matches) == 1:
                 return matches[0]
             if time.monotonic() >= deadline:
-                raise NoMatchError(f"nessun elemento corrisponde a {selector!r} entro {timeout_seconds}s")
+                raise NoMatchError(
+                    f"nessun elemento corrisponde a {selector!r} entro {timeout_seconds}s "
+                    f"({self._explain_no_match(root, selector)})"
+                )
             time.sleep(0.1)
 
     def find_unique_element(self, root, selector: ElementSelector):
@@ -167,7 +192,7 @@ class SelectorEngine:
             automation_id=selector.automation_id,
         )
         if not matches:
-            raise NoMatchError(f"nessun elemento corrisponde a {selector!r}")
+            raise NoMatchError(f"nessun elemento corrisponde a {selector!r} ({self._explain_no_match(root, selector)})")
         if len(matches) > 1:
             raise AmbiguousSelectionError(
                 f"{len(matches)} elementi corrispondono a {selector!r}: servono criteri piu' precisi"
