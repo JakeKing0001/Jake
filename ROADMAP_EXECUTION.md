@@ -5618,6 +5618,23 @@ Criterio di uscita: suite di siti fixture locale verde e zero injection dal cont
   campo password e campo normale, e verifica esplicita che il valore vero "segreto123" non sia
   MAI leggibile via UI Automation). 3.018/3.018 test in locale, ruff verde.
 
+- `F3.6.3` (prima fetta - "supportare navigazione", nessun codice nuovo necessario) — 19/09/2026:
+  la composizione GIA' esistente di `click_element` (F3.4.2, Invoke su un `Hyperlink`) +
+  `read_address_bar_text` (F3.6.5) + `find_page_document` (F3.6.1) basta gia' a completare e
+  verificare una navigazione VERA, non ipotizzata - verificato lanciando davvero Edge e cliccando
+  un link, non assunto dalla composizione dei pezzi gia' costruiti. Il link della fixture
+  (`benchmarks/browser_fixture.html`) ora punta a una NUOVA seconda pagina locale reale
+  (`benchmarks/browser_fixture_page2.html`, minimale - un solo titolo distintivo) invece di
+  un'ancora "#" sulla stessa pagina, cosi' un test puo' dimostrare un vero cambio di URL/pagina,
+  non un click che non fa nulla di osservabile.
+
+  Questo e' il caso PIU' semplice tra quelli dichiarati da F3.6.3 (navigazione tramite un link
+  gia' presente sulla pagina) - form/tab/download/upload e navigazione diretta per URL restano
+  dichiarati fuori scope, non un'omissione. Prova: 1 test nuovo in
+  `tests/test_browser_adapter.py::RealBrowserFixtureTests` (contro Edge vero - clicca il link,
+  verifica sia il nuovo URL nella barra degli indirizzi sia il nuovo `Document` caricato).
+  3.019/3.019 test in locale, ruff verde.
+
 ### F3.7 — Adapter applicativi
 
 Dipende da: F3.4.
