@@ -16,6 +16,7 @@ from core.computer_use.browser_adapter import (
     is_password_field,
     launch_isolated_browser,
     read_address_bar_text,
+    read_page_text,
 )
 from core.computer_use.selector import ElementSelector, SelectorEngine
 from core.computer_use.ui_automation_adapter import UIAutomationAdapter
@@ -158,6 +159,20 @@ class RealBrowserFixtureTests(unittest.TestCase):
         new_document = find_page_document(self.adapter, self.window)
         info = self.adapter.describe_element(new_document)
         self.assertEqual(info.name, "Jake Browser Fixture - Pagina 2", "la pagina caricata deve essere davvero la seconda, non la stessa")
+
+    def test_read_page_text_collects_visible_text_without_ever_exposing_the_password_value(self):
+        """F3.6.1 (resto - leggere il testo visibile, non solo trovare un elemento per nome).
+        Verifica sia il caso positivo (il testo vero c'e') sia quello di sicurezza (il valore
+        vero del campo password, "segreto123", non compare MAI - solo la sua etichetta)."""
+        document = find_page_document(self.adapter, self.window)
+
+        text = read_page_text(self.adapter, document)
+
+        self.assertIn("Jake Browser Fixture", text)
+        self.assertIn("Aggiungi", text)
+        self.assertIn("Un link di prova", text)
+        self.assertIn("Password", text, "l'ETICHETTA del campo password e' testo pubblico, deve comparire")
+        self.assertNotIn("segreto123", text, "il VALORE vero del campo password non deve mai comparire nel testo estratto")
 
 
 if __name__ == "__main__":

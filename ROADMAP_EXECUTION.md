@@ -5635,6 +5635,30 @@ Criterio di uscita: suite di siti fixture locale verde e zero injection dal cont
   verifica sia il nuovo URL nella barra degli indirizzi sia il nuovo `Document` caricato).
   3.019/3.019 test in locale, ruff verde.
 
+- `F3.6.1` (resto - leggere il testo visibile della pagina) — 19/09/2026: nuovo
+  `browser_adapter.py::read_page_text()` - cammina l'albero sotto un `Document` (F3.2,
+  `describe_tree`) e raccoglie il nome di ogni nodo non vuoto, in ordine - lo stesso genere di
+  estrazione gia' fatta da `core/vision/screen.py::read_screen_text` per l'OCR, qui dal DOM reale
+  invece che da pixel.
+
+  **Rassicurazione strutturale, verificata non assunta**: nessuna esclusione esplicita e'
+  necessaria per i campi password (F3.6.7) - `ElementInfo`/`describe_tree` (F3.2.3) non espongono
+  MAI il pattern Value di un elemento, solo `name`/`automation_id`/`control_type`/`enabled`/
+  `selected`/`toggle_state`/`focused`. Il NOME di un campo password e' la sua ETICHETTA (es.
+  "Password"), mai il suo valore (quello vive SOLO nel pattern Value, letto solo da
+  `read_address_bar_text`/uno strumento dedicato, mai da questa funzione) - verificato con la
+  fixture reale (il campo password compare come `Edit 'Password'`, il valore vero "segreto123"
+  non compare mai nel testo estratto), non assunto dalla semantica HTML/ARIA.
+
+  Deliberatamente NON affrontato qui: F3.6.4 ("isolare testo web come non fidato") - nessuna
+  skill/intent ancora consuma questo testo, quindi non c'e' ancora un intent REALE da passare a
+  `core/taint.py::wrap_external_content` (che richiede un intent gia' censito nella tassonomia
+  esistente, non uno inventato per l'occasione) - un futuro collegamento resta un incremento di
+  adozione a se', lo stesso principio gia' seguito da F1.5.1 per introdurre un pezzo alla volta.
+  Prova: 1 test nuovo in `tests/test_browser_adapter.py::RealBrowserFixtureTests` (contro Edge
+  vero - verifica sia il caso positivo, il testo vero c'e', sia quello di sicurezza, il valore
+  vero del campo password non compare mai). 3.020/3.020 test in locale, ruff verde.
+
 ### F3.7 — Adapter applicativi
 
 Dipende da: F3.4.
