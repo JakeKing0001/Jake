@@ -6307,6 +6307,50 @@ Criterio di uscita: una procedura dimostrata sopravvive a riavvio, resize e dati
   verifica per IDENTITA' di PID (la finestra aperta da Jake non e' mai uno dei PID gia'
   esistenti). 3.075/3.075 test invariato, ruff verde.
 
+- `F3.8.4` (prima fetta - "testarla in dry-run", SECONDO incremento di F3.8) — 19/09/2026: nuovi
+  `core/computer_use/procedure.py::dry_run_step()`/`dry_run_steps()`/`DryRunStepResult`. Verifica
+  se `step.selector` risolverebbe DAVVERO a esattamente un elemento nello stato ATTUALE dell'app -
+  SENZA mai cliccare/scrivere. Riusa `SelectorEngine.locate()` (F3.3.1) per intero, non una sua
+  reimplementazione parallela che potrebbe disallinearsi nel tempo dal replay vero. `would_succeed`
+  distingue tre modi di fallire (finestra non trovata, elemento non trovato, selettore ambiguo) -
+  ognuno riportato con un prefisso dedicato nel messaggio, non un booleano opaco. A differenza di
+  `replay_steps` (si ferma al primo fallimento, perche' un'azione vera dipende dallo stato lasciato
+  dalla precedente), `dry_run_steps` controlla OGNI passo fino in fondo - nessuna azione viene mai
+  eseguita, quindi nessuno stato che un passo "rompe" per i successivi.
+
+  **"su dati innocui" (la seconda meta' di F3.8.4) dichiarato esplicitamente NON affrontato**: un
+  dry-run che non tocca mai l'app e un dry-run che esegue per davvero ma contro un dato/ambiente
+  sicuro sono due concetti DIVERSI - il secondo richiede sapere COSA rende un dato "innocuo" per
+  l'app target, non affrontato in questa prima fetta.
+
+  **Due buchi reali trovati scrivendo i TEST, non nel codice di produzione, entrambi corretti
+  prima di spedire**: (1) una prima versione di `DryRunAgainstTheRealFixtureTests` duplicava a
+  mano la logica di `setUp`/`tearDown` di un processo fixture condiviso SENZA il `try`/`except`
+  attorno a `find_window_by_title` che `_RealFixtureTestCase` (gia' esistente in
+  `tests/test_ui_automation_adapter.py`) ha gia' - quando quella ricerca ha sollevato
+  `WindowNotFoundError` dopo 15s (coerente con un carico di sistema insolito su questa macchina
+  dopo un'intera sessione di lanci reali di app), il processo fixture gia' avviato e' rimasto
+  ORFANO (`tearDownClass` non viene chiamato da `unittest` se `setUpClass` solleva) - quella
+  finestra orfana ha poi fatto fallire `ReplayAgainstTheRealFixtureTests` con
+  `AmbiguousWindowError` (due finestre "Computer Use Fixture" invece di una). Corretto riusando
+  `_RealFixtureTestCase` (gia' testata, gia' corretta) invece di duplicarla. (2) Un test che
+  verificava "il dry-run non ha cliccato per davvero" cercava `ListItem` in TUTTA la finestra -
+  ma la fixture ha DUE liste (`fixture_list`, dove "Aggiungi" aggiunge davvero, e
+  `fixture_scroll_list`, pre-popolata con "Riga 1".."Riga 30" fin dall'avvio, F3.1.1) - un falso
+  positivo garantito (le righe della scroll_list ci sono SEMPRE), scoperto per davvero guardando
+  il messaggio del primo fallimento ("Riga 1", mai il testo del test), non assunto. Corretto
+  scoprendo prima la lista GIUSTA per `automation_id`.
+
+  Deliberatamente NON affrontati qui: F3.8.2 (parametri variabili), F3.8.3 (mostrare la procedura
+  all'utente), la seconda meta' di F3.8.4 ("dati innocui", vedi sopra), F3.8.5 (persistenza a
+  lungo termine), F3.8.6 (rilevazione di drift), F3.8.7 (approvazione se capability/impatto
+  cambiano). Prova: 6 test nuovi in
+  `tests/test_procedure.py::DryRunAgainstTheRealFixtureTests` (un passo che risolverebbe riporta
+  `would_succeed=True`; elemento mancante/finestra mancante/selettore ambiguo riportano ciascuno
+  il proprio prefisso; un dry-run non clicca mai per davvero, verificato osservando la lista
+  giusta; `dry_run_steps` controlla ogni passo anche dopo un fallimento precedente). 3.081/3.081
+  test, ruff verde.
+
 ### Gate F3
 
 - ≥ 90% su 100 task fixture;

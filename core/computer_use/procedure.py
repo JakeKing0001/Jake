@@ -26,8 +26,10 @@ alla volta" di questa sessione):
 - F3.8.2 (inferire parametri variabili e precondizioni - qui `text` e' sempre un valore LETTERALE
   gia' registrato, mai un parametro da sostituire a runtime);
 - F3.8.3 (mostrare la procedura generalizzata all'utente - nessuna UI/HUD qui);
-- F3.8.4 (dry-run su dati innocui - `replay_steps` esegue SEMPRE per davvero, nessuna modalita'
-  simulata);
+- F3.8.4 (prima fetta - "dry-run" - CHIUSA in un incremento successivo, 19/09/2026):
+  `dry_run_step()`/`dry_run_steps()` - vedi le loro docstring. Resta aperta la seconda meta'
+  ("su dati innocui" - eseguire per davvero ma contro un ambiente/dato sicuro, diverso da "non
+  eseguire affatto");
 - F3.8.5 (salvare versione/app target/selector/undo - nessuna persistenza a lungo termine, solo
   la forma serializzabile di un singolo passo/lista di passi in memoria);
 - F3.8.6 (rilevare drift e sospendersi - `replay_steps` si ferma al primo fallimento, F3.5, ma non
@@ -167,3 +169,64 @@ def replay_steps(
         if not result.success:
             break
     return results
+
+
+DRY_RUN_WINDOW_NOT_FOUND = "WINDOW_NOT_FOUND"
+DRY_RUN_NOT_FOUND = "NOT_FOUND"
+DRY_RUN_AMBIGUOUS = "AMBIGUOUS_MATCH"
+
+
+@dataclass(frozen=True)
+class DryRunStepResult:
+    """F3.8.4 (prima fetta - "testarla in dry-run"): l'esito di UNA verifica dry-run, MAI un
+    `ComputerActionResult` (che dichiara un'azione davvero eseguita - riusarlo qui rischierebbe
+    di far credere a un chiamante distratto che un dry-run abbia click/scritto per davvero, la
+    stessa distinzione gia' importante altrove in questo progetto tra "success" e "verified").
+    `would_succeed=True` significa SOLO "il selettore risolve a esattamente un elemento adesso" -
+    non garantisce che l'azione vera avrebbe successo (F3.5, la scala di ripiego, potrebbe ancora
+    servire quando si esegue per davvero)."""
+
+    step: RecordedStep
+    would_succeed: bool
+    error: str | None = None
+
+
+def dry_run_step(adapter: UIAutomationAdapter, step: RecordedStep, timeout_seconds: float = 5.0) -> DryRunStepResult:
+    """F3.8.4 (prima fetta - "testarla in dry-run e su dati innocui"): verifica se `step.selector`
+    risolverebbe DAVVERO a esattamente un elemento nello stato ATTUALE dell'app - senza mai
+    cliccare/scrivere (nessun `ComputerAgent` coinvolto qui, a differenza di `replay_step`). Riusa
+    `SelectorEngine.locate()` (F3.3.1) per intero: la STESSA identica logica di risoluzione
+    finestra+elemento del replay vero, non una sua reimplementazione parallela che potrebbe
+    disallinearsi nel tempo (es. dichiarare "risolverebbe" con un criterio che il replay vero
+    interpreta diversamente).
+
+    **"su dati innocui" (la seconda meta' di F3.8.4) NON e' affrontato qui**: questo dry-run non
+    tocca MAI l'app (nemmeno leggere un valore) - "dati innocui" implicherebbe invece eseguire
+    l'azione per davvero ma contro un ambiente/dato sicuro (es. una copia, un account di prova),
+    un concetto diverso e piu' grande (richiede sapere COSA rende un dato "innocuo" per l'app
+    target) non affrontato in questa prima fetta."""
+    from core.computer_use.selector import AmbiguousSelectionError, NoMatchError, SelectorEngine
+    from core.computer_use.ui_automation_adapter import WindowNotFoundError
+
+    engine = SelectorEngine(adapter)
+    try:
+        engine.locate(step.selector, timeout_seconds=timeout_seconds)
+    except WindowNotFoundError as exc:
+        return DryRunStepResult(step=step, would_succeed=False, error=f"{DRY_RUN_WINDOW_NOT_FOUND}: {exc}")
+    except NoMatchError as exc:
+        return DryRunStepResult(step=step, would_succeed=False, error=f"{DRY_RUN_NOT_FOUND}: {exc}")
+    except AmbiguousSelectionError as exc:
+        return DryRunStepResult(step=step, would_succeed=False, error=f"{DRY_RUN_AMBIGUOUS}: {exc}")
+    return DryRunStepResult(step=step, would_succeed=True)
+
+
+def dry_run_steps(
+    adapter: UIAutomationAdapter, steps: list[RecordedStep], timeout_seconds: float = 5.0,
+) -> list[DryRunStepResult]:
+    """A differenza di `replay_steps` (che si ferma al PRIMO fallimento, perche' un'azione vera
+    puo' dipendere dallo stato lasciato dalla precedente), un dry-run verifica OGNI passo fino in
+    fondo anche dopo un `would_succeed=False` - nessuna azione viene mai eseguita, quindi non
+    esiste uno stato che un passo "rompe" per i successivi: un chiamante vuole vedere TUTTI i
+    passi che non risolverebbero oggi, non fermarsi al primo per poi dover rilanciare piu' volte
+    per scoprire gli altri."""
+    return [dry_run_step(adapter, step, timeout_seconds=timeout_seconds) for step in steps]

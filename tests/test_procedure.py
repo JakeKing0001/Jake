@@ -14,13 +14,19 @@ from core.computer_agent import ComputerAgent
 from core.computer_use.procedure import (
     ACTION_CLICK,
     ACTION_TYPE,
+    DRY_RUN_AMBIGUOUS,
+    DRY_RUN_NOT_FOUND,
+    DRY_RUN_WINDOW_NOT_FOUND,
     RecordedStep,
     UnknownActionError,
+    dry_run_step,
+    dry_run_steps,
     replay_step,
     replay_steps,
 )
 from core.computer_use.selector import ElementSelector, SelectorEngine
 from core.computer_use.ui_automation_adapter import UIAutomationAdapter
+from tests.test_ui_automation_adapter import _RealFixtureTestCase
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _FIXTURE_WINDOW_TITLE = "Jake Computer Use Fixture"
@@ -186,6 +192,117 @@ class ReplayAgainstTheRealFixtureTests(unittest.TestCase):
         result = replay_step(self.agent, self.adapter, step, timeout_seconds=5.0)
 
         self.assertTrue(result.success, result)
+
+
+class DryRunAgainstTheRealFixtureTests(_RealFixtureTestCase):
+    """F3.8.4 (prima fetta - "testarla in dry-run"): `dry_run_step`/`dry_run_steps` non devono MAI
+    cliccare/scrivere - un solo processo fixture CONDIVISO per l'intera classe (a differenza di
+    `ReplayAgainstTheRealFixtureTests`, che muta lo stato e ha bisogno di un processo dedicato per
+    test) e' quindi sicuro: nessun test qui cambia lo stato della fixture. Riusa
+    `_RealFixtureTestCase` (`tests/test_ui_automation_adapter.py`) invece di duplicare setUp/
+    tearDown a mano - **buco reale trovato scrivendo QUESTO test, non ipotizzato**: una prima
+    versione duplicava la stessa logica ma SENZA il `try`/`except` attorno a `find_window_by_title`
+    che `_RealFixtureTestCase` gia' ha - quando quella ricerca ha sollevato (un `WindowNotFoundError`
+    dopo 15s, coerente con un carico di sistema insolito su questa macchina dopo un'intera sessione
+    di lanci reali di app), il processo fixture gia' avviato e' rimasto ORFANO (mai terminato,
+    `tearDownClass` non viene chiamato da `unittest` se `setUpClass` solleva) - quella finestra
+    orfana ha poi fatto fallire `ReplayAgainstTheRealFixtureTests` con un'ambiguita' reale (due
+    finestre "Computer Use Fixture" invece di una). Riusare la classe base gia' corretta invece di
+    duplicarla evita la stessa classe di bug per costruzione."""
+
+    def test_a_step_that_would_resolve_reports_would_succeed_true(self):
+        step = RecordedStep(
+            action=ACTION_CLICK,
+            selector=ElementSelector(name="Aggiungi", control_type="Button", window_title_contains="Computer Use Fixture"),
+        )
+
+        result = dry_run_step(self.adapter, step, timeout_seconds=5.0)
+
+        self.assertTrue(result.would_succeed)
+        self.assertIsNone(result.error)
+
+    def test_a_step_with_a_missing_element_reports_would_succeed_false_with_not_found(self):
+        step = RecordedStep(
+            action=ACTION_CLICK,
+            selector=ElementSelector(name="Questo bottone non esiste XYZ", window_title_contains="Computer Use Fixture"),
+        )
+
+        result = dry_run_step(self.adapter, step, timeout_seconds=1.0)
+
+        self.assertFalse(result.would_succeed)
+        self.assertTrue(result.error.startswith(DRY_RUN_NOT_FOUND))
+
+    def test_a_step_with_a_missing_window_reports_would_succeed_false_with_window_not_found(self):
+        step = RecordedStep(
+            action=ACTION_CLICK,
+            selector=ElementSelector(name="Aggiungi", window_title_contains="Finestra che non esiste XYZ123"),
+        )
+
+        result = dry_run_step(self.adapter, step, timeout_seconds=1.0)
+
+        self.assertFalse(result.would_succeed)
+        self.assertTrue(result.error.startswith(DRY_RUN_WINDOW_NOT_FOUND))
+
+    def test_an_ambiguous_step_reports_would_succeed_false_with_ambiguous(self):
+        """'Categoria A'/'Categoria B' condividono lo stesso control_type - la stessa ambiguita'
+        gia' nota della fixture, usata altrove in questa sessione (F3.3.2)."""
+        step = RecordedStep(
+            action=ACTION_CLICK,
+            selector=ElementSelector(control_type="TreeItem", window_title_contains="Computer Use Fixture"),
+        )
+
+        result = dry_run_step(self.adapter, step, timeout_seconds=1.0)
+
+        self.assertFalse(result.would_succeed)
+        self.assertTrue(result.error.startswith(DRY_RUN_AMBIGUOUS))
+
+    def test_dry_run_step_never_actually_clicks_anything(self):
+        """Il punto centrale del dry-run: cliccare "Aggiungi" via dry-run NON deve aggiungere
+        nulla alla lista - verificato osservando la fixture DOPO, non solo assumendo dal
+        `would_succeed`. **Buco reale trovato scrivendo questo test, non ipotizzato**: la fixture
+        ha DUE liste (`item_list`, dove "Aggiungi" aggiunge davvero, e `scroll_list`, pre-popolata
+        con "Riga 1".."Riga 30" fin dall'avvio, F3.1.1) - cercare `ListItem` in tutta la finestra
+        trova SEMPRE le righe della scroll_list, un falso positivo che farebbe fallire questo test
+        anche se il dry-run si comportasse correttamente. Scoperto per davvero il proprio bug
+        (non assunto): il fallimento iniziale mostrava "Riga 1"/"Riga 2"/"Riga 3", mai il nome
+        digitato dal test - la prova che il dry-run non aveva cliccato per davvero, solo che il
+        test cercava nel posto sbagliato. Corretto scoprendo prima la lista GIUSTA per
+        `automation_id` (`fixture_list`, non `fixture_scroll_list`)."""
+        step = RecordedStep(
+            action=ACTION_CLICK,
+            selector=ElementSelector(name="Aggiungi", control_type="Button", window_title_contains="Computer Use Fixture"),
+        )
+
+        dry_run_step(self.adapter, step, timeout_seconds=5.0)
+
+        engine = SelectorEngine(self.adapter)
+        window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=5.0)
+        item_list = engine.find_unique_element(
+            window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_list"),
+        )
+        items = engine.find_all(item_list, ElementSelector(control_type="ListItem"))
+        self.assertEqual(items, [], "un dry-run non deve MAI eseguire l'azione vera")
+
+    def test_dry_run_steps_checks_every_step_even_after_an_earlier_failure(self):
+        """A differenza di `replay_steps` (si ferma al primo fallimento), un dry-run verifica
+        TUTTI i passi anche dopo uno che non risolverebbe - nessuna azione vera che potrebbe
+        rendere i passi successivi dipendenti da uno stato mai raggiunto."""
+        steps = [
+            RecordedStep(
+                action=ACTION_CLICK,
+                selector=ElementSelector(name="Questo bottone non esiste XYZ", window_title_contains="Computer Use Fixture"),
+            ),
+            RecordedStep(
+                action=ACTION_CLICK,
+                selector=ElementSelector(name="Aggiungi", control_type="Button", window_title_contains="Computer Use Fixture"),
+            ),
+        ]
+
+        results = dry_run_steps(self.adapter, steps, timeout_seconds=1.0)
+
+        self.assertEqual(len(results), 2, "un dry-run deve controllare OGNI passo, non fermarsi al primo fallimento")
+        self.assertFalse(results[0].would_succeed)
+        self.assertTrue(results[1].would_succeed)
 
 
 class UnknownActionErrorTests(unittest.TestCase):
