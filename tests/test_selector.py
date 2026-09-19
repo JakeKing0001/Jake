@@ -31,6 +31,41 @@ class ElementSelectorTests(unittest.TestCase):
         ElementSelector(automation_id="fixture_add_button")
 
 
+class ElementSelectorSerializationTests(unittest.TestCase):
+    """F3.3.4 (resto - "salvare selector procedurali senza coordinate assolute"): `to_dict`/
+    `from_dict`, un formato di salvataggio semplice (un dict, agnostico rispetto a come il
+    chiamante lo persiste davvero - JSON su disco, una riga in un futuro formato di "procedura
+    registrata" per F3.8) invece di nessuno."""
+
+    def test_to_dict_omits_criteria_that_were_never_given(self):
+        selector = ElementSelector(name="Aggiungi")
+        self.assertEqual(selector.to_dict(), {"name": "Aggiungi"})
+
+    def test_to_dict_includes_every_criterion_that_was_given(self):
+        selector = ElementSelector(name="Aggiungi", control_type="Button", automation_id="fixture_add_button")
+        self.assertEqual(
+            selector.to_dict(),
+            {"name": "Aggiungi", "control_type": "Button", "automation_id": "fixture_add_button"},
+        )
+
+    def test_a_round_trip_through_dict_reproduces_an_identical_selector(self):
+        original = ElementSelector(name="Rimuovi selezionato", control_type="Button")
+        restored = ElementSelector.from_dict(original.to_dict())
+        self.assertEqual(original, restored)
+
+    def test_from_dict_with_no_known_criteria_raises_the_same_error_as_the_constructor(self):
+        with self.assertRaises(ValueError):
+            ElementSelector.from_dict({})
+
+    def test_from_dict_rejects_an_unknown_key_instead_of_silently_dropping_it(self):
+        """Un selettore salvato con un campo scritto male o di uno schema futuro non supportato
+        deve fallire RUMOROSAMENTE - ignorarlo silenziosamente produrrebbe un selettore PIU'
+        AMPIO di quello originariamente salvato (un criterio perso e' un rischio di match
+        ambiguo/sbagliato, non un dettaglio innocuo)."""
+        with self.assertRaises(ValueError):
+            ElementSelector.from_dict({"nome": "Aggiungi"})  # typo reale: "nome" non "name"
+
+
 class FindUniqueAgainstTheRealFixtureTests(_RealFixtureTestCase):
     def setUp(self):
         self.engine = SelectorEngine(self.adapter)
