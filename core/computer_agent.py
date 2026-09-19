@@ -81,11 +81,34 @@ si limita ad AGGIUNGERE il testo a quello gia' impostato da `SetValue`, duplican
 nel ripiego pixel di `type_into_element`, cosi' il ripiego resta SICURO da incatenare anche
 quando la strategia precedente e' gia' riuscita silenziosamente, non solo quando e' davvero
 fallita (lo stesso principio di sicurezza gia' dichiarato per `unsafe_after_failure`, F3.5.6, ma
-qui risolto rendendo il ripiego stesso idempotente invece di doverlo evitare)."""
+qui risolto rendendo il ripiego stesso idempotente invece di doverlo evitare).
+
+`idempotency_key` (F3.4.6, "evitare doppia esecuzione sui retry"): un parametro opzionale in piu'
+per `click_element`/`type_into_element`, una protezione DIVERSA e complementare da quella sopra -
+quella evita che il RIPIEGO INTERNO alla stessa chiamata duplichi l'effetto di una strategia gia'
+riuscita; questa evita che una SECONDA CHIAMATA dall'esterno (un retry del chiamante, es. l'agente
+a passi di F3.3 che rilancia lo stesso passo dopo un pixel diff debole/`verified=False` pur essendo
+l'azione gia' riuscita davvero) ripeta l'azione una seconda volta. Implementata come una cache
+per-ISTANZA (mai di modulo - vedi `ComputerAgent.__init__`) con scadenza esplicita (30s di
+default, iniettabile) che memorizza SOLO i risultati riusciti - `core/action_ledger.py::
+idempotency_key_of` esiste gia' per la stessa famiglia di chiave ma dichiara esplicitamente di
+NON applicare ancora un'enforcement del genere, lasciandola come "una decisione di policy che
+merita una revisione dedicata"; questa e' quella revisione, applicata pero' al livello PIU' BASSO
+e piu' sicuro per farlo davvero (un'azione fisica sullo schermo), non ancora collegata alla chiave
+dell'intent-level ledger - un chiamante che vuole questa protezione deve passare esplicitamente
+`idempotency_key` (nessuna skill esistente e' toccata, il default resta `None`, comportamento
+identico a prima di F3.4.6)."""
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 POST_ACTION_SETTLE_SECONDS = 0.4
+
+# F3.4.6 ("evitare doppia esecuzione sui retry"): finestra entro cui un `idempotency_key` ripetuto
+# restituisce il risultato GIA' ottenuto invece di rieseguire l'azione - vedi il docstring di
+# `ComputerAgent.__init__` per la scelta del valore e i limiti dichiarati. 30s copre un retry
+# immediato dello stesso passo (es. l'agente a passi di F3.3 che rivede un pixel diff debole e
+# rilancia lo stesso passo), non una richiesta successiva scorrelata dell'utente ore dopo.
+IDEMPOTENCY_TTL_SECONDS = 30.0
 
 # F3.5.5: vocabolario chiuso per ComputerActionResult.evidence - vedi il docstring del modulo.
 EVIDENCE_PIXEL_DIFF = "pixel_diff"
@@ -107,6 +130,49 @@ class ComputerActionResult:
 
 
 class ComputerAgent:
+    def __init__(self, idempotency_ttl_seconds: float = IDEMPOTENCY_TTL_SECONDS) -> None:
+        """F3.4.6: `idempotency_ttl_seconds` iniettabile (non solo la costante di modulo) per lo
+        stesso motivo per cui `timeout_seconds` e' gia' un parametro esplicito ovunque in questo
+        progetto - un test deve poter usare una finestra brevissima per osservare una vera
+        scadenza senza un `time.sleep()` reale di 30s. La cache stessa (`_idempotency_cache`) vive
+        sull'ISTANZA, mai a livello di modulo: un'istanza di `ComputerAgent` e' gia' il ciclo di
+        vita giusto per questa protezione (una skill la crea una volta e la riusa tra le proprie
+        `execute()`, vedi `skills/screen_click.py`) - una cache di modulo condivisa tra istanze/
+        skill diverse rischierebbe di far combaciare chiavi scelte da parti del sistema che non si
+        conoscono tra loro."""
+        self._idempotency_ttl_seconds = idempotency_ttl_seconds
+        self._idempotency_cache: dict[str, tuple[float, ComputerActionResult]] = {}
+
+    def _cached_action_result(self, idempotency_key: str | None) -> ComputerActionResult | None:
+        """F3.4.6: `None` (mai sollevare, mai inventare un risultato) sia quando `idempotency_key`
+        non e' dato (il chiamante non ha chiesto questa protezione) sia quando la voce in cache e'
+        scaduta - una voce scaduta viene anche RIMOSSA qui (non lasciata a crescere in eterno:
+        `core/action_ledger.py::idempotency_key_of` dichiara esplicitamente che una cache di
+        questo genere ha bisogno di una scadenza dichiarata, non di crescita illimitata come il
+        ledger append-only, che e' un registro di controllo con un problema diverso). Una copia
+        indipendente (`dataclasses.replace`, campi tutti primitivi) del risultato salvato, mai lo
+        stesso oggetto: un chiamante che mutasse il risultato restituito non deve poter corrompere
+        la voce in cache per una chiamata futura."""
+        if idempotency_key is None:
+            return None
+        entry = self._idempotency_cache.get(idempotency_key)
+        if entry is None:
+            return None
+        cached_at, result = entry
+        if time.monotonic() - cached_at > self._idempotency_ttl_seconds:
+            del self._idempotency_cache[idempotency_key]
+            return None
+        return replace(result)
+
+    def _remember_action_result(self, idempotency_key: str | None, result: ComputerActionResult) -> None:
+        """F3.4.6: memorizza SOLO un risultato riuscito (`success=True`) - un'azione FALLITA deve
+        restare ritentabile normalmente (il punto dei retry), bloccarla dietro la stessa chiave
+        trasformerebbe una protezione contro la doppia esecuzione in un modo accidentale di
+        impedire per sempre un secondo tentativo legittimo dopo un fallimento transitorio."""
+        if idempotency_key is None or not result.success:
+            return
+        self._idempotency_cache[idempotency_key] = (time.monotonic(), replace(result))
+
     def observe(self) -> list[dict] | None:
         """OCR dello schermo attuale: ogni parola visibile con il suo rettangolo in pixel."""
         from core.vision.screen import read_screen_words
@@ -213,12 +279,24 @@ class ComputerAgent:
     def click_element(
         self, *, window_title: str | None = None, root=None, name: str | None = None,
         control_type: str | None = None, automation_id: str | None = None, timeout_seconds: float = 5.0,
+        idempotency_key: str | None = None,
     ) -> ComputerActionResult:
         """F3.4.2: trova un elemento per nome/ruolo/automation_id dentro `window_title` (o dentro
         `root`, un elemento gia' risolto - F3.6, un browser non ha un titolo di finestra
         prevedibile) e lo clicca via UI Automation (Invoke, F3.4), con ripiego a un click pixel
         alle stesse coordinate se Invoke fallisce o non ha un effetto visibile (F3.5). Vedi il
-        docstring del modulo per le scelte e i limiti dichiarati."""
+        docstring del modulo per le scelte e i limiti dichiarati.
+
+        `idempotency_key` (F3.4.6, "evitare doppia esecuzione sui retry"): se dato e una chiamata
+        RIUSCITA con la stessa chiave e' ancora in cache (vedi `ComputerAgent.__init__`), questa
+        chiamata restituisce SUBITO quel risultato - senza cercare l'elemento una seconda volta,
+        senza muovere il mouse - invece di eseguire di nuovo l'azione. `None` (il default) lascia
+        il comportamento IDENTICO a prima di F3.4.6: nessuna skill/chiamante esistente e' toccato
+        da questa aggiunta finche' non passa esplicitamente una chiave."""
+        cached = self._cached_action_result(idempotency_key)
+        if cached is not None:
+            return cached
+
         from core.computer_use.executor import ActionExecutor
         from core.computer_use.fallback import try_strategies_in_order
         from core.vision.screen import capture_screenshot_image
@@ -271,15 +349,18 @@ class ComputerAgent:
 
         if not action_performed[0]:
             return ComputerActionResult(success=False, error="OPERATION_FAILED")
-        return ComputerActionResult(
+        result = ComputerActionResult(
             success=True, x=center_x, y=center_y, matched=name,
             verified=outcome.succeeded, change_ratio=round(last_ratio[0], 4),
             evidence=EVIDENCE_PIXEL_DIFF if before is not None else EVIDENCE_NONE,
         )
+        self._remember_action_result(idempotency_key, result)
+        return result
 
     def type_into_element(
         self, text: str, *, window_title: str | None = None, root=None, name: str | None = None,
         control_type: str | None = None, automation_id: str | None = None, timeout_seconds: float = 5.0,
+        idempotency_key: str | None = None,
     ) -> ComputerActionResult:
         """F3.4.2 (resto - "unificare... type... nel ComputerAgent"): trova un campo di testo per
         nome/ruolo/automation_id dentro `window_title` (o dentro `root`, F3.6, come per
@@ -293,7 +374,19 @@ class ComputerAgent:
         `text` NON compare MAI in `ComputerActionResult` (ne' in `matched` ne' altrove) - lo
         stesso principio gia' seguito da `ElementActionReceipt.set_value` (F3.4.5): un campo
         testo libero nel risultato rischierebbe di far finire una password o un dato sensibile
-        digitato dall'utente in una struttura che un futuro chiamante potrebbe loggare."""
+        digitato dall'utente in una struttura che un futuro chiamante potrebbe loggare.
+
+        `idempotency_key` (F3.4.6): stessa identica protezione di `click_element` - vedi il suo
+        docstring, non ripetuto qui. Particolarmente rilevante qui: senza, un retry su un campo
+        gia' scritto correttamente rischierebbe di ADD/duplicare il testo invece di limitarsi a
+        non fare nulla (il ripiego pixel gia' seleziona tutto prima di scrivere per restare
+        sicuro da incatenare CON SE STESSO in un'unica chiamata - vedi sopra - ma questo non
+        protegge da una SECONDA chiamata dall'esterno con lo stesso intento logico, il caso che
+        `idempotency_key` copre)."""
+        cached = self._cached_action_result(idempotency_key)
+        if cached is not None:
+            return cached
+
         from core.computer_use.executor import ActionExecutor
         from core.computer_use.fallback import try_strategies_in_order
         from core.vision.screen import capture_screenshot_image
@@ -354,8 +447,10 @@ class ComputerAgent:
 
         if not action_performed[0]:
             return ComputerActionResult(success=False, error="OPERATION_FAILED")
-        return ComputerActionResult(
+        result = ComputerActionResult(
             success=True, x=center_x, y=center_y, matched=name,
             verified=outcome.succeeded, change_ratio=round(last_ratio[0], 4),
             evidence=EVIDENCE_PIXEL_DIFF if before is not None else EVIDENCE_NONE,
         )
+        self._remember_action_result(idempotency_key, result)
+        return result
