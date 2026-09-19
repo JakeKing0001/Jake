@@ -8,6 +8,7 @@ ocr_available`)."""
 import unittest
 from pathlib import Path
 
+from core.computer_agent import ComputerAgent
 from core.computer_use.browser_adapter import (
     BrowserNotFoundError,
     find_edge_executable,
@@ -70,6 +71,28 @@ class RealBrowserFixtureTests(unittest.TestCase):
 
         matches = self.adapter.find_matching_elements(document, name="Nuova scheda")
         self.assertEqual(matches, [])
+
+    def test_computer_agent_click_and_type_work_against_the_document_root(self):
+        """F3.4.2 + F3.6 insieme: `ComputerAgent.type_into_element`/`click_element` con `root`
+        (il nodo `Document`, non `window_title` - un browser non ne ha uno prevedibile) invece di
+        assemblare adapter/selector/executor a mano - lo stesso genere di dimostrazione end-to-end
+        gia' fatta per la fixture Qt in `tests/test_computer_use_integration.py`, qui contro un
+        browser vero."""
+        document = find_page_document(self.adapter, self.window)
+        agent = ComputerAgent()
+
+        type_result = agent.type_into_element("dal browser", root=document, name="Campo di testo", control_type="Edit")
+        self.assertTrue(type_result.success)
+        click_result = agent.click_element(root=document, name="Aggiungi", control_type="Button")
+        self.assertTrue(click_result.success)
+
+        # Il gestore onclick della fixture scrive il valore del campo nel paragrafo di output -
+        # rileggere il Document (potrebbe essere cambiato) e cercare quel testo e' la prova
+        # indipendente che l'intera catena ha avuto un effetto reale, non solo che nessuna delle
+        # due chiamate abbia sollevato.
+        document_after = find_page_document(self.adapter, self.window)
+        matches = self.adapter.find_matching_elements(document_after, name="dal browser")
+        self.assertEqual(len(matches), 1, "il paragrafo di output deve mostrare davvero il testo digitato")
 
 
 if __name__ == "__main__":

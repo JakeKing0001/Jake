@@ -261,6 +261,34 @@ class ClickElementTests(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertEqual(result.error, "OPERATION_FAILED")
 
+    def test_root_bypasses_the_window_title_lookup_entirely(self):
+        """F3.6 (adozione): un browser non ha un titolo di finestra prevedibile in anticipo (F3.6,
+        `core/computer_use/browser_adapter.py`) - passare `root` (un elemento gia' risolto, es.
+        il nodo `Document` di una pagina) deve saltare del tutto `find_window_by_title`, non
+        chiamarlo comunque con un valore vuoto."""
+        before = Image.new("RGB", (10, 10), (0, 0, 0))
+        after = Image.new("RGB", (10, 10), (255, 255, 255))
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("core.computer_use.executor.ActionExecutor") as MockExecutor, \
+             mock.patch("core.vision.screen.capture_screenshot_image", side_effect=[before, after]), \
+             mock.patch("pyautogui.click") as click, mock.patch("time.sleep"):
+            self._mocked_adapter_and_engine(MockAdapter, MockEngine)
+            result = ComputerAgent().click_element(root=mock.sentinel.document, name="Aggiungi")
+
+        MockAdapter.return_value.find_window_by_title.assert_not_called()
+        MockEngine.return_value.wait_for_unique_element.assert_called_once_with(
+            mock.sentinel.document, mock.ANY, timeout_seconds=5.0,
+        )
+        MockExecutor.return_value.invoke.assert_called_once_with(mock.sentinel.element)
+        click.assert_not_called()
+        self.assertTrue(result.success)
+
+    def test_neither_window_title_nor_root_raises_a_clear_error(self):
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter"):
+            with self.assertRaises(ValueError):
+                ComputerAgent().click_element(name="Aggiungi")
+
 
 class TypeIntoElementTests(unittest.TestCase):
     """F3.4.2 (resto): type_into_element - stessa struttura di ClickElementTests sopra (fattorizzata

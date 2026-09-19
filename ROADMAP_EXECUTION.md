@@ -5532,6 +5532,28 @@ Criterio di uscita: suite di siti fixture locale verde e zero injection dal cont
   gia' seguito per l'OCR in F3.5.1). 3.012/3.012 test in locale (dove Edge e' installato, i test
   girano per davvero, non saltano), ruff verde.
 
+- `F3.4.2`/`F3.6` (adozione - collega `ComputerAgent.click_element`/`type_into_element` al
+  browser) — 19/09/2026: nuovo parametro opzionale `root` su `click_element`/`type_into_element`
+  (fattorizzato in `_locate_element_center`, condiviso da entrambi) - un elemento GIA' risolto
+  (es. il nodo `Document` di `find_page_document`, F3.6.1) su cui cercare direttamente, in
+  ALTERNATIVA a `window_title`: un browser non ha un titolo di finestra prevedibile in anticipo
+  (cambia con ogni pagina/tab caricata), a differenza di un'app Qt fissa per cui `window_title`
+  gia' basta. Cambio ADDITIVO: `window_title` resta il percorso esistente e invariato quando
+  `root` non e' dato, nessuna skill/chiamante esistente toccato; `root` ha la precedenza se
+  entrambi sono presenti; nessuno dei due dato solleva `ValueError` esplicito invece di un
+  `WindowNotFoundError` fuorviante (la ricerca non e' nemmeno iniziata).
+
+  **Capstone di questo incremento - la prima volta che F3.4.2 e F3.6 lavorano insieme contro un
+  browser vero**: `type_into_element` + `click_element` con `root=document` completano per davvero
+  Task 1/10 (digita e clicca Aggiungi, lo stesso schema gia' dimostrato per la fixture Qt) contro
+  la fixture browser - verificato con una prova indipendente forte, non solo che le due chiamate
+  non abbiano sollevato: il gestore `onclick` della pagina scrive il valore del campo nel
+  paragrafo di output, e quel testo compare DAVVERO nel `Document` riletto dopo il click. Prova: 2
+  test nuovi in `tests/test_computer_agent.py::ClickElementTests` (con finti - `root` salta
+  `find_window_by_title` del tutto, nessuno dei due parametri solleva `ValueError`) + 1 test nuovo
+  in `tests/test_browser_adapter.py::RealBrowserFixtureTests` (contro Edge vero, capstone).
+  3.015/3.015 test in locale, ruff verde.
+
 ### F3.7 — Adapter applicativi
 
 Dipende da: F3.4.
