@@ -163,23 +163,36 @@ class ComputerAgent:
         )
 
     def _locate_element_center(
-        self, *, window_title: str, name: str | None, control_type: str | None,
+        self, *, window_title: str | None = None, root=None, name: str | None, control_type: str | None,
         automation_id: str | None, timeout_seconds: float,
     ):
         """F3.4.2 (fattorizzato per `type_into_element`, resto della fetta - stesso identico
-        percorso "trova finestra -> trova elemento -> leggi i bounds" gia' usato da
+        percorso "trova la radice -> trova elemento -> leggi i bounds" gia' usato da
         `click_element`, non duplicato una seconda volta): restituisce `(adapter, element,
         center_x, center_y)`, oppure un `ComputerActionResult` gia' pronto con l'errore giusto se
         un passo qualunque fallisce - il chiamante lo riconosce con `isinstance` e lo restituisce
-        cosi' com'e', senza reinterpretare l'errore."""
+        cosi' com'e', senza reinterpretare l'errore.
+
+        `root` (F3.6, adozione): un elemento GIA' risolto (es. il nodo `Document` di una pagina
+        web, `core/computer_use/browser_adapter.py::find_page_document`) su cui cercare
+        direttamente, invece di `window_title` - un browser non ha un titolo di finestra
+        prevedibile in anticipo (cambia con ogni pagina/tab caricata), a differenza di un'app Qt
+        fissa. Esattamente uno dei due va dato: `root` ha la precedenza se entrambi sono
+        presenti, `window_title` resta il percorso esistente e INVARIATO quando `root` e' `None`
+        (nessuna skill/chiamante esistente e' toccato da questa aggiunta)."""
         from core.computer_use.selector import AmbiguousSelectionError, ElementSelector, NoMatchError, SelectorEngine
         from core.computer_use.ui_automation_adapter import UIAutomationAdapter, WindowNotFoundError
 
         adapter = UIAutomationAdapter()
-        try:
-            window = adapter.find_window_by_title(window_title, timeout_seconds=timeout_seconds)
-        except WindowNotFoundError:
-            return ComputerActionResult(success=False, error="WINDOW_NOT_FOUND")
+        if root is not None:
+            window = root
+        else:
+            if window_title is None:
+                raise ValueError("click_element/type_into_element richiedono window_title oppure root")
+            try:
+                window = adapter.find_window_by_title(window_title, timeout_seconds=timeout_seconds)
+            except WindowNotFoundError:
+                return ComputerActionResult(success=False, error="WINDOW_NOT_FOUND")
 
         engine = SelectorEngine(adapter)
         selector = ElementSelector(name=name, control_type=control_type, automation_id=automation_id)
@@ -198,20 +211,21 @@ class ComputerAgent:
         return adapter, element, center_x, center_y
 
     def click_element(
-        self, *, window_title: str, name: str | None = None, control_type: str | None = None,
-        automation_id: str | None = None, timeout_seconds: float = 5.0,
+        self, *, window_title: str | None = None, root=None, name: str | None = None,
+        control_type: str | None = None, automation_id: str | None = None, timeout_seconds: float = 5.0,
     ) -> ComputerActionResult:
-        """F3.4.2: trova un elemento per nome/ruolo/automation_id dentro `window_title` e lo
-        clicca via UI Automation (Invoke, F3.4), con ripiego a un click pixel alle stesse
-        coordinate se Invoke fallisce o non ha un effetto visibile (F3.5). Vedi il docstring del
-        modulo per le scelte e i limiti dichiarati."""
+        """F3.4.2: trova un elemento per nome/ruolo/automation_id dentro `window_title` (o dentro
+        `root`, un elemento gia' risolto - F3.6, un browser non ha un titolo di finestra
+        prevedibile) e lo clicca via UI Automation (Invoke, F3.4), con ripiego a un click pixel
+        alle stesse coordinate se Invoke fallisce o non ha un effetto visibile (F3.5). Vedi il
+        docstring del modulo per le scelte e i limiti dichiarati."""
         from core.computer_use.executor import ActionExecutor
         from core.computer_use.fallback import try_strategies_in_order
         from core.vision.screen import capture_screenshot_image
         from core.vision.screen_diff import pixel_change_ratio, screen_visibly_changed
 
         located = self._locate_element_center(
-            window_title=window_title, name=name, control_type=control_type,
+            window_title=window_title, root=root, name=name, control_type=control_type,
             automation_id=automation_id, timeout_seconds=timeout_seconds,
         )
         if isinstance(located, ComputerActionResult):
@@ -264,16 +278,17 @@ class ComputerAgent:
         )
 
     def type_into_element(
-        self, text: str, *, window_title: str, name: str | None = None, control_type: str | None = None,
-        automation_id: str | None = None, timeout_seconds: float = 5.0,
+        self, text: str, *, window_title: str | None = None, root=None, name: str | None = None,
+        control_type: str | None = None, automation_id: str | None = None, timeout_seconds: float = 5.0,
     ) -> ComputerActionResult:
         """F3.4.2 (resto - "unificare... type... nel ComputerAgent"): trova un campo di testo per
-        nome/ruolo/automation_id dentro `window_title` e vi scrive `text` tramite il pattern
-        Value di UI Automation (F3.4, `SetValue` - non digitazione tasto per tasto simulata),
-        ripiegando su un click + digitazione reale (`pyautogui.click` poi `pyautogui.write`) alle
-        stesse coordinate se Value non e' disponibile o non ha un effetto visibile (F3.5). Stessa
-        struttura di `click_element` sopra, stessa distinzione success/verified di `click_point`
-        (F3.5.5) - vedi i loro docstring per le scelte gia' motivate, non ripetute qui.
+        nome/ruolo/automation_id dentro `window_title` (o dentro `root`, F3.6, come per
+        `click_element`) e vi scrive `text` tramite il pattern Value di UI Automation (F3.4,
+        `SetValue` - non digitazione tasto per tasto simulata), ripiegando su un click +
+        digitazione reale (`pyautogui.click` poi `pyautogui.write`) alle stesse coordinate se
+        Value non e' disponibile o non ha un effetto visibile (F3.5). Stessa struttura di
+        `click_element` sopra, stessa distinzione success/verified di `click_point` (F3.5.5) -
+        vedi i loro docstring per le scelte gia' motivate, non ripetute qui.
 
         `text` NON compare MAI in `ComputerActionResult` (ne' in `matched` ne' altrove) - lo
         stesso principio gia' seguito da `ElementActionReceipt.set_value` (F3.4.5): un campo
@@ -285,7 +300,7 @@ class ComputerAgent:
         from core.vision.screen_diff import pixel_change_ratio, screen_visibly_changed
 
         located = self._locate_element_center(
-            window_title=window_title, name=name, control_type=control_type,
+            window_title=window_title, root=root, name=name, control_type=control_type,
             automation_id=automation_id, timeout_seconds=timeout_seconds,
         )
         if isinstance(located, ComputerActionResult):
