@@ -5116,6 +5116,45 @@ Criterio di uscita: ogni fallback è osservabile e non produce duplicazioni nei 
   fallisce SUBITO, non dopo il timeout intero) + 1 test capstone end-to-end. 2.958/2.958 test,
   ruff verde.
 
+- `F3.4.7` (residuo - una finestra di primo livello NUOVA e IMPREVISTA, un caso diverso dal
+  capstone sopra) — 19/09/2026: nuovi `UIAutomationAdapter.snapshot_top_level_window_handles()`/
+  `wait_for_new_top_level_window(baseline_handles, timeout_seconds)`. Il capstone di F3.4.7 (18/
+  09/2026, sopra) aveva gia' risolto il caso di un dialogo modale DENTRO l'albero di controllo
+  della finestra GENITRICE nota (`QMessageBox` di Qt, trovato come discendente, non come figlio
+  del desktop) - ma dichiarava implicitamente NON coperto il caso di una finestra completamente
+  NUOVA e SEPARATA che compare come vero figlio del desktop, il cui titolo non e' prevedibile in
+  anticipo (un dialogo di sistema, un prompt di un processo diverso) - ne' `find_window_by_title`
+  ne' `find_window_by_title_containing` possono cercarla senza conoscerne gia' il nome.
+
+  **Investigato empiricamente PRIMA di scrivere il codice, non assunto - un tentativo iniziale
+  smentito**: il piano originale era dimostrare questa capacita' con il dialogo "Salva con nome"
+  nativo di Notepad (Ctrl+S) - un probe dedicato ha pero' trovato che il Notepad moderno di
+  Windows 11 (pacchettizzato MSIX) NON apre piu' un dialogo separato entro un timeout ragionevole
+  nello scenario provato (nessuna nuova finestra di primo livello rilevata in 8s) - coerente con
+  la stessa evoluzione "i dialoghi nativi diventano overlay in-processo" gia' vista per Qt nel
+  capstone, non una prova che il meccanismo sia inutile, solo che Notepad non e' il bersaglio
+  giusto per dimostrarlo. Verificato invece con l'infrastruttura GIA' sicura e gia' provata di
+  questa sessione: la fixture Qt (F3.1) come "nuova finestra" e una seconda finestra Esplora File
+  reale (`core/computer_use/file_explorer_adapter.py::open_explorer_window`, F3.7.1) durante
+  l'indagine - entrambe rilevate correttamente come nuovi HWND assenti dal baseline.
+
+  Identificazione tramite `CurrentNativeWindowHandle` (un vero HWND), non titolo ne' PID - **scelta
+  motivata da due buchi reali gia' trovati in QUESTO STESSO incremento di sessione**: il PID puo'
+  essere CONDIVISO da piu' finestre per davvero (Windows Terminal/Word, vedi il deferimento Office
+  sopra), e il titolo e' gia' noto ambiguo/dipendente dalla lingua altrove in questo modulo - un
+  HWND identifica invece in modo univoco una finestra per tutta la sua vita. Stessa logica
+  "rifiuta l'ambiguita'" di `find_window_by_title_containing` (F3.7) se piu' di una finestra nuova
+  compare nello stesso istante di verifica.
+
+  Deliberatamente NON affrontato qui: collegare questa capacita' a `ComputerAgent`/`click_element`
+  come un passo automatico dopo ogni azione (resta un metodo dell'adapter, non ancora un
+  comportamento di default - una decisione di adozione a parte), un vero esempio con un dialogo di
+  sistema reale (solo la fixture Qt e Esplora File usati qui, entrambi gia' sicuri). Prova: 3 test
+  nuovi in `tests/test_ui_automation_adapter.py::WaitForNewTopLevelWindowTests` (nessuna nuova
+  finestra rispetta il timeout dato; una finestra reale nuova viene trovata; due finestre nuove
+  comparse insieme sollevano `AmbiguousWindowError` subito, non dopo il timeout intero). 3.039/
+  3.039 test, ruff verde.
+
 - `F3.4.5` (produrre un `ActionReceipt` con elemento target e pattern usato) — 18/09/2026: nuovo
   `core/computer_use/executor.py::ElementActionReceipt` - ogni metodo pubblico di `ActionExecutor`
   (`invoke`/`set_value`/`toggle`/`select`/`expand`/`collapse`/`scroll_to_bottom`/`scroll_to_top`,
