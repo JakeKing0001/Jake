@@ -37,6 +37,22 @@ Non verificato per `http(s)://` (richiederebbe navigare verso un sito reale, fuo
 "solo fixture locale" di questo incremento - dichiarato onesto "non provato", non esteso per
 analogia).
 
+**Quarto buco (in realta' una RASSICURAZIONE reale, trovata non assunta) - F3.6.7, "redigere
+password e campi sensibili"**: un campo `<input type="password">` con un valore VERO
+("segreto123", non vuoto - un valore vuoto non avrebbe provato nulla) espone
+`CurrentIsPassword=True` via UI Automation (`False` per un campo di testo normale, verificato il
+contrasto) - un segnale STRUTTURALE, non un'euristica sul nome del campo. Piu' importante: il
+pattern Value di UN CAMPO PASSWORD restituisce gia' caratteri SOSTITUTIVI mascherati
+(`CurrentValue` NON e' mai il testo vero "segreto123"), Chromium lo protegge GIA' da solo a
+livello di UI Automation, prima che questo modulo debba fare qualunque cosa - verificato leggendo
+il valore per davvero, non assunto dalla documentazione. `is_password_field()` espone il segnale
+strutturale per un chiamante che debba SAPERE se un campo e' sensibile PRIMA di interagirci (es.
+per richiedere una policy, F3.6.6/F3.4.3, non ancora collegata) - non una funzione di redazione,
+che non serve per il pattern Value (gia' mascherato dal browser). Resta NON verificato se un
+percorso diverso (OCR sullo schermo, F3.5.1 - i puntini mascherati SONO comunque testo visibile,
+solo non il valore vero) o il clipboard (se l'utente copia da un campo password) espongano il
+valore vero - entrambi fuori dallo scope di questo modulo, dichiarati non affrontati.
+
 Deliberatamente NON affrontati qui, passi successivi dichiarati (stesso principio "un incremento
 alla volta" di questa sessione):
 - F3.6.2 (resto): un vocabolario/euristica per "istruzioni dell'utente" dentro la pagina (oggi
@@ -51,9 +67,9 @@ alla volta" di questa sessione):
   richiederebbe Chrome DevTools Protocol, escluso per decisione esplicita con l'utente - resta
   dichiarato fuori scope, non un'omissione);
 - F3.6.6 (rispettare CAPTCHA/login/protezioni anti-automazione - `launch_isolated_browser` non
-  tenta mai login automatico, ma non c'e' ancora una policy esplicita che lo vieti);
-- F3.6.7 (redigere password/campi sensibili - nessun campo password ancora letto da questo
-  modulo);
+  tenta mai login automatico, ma non c'e' ancora una policy esplicita che lo vieti - ne'
+  `is_password_field()` e' ancora collegata a nessuna decisione di policy);
+- F3.6.7 (resto - redazione per OCR/clipboard, non affrontata: vedi sopra);
 - trovare l'eseguibile del browser SOLO su Edge, un percorso fisso (`_CANDIDATE_EDGE_PATHS`) -
   Chrome/Firefox non ancora supportati, ne' un rilevamento piu' robusto del browser predefinito
   dell'utente."""
@@ -182,3 +198,23 @@ def read_address_bar_text(adapter: UIAutomationAdapter, browser_window, timeout_
         return None
     value_pattern = pattern.QueryInterface(UIA.IUIAutomationValuePattern)
     return value_pattern.CurrentValue
+
+
+def is_password_field(element) -> bool:
+    """F3.6.7 (prima fetta - "redigere password e campi sensibili"): vero se l'elemento e' un
+    campo password (`<input type="password">`, verificato via `CurrentIsPassword` - un segnale
+    STRUTTURALE letto da Chromium/UI Automation, non un'euristica sul NOME del campo, che
+    potrebbe mancare o mentire). `False` onesto (mai un'eccezione) se la proprieta' non e'
+    leggibile - lo stesso principio "onesto ma non fragile" gia' seguito da `describe_element`
+    (F3.2): un elemento su cui questa proprieta' non e' disponibile non e' TRATTATO come
+    password, ma nemmeno fa fallire la chiamata.
+
+    Non una funzione di redazione - vedi il docstring del modulo: il pattern Value di un vero
+    campo password restituisce GIA' caratteri mascherati (verificato, non assunto), Chromium lo
+    protegge da solo prima che questo modulo debba fare qualunque cosa. Questa funzione serve a
+    un chiamante che debba SAPERE se un campo e' sensibile PRIMA di interagirci (es. per
+    richiedere una policy, F3.6.6, non ancora collegata)."""
+    try:
+        return bool(element.CurrentIsPassword)
+    except (ValueError, comtypes.COMError):
+        return False

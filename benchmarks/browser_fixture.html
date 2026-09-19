@@ -5,9 +5,16 @@ vedi ROADMAP_EXECUTION.md sezione F3.6, dipende da F1.5 e F3.5). Stesso ruolo di
 benchmarks/computer_use_fixture.py (F3.1.1) ma per il browser invece di un'app Qt: una pagina
 locale, deterministica, senza risorse esterne (nessuna richiesta di rete, nessun contenuto che
 possa cambiare tra un'esecuzione e l'altra) - controllabile via UI Automation reale, non un DOM
-scaricato/parsato a parte. Elementi deliberatamente minimi (input/button/output/link), lo stesso
-principio "un incremento alla volta" gia' seguito per la fixture Qt: il resto delle capacita'
-dichiarate da F3.6 (form, tab, download/upload, navigazione) restano fuori da questa prima fetta.
+scaricato/parsato a parte. Elementi deliberatamente minimi (input/button/output/link/campo
+password), lo stesso principio "un incremento alla volta" gia' seguito per la fixture Qt: il
+resto delle capacita' dichiarate da F3.6 (form, tab, download/upload, navigazione) restano fuori
+da questa prima fetta.
+
+Il campo password (F3.6.7, "redigere password e campi sensibili") ha un VALORE reale
+("segreto123") apposta - serve a dimostrare che Chromium lo MASCHERA gia' da solo a livello di UI
+Automation (`CurrentValue` restituisce caratteri sostitutivi, non il testo vero, verificato non
+assunto - vedi core/computer_use/browser_adapter.py::is_password_field), non un valore vuoto che
+non proverebbe nulla.
 -->
 <html lang="it">
 <head>
@@ -20,5 +27,6 @@ dichiarate da F3.6 (form, tab, download/upload, navigazione) restano fuori da qu
 <button id="fixture-add-button" onclick="document.getElementById('fixture-output').textContent = document.getElementById('fixture-input').value;">Aggiungi</button>
 <p id="fixture-output"></p>
 <a href="#" id="fixture-link">Un link di prova</a>
+<input type="password" id="fixture-password" aria-label="Password" value="segreto123">
 </body>
 </html>

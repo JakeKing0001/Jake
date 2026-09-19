@@ -13,6 +13,7 @@ from core.computer_use.browser_adapter import (
     BrowserNotFoundError,
     find_edge_executable,
     find_page_document,
+    is_password_field,
     launch_isolated_browser,
     read_address_bar_text,
 )
@@ -107,6 +108,37 @@ class RealBrowserFixtureTests(unittest.TestCase):
         self.assertIsNotNone(text)
         self.assertIn("browser_fixture.html", text)
         self.assertNotEqual(text, _FIXTURE_URL, "la barra normalizza il file:// - non deve mai coincidere per uguaglianza esatta")
+
+    def test_is_password_field_distinguishes_a_real_password_field_from_a_normal_one(self):
+        """F3.6.7 (prima fetta - "redigere password e campi sensibili"): segnale STRUTTURALE
+        (`CurrentIsPassword`), non un'euristica sul nome del campo - verificato il contrasto tra
+        i due campi della fixture, non assunto da uno solo."""
+        document = find_page_document(self.adapter, self.window)
+        engine = SelectorEngine(self.adapter)
+
+        password_field = engine.wait_for_unique_element(document, ElementSelector(name="Password", control_type="Edit"))
+        normal_field = engine.wait_for_unique_element(document, ElementSelector(name="Campo di testo", control_type="Edit"))
+
+        self.assertTrue(is_password_field(password_field))
+        self.assertFalse(is_password_field(normal_field))
+
+    def test_a_real_password_fields_value_is_already_masked_by_chromium_not_by_this_module(self):
+        """Rassicurazione reale, non assunta: il campo password della fixture ha un valore VERO
+        ("segreto123", vedi benchmarks/browser_fixture.html) - se questo test leggesse quel
+        valore in chiaro, sarebbe un buco di sicurezza reale. Chromium lo maschera GIA' a livello
+        di UI Automation, prima che questo modulo debba fare qualunque cosa."""
+        import comtypes
+        import comtypes.client
+        comtypes.client.GetModule("UIAutomationCore.dll")
+        from comtypes.gen import UIAutomationClient as UIA
+
+        document = find_page_document(self.adapter, self.window)
+        engine = SelectorEngine(self.adapter)
+        password_field = engine.wait_for_unique_element(document, ElementSelector(name="Password", control_type="Edit"))
+
+        value_pattern = password_field.GetCurrentPattern(UIA.UIA_ValuePatternId).QueryInterface(UIA.IUIAutomationValuePattern)
+
+        self.assertNotEqual(value_pattern.CurrentValue, "segreto123", "il valore vero non deve mai essere leggibile via UI Automation")
 
 
 if __name__ == "__main__":
