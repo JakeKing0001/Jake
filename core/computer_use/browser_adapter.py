@@ -166,6 +166,41 @@ def launch_isolated_browser(url: str) -> IsolatedBrowserProcess:
     return IsolatedBrowserProcess(process, user_data_dir)
 
 
+def read_page_text(adapter: UIAutomationAdapter, document, max_depth: int = 20) -> str:
+    """F3.6.1 (resto - leggere il testo visibile della pagina, non solo trovare un elemento per
+    nome): cammina l'albero sotto `document` (F3.2, `describe_tree`) e raccoglie il NOME di ogni
+    nodo non vuoto, in ordine - lo stesso genere di estrazione gia' fatta da `core/vision/
+    screen.py::read_screen_text` per l'OCR, qui dal DOM reale invece che da pixel.
+
+    Nessuna esclusione esplicita per i campi password (F3.6.7): `ElementInfo`/`describe_tree`
+    (F3.2.3) non espongono MAI il pattern Value di un elemento, solo `name`/`automation_id`/
+    `control_type`/`enabled`/`selected`/`toggle_state`/`focused` - il NOME di un campo password e'
+    la sua ETICHETTA (es. "Password"), mai il suo valore (quello vive SOLO nel pattern Value, letto
+    solo da `read_address_bar_text`/uno strumento dedicato, mai da questa funzione) - verificato
+    con la fixture reale (il campo password compare come `Edit 'Password'`, non con "segreto123"),
+    non assunto dalla semantica HTML/ARIA.
+
+    F3.6.4 ("isolare testo web come non fidato") NON e' affrontato qui: nessuna skill/intent
+    ancora consuma questo testo, quindi non c'e' ancora un intent REALE da passare a
+    `core/taint.py::wrap_external_content` (che richiede un intent gia' censito nella tassonomia
+    esistente, non uno inventato per l'occasione) - un futuro collegamento resta un incremento di
+    adozione a se', lo stesso principio gia' seguito da F1.5.1 per introdurre un pezzo alla
+    volta."""
+    tree = adapter.describe_tree(document, max_depth=max_depth)
+    if tree is None:
+        return ""
+    pieces: list[str] = []
+
+    def _walk(node) -> None:
+        if node.name:
+            pieces.append(node.name)
+        for child in node.children:
+            _walk(child)
+
+    _walk(tree)
+    return "\n".join(pieces)
+
+
 def find_page_document(adapter: UIAutomationAdapter, browser_window, timeout_seconds: float = 10.0):
     """F3.6.1/F3.6.2: la radice `Document` della pagina caricata - l'UNICO confine STRUTTURALE tra
     il chrome del browser (barra degli indirizzi, tab, impostazioni) e il contenuto web vero, non
