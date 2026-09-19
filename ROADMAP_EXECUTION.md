@@ -4678,6 +4678,40 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   catturato - la lista con scorrimento renderizza con la barra visibile e "Riga 1"/"Riga 2"/
   "Riga 3" in vista. 2.912/2.912 test, ruff verde.
 
+- `F3.1.2` (Task 6/10 - F3.1.6, la parte DINAMICA mai affrontata finora) — 19/09/2026: nuovi
+  `load_button`/`dynamic_button` nella fixture (`benchmarks/computer_use_fixture.py`) - a
+  differenza di `remove_button` (gia' un "primo assaggio" di F3.1.6, ma SINCRONO: cambia stato
+  dentro lo stesso gestore di click che lo scopre), `dynamic_button` si abilita solo dopo un vero
+  `QTimer` innescato da `load_button` - lo stesso genere di attesa che un'app reale impone per un
+  caricamento di rete/un'operazione lunga, dove un selettore che leggesse lo stato SUBITO dopo il
+  click troverebbe DAVVERO il controllo ancora nello stato precedente.
+
+  **Buco reale trovato scrivendo il test di reset, non ipotizzato - lo stesso genere di rischio
+  gia' incontrato per `scroll_list`/`currentRow` sopra, qui piu' insidioso**: una prima versione
+  usava `QTimer.singleShot` (la comodita' statica, senza un riferimento a cui chiedere `.stop()`)
+  - `reset_state()` azzerava lo stato VISIBILE subito, ma il timer GIA' schedulato al click su
+  "Carica dati" continuava comunque a scorrere in background, riabilitando il bottone da solo
+  circa 1s dopo, vanificando il reset in SILENZIO (riprodotto per davvero: `isEnabled()` risultava
+  `True` dopo un'attesa, nonostante il reset gia' chiamato prima che il timer scadesse - un task
+  interrotto a meta' che lascerebbe un residuo asincrono per il task SUCCESSIVO, esattamente cio'
+  che `reset_state()` esiste per impedire). Un controllo SUBITO dopo il reset non l'avrebbe MAI
+  scoperto - serve un'attesa vera oltre la durata del timer originale per una prova genuina.
+  Corretto sostituendo `QTimer.singleShot` con un vero `QTimer` (`setSingleShot(True)`,
+  `.start()`/`.stop()`), fermato esplicitamente in `reset_state()` PRIMA di disabilitare di nuovo
+  il bottone.
+
+  Con questo, F3.1.2 ha ora 6 dei 10 task dimostrati (Task 3, "espandi categoria", resta l'unico
+  bloccato da un limite Qt reale gia' documentato - ExpandCollapse senza effetto su ogni bottone
+  gia' verificato). F3.1.6 resta aperto solo per "controlli ambigui" (gia' dimostrato altrove in
+  questa sessione con 'Categoria A'/'Categoria B' dello stesso `control_type`, F3.3.2/F3.3.3, ma
+  senza un bersaglio dedicato in QUESTA fixture). Prova: 7 test nuovi in
+  `tests/test_computer_use_fixture.py::DynamicButtonTests` + 1 test di reset esteso con
+  un'attesa reale oltre il timer (la prova che cattura il buco sopra) + 1 test end-to-end nuovo in
+  `tests/test_computer_use_integration.py::DynamicControlEndToEndTests` (verifica che il
+  controllo resti disabilitato SUBITO dopo il click, poi diventi abilitato solo dopo un'attesa
+  a polling che rispetta davvero il ritardo del timer, non un tempismo fortunato). 3.110/3.110
+  test, ruff verde.
+
 ### F3.2 — Windows UI Automation adapter
 
 Dipende da: F3.1.

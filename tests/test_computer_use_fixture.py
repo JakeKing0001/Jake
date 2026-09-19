@@ -36,12 +36,14 @@ class AutomationPropertiesTests(unittest.TestCase):
         self.assertEqual(window.tabs.objectName(), "fixture_tabs")
         self.assertEqual(window.option_checkbox.objectName(), "fixture_checkbox")
         self.assertEqual(window.scroll_list.objectName(), "fixture_scroll_list")
+        self.assertEqual(window.load_button.objectName(), "fixture_load_button")
+        self.assertEqual(window.dynamic_button.objectName(), "fixture_dynamic_button")
 
     def test_every_control_has_a_non_empty_accessible_name(self):
         window = ComputerUseFixtureWindow()
         for widget in (
             window.input_field, window.add_button, window.reset_button, window.item_list, window.tree,
-            window.tabs, window.option_checkbox, window.scroll_list,
+            window.tabs, window.option_checkbox, window.scroll_list, window.load_button, window.dynamic_button,
         ):
             self.assertTrue(widget.accessibleName(), f"{widget.objectName()} non ha un accessibleName")
 
@@ -134,6 +136,29 @@ class ResetStateTests(unittest.TestCase):
 
         self.assertFalse(window.remove_button.isEnabled())
 
+    def test_reset_disables_the_dynamic_button_again_even_mid_timer(self):
+        """Reset deve funzionare anche se chiamato PRIMA che il timer sia scattato (un task
+        interrotto a meta') - il bottone deve restare/tornare disabilitato, non solo essere
+        disabilitato quando il reset arriva dopo che il timer e' gia' scattato.
+
+        **Buco reale trovato scrivendo questo test, non ipotizzato**: una prima versione della
+        fixture usava `QTimer.singleShot` (la comodita' statica, senza un riferimento a cui
+        chiedere `.stop()`) - il reset azzerava lo stato VISIBILE subito, ma il timer GIA'
+        schedulato al click su "Carica dati" continuava comunque, riabilitando il bottone da
+        solo circa 1s dopo, vanificando il reset in silenzio. Il controllo SUBITO dopo il reset
+        (sotto) non l'avrebbe mai scoperto - serve aspettare DAVVERO oltre la durata del timer
+        originale (`QTest.qWait`, non un singolo controllo immediato) per una prova vera."""
+        window = ComputerUseFixtureWindow()
+        QTest.mouseClick(window.load_button, Qt.LeftButton)
+
+        QTest.mouseClick(window.reset_button, Qt.LeftButton)
+
+        self.assertFalse(window.dynamic_button.isEnabled())
+        self.assertFalse(window.dynamic_action_activated)
+
+        QTest.qWait(1200)  # oltre l'intero secondo del timer originale, se mai fosse sopravvissuto al reset
+        self.assertFalse(window.dynamic_button.isEnabled(), "il timer originale non deve MAI riabilitarlo dopo un reset")
+
 
 class RemoveButtonEnabledStateTests(unittest.TestCase):
     """F3.1.6 (assaggio anticipato - "controlli disabilitati"): il bottone 'Rimuovi selezionato'
@@ -159,6 +184,61 @@ class RemoveButtonEnabledStateTests(unittest.TestCase):
         QTest.mouseClick(window.remove_button, Qt.LeftButton)
 
         self.assertEqual(window.list_items(), ["ciao"], "senza selezione, il click non deve avere alcun effetto")
+
+
+class DynamicButtonTests(unittest.TestCase):
+    """Task 6/10 di F3.1.2 (F3.1.6, la parte DINAMICA - a differenza di
+    `RemoveButtonEnabledStateTests` sopra, dove il bottone cambia stato in modo SINCRONO dentro lo
+    stesso gestore di click che lo scopre, qui il cambiamento avviene DOPO, tramite un vero
+    `QTimer` - lo stesso genere di attesa che un'app reale impone per un'operazione asincrona)."""
+
+    def test_the_button_starts_disabled_on_a_fresh_window(self):
+        window = ComputerUseFixtureWindow()
+        self.assertFalse(window.dynamic_button.isEnabled())
+
+    def test_clicking_load_does_not_enable_it_immediately(self):
+        window = ComputerUseFixtureWindow()
+
+        QTest.mouseClick(window.load_button, Qt.LeftButton)
+
+        self.assertFalse(window.dynamic_button.isEnabled(), "non deve essere gia' abilitato subito dopo il click, prima che il timer scada")
+
+    def test_clicking_load_enables_it_only_after_the_timer_really_fires(self):
+        window = ComputerUseFixtureWindow()
+
+        QTest.mouseClick(window.load_button, Qt.LeftButton)
+        QTest.qWait(1200)  # oltre il secondo dichiarato dal timer, non un'attesa arbitraria
+
+        self.assertTrue(window.dynamic_button.isEnabled())
+
+    def test_clicking_a_disabled_dynamic_button_does_nothing(self):
+        window = ComputerUseFixtureWindow()
+
+        QTest.mouseClick(window.dynamic_button, Qt.LeftButton)
+
+        self.assertFalse(window.dynamic_action_activated, "un bottone disabilitato non deve MAI emettere clicked()")
+
+    def test_clicking_it_once_really_enabled_activates_the_dynamic_action(self):
+        window = ComputerUseFixtureWindow()
+        QTest.mouseClick(window.load_button, Qt.LeftButton)
+        QTest.qWait(1200)
+
+        QTest.mouseClick(window.dynamic_button, Qt.LeftButton)
+
+        self.assertTrue(window.dynamic_action_activated)
+
+    def test_clicking_load_twice_restarts_the_timer_from_the_second_click(self):
+        """`.start()` (non `QTimer.singleShot`) riavvia il conto alla rovescia da capo se
+        cliccato una seconda volta - verificato che il bottone resti DISABILITATO subito dopo un
+        secondo click (il timer e' ripartito da zero), non che sia rimasto abilitato dal primo
+        tentativo (che qui non ha nemmeno avuto il tempo di scadere)."""
+        window = ComputerUseFixtureWindow()
+        QTest.mouseClick(window.load_button, Qt.LeftButton)
+        QTest.qWait(700)  # meno del secondo dichiarato: il primo timer non e' ancora scaduto
+
+        QTest.mouseClick(window.load_button, Qt.LeftButton)
+
+        self.assertFalse(window.dynamic_button.isEnabled(), "il secondo click deve far ripartire il timer da capo")
 
 
 class ConfirmationDialogAutomationPropertiesTests(unittest.TestCase):

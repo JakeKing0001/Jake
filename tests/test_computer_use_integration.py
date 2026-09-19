@@ -366,6 +366,70 @@ class ScrollAndSelectLastRowEndToEndTests(unittest.TestCase):
         self.assertTrue(outcome.succeeded, outcome.attempts)
 
 
+class DynamicControlEndToEndTests(unittest.TestCase):
+    """Task 6/10 di F3.1.2 (F3.1.6, la parte DINAMICA mai affrontata finora - vedi
+    `benchmarks/computer_use_fixture.py` per il perche' `remove_button`, gia' un "primo assaggio",
+    non bastava: cambia stato in modo SINCRONO dentro lo stesso gestore di click che lo scopre,
+    non dopo un vero ritardo). Clicca "Carica dati", verifica che "Azione sbloccata" resti
+    DAVVERO disabilitato subito dopo (non un flag gia' cambiato per costruzione), poi attende - a
+    polling, mai un `time.sleep()` fisso - che il vero `QTimer` della fixture lo abiliti, prima di
+    interagirci."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_a_dynamically_enabled_control_is_detected_only_after_it_really_becomes_ready(self):
+        dynamic_selector = ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_dynamic_button")
+
+        before = self.engine.find_unique(self.window, dynamic_selector)
+        self.assertFalse(before.enabled, "deve iniziare disabilitato, come dichiarato dalla fixture")
+
+        load_button = self.engine.find_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_load_button"),
+        )
+        self.executor.invoke(load_button)
+
+        # Il punto centrale del test: SUBITO dopo il click, il controllo deve essere ancora
+        # disabilitato per davvero - il vero QTimer della fixture non e' scattato istantaneamente,
+        # non un'osservazione che confermerebbe comunque un flag gia' cambiato per costruzione.
+        immediately_after = self.engine.find_unique(self.window, dynamic_selector)
+        self.assertFalse(immediately_after.enabled, "non deve essere gia' abilitato subito dopo il click, prima del timer")
+
+        started = time.monotonic()
+        deadline = started + 3.0
+        became_enabled = False
+        while time.monotonic() < deadline:
+            info = self.engine.find_unique(self.window, dynamic_selector)
+            if info.enabled:
+                became_enabled = True
+                break
+            time.sleep(0.05)
+        elapsed = time.monotonic() - started
+
+        self.assertTrue(became_enabled, "il controllo deve diventare abilitato entro il timeout, il timer della fixture e' di ~1s")
+        self.assertGreaterEqual(elapsed, 0.9, "deve rispettare DAVVERO il ritardo del timer (~1s), non un caso di tempismo fortunato")
+
+        # Una volta davvero abilitato, si puo' interagire con lui come con qualunque altro bottone.
+        dynamic_element = self.engine.find_unique_element(self.window, dynamic_selector)
+        self.executor.invoke(dynamic_element)
+
+
 class ClickElementRealFixtureTests(unittest.TestCase):
     """F3.4.2 (adozione): `ComputerAgent.click_element` - lo stesso Task 1/10 gia' dimostrato in
     `RemoveWithConfirmationEndToEndTests` (digita e clicca Aggiungi), ma guidato dal metodo

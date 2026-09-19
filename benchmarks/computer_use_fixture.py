@@ -12,13 +12,24 @@ ExpandCollapse, Scroll" ancora senza un bersaglio nella fixture): con questa, `F
 per intero - button/input/list/dialog/tree/tabs/scrolling, esattamente l'elenco letterale della
 roadmap ("Creare una app fixture Windows con button, input, list, dialog, tree, tabs e
 scrolling"). Stesso principio "un incremento alla volta" gia' seguito per tutta la fase F1 in
-questa sessione - deliberatamente NON affrontati qui, passi successivi dichiarati:
-- F3.1.2 (5 dei 10 task rimangono - cinque dimostrati qui: "aggiungi", "rimuovi con conferma",
-  "espandi e seleziona", "cambia tab e spunta l'opzione", "scorri e seleziona l'ultima riga");
+questa sessione.
+
+**Sesta fetta (19/09/2026, un incremento successivo) - Task 6/10 di F3.1.2, la parte DINAMICA di
+F3.1.6 mai affrontata finora**: `load_button`/`dynamic_button` - a differenza di `remove_button`
+(gia' un "primo assaggio" di F3.1.6, ma SINCRONO: cambia stato dentro lo stesso gestore di click
+che lo scopre), `dynamic_button` si abilita solo dopo un vero `QTimer.singleShot` innescato da
+`load_button` - lo stesso genere di attesa che un'app reale impone per un caricamento di rete/
+un'operazione lunga, dove un selettore che leggesse lo stato SUBITO dopo il click troverebbe
+DAVVERO il controllo ancora nello stato precedente, non un flag gia' cambiato per costruzione.
+
+Deliberatamente NON affrontati qui, passi successivi dichiarati:
+- F3.1.2 (4 dei 10 task rimangono ora - sei dimostrati: "aggiungi", "rimuovi con conferma",
+  "espandi e seleziona", "cambia tab e spunta l'opzione", "scorri e seleziona l'ultima riga",
+  "attendi un controllo dinamico e attivalo");
 - F3.1.5 (DPI, piu' monitor, finestre sovrapposte, temi diversi);
-- F3.1.6 (controlli ambigui e dinamici - i controlli DISABILITATI hanno gia' un primo assaggio
-  col bottone "Rimuovi selezionato", disabilitato senza una selezione, ma non e' l'intero punto
-  dichiarato da quella fetta);
+- F3.1.6 (resto - "controlli ambigui", gia' dimostrato altrove in questa sessione con
+  'Categoria A'/'Categoria B' dello stesso `control_type`, F3.3.2/F3.3.3, ma non con un bersaglio
+  DEDICATO in questa fixture);
 - l'intera F3.2 (`UIAutomationAdapter`, ancora da costruire).
 
 PySide6 invece di Win32/WinForms nativo: gia' una dipendenza del progetto
@@ -31,6 +42,7 @@ esplicitamente app non-Qt reali (Esplora file, VS Code, browser, Office...)."""
 import argparse
 import sys
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QHBoxLayout, QLabel, QLineEdit, QListWidget, QMessageBox, QPushButton,
     QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
@@ -87,6 +99,28 @@ class ComputerUseFixtureWindow(QWidget):
         self.remove_button.setEnabled(False)
         self.remove_button.clicked.connect(self._remove_selected_with_confirmation)
 
+        self.load_button = QPushButton("Carica dati")
+        self.load_button.setObjectName("fixture_load_button")
+        self.load_button.setAccessibleName("Carica dati")
+        self.load_button.clicked.connect(self._start_loading)
+
+        self.dynamic_button = QPushButton("Azione sbloccata")
+        self.dynamic_button.setObjectName("fixture_dynamic_button")
+        self.dynamic_button.setAccessibleName("Azione sbloccata")
+        self.dynamic_button.setEnabled(False)
+        self.dynamic_button.clicked.connect(self._activate_dynamic_action)
+        self.dynamic_action_activated = False
+        # Un QTimer VERO (non la comodita' statica QTimer.singleShot) - serve un riferimento a cui
+        # chiedere .stop() da reset_state(). Buco reale trovato scrivendo il test di reset, non
+        # ipotizzato: un reset chiamato PRIMA che il timer scada (un task interrotto a meta') non
+        # fermava affatto il timer gia' schedulato con QTimer.singleShot - il bottone tornava
+        # abilitato DA SOLO ~1s dopo, vanificando il reset in silenzio (verificato riproducendolo:
+        # `isEnabled()` era `True` dopo un'attesa, nonostante il reset gia' chiamato).
+        self._load_timer = QTimer(self)
+        self._load_timer.setSingleShot(True)
+        self._load_timer.setInterval(1000)
+        self._load_timer.timeout.connect(lambda: self.dynamic_button.setEnabled(True))
+
         self.item_list = QListWidget()
         self.item_list.setObjectName("fixture_list")
         self.item_list.setAccessibleName("Elenco elementi")
@@ -126,6 +160,10 @@ class ComputerUseFixtureWindow(QWidget):
         buttons_row.addWidget(self.reset_button)
         buttons_row.addWidget(self.remove_button)
 
+        dynamic_row = QHBoxLayout()
+        dynamic_row.addWidget(self.load_button)
+        dynamic_row.addWidget(self.dynamic_button)
+
         layout = QVBoxLayout(self)
         layout.addWidget(self.input_field)
         layout.addLayout(buttons_row)
@@ -133,6 +171,7 @@ class ComputerUseFixtureWindow(QWidget):
         layout.addWidget(self.tree)
         layout.addWidget(self.tabs)
         layout.addWidget(self.scroll_list)
+        layout.addLayout(dynamic_row)
 
     def _add_current_text(self) -> None:
         """Task 1/10 di F3.1.2 (gli altri 9 restano un passo successivo dichiarato): digitare un
@@ -220,6 +259,37 @@ class ComputerUseFixtureWindow(QWidget):
         self.scroll_list.clearSelection()
         self.scroll_list.setCurrentRow(-1)
         self.scroll_list.scrollToTop()
+        # .stop() PRIMA di disabilitare di nuovo il bottone - un reset chiamato PRIMA che il
+        # timer sia scaduto (un task interrotto a meta') deve fermare DAVVERO l'operazione
+        # pendente, non solo azzerare lo stato visibile lasciando che il timer originale la
+        # riabiliti da solo qualche istante dopo (vedi il docstring di _start_loading per la
+        # prova empirica di questo buco, trovato scrivendo il test di reset).
+        self._load_timer.stop()
+        self.dynamic_button.setEnabled(False)
+        self.dynamic_action_activated = False
+
+    def _start_loading(self) -> None:
+        """Task 6/10 di F3.1.2 (F3.1.6, "controlli dinamici" - la parte MAI affrontata finora:
+        `remove_button`, F3.1.6 "un primo assaggio", cambia stato in modo SINCRONO dentro lo
+        stesso gestore di click che lo scopre; questo bottone appare/si abilita in un momento
+        DIVERSO e successivo, dopo un `QTimer` - lo stesso genere di attesa che un'app reale
+        impone per un caricamento di rete/un'operazione lunga, non riproducibile da un controllo
+        gia' presente e sincrono). Un vero `QTimer` (non un semplice flag booleano settato
+        subito) cosi' un selettore che leggesse lo stato SUBITO dopo il click troverebbe DAVVERO
+        il bottone ancora disabilitato - la stessa distinzione "sincrono vs poi, davvero" gia' al
+        centro di F3.4.7. `.start()` (non `QTimer.singleShot`, la comodita' statica usata in una
+        prima versione) riavvia il conto alla rovescia da capo se cliccato una seconda volta -
+        coerente con "carica di nuovo" invece di lasciare un timer piu' vecchio, gia' in corso,
+        decidere quando il bottone si abilita."""
+        self._load_timer.stop()
+        self.dynamic_button.setEnabled(False)
+        self._load_timer.start()
+
+    def _activate_dynamic_action(self) -> None:
+        """Il bottone dinamico, una volta abilitato DAVVERO dal timer sopra, si comporta come
+        qualunque altro bottone - il punto di F3.1.6 e' la sua APPARIZIONE ritardata, non
+        un'azione speciale una volta raggiungibile."""
+        self.dynamic_action_activated = True
 
     def _update_remove_button_enabled(self) -> None:
         """Un piccolo assaggio anticipato di F3.1.6 ("controlli disabilitati"): senza una
