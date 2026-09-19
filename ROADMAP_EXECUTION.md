@@ -4845,6 +4845,36 @@ Criterio di uscita: gli stessi task passano dopo resize, tema e spostamento fine
   del nome invece delle coordinate lo rende plausibile per costruzione, ma non ancora provato).
   Prova: 11 test nuovi in `tests/test_selector.py`. 2.932/2.932 test, ruff verde.
 
+- `F3.3.4` (resto - "salvare selector procedurali senza coordinate assolute", CHIUDE F3.3.4) —
+  19/09/2026: nuovi `ElementSelector.to_dict()`/`.from_dict()` (`core/computer_use/selector.py`).
+  Motivato dopo che un'indagine su tre app residue di F3.7 (Windows Media Player, la app Impostazioni
+  moderna, le app di messaggistica) ha trovato solo rischi gia' noti (istanza singola per utente,
+  nessun isolamento verificato, la stessa diagnosi gia' data per Impostazioni/Office) senza un
+  nuovo bersaglio sicuro da investigare subito - deciso di avanzare invece su un pezzo di F3.3 gia'
+  segnalato come aperto, puro codice senza dipendenze da un'app esterna o da dati personali
+  dell'utente (Discord/WhatsApp, gli ultimi candidati di "messaggistica", avrebbero rischiato di
+  esporre conversazioni reali dell'utente durante un'indagine automatizzata - un rischio di privacy
+  diverso e piu' delicato del solo "PID condiviso", non affrontato senza autorizzazione esplicita).
+
+  `to_dict()` restituisce solo i criteri DATI (mai `None` esplicito per un criterio omesso - un
+  file salvato piu' pulito, "omesso" e "None" significano gia' la stessa cosa in questa classe).
+  `from_dict()` e' l'inverso ma solleva `ValueError` su una chiave SCONOSCIUTA invece di
+  ignorarla silenziosamente - un selettore procedurale gia' salvato e poi ricaricato con un campo
+  scritto male (es. "nome" invece di "name") deve fallire RUMOROSAMENTE, non produrre
+  silenziosamente un selettore PIU' AMPIO di quello originariamente salvato (un criterio perso
+  aumenta il rischio di un match ambiguo o SBAGLIATO su un elemento diverso) - stesso principio
+  "rifiuta l'incertezza invece di indovinare" gia' seguito da `find_unique`/`AmbiguousSelectionError`.
+
+  Nessuna decisione ancora presa su DOVE/COME un chiamante persiste il dict (JSON su disco, una
+  voce di un futuro formato "procedura registrata" per F3.8 "Learn by demonstration", che questo
+  incremento sblocca come prerequisito senza ancora affrontarlo) - `to_dict`/`from_dict`
+  restituiscono/accettano un `dict` semplice, agnostico rispetto al formato di persistenza scelto
+  da un futuro chiamante. Prova: 5 test nuovi in
+  `tests/test_selector.py::ElementSelectorSerializationTests` (omette i criteri non dati; include
+  tutti i criteri dati; un round-trip riproduce un selettore identico; nessun criterio noto
+  solleva lo stesso errore del costruttore; una chiave sconosciuta/un typo viene rifiutata invece
+  di ignorata). 3.044/3.044 test, ruff verde.
+
 ### F3.4 — Executor semantico
 
 Dipende da: F3.3 e F1.3.
@@ -5991,6 +6021,24 @@ Criterio di uscita: cinque workflow reali completati in tre esecuzioni consecuti
   chiave si comporta come prima, un fallimento non viene mai messo in cache, una chiave scaduta
   torna a rieseguire, chiavi diverse non collidono, stessa protezione per `type_into_element`,
   la copia restituita e' indipendente dalla cache). 3.036/3.036 test, ruff verde.
+
+- `F3.7.1` (media - indagine, NESSUN codice prodotto, stesso trattamento di Impostazioni/Office) —
+  19/09/2026: prima di scrivere un adapter, verificato con `wait_for_new_top_level_window` (F3.4.7,
+  appena costruito - usato qui per la prima volta per uno scopo diverso dal suo stesso test) se
+  Windows Media Player classico (`wmplayer.exe`, verificato installato) apre una SECONDA finestra
+  separata come gia' fatto per Esplora File/VS Code/terminale. **Risultato diverso dagli altri tre
+  - non un processo condiviso pericoloso come Windows Terminal/Word, ma nessuna seconda finestra
+  affatto**: un secondo lancio di `wmplayer.exe` non ha prodotto alcuna nuova finestra di primo
+  livello entro 15s (verificato con lo stesso meccanismo di attesa a polling appena costruito, non
+  un singolo tentativo) - coerente con un modello a ISTANZA SINGOLA per utente (il secondo lancio
+  probabilmente si limita ad attivare la finestra gia' aperta, senza crearne una nuova) - lo stesso
+  identico rischio gia' documentato per "Impostazioni": nessun modo verificato di aprire una
+  copia ISOLATA, automatizzarla rischierebbe di interagire con una finestra REALE gia' aperta
+  dall'utente. L'app "Media Player" moderna (`Microsoft.ZuneMusic`, UWP) non e' stata investigata
+  separatamente - stessa famiglia architetturale di "Impostazioni" (altra app UWP single-instance),
+  la stessa diagnosi si applica per costruzione fino a una verifica dedicata futura. Rimandato,
+  stesso trattamento di Impostazioni/Office - nessun file nuovo, nessun test nuovo, 3.039/3.039
+  test invariato (il conteggio del Round 4/4 precedente, questa voce non ha aggiunto test).
 
 ### F3.8 — Learn by demonstration
 

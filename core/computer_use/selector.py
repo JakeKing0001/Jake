@@ -22,8 +22,8 @@ alla volta" di questa sessione):
 - F3.3.2: un vero punteggio/spiegazione del PERCHE' un elemento e' stato scelto tra piu'
   candidati - oggi `find_unique` rifiuta l'ambiguita' invece di sceglierne uno (F3.3.3), ma non
   assegna ancora un punteggio a candidati diversi;
-- F3.3.4 (resto): salvare/serializzare un selettore (oggi e' gia' un dataclass, quindi gia'
-  "procedurale senza coordinate", ma non c'e' ancora un formato di salvataggio su disco);
+- F3.3.4 (resto - CHIUSO in un incremento successivo, 19/09/2026): `ElementSelector.to_dict()`/
+  `.from_dict()` - vedi le loro docstring;
 - F3.3.5 (invalidare selettori quando la struttura/versione dell'app cambia - non c'e' ancora
   nessuna cache di selettori da invalidare);
 - F3.3.6 (inspector nell'HUD);
@@ -49,6 +49,41 @@ class ElementSelector:
     def __post_init__(self) -> None:
         if self.name is None and self.control_type is None and self.automation_id is None:
             raise ValueError("ElementSelector richiede almeno un criterio (name/control_type/automation_id)")
+
+    def to_dict(self) -> dict:
+        """F3.3.4 (resto - "salvare selector procedurali senza coordinate assolute"): solo i campi
+        NON `None`, cosi' un selettore salvato su disco (JSON, YAML, o qualunque formato un
+        chiamante scelga - questo metodo resta agnostico rispetto al formato, restituisce solo un
+        dict semplice) e poi ricaricato produce lo STESSO `ElementSelector`, non uno con campi
+        `None` scritti esplicitamente che renderebbero il file piu' rumoroso senza aggiungere
+        informazione (un criterio omesso e un criterio `None` significano gia' la stessa cosa in
+        questa classe)."""
+        result: dict = {}
+        if self.name is not None:
+            result["name"] = self.name
+        if self.control_type is not None:
+            result["control_type"] = self.control_type
+        if self.automation_id is not None:
+            result["automation_id"] = self.automation_id
+        return result
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ElementSelector":
+        """L'inverso di `to_dict` - solleva `ValueError` (non ignora silenziosamente) su una
+        chiave SCONOSCIUTA, non solo sull'assenza di ogni criterio gia' coperta da
+        `__post_init__`: un selettore procedurale salvato e poi ricaricato con un campo
+        scritto male o di uno schema futuro non ancora supportato deve fallire RUMOROSAMENTE,
+        non produrre silenziosamente un selettore PIU' AMPIO di quello inteso (un criterio perso
+        per un typo aumenterebbe il rischio di un match ambiguo o, peggio, di un match SBAGLIATO
+        su un elemento diverso da quello originariamente salvato - lo stesso principio "rifiuta
+        l'ambiguita'/l'incertezza invece di indovinare" gia' seguito da `find_unique`)."""
+        unknown_keys = set(data) - {"name", "control_type", "automation_id"}
+        if unknown_keys:
+            raise ValueError(f"ElementSelector.from_dict: chiavi sconosciute {sorted(unknown_keys)}")
+        return cls(
+            name=data.get("name"), control_type=data.get("control_type"),
+            automation_id=data.get("automation_id"),
+        )
 
 
 class NoMatchError(Exception):
