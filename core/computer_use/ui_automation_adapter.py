@@ -212,6 +212,62 @@ class UIAutomationAdapter:
                 raise WindowNotFoundError(f"nessuna finestra visibile contenente {substring!r} entro {timeout_seconds}s")
             time.sleep(0.1)
 
+    def snapshot_top_level_window_handles(self) -> set[int]:
+        """F3.4.7 ("gestire dialoghi modali... come eventi, non sleep fissi", prima fetta -
+        adozione): una fotografia di QUALI finestre di primo livello esistono ADESSO, tramite
+        `CurrentNativeWindowHandle` (un vero HWND di Windows) invece di titolo o PID - verificato
+        (non assunto) che un HWND identifica in modo univoco UNA finestra per tutta la sua vita,
+        a differenza del PID (che questa stessa sessione ha appena scoperto poter essere
+        CONDIVISO da piu' finestre per davvero - Windows Terminal/Word, vedi
+        `core/computer_use/terminal_adapter.py` - e del titolo, gia' noto ambiguo/dipendente dalla
+        lingua altrove in questo modulo). Il chiamante prende questa fotografia PRIMA di
+        un'azione che potrebbe far comparire un dialogo modale imprevisto (il cui titolo non e'
+        noto in anticipo), poi la passa a `wait_for_new_top_level_window` invece di un
+        `time.sleep(N)` fisso seguito da un tentativo alla cieca."""
+        root = self._uia.GetRootElement()
+        true_condition = self._uia.CreateTrueCondition()
+        candidates = root.FindAll(UIA.TreeScope_Children, true_condition)
+        handles: set[int] = set()
+        for i in range(candidates.Length):
+            candidate = candidates.GetElement(i)
+            try:
+                handles.add(candidate.CurrentNativeWindowHandle)
+            except (ValueError, comtypes.COMError):
+                continue
+        return handles
+
+    def wait_for_new_top_level_window(self, baseline_handles: set[int], timeout_seconds: float = 5.0):
+        """F3.4.7 (prima fetta): attende - RI-INTERROGANDO a intervalli brevi, mai un singolo
+        `time.sleep(N)` seguito da un solo tentativo - che compaia una finestra di primo livello
+        il cui HWND NON era in `baseline_handles` (da `snapshot_top_level_window_handles`,
+        chiamato PRIMA dell'azione che potrebbe aprire un dialogo). Non richiede di conoscere il
+        titolo del dialogo in anticipo (a differenza di `find_window_by_title`/
+        `find_window_by_title_containing`) - il caso d'uso dichiarato da F3.4.7 e' proprio un
+        dialogo/cambio di focus IMPREVISTO, il cui titolo dipende dall'azione appena eseguita.
+
+        Solleva `AmbiguousWindowError` (stesso principio "rifiuta l'ambiguita'" gia' seguito da
+        `find_window_by_title_containing`, F3.7) se PIU' di una finestra nuova compare nello
+        STESSO istante di verifica - un chiamante che si aspetta un singolo dialogo non deve
+        ricevere silenziosamente una finestra a caso tra piu' candidate."""
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            current = self.snapshot_top_level_window_handles()
+            new_handles = current - baseline_handles
+            if len(new_handles) > 1:
+                raise AmbiguousWindowError(
+                    f"{len(new_handles)} nuove finestre di primo livello sono comparse insieme: servono criteri piu' precisi"
+                )
+            if len(new_handles) == 1:
+                target_handle = next(iter(new_handles))
+                condition = self._uia.CreatePropertyCondition(UIA.UIA_NativeWindowHandlePropertyId, target_handle)
+                root = self._uia.GetRootElement()
+                window = root.FindFirst(UIA.TreeScope_Children, condition)
+                if window:
+                    return window
+            if time.monotonic() >= deadline:
+                raise WindowNotFoundError(f"nessuna nuova finestra di primo livello comparsa entro {timeout_seconds}s")
+            time.sleep(0.1)
+
     def describe_element(self, element) -> ElementInfo | None:
         """Solo l'elemento dato, senza figli (`children` resta vuoto) - vedi `describe_tree` per
         una copia ricorsiva. Proprieta' lette dal vivo (`Current*`), non da una cache (F3.2.2,

@@ -179,6 +179,90 @@ class FindWindowByTitleContainingTests(unittest.TestCase):
                     process.kill()
 
 
+class WaitForNewTopLevelWindowTests(unittest.TestCase):
+    """F3.4.7 (adozione - un residuo genuinamente diverso, non gia' coperto dal capstone di
+    questo stesso incremento): quel capstone ha trovato che un dialogo MODALE di Qt (`QMessageBox`)
+    compare come DISCENDENTE della finestra genitrice nell'albero di CONTROLLO di UI Automation,
+    non come figlio del desktop - risolto li' con `SelectorEngine.wait_for_unique_element` cercato
+    a partire dalla finestra nota. Il caso che QUESTO rimane a coprire e' diverso: una finestra
+    NUOVA e IMPREVISTA che compare come vera finestra di primo livello separata (es. un dialogo
+    di sistema, un prompt di un processo diverso) - un titolo non noto in anticipo, quindi mai
+    cercabile con `find_window_by_title`/`find_window_by_title_containing`. Verificato contro la
+    fixture Qt gia' esistente (nessuna nuova app reale necessaria per testare questo meccanismo
+    generico), stesso schema di `FindWindowByTitleContainingTests` sopra."""
+
+    def test_no_new_window_raises_within_the_timeout(self):
+        adapter = UIAutomationAdapter()
+        baseline = adapter.snapshot_top_level_window_handles()
+        started = time.monotonic()
+
+        with self.assertRaises(WindowNotFoundError):
+            adapter.wait_for_new_top_level_window(baseline, timeout_seconds=1.0)
+
+        elapsed = time.monotonic() - started
+        self.assertGreaterEqual(elapsed, 1.0, "deve rispettare davvero il timeout dato, non arrendersi prima")
+
+    def test_detects_a_real_new_window_that_appears_after_the_baseline(self):
+        adapter = UIAutomationAdapter()
+        baseline = adapter.snapshot_top_level_window_handles()
+
+        process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        try:
+            window = adapter.wait_for_new_top_level_window(baseline, timeout_seconds=15.0)
+            info = adapter.describe_element(window)
+            self.assertEqual(info.name, _FIXTURE_WINDOW_TITLE, "deve trovare la finestra nuova per davvero, non una qualunque")
+        finally:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+
+    def test_two_new_windows_appearing_together_raise_ambiguous_error(self):
+        adapter = UIAutomationAdapter()
+        baseline = adapter.snapshot_top_level_window_handles()
+
+        process_a = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        process_b = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        try:
+            # Stesso principio di avvio-e-ritenta di FindWindowByTitleContainingTests sopra:
+            # attende che ENTRAMBE le finestre siano visibili prima di controllare l'ambiguita',
+            # invece di un singolo tentativo ottimistico che potrebbe vedere solo la prima.
+            warmup_deadline = time.monotonic() + 15.0
+            while True:
+                try:
+                    adapter.wait_for_new_top_level_window(baseline, timeout_seconds=0.2)
+                except AmbiguousWindowError:
+                    break
+                except WindowNotFoundError:
+                    pass
+                if time.monotonic() > warmup_deadline:
+                    self.fail("le due finestre della fixture non sono mai comparse entrambe")
+
+            started = time.monotonic()
+            with self.assertRaises(AmbiguousWindowError):
+                adapter.wait_for_new_top_level_window(baseline, timeout_seconds=5.0)
+
+            elapsed = time.monotonic() - started
+            self.assertLess(elapsed, 3.0, "l'ambiguita' non deve aspettare il timeout intero")
+        finally:
+            for process in (process_a, process_b):
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+
+
 class _RealFixtureTestCase(unittest.TestCase):
     """Un solo processo fixture condiviso da TUTTI i test di questa classe (nessuno muta lo stato
     della fixture, tutti sono read-only - lanciarne uno per test sarebbe solo piu' lento senza
