@@ -5793,6 +5793,58 @@ Criterio di uscita: cinque workflow reali completati in tre esecuzioni consecuti
   pre-esistente, inclusa potenzialmente questa stessa sessione, viene mai toccato). 3.026/3.026
   test, ruff verde.
 
+- `F3.7.1` (terminale, quinta app dell'ordine dichiarato - "Impostazioni" ancora saltata, vedi
+  sopra) — 19/09/2026: nuovo `core/computer_use/terminal_adapter.py`.
+
+  **Rischio di sicurezza PIU' insidioso di quelli gia' trovati - scoperto da un SECONDO probe
+  empirico, invisibile al primo**: Windows Terminal (l'app predefinita per una console su Windows
+  11, verificata essere il default su questa macchina) usa un'architettura "monarch/peasant" -
+  lanciando `start "titolo" cmd.exe` DUE VOLTE in sequenza, le due finestre risultanti hanno
+  riportato lo STESSO `CurrentProcessId` (verificato, non assunto: un unico probe con una sola
+  finestra non l'avrebbe mai rivelato). Riprodotto DAVVERO l'incidente, non solo temuto: terminare
+  quel PID condiviso (con l'intento di chiudere solo la prima finestra) ha chiuso ANCHE la seconda,
+  completamente indipendente agli occhi dell'utente. Applicare qui lo stesso schema gia' usato per
+  Esplora File/VS Code (`taskkill` sul PID della finestra trovata) avrebbe quindi rischiato di
+  chiudere finestre/schede REALI dell'utente che condividono lo stesso processo Windows Terminal.
+
+  **Soluzione VERIFICATA con lo stesso identico test che ha trovato il rischio**: invocare
+  `conhost.exe` (l'host di console legacy, ancora presente e funzionante anche con Windows
+  Terminal come predefinito) DIRETTAMENTE, bypassando l'architettura monarch/peasant. Due finestre
+  `conhost.exe cmd.exe` lanciate in sequenza hanno riportato PID DIVERSI, e terminare la prima ha
+  lasciato la seconda intatta e trovabile - lo stesso test "apri due finestre, verifica PID
+  diversi, chiudi una, verifica che l'altra sopravviva" gia' richiesto per Esplora File, qui
+  superato da `conhost.exe` e FALLITO da Windows Terminal. Questo adapter lancia quindi sempre
+  `conhost.exe cmd.exe`, mai `cmd.exe`/`start` da soli e mai `wt.exe` esplicitamente - il test
+  `RealTerminalTests::test_two_windows_get_separate_processes_and_closing_one_never_touches_the_other`
+  riproduce esattamente questo scenario contro il codice reale, non solo contro il probe usa e
+  getta dell'indagine.
+
+  **Capacita' in piu' rispetto a Esplora File/VS Code, verificata non assunta impossibile**: a
+  differenza dell'editor Monaco di VS Code (non accessibile per default), il buffer di testo REALE
+  di un `conhost.exe` E' leggibile via UI Automation - verificato interrogando l'elemento
+  `Document` ("Text Area") con `TextPattern` (`IUIAutomationTextPattern.DocumentRange.GetText(-1)`),
+  che ha restituito il contenuto VERO stampato nella shell (un marcatore univoco stampato con
+  `echo`), non solo il titolo della finestra. `read_terminal_text()` espone questa capacita' - una
+  differenza reale tra due app della stessa famiglia "F3.7 adapter", non un'assunzione che tutte si
+  comportino allo stesso modo.
+
+  **`ResourceWarning` atteso e dichiarato, non inseguito con un fix cosmetico**: a differenza del
+  launcher di Esplora File/VS Code (un processo separato che esce da solo in fretta), il processo
+  lanciato qui (`conhost.exe`) verificato COINCIDE con il processo reale della finestra (stesso
+  PID) - non esce finche' la finestra non viene chiusa da `close_terminal_window`. Chiamare
+  `.wait(timeout=...)` come per gli altri due adapter avrebbe sprecato l'intero timeout ad ogni
+  chiamata fingendo un'uscita che non arriva mai - rimosso, il `ResourceWarning` risultante e'
+  dichiarato onestamente nel docstring del modulo invece di nascosto dietro un `wait()` fuorviante.
+
+  Deliberatamente NON affrontati qui: invio di input alla shell (digitare/eseguire un comando -
+  solo apertura/localizzazione/lettura/chiusura in questa prima fetta), Windows Terminal stesso
+  (resta NON supportato per il rischio monarch/peasant sopra - un incremento futuro potrebbe
+  rivalutarlo se si trova un modo verificato di distinguere un PID sicuro da uno condiviso),
+  `conhost.exe` sotto host diversi da `cmd.exe` (es. PowerShell, non verificato). Prova: 3 test
+  nuovi in `tests/test_terminal_adapter.py::RealTerminalTests` (contro conhost.exe vero, con la
+  stessa rete di sicurezza esplicita gia' usata per Esplora File/VS Code - nessun processo
+  conhost.exe pre-esistente viene mai toccato). 3.029/3.029 test, ruff verde.
+
 ### F3.8 — Learn by demonstration
 
 Dipende da: F3.3, F3.4 e F5 procedural memory.
