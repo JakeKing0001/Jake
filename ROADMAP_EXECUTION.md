@@ -5018,6 +5018,29 @@ Criterio di uscita: gli stessi task passano dopo resize, tema e spostamento fine
   solleva NoMatchError) + 1 test di round-trip in `ElementSelectorSerializationTests`. 3.056/3.056
   test, ruff verde.
 
+- `F3.3.2` (resto - "spiegare perche' un elemento e' stato scelto", il caso gemello
+  AmbiguousSelectionError, CHIUDE F3.3.2) — 19/09/2026: nuovo `SelectorEngine.
+  _describe_ambiguous_matches()`, collegato ai tre punti che sollevano `AmbiguousSelectionError`
+  (`find_unique`, `wait_for_unique_element`, `find_unique_element`) - stessa idea gia' applicata a
+  `NoMatchError` nell'incremento precedente, qui per il caso OPPOSTO: non "perche' nessuno", ma
+  "quali sono i troppi". Il messaggio ora elenca `automation_id`/`bounds` di OGNI candidato
+  ambiguo, non solo il conteggio - un chiamante che vede "2 elementi corrispondono" da solo non
+  saprebbe COME restringere il selettore senza tornare a ispezionare l'albero a mano; con
+  automation_id/bounds di entrambi i candidati visibili, spesso la differenza (e quindi il
+  criterio da aggiungere) e' immediata.
+
+  Accetta sia `ElementInfo` gia' descritti (il percorso di `find_unique`, via `find_all`) sia
+  elementi COM GREZZI (`wait_for_unique_element`/`find_unique_element`, che non passano da
+  `find_all`) - questi ultimi descritti AL VOLO con lo stesso `describe_element` gia' usato
+  ovunque nel modulo, nessuna duplicazione della logica "onesto None su un provider incompleto"
+  gia' costruita li'. **Diagnostico soltanto, non un cambiamento di comportamento**: nessun vero
+  punteggio/ranking fuzzy tra candidati - quali elementi contano come "match" resta invariato
+  (un'uguaglianza esatta per criterio), solo il messaggio d'errore e' piu' ricco. Con questo, F3.3.2
+  e' chiuso per intero (prima fetta + resto, entrambi negli ultimi due incrementi). Prova: 2 test
+  nuovi (`find_unique` con `ElementInfo`, `wait_for_unique_element` con elementi COM grezzi -
+  entrambi contro l'ambiguita' reale gia' nota della fixture, "Categoria A"/"Categoria B" con lo
+  stesso `control_type`). 3.058/3.058 test, ruff verde.
+
 ### F3.4 — Executor semantico
 
 Dipende da: F3.3 e F1.3.

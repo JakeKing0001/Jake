@@ -181,6 +181,18 @@ class FindUniqueAgainstTheRealFixtureTests(_RealFixtureTestCase):
         with self.assertRaises(AmbiguousSelectionError):
             self.engine.find_unique(self.window, ElementSelector(control_type="TreeItem"))
 
+    def test_ambiguous_error_describes_every_candidate_not_just_the_count(self):
+        """F3.3.2 (resto - "spiegare perche' un elemento e' stato scelto tra piu' candidati"): il
+        messaggio deve elencare gli automation_id REALI di 'Categoria A'/'Categoria B', non solo
+        "2 elementi corrispondono" - altrimenti un chiamante non saprebbe COME restringere il
+        selettore senza tornare a ispezionare l'albero a mano."""
+        with self.assertRaises(AmbiguousSelectionError) as ctx:
+            self.engine.find_unique(self.window, ElementSelector(control_type="TreeItem"))
+
+        message = str(ctx.exception)
+        self.assertIn("automation_id=", message)
+        self.assertIn("bounds=", message)
+
     def test_find_all_returns_every_matching_element_not_just_one(self):
         buttons = self.engine.find_all(self.window, ElementSelector(control_type="Button"))
 
@@ -280,6 +292,16 @@ class WaitForUniqueElementTests(_RealFixtureTestCase):
 
         elapsed = time.monotonic() - started
         self.assertLess(elapsed, 2.0, "l'ambiguita' non deve aspettare il timeout intero")
+
+    def test_ambiguous_error_describes_candidates_even_for_raw_com_matches(self):
+        """A differenza di `find_unique` (che lavora su `ElementInfo` gia' descritti),
+        `wait_for_unique_element` lavora su elementi COM GREZZI - la descrizione deve funzionare
+        anche li', non solo nel percorso di `find_unique`."""
+        with self.assertRaises(AmbiguousSelectionError) as ctx:
+            self.engine.wait_for_unique_element(self.window, ElementSelector(control_type="TreeItem"), timeout_seconds=1.0)
+
+        message = str(ctx.exception)
+        self.assertIn("automation_id=", message)
 
 
 class LocalizationAfterResizeAndMoveTests(unittest.TestCase):
