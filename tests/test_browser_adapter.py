@@ -14,6 +14,7 @@ from core.computer_use.browser_adapter import (
     find_edge_executable,
     find_page_document,
     launch_isolated_browser,
+    read_address_bar_text,
 )
 from core.computer_use.selector import ElementSelector, SelectorEngine
 from core.computer_use.ui_automation_adapter import UIAutomationAdapter
@@ -93,6 +94,19 @@ class RealBrowserFixtureTests(unittest.TestCase):
         document_after = find_page_document(self.adapter, self.window)
         matches = self.adapter.find_matching_elements(document_after, name="dal browser")
         self.assertEqual(len(matches), 1, "il paragrafo di output deve mostrare davvero il testo digitato")
+
+    def test_read_address_bar_text_shows_a_normalized_path_not_the_exact_url(self):
+        """F3.6.5 (prima fetta - "verificare URL"): buco reale trovato leggendo davvero la barra
+        degli indirizzi, non ipotizzato - per un `file:///` locale Edge la mostra NORMALIZZATA
+        (percorso Windows con `/`, senza lo schema `file:///` davanti), diversa carattere per
+        carattere dall'URL passato a `launch_isolated_browser`. Verificato che il pezzo
+        DISTINTIVO (il nome del file) sia comunque presente - la sottostringa e' il confronto
+        onesto, mai l'uguaglianza esatta con questo genere di URL."""
+        text = read_address_bar_text(self.adapter, self.window)
+
+        self.assertIsNotNone(text)
+        self.assertIn("browser_fixture.html", text)
+        self.assertNotEqual(text, _FIXTURE_URL, "la barra normalizza il file:// - non deve mai coincidere per uguaglianza esatta")
 
 
 if __name__ == "__main__":
