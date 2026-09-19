@@ -5570,12 +5570,29 @@ Criterio di uscita: suite di siti fixture locale verde e zero injection dal cont
 
   Deliberatamente NON affrontati qui: F3.6.5 (resto - nessun codice di stato HTTP o segnale di
   caricamento, solo il testo della barra - un vero stato HTTP richiederebbe Chrome DevTools
-  Protocol, escluso per decisione esplicita con l'utente), la ricerca dell'elemento e' per nome
-  localizzato in italiano ("Indirizzo e barra di ricerca" - non funzionerebbe su un Edge in
-  un'altra lingua, stesso limite gia' accettato altrove per i nomi della fixture Qt). Prova: 1
-  test nuovo in `tests/test_browser_adapter.py::RealBrowserFixtureTests` (contro Edge vero,
-  verifica esplicitamente che il testo NON coincida per uguaglianza esatta con l'URL navigato).
+  Protocol, escluso per decisione esplicita con l'utente). Prova: 1 test nuovo in
+  `tests/test_browser_adapter.py::RealBrowserFixtureTests` (contro Edge vero, verifica
+  esplicitamente che il testo NON coincida per uguaglianza esatta con l'URL navigato).
   3.016/3.016 test in locale, ruff verde.
+
+- `F3.6.5` (fix di un fallimento REALE in CI, trovato dopo la pubblicazione - non ipotizzato) —
+  19/09/2026: `read_address_bar_text` cercava l'elemento per NOME localizzato in italiano
+  ("Indirizzo e barra di ricerca") - funzionava in locale (Edge in italiano) ma falliva SEMPRE sul
+  runner CI (Edge in inglese sul runner GitHub Actions, un nome diverso, mai verificato prima
+  della pubblicazione perche' questa macchina ha un solo locale disponibile per testarlo).
+
+  **Fix**: cerca SOLO per `control_type` (mai per nome, quindi indipendente dalla lingua), ma
+  ristretto al nodo `ToolBar` del browser invece che all'intera finestra - un `Edit` cercato
+  sull'INTERA finestra sarebbe AMBIGUO quando la pagina contiene un proprio campo di testo (come
+  questa stessa fixture, che ne ha uno), dato che l'albero della pagina e quello del chrome del
+  browser sono entrambi discendenti della stessa finestra di primo livello - verificato che la
+  ricerca ristretta al `ToolBar` resta univoca anche con il contenuto della pagina gia' sveglio
+  (il caso piu' difficile), non assunto. Stesso principio "verificare per davvero prima di
+  pubblicare, non solo testare nell'unico locale disponibile" gia' imparato in questa sessione
+  per il fallimento CI di Task 3 (F3.5.1) - qui pero' risolto al primo tentativo, con una
+  diagnosi diretta dal traceback CI invece di tre ipotesi scartate una per una. 3.016/3.016 test
+  in locale (dove Edge e' in italiano, verificato che la nuova ricerca per solo `control_type`
+  funzioni comunque), ruff verde.
 
 ### F3.7 — Adapter applicativi
 
