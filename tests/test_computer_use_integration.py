@@ -413,6 +413,31 @@ class ClickElementRealFixtureTests(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertEqual(result.error, "NOT_FOUND")
 
+    def test_type_into_element_then_click_element_completes_task_1_without_manual_assembly(self):
+        """F3.4.2 (resto): Task 1/10 completato usando SOLO i due metodi unificati di
+        ComputerAgent - a differenza del test sopra (che usa ancora `ActionExecutor.set_value` a
+        mano per il campo di testo), qui NESSUN pezzo di `core/computer_use/` viene toccato
+        direttamente dal chiamante."""
+        type_result = self.computer_agent.type_into_element(
+            "via type_into_element", window_title=_FIXTURE_WINDOW_TITLE,
+            automation_id="QApplication.jake_fixture_window.fixture_input",
+        )
+        self.assertTrue(type_result.success)
+
+        click_result = self.computer_agent.click_element(window_title=_FIXTURE_WINDOW_TITLE, name="Aggiungi", control_type="Button")
+        self.assertTrue(click_result.success)
+
+        item = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(name="via type_into_element", control_type="ListItem"), timeout_seconds=3.0,
+        )
+        self.assertEqual(item.CurrentName, "via type_into_element")
+
+    def test_type_into_element_reports_not_found_for_a_name_that_does_not_exist(self):
+        result = self.computer_agent.type_into_element("qualunque testo", window_title=_FIXTURE_WINDOW_TITLE, name="Campo che non esiste XYZ")
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "NOT_FOUND")
+
 
 if __name__ == "__main__":
     unittest.main()

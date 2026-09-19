@@ -5422,6 +5422,44 @@ Criterio di uscita: ogni fallback è osservabile e non produce duplicazioni nei 
   finti) + 2 test nuovi in `tests/test_computer_use_integration.py::ClickElementRealFixtureTests`
   (contro la fixture vera). 2.998/2.998 test, ruff verde.
 
+- `F3.4.2` (resto - "unificare... type... nel ComputerAgent") — 19/09/2026: nuovo
+  `ComputerAgent.type_into_element(text, *, window_title, name=None, control_type=None,
+  automation_id=None, timeout_seconds=5.0)` - stessa struttura di `click_element` (fattorizzata in
+  un nuovo `_locate_element_center`, condiviso da entrambi invece di duplicato), ma con il pattern
+  Value (F3.4, `SetValue`) invece di Invoke, con ripiego a un click + digitazione reale
+  (`pyautogui.write`) se Value fallisce o non ha un effetto visibile (F3.5). `text` NON compare
+  MAI in `ComputerActionResult` - lo stesso principio gia' seguito da `ElementActionReceipt.
+  set_value` (F3.4.5), per non rischiare che una password finisca in una struttura loggabile.
+
+  **Buco reale trovato verificando il metodo contro la fixture, non ipotizzato - una conseguenza
+  pratica CONCRETA della debolezza gia' dichiarata in F3.5.5**: `SetValue` puo' riuscire per
+  davvero (il campo cambia sul serio, verificato leggendo `CurrentValue` via UI Automation, non
+  assunto) mentre l'evidenza debole del pixel diff - calcolata sull'INTERO schermo, non sul campo
+  - non rileva un cambiamento cosi' piccolo e fa scattare comunque il ripiego pixel. Riprodotto
+  in modo deterministico (3/3): una ricerca FALLITA su un nome inesistente (via `click_element` O
+  `type_into_element`, nessuna azione reale) eseguita PRIMA di un `type_into_element` altrimenti
+  perfettamente riuscito bastava a far scattare questo scenario ogni volta. Indagato a fondo prima
+  di correggere (non assunto): letto il valore REALE del campo via il pattern Value dopo ogni
+  passo, scoperto che conteneva il testo DUPLICATO (`"via type_into_element" ->
+  "via type_into_elementvia type_into_element"`) - `SetValue` aveva gia' impostato il testo
+  correttamente, ma `pyautogui.write` del ripiego lo aggiungeva invece di sostituirlo, dato che un
+  click su un `QLineEdit` non seleziona il contenuto esistente.
+
+  **Fix**: Ctrl+A prima di scrivere nel ripiego pixel di `type_into_element` - rende il ripiego
+  SICURO da incatenare anche quando la strategia precedente e' gia' riuscita silenziosamente
+  (evidenza debole che non l'ha rilevato), non solo quando e' davvero fallita. Stesso principio di
+  sicurezza gia' dichiarato per `unsafe_after_failure` (F3.5.6), qui risolto rendendo il ripiego
+  stesso IDEMPOTENTE invece di doverlo evitare del tutto. Verificato: la classe di test reale che
+  aveva riprodotto il buco (ricerca fallita + `type_into_element` + `click_element`, Task 1/10
+  completato con i soli metodi unificati) ora passa in modo affidabile su 3 esecuzioni consecutive
+  della classe intera, dove prima falliva 3/3.
+
+  Prova: 6 test nuovi in `tests/test_computer_agent.py::TypeIntoElementTests` (con finti,
+  incluso un test dedicato che dimostra l'ordine click->Ctrl+A->scrivi con un mock condiviso) + 2
+  test nuovi in `tests/test_computer_use_integration.py::ClickElementRealFixtureTests` (contro la
+  fixture vera, incluso quello che ha originariamente riprodotto il buco). 3.006/3.006 test, ruff
+  verde.
+
 ### F3.6 — Browser adapter
 
 Dipende da: F1.5 e F3.5.
