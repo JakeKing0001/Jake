@@ -6351,6 +6351,34 @@ Criterio di uscita: una procedura dimostrata sopravvive a riavvio, resize e dati
   giusta; `dry_run_steps` controlla ogni passo anche dopo un fallimento precedente). 3.081/3.081
   test, ruff verde.
 
+- `F3.8.2` (prima meta' - "parametri variabili", TERZO incremento di F3.8) — 19/09/2026: nuovi
+  `core/computer_use/procedure.py::substitute_parameters()`/`MissingParameterError`. Un
+  placeholder `${nome}` nel `text` di un `RecordedStep` viene sostituito a runtime da
+  `replay_step`/`replay_steps` (prima di scrivere per davvero) e verificato in anticipo da
+  `dry_run_step`/`dry_run_steps` (un dry-run che controllasse solo il selettore darebbe un falso
+  senso di sicurezza: il selettore risolve anche se il parametro manca, il replay vero
+  fallirebbe comunque). Un `text` SENZA placeholder passa invariato - la maggioranza dei passi
+  gia' registrati in F3.8.1 restano validi senza modifiche, F3.8.2 li rende OPZIONALMENTE
+  parametrici, non obbliga a un formato nuovo.
+
+  **Un parametro mancante fallisce RUMOROSAMENTE, mai scritto come placeholder letterale**: un
+  `MISSING_PARAMETER` invece di scrivere `"${username}"` per davvero in un campo reale - per un
+  modulo di login o un dato sensibile sarebbe un errore osservabile solo DOPO il fatto, non prima.
+  Verificato con una lettura DIRETTA del `ValuePattern` del campo (non `.name`, l'etichetta
+  accessibile statica che non proverebbe nulla - lo stesso genere di lettura gia' usata da
+  `browser_adapter.py::read_address_bar_text`, F3.6.5) che il campo resta vuoto dopo un
+  `MISSING_PARAMETER`, non scritto a meta'.
+
+  Resta aperta la seconda meta' di F3.8.2 ("precondizioni" - nessun modo di dichiarare che un
+  passo richiede uno stato precedente oltre a "il selettore risolve", ne' di INFERIRE
+  automaticamente quali parti del testo registrato sono variabili invece di richiedere che il
+  chiamante le marchi a mano con `${nome}`). Prova: 8 test nuovi (5 unitari su
+  `substitute_parameters` - nessun placeholder passa invariato, un placeholder solo/piu'
+  placeholder sostituiti, un parametro mancante solleva con/senza altri parametri dati; 3
+  end-to-end reali - un passo parametrico scrive il valore sostituito per davvero e verificato
+  nella lista, un parametro mancante non scrive mai il placeholder letterale, lo stesso caso
+  rilevato in anticipo da un dry-run). 3.089/3.089 test, ruff verde.
+
 ### Gate F3
 
 - ≥ 90% su 100 task fixture;

@@ -15,14 +15,17 @@ from core.computer_use.procedure import (
     ACTION_CLICK,
     ACTION_TYPE,
     DRY_RUN_AMBIGUOUS,
+    DRY_RUN_MISSING_PARAMETER,
     DRY_RUN_NOT_FOUND,
     DRY_RUN_WINDOW_NOT_FOUND,
+    MissingParameterError,
     RecordedStep,
     UnknownActionError,
     dry_run_step,
     dry_run_steps,
     replay_step,
     replay_steps,
+    substitute_parameters,
 )
 from core.computer_use.selector import ElementSelector, SelectorEngine
 from core.computer_use.ui_automation_adapter import UIAutomationAdapter
@@ -85,6 +88,33 @@ class RecordedStepValidationTests(unittest.TestCase):
     def test_from_dict_requires_action_and_selector(self):
         with self.assertRaises(ValueError):
             RecordedStep.from_dict({"selector": {"name": "Aggiungi", "window_title_contains": "Fixture"}})
+
+
+class SubstituteParametersTests(unittest.TestCase):
+    """F3.8.2 (prima meta' - "parametri variabili"): `substitute_parameters`, una funzione pura -
+    nessuna app reale necessaria per verificarla, a differenza del resto di questo file."""
+
+    def test_a_text_without_placeholders_passes_through_unchanged(self):
+        self.assertEqual(substitute_parameters("testo letterale", None), "testo letterale")
+        self.assertEqual(substitute_parameters("testo letterale", {}), "testo letterale")
+
+    def test_a_single_placeholder_is_substituted(self):
+        result = substitute_parameters("Ciao ${nome}!", {"nome": "Jake"})
+        self.assertEqual(result, "Ciao Jake!")
+
+    def test_multiple_placeholders_are_all_substituted(self):
+        result = substitute_parameters("${saluto} ${nome}!", {"saluto": "Ciao", "nome": "Jake"})
+        self.assertEqual(result, "Ciao Jake!")
+
+    def test_a_missing_parameter_raises_instead_of_leaving_the_placeholder_literal(self):
+        """MAI scrivere il placeholder letterale (`${username}`) in un campo reale - un errore
+        RUMOROSO invece di un'osservazione silenziosa solo dopo il fatto."""
+        with self.assertRaises(MissingParameterError):
+            substitute_parameters("Ciao ${nome}!", {"saluto": "Ciao"})
+
+    def test_a_missing_parameter_with_no_parameters_at_all_still_raises(self):
+        with self.assertRaises(MissingParameterError):
+            substitute_parameters("Ciao ${nome}!", None)
 
 
 class ReplayAgainstTheRealFixtureTests(unittest.TestCase):
@@ -193,6 +223,61 @@ class ReplayAgainstTheRealFixtureTests(unittest.TestCase):
 
         self.assertTrue(result.success, result)
 
+    def test_a_parameterized_step_writes_the_substituted_value_for_real(self):
+        """F3.8.2 (adozione): un passo REGISTRATO con `${nome}` scrive DAVVERO il valore passato a
+        runtime, non il placeholder letterale - verificato osservando la fixture DOPO (l'elemento
+        deve comparire con il testo SOSTITUITO), non solo che `replay_step` non abbia sollevato."""
+        step = RecordedStep(
+            action=ACTION_TYPE,
+            selector=ElementSelector(
+                automation_id="QApplication.jake_fixture_window.fixture_input",
+                window_title_contains="Computer Use Fixture",
+            ),
+            text="elemento di ${utente}",
+        )
+        add_button = RecordedStep(
+            action=ACTION_CLICK,
+            selector=ElementSelector(name="Aggiungi", control_type="Button", window_title_contains="Computer Use Fixture"),
+        )
+
+        results = replay_steps(
+            self.agent, self.adapter, [step, add_button], timeout_seconds=10.0, parameters={"utente": "Jake"},
+        )
+
+        self.assertTrue(all(r.success for r in results), results)
+        window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=5.0)
+        engine = SelectorEngine(self.adapter)
+        item = engine.find_unique(window, ElementSelector(name="elemento di Jake", control_type="ListItem"))
+        self.assertEqual(item.name, "elemento di Jake")
+
+    def test_a_missing_parameter_is_reported_without_ever_typing_the_literal_placeholder(self):
+        step = RecordedStep(
+            action=ACTION_TYPE,
+            selector=ElementSelector(
+                automation_id="QApplication.jake_fixture_window.fixture_input",
+                window_title_contains="Computer Use Fixture",
+            ),
+            text="elemento di ${utente}",
+        )
+
+        result = replay_step(self.agent, self.adapter, step, timeout_seconds=5.0, parameters={"altro": "valore"})
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "MISSING_PARAMETER")
+        # Verifica diretta del VALORE vero del campo (non `.name`, che e' solo l'etichetta
+        # accessibile statica e non conterrebbe mai il placeholder comunque - lo stesso genere di
+        # lettura gia' usata da browser_adapter.py::read_address_bar_text, F3.6.5).
+        from comtypes.gen import UIAutomationClient as UIA
+
+        window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=5.0)
+        engine = SelectorEngine(self.adapter)
+        input_element = engine.find_unique_element(
+            window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_input"),
+        )
+        value_pattern = input_element.GetCurrentPattern(UIA.UIA_ValuePatternId).QueryInterface(UIA.IUIAutomationValuePattern)
+        self.assertNotIn("${utente}", value_pattern.CurrentValue)
+        self.assertEqual(value_pattern.CurrentValue, "", "il campo deve restare vuoto, mai scritto a meta'")
+
 
 class DryRunAgainstTheRealFixtureTests(_RealFixtureTestCase):
     """F3.8.4 (prima fetta - "testarla in dry-run"): `dry_run_step`/`dry_run_steps` non devono MAI
@@ -255,6 +340,24 @@ class DryRunAgainstTheRealFixtureTests(_RealFixtureTestCase):
 
         self.assertFalse(result.would_succeed)
         self.assertTrue(result.error.startswith(DRY_RUN_AMBIGUOUS))
+
+    def test_a_step_needing_a_missing_parameter_reports_would_succeed_false(self):
+        """F3.8.2 (adozione): il selettore da solo risolverebbe (il campo esiste) - un dry-run che
+        controllasse SOLO il selettore darebbe un falso senso di sicurezza, dato che il replay
+        vero fallirebbe comunque per il parametro mancante."""
+        step = RecordedStep(
+            action=ACTION_TYPE,
+            selector=ElementSelector(
+                automation_id="QApplication.jake_fixture_window.fixture_input",
+                window_title_contains="Computer Use Fixture",
+            ),
+            text="elemento di ${utente}",
+        )
+
+        result = dry_run_step(self.adapter, step, timeout_seconds=1.0, parameters=None)
+
+        self.assertFalse(result.would_succeed)
+        self.assertTrue(result.error.startswith(DRY_RUN_MISSING_PARAMETER))
 
     def test_dry_run_step_never_actually_clicks_anything(self):
         """Il punto centrale del dry-run: cliccare "Aggiungi" via dry-run NON deve aggiungere

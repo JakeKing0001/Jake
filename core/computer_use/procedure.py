@@ -23,8 +23,13 @@ modulo debba fare nulla in piu' per garantirlo.
 
 Deliberatamente NON affrontati qui, passi successivi dichiarati (stesso principio "un incremento
 alla volta" di questa sessione):
-- F3.8.2 (inferire parametri variabili e precondizioni - qui `text` e' sempre un valore LETTERALE
-  gia' registrato, mai un parametro da sostituire a runtime);
+- F3.8.2 (prima meta' - "parametri variabili" - CHIUSA in un incremento successivo, 19/09/2026):
+  `substitute_parameters()`/`MissingParameterError`, un placeholder `${nome}` in `step.text`
+  sostituito a runtime da `replay_step`/`replay_steps`/`dry_run_step`/`dry_run_steps`. Resta
+  aperta la seconda meta' ("precondizioni" - nessun modo di dichiarare che un passo richiede uno
+  stato precedente oltre a "il selettore risolve", ne' di INFERIRE automaticamente quali parti
+  del testo registrato sono variabili invece di richiedere che il chiamante le marchi a mano con
+  `${nome}`);
 - F3.8.3 (mostrare la procedura generalizzata all'utente - nessuna UI/HUD qui);
 - F3.8.4 (prima fetta - "dry-run" - CHIUSA in un incremento successivo, 19/09/2026):
   `dry_run_step()`/`dry_run_steps()` - vedi le loro docstring. Resta aperta la seconda meta'
@@ -36,6 +41,7 @@ alla volta" di questa sessione):
   distingue "l'app e' cambiata struttura" da un qualunque altro fallimento transitorio);
 - F3.8.7 (richiedere nuova approvazione se capability/impatto cambiano - nessun collegamento a
   `core/policy_engine.py` qui, gia' escluso esplicitamente anche da F3.4.3)."""
+import re
 from dataclasses import dataclass
 
 from core.computer_agent import ComputerActionResult, ComputerAgent
@@ -45,6 +51,35 @@ from core.computer_use.ui_automation_adapter import UIAutomationAdapter
 ACTION_CLICK = "click"
 ACTION_TYPE = "type"
 _KNOWN_ACTIONS = frozenset({ACTION_CLICK, ACTION_TYPE})
+
+_PARAMETER_PATTERN = re.compile(r"\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
+
+
+class MissingParameterError(Exception):
+    """F3.8.2 ("inferire parametri variabili... " - qui la META' realizzata: SOSTITUIRE un
+    parametro gia' nominato in fase di registrazione, non ancora INFERIRLO automaticamente da un
+    esempio, vedi il docstring del modulo). Un placeholder `${nome}` nel `text` di un passo senza
+    un valore corrispondente in `parameters` deve fallire RUMOROSAMENTE - MAI scrivere il
+    placeholder letterale (`"${username}"`) in un campo reale, che per un modulo di login o un
+    modulo con dati sensibili sarebbe un errore osservabile solo dopo il fatto, non prima."""
+
+
+def substitute_parameters(text: str, parameters: dict[str, str] | None) -> str:
+    """Sostituisce ogni `${nome}` in `text` con `parameters[nome]` - un `text` SENZA alcun
+    placeholder passa invariato anche se `parameters` e' vuoto/`None` (la maggioranza dei passi
+    REGISTRATI oggi, F3.8.1, sono ancora valori letterali puri, F3.8.2 li rende OPZIONALMENTE
+    parametrici, non li trasforma tutti in template). Il pattern (`${nome}`, lettere/cifre/
+    underscore, deve iniziare con lettera o underscore) e' deliberatamente lo stesso stile gia'
+    familiare da shell/template comuni, non un formato inventato per questo modulo."""
+    parameters = parameters or {}
+
+    def _replace(match: re.Match) -> str:
+        name = match.group(1)
+        if name not in parameters:
+            raise MissingParameterError(f"parametro mancante: {name!r} nel testo {text!r}")
+        return parameters[name]
+
+    return _PARAMETER_PATTERN.sub(_replace, text)
 
 
 @dataclass(frozen=True)
@@ -106,7 +141,7 @@ class UnknownActionError(Exception):
 
 def replay_step(
     agent: ComputerAgent, adapter: UIAutomationAdapter, step: RecordedStep,
-    timeout_seconds: float = 5.0, idempotency_key: str | None = None,
+    timeout_seconds: float = 5.0, idempotency_key: str | None = None, parameters: dict[str, str] | None = None,
 ) -> ComputerActionResult:
     """Rigioca UN passo per davvero: trova la finestra (`find_window_by_title_containing`, F3.7 -
     stesso identico meccanismo di `SelectorEngine.locate`, F3.3.1) poi delega a `ComputerAgent.
@@ -117,7 +152,13 @@ def replay_step(
     `ComputerActionResult(success=False, error="WINDOW_NOT_FOUND")` - la STESSA identica forma
     d'errore che `click_element`/`type_into_element` gia' restituiscono per il proprio percorso
     `window_title`, cosi' un chiamante non deve gestire due forme diverse di "finestra non
-    trovata" a seconda che l'azione venga da un replay o da una chiamata diretta."""
+    trovata" a seconda che l'azione venga da un replay o da una chiamata diretta.
+
+    `parameters` (F3.8.2, adozione): se `step.text` contiene `${nome}` (`substitute_parameters`),
+    sostituito PRIMA di scrivere - un placeholder senza valore corrispondente produce
+    `ComputerActionResult(success=False, error="MISSING_PARAMETER")`, MAI il placeholder letterale
+    scritto in un campo reale. Ignorato per `ACTION_CLICK` (un click non scrive nulla, `parameters`
+    passato comunque da un chiamante che rigioca una lista mista di passi resta innocuo)."""
     from core.computer_use.ui_automation_adapter import WindowNotFoundError
 
     try:
@@ -132,8 +173,12 @@ def replay_step(
             idempotency_key=idempotency_key,
         )
     if step.action == ACTION_TYPE:
+        try:
+            resolved_text = substitute_parameters(step.text, parameters)
+        except MissingParameterError:
+            return ComputerActionResult(success=False, error="MISSING_PARAMETER")
         return agent.type_into_element(
-            step.text, root=window, name=step.selector.name, control_type=step.selector.control_type,
+            resolved_text, root=window, name=step.selector.name, control_type=step.selector.control_type,
             automation_id=step.selector.automation_id, timeout_seconds=timeout_seconds,
             idempotency_key=idempotency_key,
         )
@@ -142,6 +187,7 @@ def replay_step(
 
 def replay_steps(
     agent: ComputerAgent, adapter: UIAutomationAdapter, steps: list[RecordedStep], timeout_seconds: float = 5.0,
+    parameters: dict[str, str] | None = None,
 ) -> list[ComputerActionResult]:
     """Rigioca una LISTA di passi IN ORDINE, fermandosi al PRIMO fallimento (`success=False`) -
     coerente con lo spirito di F3.8.6 ("rilevare drift e sospendere la routine invece di
@@ -164,7 +210,7 @@ def replay_steps(
     (es. un id di corsa/procedura che F3.8.5, non ancora costruito, dovra' comunque generare)."""
     results: list[ComputerActionResult] = []
     for step in steps:
-        result = replay_step(agent, adapter, step, timeout_seconds=timeout_seconds)
+        result = replay_step(agent, adapter, step, timeout_seconds=timeout_seconds, parameters=parameters)
         results.append(result)
         if not result.success:
             break
@@ -174,6 +220,7 @@ def replay_steps(
 DRY_RUN_WINDOW_NOT_FOUND = "WINDOW_NOT_FOUND"
 DRY_RUN_NOT_FOUND = "NOT_FOUND"
 DRY_RUN_AMBIGUOUS = "AMBIGUOUS_MATCH"
+DRY_RUN_MISSING_PARAMETER = "MISSING_PARAMETER"
 
 
 @dataclass(frozen=True)
@@ -191,7 +238,10 @@ class DryRunStepResult:
     error: str | None = None
 
 
-def dry_run_step(adapter: UIAutomationAdapter, step: RecordedStep, timeout_seconds: float = 5.0) -> DryRunStepResult:
+def dry_run_step(
+    adapter: UIAutomationAdapter, step: RecordedStep, timeout_seconds: float = 5.0,
+    parameters: dict[str, str] | None = None,
+) -> DryRunStepResult:
     """F3.8.4 (prima fetta - "testarla in dry-run e su dati innocui"): verifica se `step.selector`
     risolverebbe DAVVERO a esattamente un elemento nello stato ATTUALE dell'app - senza mai
     cliccare/scrivere (nessun `ComputerAgent` coinvolto qui, a differenza di `replay_step`). Riusa
@@ -199,6 +249,11 @@ def dry_run_step(adapter: UIAutomationAdapter, step: RecordedStep, timeout_secon
     finestra+elemento del replay vero, non una sua reimplementazione parallela che potrebbe
     disallinearsi nel tempo (es. dichiarare "risolverebbe" con un criterio che il replay vero
     interpreta diversamente).
+
+    `parameters` (F3.8.2, adozione): per un passo `ACTION_TYPE`, verifica ANCHE che
+    `substitute_parameters(step.text, parameters)` non sollevi - un dry-run che dichiarasse
+    "risolverebbe" ignorando un parametro mancante darebbe un falso senso di sicurezza, dato che
+    il replay vero fallirebbe comunque con `MISSING_PARAMETER`.
 
     **"su dati innocui" (la seconda meta' di F3.8.4) NON e' affrontato qui**: questo dry-run non
     tocca MAI l'app (nemmeno leggere un valore) - "dati innocui" implicherebbe invece eseguire
@@ -217,11 +272,17 @@ def dry_run_step(adapter: UIAutomationAdapter, step: RecordedStep, timeout_secon
         return DryRunStepResult(step=step, would_succeed=False, error=f"{DRY_RUN_NOT_FOUND}: {exc}")
     except AmbiguousSelectionError as exc:
         return DryRunStepResult(step=step, would_succeed=False, error=f"{DRY_RUN_AMBIGUOUS}: {exc}")
+    if step.action == ACTION_TYPE:
+        try:
+            substitute_parameters(step.text, parameters)
+        except MissingParameterError as exc:
+            return DryRunStepResult(step=step, would_succeed=False, error=f"{DRY_RUN_MISSING_PARAMETER}: {exc}")
     return DryRunStepResult(step=step, would_succeed=True)
 
 
 def dry_run_steps(
     adapter: UIAutomationAdapter, steps: list[RecordedStep], timeout_seconds: float = 5.0,
+    parameters: dict[str, str] | None = None,
 ) -> list[DryRunStepResult]:
     """A differenza di `replay_steps` (che si ferma al PRIMO fallimento, perche' un'azione vera
     puo' dipendere dallo stato lasciato dalla precedente), un dry-run verifica OGNI passo fino in
@@ -229,4 +290,4 @@ def dry_run_steps(
     esiste uno stato che un passo "rompe" per i successivi: un chiamante vuole vedere TUTTI i
     passi che non risolverebbero oggi, non fermarsi al primo per poi dover rilanciare piu' volte
     per scoprire gli altri."""
-    return [dry_run_step(adapter, step, timeout_seconds=timeout_seconds) for step in steps]
+    return [dry_run_step(adapter, step, timeout_seconds=timeout_seconds, parameters=parameters) for step in steps]
