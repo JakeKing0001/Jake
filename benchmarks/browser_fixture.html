@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<!--
+Jake Browser Fixture (F3.6.1, prima fetta di F3.6 - "Browser adapter", mai iniziata prima d'ora -
+vedi ROADMAP_EXECUTION.md sezione F3.6, dipende da F1.5 e F3.5). Stesso ruolo di
+benchmarks/computer_use_fixture.py (F3.1.1) ma per il browser invece di un'app Qt: una pagina
+locale, deterministica, senza risorse esterne (nessuna richiesta di rete, nessun contenuto che
+possa cambiare tra un'esecuzione e l'altra) - controllabile via UI Automation reale, non un DOM
+scaricato/parsato a parte. Elementi deliberatamente minimi (input/button/output/link), lo stesso
+principio "un incremento alla volta" gia' seguito per la fixture Qt: il resto delle capacita'
+dichiarate da F3.6 (form, tab, download/upload, navigazione) restano fuori da questa prima fetta.
+-->
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Jake Browser Fixture</title>
+</head>
+<body>
+<h1>Jake Browser Fixture</h1>
+<input type="text" id="fixture-input" aria-label="Campo di testo">
+<button id="fixture-add-button" onclick="document.getElementById('fixture-output').textContent = document.getElementById('fixture-input').value;">Aggiungi</button>
+<p id="fixture-output"></p>
+<a href="#" id="fixture-link">Un link di prova</a>
+</body>
+</html>
