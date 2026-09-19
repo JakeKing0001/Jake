@@ -262,5 +262,122 @@ class ClickElementTests(unittest.TestCase):
         self.assertEqual(result.error, "OPERATION_FAILED")
 
 
+class TypeIntoElementTests(unittest.TestCase):
+    """F3.4.2 (resto): type_into_element - stessa struttura di ClickElementTests sopra (fattorizzata
+    da `_locate_element_center`, condivisa da entrambi i metodi), qui con SetValue/pixel_type
+    invece di Invoke/pixel_click."""
+
+    def _mocked_adapter_and_engine(self, MockAdapter, MockEngine, *, element=mock.sentinel.element):
+        adapter = MockAdapter.return_value
+        adapter.find_window_by_title.return_value = mock.sentinel.window
+        adapter.describe_element.return_value = _BUTTON_INFO
+        engine = MockEngine.return_value
+        engine.wait_for_unique_element.return_value = element
+        return adapter, engine
+
+    def test_window_not_found_is_reported_without_touching_the_keyboard(self):
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("pyautogui.write") as write:
+            MockAdapter.return_value.find_window_by_title.side_effect = WindowNotFoundError("no window")
+            result = ComputerAgent().type_into_element("un segreto", window_title="Non esiste")
+
+        write.assert_not_called()
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "WINDOW_NOT_FOUND")
+
+    def test_no_match_is_reported_without_touching_the_keyboard(self):
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("pyautogui.write") as write:
+            MockAdapter.return_value.find_window_by_title.return_value = mock.sentinel.window
+            MockEngine.return_value.wait_for_unique_element.side_effect = NoMatchError("nessuno")
+            result = ComputerAgent().type_into_element("un segreto", window_title="Jake Computer Use Fixture", name="Non c'e'")
+
+        write.assert_not_called()
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "NOT_FOUND")
+
+    def test_a_successful_set_value_with_a_visible_change_reports_verified(self):
+        before = Image.new("RGB", (10, 10), (0, 0, 0))
+        after = Image.new("RGB", (10, 10), (255, 255, 255))
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("core.computer_use.executor.ActionExecutor") as MockExecutor, \
+             mock.patch("core.vision.screen.capture_screenshot_image", side_effect=[before, after]), \
+             mock.patch("pyautogui.write") as write, mock.patch("time.sleep"):
+            self._mocked_adapter_and_engine(MockAdapter, MockEngine)
+            result = ComputerAgent().type_into_element("un segreto", window_title="Jake Computer Use Fixture", name="Campo")
+
+        MockExecutor.return_value.set_value.assert_called_once_with(mock.sentinel.element, "un segreto")
+        write.assert_not_called()
+        self.assertTrue(result.success)
+        self.assertTrue(result.verified)
+
+    def test_set_value_failing_falls_back_to_a_real_click_and_typewrite(self):
+        before = Image.new("RGB", (10, 10), (0, 0, 0))
+        after = Image.new("RGB", (10, 10), (255, 255, 255))
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("core.computer_use.executor.ActionExecutor") as MockExecutor, \
+             mock.patch("core.vision.screen.capture_screenshot_image", side_effect=[before, after]), \
+             mock.patch("pyautogui.click") as click, mock.patch("pyautogui.hotkey") as hotkey, \
+             mock.patch("pyautogui.write") as write, mock.patch("time.sleep"):
+            self._mocked_adapter_and_engine(MockAdapter, MockEngine)
+            MockExecutor.return_value.set_value.side_effect = ElementNotInteractableError("disabilitato")
+            result = ComputerAgent().type_into_element("un segreto", window_title="Jake Computer Use Fixture", name="Campo")
+
+        click.assert_called_once_with(130, 210)
+        hotkey.assert_called_once_with("ctrl", "a")
+        write.assert_called_once_with("un segreto")
+        self.assertTrue(result.success)
+        self.assertTrue(result.verified)
+
+    def test_the_pixel_fallback_selects_all_before_writing_so_it_never_duplicates_a_silent_uia_success(self):
+        """Buco reale trovato verificando questo metodo contro la fixture, non ipotizzato: SetValue
+        (F3.4) puo' riuscire per davvero (il campo cambia sul serio) mentre l'evidenza debole del
+        pixel diff (F3.5.5, calcolata sull'INTERO schermo) non rileva il cambiamento in un campo
+        piccolo e fa scattare comunque il ripiego pixel - senza Ctrl+A prima, `pyautogui.write`
+        si limiterebbe ad AGGIUNGERE il testo a quello gia' impostato da SetValue, duplicandolo
+        (verificato contro la fixture vera: il campo conteneva davvero il testo raddoppiato prima
+        di questa correzione)."""
+        same = Image.new("RGB", (10, 10), (0, 0, 0))
+        call_order = []
+        manager = mock.Mock()
+        manager.click.side_effect = lambda *a, **k: call_order.append("click")
+        manager.hotkey.side_effect = lambda *a, **k: call_order.append("hotkey")
+        manager.write.side_effect = lambda *a, **k: call_order.append("write")
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("core.computer_use.executor.ActionExecutor") as MockExecutor, \
+             mock.patch("core.vision.screen.capture_screenshot_image", side_effect=[same, same.copy(), same.copy()]), \
+             mock.patch("pyautogui.click", manager.click), mock.patch("pyautogui.hotkey", manager.hotkey), \
+             mock.patch("pyautogui.write", manager.write), mock.patch("time.sleep"):
+            self._mocked_adapter_and_engine(MockAdapter, MockEngine)
+            # SetValue "riesce" (non solleva) ma l'evidenza debole non rileva alcun cambiamento -
+            # esattamente il caso reale che ha motivato questa correzione.
+            result = ComputerAgent().type_into_element("un segreto", window_title="Jake Computer Use Fixture", name="Campo")
+
+        self.assertTrue(MockExecutor.return_value.set_value.called, "il ripiego pixel deve scattare comunque quando l'evidenza non conferma")
+        self.assertEqual(call_order, ["click", "hotkey", "write"], "Ctrl+A deve precedere la scrittura, non solo essere chiamato")
+        manager.write.assert_called_once_with("un segreto")
+        self.assertTrue(result.success)
+
+    def test_the_typed_text_never_appears_in_the_result(self):
+        """Lo stesso principio gia' seguito da ElementActionReceipt.set_value (F3.4.5): un campo
+        testo libero nel risultato rischierebbe di far finire una password in una struttura
+        loggabile."""
+        before = Image.new("RGB", (10, 10), (0, 0, 0))
+        after = Image.new("RGB", (10, 10), (255, 255, 255))
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("core.computer_use.executor.ActionExecutor"), \
+             mock.patch("core.vision.screen.capture_screenshot_image", side_effect=[before, after]), \
+             mock.patch("pyautogui.write"), mock.patch("time.sleep"):
+            self._mocked_adapter_and_engine(MockAdapter, MockEngine)
+            result = ComputerAgent().type_into_element("hunter2_super_secret", window_title="Jake Computer Use Fixture", name="Campo")
+
+        self.assertNotIn("hunter2_super_secret", str(result))
+
+
 if __name__ == "__main__":
     unittest.main()

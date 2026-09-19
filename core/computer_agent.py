@@ -10,9 +10,9 @@ di attivare due volte un'azione che in realta' era gia' andata a buon fine (es. 
 modulo, l'attivazione di una casella di spunta), il che sarebbe peggio di riportare
 onestamente "non verificato" e lasciare che sia l'agente a decidere il prossimo passo.
 
-Oggi copre solo il click (la parte piu' soggetta ad ambiguita': coordinate leggermente fuori
-bersaglio, bottoni disabilitati); digitazione e scorrimento restano skill isolate (TYPE_TEXT,
-PRESS_KEY, SCROLL) e sono un possibile prossimo passo di questa fase.
+A coordinate pixel assolute copre click (`click_point`/`click_text`) e, da F3.4.2, digitazione
+semantica per nome (`type_into_element`, vedi sotto) - scorrimento/tasti/drag/drop restano skill
+isolate (PRESS_KEY, SCROLL) e sono un possibile prossimo passo di questa fase.
 
 `click_element` (F3.4.2, prima fetta - "unificare click... nel ComputerAgent", adozione): trova
 un elemento per nome/ruolo/automation_id DENTRO una finestra data (F3.3, `SelectorEngine`) e lo
@@ -44,6 +44,14 @@ il bottone "Rimuovi selezionato" che si abilita). I metodi esistenti (`click_tex
 nessuna skill esistente (CLICK_TEXT/CLICK_ELEMENT restano sul vecchio percorso a coordinate pixel/
 OCR - collegarli e' una decisione di adozione a parte, non affrontata qui).
 
+`type_into_element` (F3.4.2, resto): stessa identica struttura di `click_element` (fattorizzata
+in `_locate_element_center`, condivisa da entrambi) ma con il pattern Value invece di Invoke -
+scrive `text` in un campo tramite `SetValue` (F3.4), non digitazione tasto per tasto simulata, con
+ripiego a click + `pyautogui.write` reale se Value fallisce. `text` NON compare MAI in
+`ComputerActionResult` - lo stesso principio gia' seguito da `ElementActionReceipt.set_value`
+(F3.4.5): mai rischiare che una password o un dato sensibile finisca in una struttura che un
+futuro chiamante potrebbe loggare.
+
 `evidence` (F3.5.5, "usare pixel diff soltanto come evidenza debole", adozione): `verified=True`
 qui viene SEMPRE da un pixel diff (`core/vision/screen_diff.py`), l'UNICO segnale disponibile a
 questa classe - a differenza della verifica basata su UI Automation costruita in `core/
@@ -57,7 +65,23 @@ qualunque animazione indipendente dal click potrebbero far cambiare i pixel senz
 abbia avuto l'effetto voluto - un falso positivo che questa classe non puo' distinguere da un vero
 successo). Il campo rende esplicita la FONTE della verifica invece di lasciare che un futuro
 chiamante legga `verified=True` come se fosse equivalente a una verifica basata su stato reale
-dell'app - non lo e' mai, in questa classe."""
+dell'app - non lo e' mai, in questa classe.
+
+**Buco reale trovato verificando `type_into_element` contro la fixture, non ipotizzato - una
+conseguenza pratica CONCRETA della debolezza gia' dichiarata sopra**: `SetValue` (F3.4) puo'
+riuscire per davvero (il campo cambia sul serio, verificato leggendo `CurrentValue` via UI
+Automation, non assunto) mentre l'evidenza debole del pixel diff - calcolata sull'INTERO schermo,
+non sul campo - non rileva un cambiamento cosi' piccolo e fa scattare comunque il ripiego pixel.
+Riprodotto per davvero: un `wait_for_unique_element`/`click_element` su un nome INESISTENTE
+(nessuna azione, solo una ricerca fallita) eseguito PRIMA di un `type_into_element` altrimenti
+riuscito bastava a far scattare questo esatto scenario in modo deterministico (3/3), non un caso
+isolato. Senza selezionare tutto il contenuto del campo PRIMA di scrivere, `pyautogui.write`
+si limita ad AGGIUNGERE il testo a quello gia' impostato da `SetValue`, duplicandolo
+(`"testo"` -> `"testotesto"`) invece di sostituirlo - corretto scrivendo Ctrl+A prima del testo
+nel ripiego pixel di `type_into_element`, cosi' il ripiego resta SICURO da incatenare anche
+quando la strategia precedente e' gia' riuscita silenziosamente, non solo quando e' davvero
+fallita (lo stesso principio di sicurezza gia' dichiarato per `unsafe_after_failure`, F3.5.6, ma
+qui risolto rendendo il ripiego stesso idempotente invece di doverlo evitare)."""
 import time
 from dataclasses import dataclass
 
@@ -138,20 +162,18 @@ class ComputerAgent:
             evidence=evidence,
         )
 
-    def click_element(
-        self, *, window_title: str, name: str | None = None, control_type: str | None = None,
-        automation_id: str | None = None, timeout_seconds: float = 5.0,
-    ) -> ComputerActionResult:
-        """F3.4.2: trova un elemento per nome/ruolo/automation_id dentro `window_title` e lo
-        clicca via UI Automation (Invoke, F3.4), con ripiego a un click pixel alle stesse
-        coordinate se Invoke fallisce o non ha un effetto visibile (F3.5). Vedi il docstring del
-        modulo per le scelte e i limiti dichiarati."""
-        from core.computer_use.executor import ActionExecutor
-        from core.computer_use.fallback import try_strategies_in_order
+    def _locate_element_center(
+        self, *, window_title: str, name: str | None, control_type: str | None,
+        automation_id: str | None, timeout_seconds: float,
+    ):
+        """F3.4.2 (fattorizzato per `type_into_element`, resto della fetta - stesso identico
+        percorso "trova finestra -> trova elemento -> leggi i bounds" gia' usato da
+        `click_element`, non duplicato una seconda volta): restituisce `(adapter, element,
+        center_x, center_y)`, oppure un `ComputerActionResult` gia' pronto con l'errore giusto se
+        un passo qualunque fallisce - il chiamante lo riconosce con `isinstance` e lo restituisce
+        cosi' com'e', senza reinterpretare l'errore."""
         from core.computer_use.selector import AmbiguousSelectionError, ElementSelector, NoMatchError, SelectorEngine
         from core.computer_use.ui_automation_adapter import UIAutomationAdapter, WindowNotFoundError
-        from core.vision.screen import capture_screenshot_image
-        from core.vision.screen_diff import pixel_change_ratio, screen_visibly_changed
 
         adapter = UIAutomationAdapter()
         try:
@@ -173,6 +195,28 @@ class ComputerAgent:
             return ComputerActionResult(success=False, error="OPERATION_FAILED")
         left, top, width, height = info.bounds
         center_x, center_y = left + width // 2, top + height // 2
+        return adapter, element, center_x, center_y
+
+    def click_element(
+        self, *, window_title: str, name: str | None = None, control_type: str | None = None,
+        automation_id: str | None = None, timeout_seconds: float = 5.0,
+    ) -> ComputerActionResult:
+        """F3.4.2: trova un elemento per nome/ruolo/automation_id dentro `window_title` e lo
+        clicca via UI Automation (Invoke, F3.4), con ripiego a un click pixel alle stesse
+        coordinate se Invoke fallisce o non ha un effetto visibile (F3.5). Vedi il docstring del
+        modulo per le scelte e i limiti dichiarati."""
+        from core.computer_use.executor import ActionExecutor
+        from core.computer_use.fallback import try_strategies_in_order
+        from core.vision.screen import capture_screenshot_image
+        from core.vision.screen_diff import pixel_change_ratio, screen_visibly_changed
+
+        located = self._locate_element_center(
+            window_title=window_title, name=name, control_type=control_type,
+            automation_id=automation_id, timeout_seconds=timeout_seconds,
+        )
+        if isinstance(located, ComputerActionResult):
+            return located
+        _adapter, element, center_x, center_y = located
         executor = ActionExecutor()
 
         try:
@@ -208,6 +252,88 @@ class ComputerAgent:
 
         outcome = try_strategies_in_order(
             [("uia_invoke", _uia_invoke), ("pixel_click", _pixel_click)],
+            verify=_verify,
+        )
+
+        if not action_performed[0]:
+            return ComputerActionResult(success=False, error="OPERATION_FAILED")
+        return ComputerActionResult(
+            success=True, x=center_x, y=center_y, matched=name,
+            verified=outcome.succeeded, change_ratio=round(last_ratio[0], 4),
+            evidence=EVIDENCE_PIXEL_DIFF if before is not None else EVIDENCE_NONE,
+        )
+
+    def type_into_element(
+        self, text: str, *, window_title: str, name: str | None = None, control_type: str | None = None,
+        automation_id: str | None = None, timeout_seconds: float = 5.0,
+    ) -> ComputerActionResult:
+        """F3.4.2 (resto - "unificare... type... nel ComputerAgent"): trova un campo di testo per
+        nome/ruolo/automation_id dentro `window_title` e vi scrive `text` tramite il pattern
+        Value di UI Automation (F3.4, `SetValue` - non digitazione tasto per tasto simulata),
+        ripiegando su un click + digitazione reale (`pyautogui.click` poi `pyautogui.write`) alle
+        stesse coordinate se Value non e' disponibile o non ha un effetto visibile (F3.5). Stessa
+        struttura di `click_element` sopra, stessa distinzione success/verified di `click_point`
+        (F3.5.5) - vedi i loro docstring per le scelte gia' motivate, non ripetute qui.
+
+        `text` NON compare MAI in `ComputerActionResult` (ne' in `matched` ne' altrove) - lo
+        stesso principio gia' seguito da `ElementActionReceipt.set_value` (F3.4.5): un campo
+        testo libero nel risultato rischierebbe di far finire una password o un dato sensibile
+        digitato dall'utente in una struttura che un futuro chiamante potrebbe loggare."""
+        from core.computer_use.executor import ActionExecutor
+        from core.computer_use.fallback import try_strategies_in_order
+        from core.vision.screen import capture_screenshot_image
+        from core.vision.screen_diff import pixel_change_ratio, screen_visibly_changed
+
+        located = self._locate_element_center(
+            window_title=window_title, name=name, control_type=control_type,
+            automation_id=automation_id, timeout_seconds=timeout_seconds,
+        )
+        if isinstance(located, ComputerActionResult):
+            return located
+        _adapter, element, center_x, center_y = located
+        executor = ActionExecutor()
+
+        try:
+            before = capture_screenshot_image()
+        except Exception:
+            before = None
+        last_ratio = [0.0]
+        action_performed = [False]
+
+        def _verify() -> bool:
+            if before is None:
+                return False
+            try:
+                time.sleep(POST_ACTION_SETTLE_SECONDS)
+                after = capture_screenshot_image()
+                last_ratio[0] = pixel_change_ratio(before, after)
+                return screen_visibly_changed(before, after)
+            except Exception:
+                return False
+
+        def _uia_set_value() -> None:
+            executor.set_value(element, text)
+            action_performed[0] = True
+
+        def _pixel_type() -> None:
+            import pyautogui
+            pyautogui.click(center_x, center_y)
+            # Ctrl+A poi scrivi, MAI scrivere direttamente sul campo com'e' - buco reale trovato
+            # verificando questo metodo, non ipotizzato (vedi ROADMAP_EXECUTION.md): SetValue
+            # (F3.4) puo' riuscire per davvero (il campo cambia sul serio, verificato leggendo
+            # CurrentValue) mentre l'evidenza debole del pixel diff (F3.5.5, calcolata sull'INTERO
+            # schermo) non rileva il cambiamento in un campo piccolo e fa scattare comunque questo
+            # ripiego - senza selezionare tutto prima, `pyautogui.write` si limiterebbe ad
+            # AGGIUNGERE il testo a quello gia' impostato da SetValue, duplicandolo invece di
+            # sostituirlo (`"testo" -> "testotesto"`). Selezionare tutto prima rende il ripiego
+            # SICURO da incatenare anche quando la strategia precedente e' gia' riuscita
+            # silenziosamente, non solo quando e' davvero fallita.
+            pyautogui.hotkey("ctrl", "a")
+            pyautogui.write(text)
+            action_performed[0] = True
+
+        outcome = try_strategies_in_order(
+            [("uia_set_value", _uia_set_value), ("pixel_type", _pixel_type)],
             verify=_verify,
         )
 
