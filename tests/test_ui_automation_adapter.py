@@ -15,7 +15,12 @@ import time
 import unittest
 from pathlib import Path
 
-from core.computer_use.ui_automation_adapter import ElementInfo, UIAutomationAdapter, WindowNotFoundError
+from core.computer_use.ui_automation_adapter import (
+    AmbiguousWindowError,
+    ElementInfo,
+    UIAutomationAdapter,
+    WindowNotFoundError,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _FIXTURE_WINDOW_TITLE = "Jake Computer Use Fixture"
@@ -89,6 +94,89 @@ class FindWindowByProcessIdTests(unittest.TestCase):
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 process.kill()
+
+
+class FindWindowByTitleContainingTests(unittest.TestCase):
+    """F3.7 (adozione, motivata da Esplora File): `find_window_by_title_containing`, per quando
+    il titolo COMPLETO include un suffisso dipendente dalla lingua del sistema (es. "cartella -
+    Esplora file"/"folder - File Explorer") che `find_window_by_title` (uguaglianza esatta) non
+    potrebbe mai prevedere - qui verificato contro la fixture Qt gia' esistente, non serve
+    Esplora File per testare questo meccanismo generico."""
+
+    def test_a_substring_that_does_not_exist_raises_within_the_timeout(self):
+        adapter = UIAutomationAdapter()
+        started = time.monotonic()
+
+        with self.assertRaises(WindowNotFoundError):
+            adapter.find_window_by_title_containing("Sottostringa che non esiste XYZ123", timeout_seconds=1.0)
+
+        elapsed = time.monotonic() - started
+        self.assertGreaterEqual(elapsed, 1.0, "deve rispettare davvero il timeout dato, non arrendersi prima")
+
+    def test_finds_the_window_by_a_partial_title(self):
+        process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        try:
+            adapter = UIAutomationAdapter()
+            adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)  # attende che sia visibile
+
+            window = adapter.find_window_by_title_containing("Computer Use Fixture", timeout_seconds=5.0)
+
+            info = adapter.describe_element(window)
+            self.assertEqual(info.name, _FIXTURE_WINDOW_TITLE)
+        finally:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+
+    def test_an_ambiguous_substring_raises_immediately_not_after_the_full_timeout(self):
+        """Due finestre della fixture (una per ogni processo) condividono lo stesso titolo -
+        cercare per una sottostringa che le trova entrambe deve fallire SUBITO, non dopo il
+        timeout intero (aspettare non risolverebbe mai l'ambiguita', lo stesso principio gia'
+        seguito da `SelectorEngine.wait_for_unique_element`, F3.4.7)."""
+        process_a = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        process_b = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        try:
+            adapter = UIAutomationAdapter()
+            # Attende che ENTRAMBE le finestre siano visibili (stesso titolo per entrambe, non
+            # distinguibili per processo con find_window_by_process_id data la fragilita' gia'
+            # documentata del PID del Popen per questa fixture) - ritenta con un breve intervallo
+            # finche' la ricerca non trova davvero l'ambiguita', invece di un singolo tentativo
+            # ottimistico che potrebbe vedere solo la prima finestra gia' pronta.
+            warmup_deadline = time.monotonic() + 15.0
+            while True:
+                try:
+                    adapter.find_window_by_title_containing("Computer Use Fixture", timeout_seconds=0.2)
+                except AmbiguousWindowError:
+                    break
+                except WindowNotFoundError:
+                    pass
+                if time.monotonic() > warmup_deadline:
+                    self.fail("le due finestre della fixture non sono mai comparse entrambe")
+
+            started = time.monotonic()
+            with self.assertRaises(AmbiguousWindowError):
+                adapter.find_window_by_title_containing("Computer Use Fixture", timeout_seconds=5.0)
+
+            elapsed = time.monotonic() - started
+            self.assertLess(elapsed, 3.0, "l'ambiguita' non deve aspettare il timeout intero")
+        finally:
+            for process in (process_a, process_b):
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
 
 
 class _RealFixtureTestCase(unittest.TestCase):
