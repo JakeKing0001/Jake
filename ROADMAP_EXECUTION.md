@@ -4988,6 +4988,36 @@ Criterio di uscita: gli stessi task passano dopo resize, tema e spostamento fine
   nuovi (`find_unique`/`wait_for_unique_element`, un refuso reale su `name` combinato con un
   `control_type` corretto contro la fixture vera). 3.048/3.048 test, ruff verde.
 
+- `F3.3.1` (resto - "selettori per... window", CHIUDE la parte "window") — 19/09/2026: nuovo campo
+  `ElementSelector.window_title_contains` (opzionale, non conta per il "almeno un criterio" di
+  `__post_init__` - da solo identifica una FINESTRA, non un elemento) + nuovo
+  `SelectorEngine.locate(selector, timeout_seconds)`, che trova PRIMA la finestra
+  (`find_window_by_title_containing`, F3.7) poi l'elemento al suo interno, da UN SOLO
+  `ElementSelector` auto-sufficiente - nessun `root` che il chiamante deve gia' avere risolto.
+
+  **Motivazione diretta dall'incremento precedente (F3.3.4, la serializzazione)**: un selettore
+  SALVATO su disco e poi ricaricato in una sessione futura (`ElementSelector.from_dict`) non ha
+  piu' a portata di mano un `root` gia' trovato da una ricerca precedente nella stessa sessione -
+  senza questo campo, un selettore "procedurale senza coordinate assolute" lo sarebbe solo per
+  l'ELEMENTO, lasciando comunque al chiamante il compito di ritrovare la finestra giusta con
+  codice separato (e potenzialmente diverso) ogni volta. Con `window_title_contains`, l'intero
+  ciclo salva -> ricarica -> ritrova funziona da un solo oggetto, verificato con un test che passa
+  DAVVERO attraverso `to_dict()`/`from_dict()` prima di chiamare `locate()`, non solo con un
+  `ElementSelector` costruito a mano nello stesso test (che non proverebbe il caso reale).
+
+  `ValueError` (non `NoMatchError`) se `window_title_contains` manca - un errore di programmazione
+  del chiamante, non un fallimento della ricerca. Il timeout dato e' CONDIVISO tra la ricerca della
+  finestra e quella dell'elemento (non raddoppiato) - una finestra lenta a comparire lascia
+  deliberatamente meno tempo all'elemento, invece di poter bloccare la chiamata fino al doppio del
+  timeout dichiarato. Restano aperti "app/process" (nessun criterio per PID/nome eseguibile) e
+  "ancestor" (nessun modo di richiedere un antenato specifico oltre a scegliere il `root` a mano) -
+  solo "window" chiuso in questo incremento. Prova: 5 test nuovi in
+  `tests/test_selector.py::LocateTests` (trova finestra+elemento da un selettore auto-sufficiente;
+  lo stesso attraverso un vero round-trip su disco; nessun criterio finestra solleva ValueError;
+  una finestra inesistente solleva WindowNotFoundError; un elemento inesistente nella finestra vera
+  solleva NoMatchError) + 1 test di round-trip in `ElementSelectorSerializationTests`. 3.056/3.056
+  test, ruff verde.
+
 ### F3.4 — Executor semantico
 
 Dipende da: F3.3 e F1.3.

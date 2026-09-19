@@ -17,8 +17,10 @@ DIRETTI del desktop) non l'avrebbe mai trovato.
 
 Deliberatamente NON affrontati qui, passi successivi dichiarati (stesso principio "un incremento
 alla volta" di questa sessione):
-- F3.3.1 (resto): selettori per app/process, window, ancestor - solo name/control_type/
-  automation_id qui, gia' le tre proprieta' che `ElementInfo` (F3.2.3) espone oggi;
+- F3.3.1 (resto - "window" CHIUSO in un incremento successivo, 19/09/2026): `ElementSelector.
+  window_title_contains` + `SelectorEngine.locate()` - vedi le loro docstring. Restano aperti
+  "app/process" (nessun criterio per PID/nome eseguibile ancora) e "ancestor" (nessun modo di
+  richiedere un antenato specifico oltre a scegliere manualmente il `root` giusto);
 - F3.3.2 (prima fetta - CHIUSA in un incremento successivo, 19/09/2026): il caso NoMatchError
   spiega ora QUALE criterio sta escludendo tutto (`SelectorEngine._explain_no_match`) - resta
   aperto il caso gemello (un vero punteggio tra PIU' candidati quando la ricerca trova qualcosa
@@ -41,11 +43,22 @@ from core.computer_use.ui_automation_adapter import ElementInfo, UIAutomationAda
 class ElementSelector:
     """F3.3.1: i tre criteri gia' disponibili in `ElementInfo` (F3.2.3) - `name`/`control_type`/
     `automation_id`, tutti opzionali individualmente ma ALMENO uno richiesto (un selettore senza
-    alcun criterio troverebbe "qualunque elemento", non e' un selettore)."""
+    alcun criterio troverebbe "qualunque elemento", non e' un selettore).
+
+    `window_title_contains` (F3.3.1 resto - "selettori per... window"): un quarto criterio
+    OPZIONALE che non conta per il "almeno uno" sopra (da solo non identifica alcun ELEMENTO,
+    solo la finestra in cui cercarlo) - motivato direttamente da F3.3.4 (la serializzazione
+    appena costruita): un selettore SALVATO su disco e poi ricaricato in una sessione futura non
+    ha piu' un `root` gia' risolto a portata di mano come lo ha un chiamante che lo costruisce al
+    volo - senza questo campo, un selettore procedurale sarebbe "procedurale" solo per
+    l'ELEMENTO, non per la finestra che lo contiene, lasciando comunque al chiamante il compito
+    di ritrovare la finestra giusta con codice separato. Con questo campo, `SelectorEngine.locate`
+    puo' fare ENTRAMBI i passi da un solo `ElementSelector` auto-sufficiente."""
 
     name: str | None = None
     control_type: str | None = None
     automation_id: str | None = None
+    window_title_contains: str | None = None
 
     def __post_init__(self) -> None:
         if self.name is None and self.control_type is None and self.automation_id is None:
@@ -66,6 +79,8 @@ class ElementSelector:
             result["control_type"] = self.control_type
         if self.automation_id is not None:
             result["automation_id"] = self.automation_id
+        if self.window_title_contains is not None:
+            result["window_title_contains"] = self.window_title_contains
         return result
 
     @classmethod
@@ -78,12 +93,12 @@ class ElementSelector:
         per un typo aumenterebbe il rischio di un match ambiguo o, peggio, di un match SBAGLIATO
         su un elemento diverso da quello originariamente salvato - lo stesso principio "rifiuta
         l'ambiguita'/l'incertezza invece di indovinare" gia' seguito da `find_unique`)."""
-        unknown_keys = set(data) - {"name", "control_type", "automation_id"}
+        unknown_keys = set(data) - {"name", "control_type", "automation_id", "window_title_contains"}
         if unknown_keys:
             raise ValueError(f"ElementSelector.from_dict: chiavi sconosciute {sorted(unknown_keys)}")
         return cls(
             name=data.get("name"), control_type=data.get("control_type"),
-            automation_id=data.get("automation_id"),
+            automation_id=data.get("automation_id"), window_title_contains=data.get("window_title_contains"),
         )
 
 
@@ -198,3 +213,29 @@ class SelectorEngine:
                 f"{len(matches)} elementi corrispondono a {selector!r}: servono criteri piu' precisi"
             )
         return matches[0]
+
+    def locate(self, selector: ElementSelector, timeout_seconds: float = 5.0):
+        """F3.3.1 (resto - "selettori per... window"): come `wait_for_unique_element`, ma senza
+        bisogno di un `root` gia' risolto dal chiamante - richiede invece che `selector.
+        window_title_contains` sia dato, e trova PRIMA la finestra (`UIAutomationAdapter.
+        find_window_by_title_containing`, F3.7) poi l'elemento al suo interno, con un SOLO
+        `ElementSelector` auto-sufficiente. Il caso motivante e' un selettore RICARICATO da
+        `ElementSelector.from_dict` (F3.3.4) in una sessione futura, senza alcun `root` gia' in
+        memoria da una ricerca precedente - senza questo metodo, un selettore salvato resterebbe
+        "procedurale" solo per l'elemento, non per la finestra che lo contiene.
+
+        `ValueError` (non un `NoMatchError` fuorviante) se `window_title_contains` non e' dato -
+        un errore di programmazione del chiamante (ha dimenticato il criterio della finestra), non
+        un fallimento della ricerca stessa, merita un'eccezione diversa e piu' chiara. La ricerca
+        della finestra e quella dell'elemento condividono lo stesso `timeout_seconds` totale, non
+        raddoppiato - una finestra che impiega quasi tutto il timeout a comparire lascerebbe
+        volutamente poco tempo all'elemento, invece di sommare due attese indipendenti che
+        potrebbero far restare bloccata la chiamata per il doppio del timeout dichiarato."""
+        if selector.window_title_contains is None:
+            raise ValueError("SelectorEngine.locate richiede selector.window_title_contains")
+        deadline = time.monotonic() + timeout_seconds
+        window = self._adapter.find_window_by_title_containing(
+            selector.window_title_contains, timeout_seconds=timeout_seconds,
+        )
+        remaining = max(0.0, deadline - time.monotonic())
+        return self.wait_for_unique_element(window, selector, timeout_seconds=remaining)
