@@ -442,5 +442,108 @@ class UnknownActionErrorTests(unittest.TestCase):
             replay_step(ComputerAgent(), self.adapter, forged, timeout_seconds=5.0)
 
 
+class RiskIntentTests(unittest.TestCase):
+    """F3.4.3 ("richiedere policy prima di upload, submit, send, delete e purchase"), adozione in
+    F3.8: `RecordedStep.risk_intent` inoltrato da `replay_step`/`dry_run_step` a `ComputerAgent`,
+    che decide davvero (nessuna decisione duplicata qui). Un vero `PolicyEngine` (economico da
+    costruire, nessun mock del motore stesso), stesso principio gia' seguito da
+    `tests/test_computer_agent.py::PolicyIntegrationTests`."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+
+    def test_a_round_trip_preserves_risk_intent_too(self):
+        original = RecordedStep(
+            action=ACTION_CLICK,
+            selector=ElementSelector(name="Aggiungi", window_title_contains="Fixture"),
+            risk_intent="DELETE_PATH",
+        )
+        restored = RecordedStep.from_dict(original.to_dict())
+        self.assertEqual(original, restored)
+        self.assertEqual(restored.risk_intent, "DELETE_PATH")
+
+    def test_replay_step_is_blocked_by_policy_without_ever_touching_the_button(self):
+        from core.policy_engine import PolicyEngine
+
+        step = RecordedStep(
+            action=ACTION_CLICK,
+            selector=ElementSelector(name="Aggiungi", control_type="Button", window_title_contains="Computer Use Fixture"),
+            risk_intent="DELETE_PATH",
+        )
+        engine = PolicyEngine(blocked_intents={"DELETE_PATH"})
+        agent = ComputerAgent(policy_engine=engine)
+
+        result = replay_step(agent, self.adapter, step, timeout_seconds=5.0)
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "POLICY_BLOCKED")
+        # Verifica diretta: il click non deve MAI essere arrivato all'app - la lista resta vuota.
+        window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=5.0)
+        engine_selector = SelectorEngine(self.adapter)
+        item_list = engine_selector.find_unique_element(
+            window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_list"),
+        )
+        self.assertEqual(engine_selector.find_all(item_list, ElementSelector(control_type="ListItem")), [])
+
+    def test_replay_step_proceeds_for_real_once_confirmed(self):
+        from core.policy_engine import PolicyEngine
+
+        step = RecordedStep(
+            action=ACTION_CLICK,
+            selector=ElementSelector(name="Aggiungi", control_type="Button", window_title_contains="Computer Use Fixture"),
+            risk_intent="DELETE_PATH",
+        )
+        engine = PolicyEngine(always_confirm_intents={"DELETE_PATH"})
+        agent = ComputerAgent(policy_engine=engine)
+
+        result = replay_step(agent, self.adapter, step, timeout_seconds=5.0, policy_parameters={"confirmed": True})
+
+        self.assertTrue(result.success, result)
+
+    def test_dry_run_step_reports_a_blocked_intent_without_an_agent_it_would_not_know(self):
+        """Senza `agent` (il default), il dry-run non puo' sapere della policy - comportamento
+        invariato, non un fallimento per un pre-requisito mancante."""
+        step = RecordedStep(
+            action=ACTION_CLICK,
+            selector=ElementSelector(name="Aggiungi", control_type="Button", window_title_contains="Computer Use Fixture"),
+            risk_intent="DELETE_PATH",
+        )
+
+        result = dry_run_step(self.adapter, step, timeout_seconds=5.0)
+
+        self.assertTrue(result.would_succeed)
+
+    def test_dry_run_step_reports_a_blocked_intent_when_an_agent_is_given(self):
+        """Il punto centrale: un dry-run che controllasse SOLO il selettore darebbe un falso senso
+        di sicurezza per un passo che il replay vero bloccherebbe per policy."""
+        from core.policy_engine import PolicyEngine
+
+        step = RecordedStep(
+            action=ACTION_CLICK,
+            selector=ElementSelector(name="Aggiungi", control_type="Button", window_title_contains="Computer Use Fixture"),
+            risk_intent="DELETE_PATH",
+        )
+        engine = PolicyEngine(blocked_intents={"DELETE_PATH"})
+        agent = ComputerAgent(policy_engine=engine)
+
+        result = dry_run_step(self.adapter, step, timeout_seconds=5.0, agent=agent)
+
+        self.assertFalse(result.would_succeed)
+        self.assertEqual(result.error, "POLICY_BLOCKED")
+
+
 if __name__ == "__main__":
     unittest.main()

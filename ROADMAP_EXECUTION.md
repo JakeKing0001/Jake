@@ -4533,9 +4533,10 @@ Criterio di uscita: nessuna contaminazione di memoria o permesso tra profili nei
   "cinque app reali" soddisfatto - Calcolatrice/Paint/Esplora File/Edge/terminale, VS Code
   investigato e trovato NON idoneo, F3.2.7 chiuso con un benchmark vero e ripetibile - resta
   aperto solo F3.2.2 meta'/F3.2.4/F3.2.5/F3.2.6];
-  F3.3 [F3.3.1/F3.3.3/F3.3.4/F3.3.7 prima fetta/F3.3.2 prima fetta chiusi, resta F3.3.1 resto/
-  F3.3.2 resto/F3.3.5/F3.3.6]; F3.4 chiusa per intero (F3.4.1-F3.4.7 tutti affrontati, F3.4.3
-  collegamento a policy escluso); F3.5 chiusa per intero (F3.5.1-F3.5.7 tutti affrontati); F3.6
+  F3.3 [F3.3.1 (window)/F3.3.2/F3.3.3/F3.3.4/F3.3.7 prima fetta chiusi, resta solo F3.3.1
+  (app/process/ancestor)/F3.3.5/F3.3.6]; F3.4 chiusa per intero (F3.4.1-F3.4.7 tutti affrontati,
+  F3.4.3 collegato a policy_engine con risk_intent esplicito - 19/09/2026); F3.5 chiusa per intero
+  (F3.5.1-F3.5.7 tutti affrontati); F3.6
   avviata (F3.6.1/F3.6.2 resto/F3.6.3/F3.6.5/F3.6.7 prima fetta fatti, resta F3.6.4/F3.6.6/F3.6.7
   resto, solo Edge); F3.7 avviata (Esplora File/browser/VS Code/terminale fatti, Impostazioni/
   Office/media rimandati per un rischio verificato o una privacy non autorizzata, messaggistica
@@ -5167,6 +5168,62 @@ Criterio di uscita: 10 task fixture completati senza coordinate pixel quando UIA
   Prova: 1 test nuovo in `tests/test_executor.py::SelectionItemKnownLimitationTests`, e la classe
   esistente `SelectionItemTests` rinominata concettualmente nel proprio docstring per chiarire il
   contrasto deliberato tra i due casi. 2.944/2.944 test, ruff verde.
+
+- `F3.4.3` ("richiedere policy prima di upload, submit, send, delete e purchase", CHIUDE il
+  criterio "100% azioni sensibili sottoposte a policy" del Gate F3 per gli intent dichiarati) —
+  19/09/2026: una decisione di design presa DOPO aver chiesto esplicitamente all'utente come
+  procedere (F3.4.3 era stata esclusa esplicitamente da OGNI incremento precedente di F3.4/F3.8 -
+  "questo modulo esegue un'azione GIA' autorizzata da chi lo chiama" - proprio perche' richiedeva
+  una decisione di design, non un collegamento meccanico): `ComputerAgent` NON PUO' sapere da solo
+  se cliccare un bottone chiamato "Elimina" e' un'azione distruttiva o innocua - un'euristica sul
+  testo del bottone sarebbe fragile, dipendente dalla lingua, con falsi positivi/negativi reali.
+  Scelta l'opzione "il chiamante dichiara il rischio esplicitamente" (non un'euristica sul testo).
+
+  Nuovo `ComputerAgent.__init__(policy_engine=None)` (opzionale, IDENTICO comportamento a prima
+  per ogni chiamante esistente - `skills/screen_click.py`, l'intera suite di test gia' scritta,
+  nessuno tocca `policy_engine`) + nuovi `risk_intent`/`policy_parameters`/`automated` su
+  `click_element`/`type_into_element`, verificati PRIMA di cercare l'elemento/muovere il mouse
+  (DOPO la cache di idempotenza - un'azione GIA' avvenuta con successo era gia' stata autorizzata,
+  ricontrollare la policy per un'azione che non sta per accadere non avrebbe senso, verificato con
+  uno spy che `decide_interactive` viene chiamato SOLO alla prima esecuzione). Delega per intero a
+  `PolicyEngine.decide_interactive`/`decide_automated` (F1) - LA STESSA istanza gia' usata da
+  `JakeCore`/`PlanExecutor`, mai un secondo motore/una logica di decisione duplicata - scelti
+  esplicitamente da `automated` (mai inferiti: `ComputerAgent` non sa da solo se gira dentro un
+  turno interattivo o un'automazione, la stessa ambiguita' che il codice esistente risolve
+  lasciando che sia CHI CHIAMA a dichiararlo, esattamente come gia' fanno `JakeCore`/
+  `PlanExecutor`).
+
+  **`automated=True` spoglia SEMPRE i segnali di autorizzazione prima di decidere**
+  (`strip_authorization_signals`, lo stesso passo gia' richiesto da `decide_automated`) - verificato
+  con un test dedicato che riproduce ESATTAMENTE il bug reale numero 1 gia' documentato nel modulo
+  docstring di `core/policy_engine.py` ("un piano automatico poteva auto-autorizzarsi"): un
+  `confirmed=True` forgiato con `automated=True` resta bloccato su `CONFIRMATION_REQUIRED`, non
+  procede. `ComputerAgent` NON implementa il ciclo "chiedi conferma ora, riprova al turno
+  successivo" di `JakeCore._authorize_command` (nessun turno conversazionale a cui appartenere) -
+  `CONFIRMATION_REQUIRED`/`AUTH_REQUIRED`/`POLICY_BLOCKED` si comportano come un fallimento di
+  ricerca (nessuna azione fisica tentata), lasciando al CHIAMANTE (che ha un ciclo conversazionale)
+  il compito di chiedere e ririchiamare con `policy_parameters={"confirmed": True, ...}` - la
+  STESSA identica busta che `JakeCore` gia' costruisce per ogni altro intent.
+
+  **Adottato anche in F3.8** (`core/computer_use/procedure.py`): nuovo `RecordedStep.risk_intent`
+  (opzionale, round-trip attraverso `to_dict`/`from_dict` come ogni altro campo) inoltrato da
+  `replay_step`/`replay_steps` a `ComputerAgent` senza duplicare la decisione. `dry_run_step`/
+  `dry_run_steps` accettano ora anche un `agent` opzionale - se dato, riusano `ComputerAgent.
+  _check_policy` (la STESSA identica decisione che il replay vero prenderebbe) per riportare
+  ANCHE un blocco di policy come `would_succeed=False`, stesso principio gia' applicato a
+  `MISSING_PARAMETER` in F3.8.2: un dry-run che controllasse solo il selettore darebbe un falso
+  senso di sicurezza per un passo che il replay vero bloccherebbe per policy.
+
+  Prova: 8 test nuovi in `tests/test_computer_agent.py::PolicyIntegrationTests` (nessun
+  `risk_intent` salta la policy anche con un motore collegato; un `risk_intent` senza motore
+  collegato non viene mai verificato; un intent bloccato/che richiede conferma si ferma senza
+  toccare il mouse; una conferma genuina fa procedere; `automated` spoglia un `confirmed` forgiato;
+  `type_into_element` verifica la policy prima di scrivere; una cache HIT non ricontrolla mai la
+  policy) + 5 test nuovi in `tests/test_procedure.py::RiskIntentTests` (round-trip di
+  `risk_intent`, un replay bloccato non tocca mai il bottone verificato osservando la lista vera,
+  un replay confermato procede per davvero, un dry-run senza agent non puo' sapere della policy,
+  un dry-run con agent riporta un blocco reale) - entrambe con un vero `PolicyEngine`, mai un
+  mock del motore stesso. 3.102/3.102 test, ruff verde.
 
 ### F3.5 — Fallback ladder
 

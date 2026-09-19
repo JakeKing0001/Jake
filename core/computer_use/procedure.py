@@ -85,16 +85,25 @@ def substitute_parameters(text: str, parameters: dict[str, str] | None) -> str:
 @dataclass(frozen=True)
 class RecordedStep:
     """Un passo REGISTRATO: QUALE azione (`action`), SU QUALE elemento (`selector`, mai una
-    coordinata), CON QUALE testo (`text`, solo per `ACTION_TYPE` - `None` per `ACTION_CLICK`,
-    un valore letterale gia' deciso in fase di registrazione per `ACTION_TYPE`, F3.8.2 non ancora
-    affrontato). `selector.window_title_contains` e' OBBLIGATORIO qui (a differenza di
-    `ElementSelector` da sola, dove resta opzionale) - un passo REGISTRATO deve poter essere
+    coordinata), CON QUALE testo (`text`, solo per `ACTION_TYPE` - `None` per `ACTION_CLICK`, un
+    valore letterale o parametrico con `${nome}`, F3.8.2, sostituito a runtime da
+    `substitute_parameters`). `selector.window_title_contains` e' OBBLIGATORIO qui (a differenza
+    di `ElementSelector` da sola, dove resta opzionale) - un passo REGISTRATO deve poter essere
     rigiocato in una sessione futura senza alcuna finestra gia' risolta a portata di mano, lo
-    stesso motivo che ha gia' portato a costruire quel campo in F3.3.1."""
+    stesso motivo che ha gia' portato a costruire quel campo in F3.3.1.
+
+    `risk_intent` (F3.4.3, adozione - opzionale, `None` di default): il nome di intent (lo stesso
+    vocabolario gia' censito in `core/risk.py`/`core/policy_engine.py`, es. "DELETE_PATH") che
+    QUESTO passo rappresenta in termini di rischio - dichiarato ESPLICITAMENTE da chi registra la
+    procedura, mai indovinato da `ComputerAgent` dal testo del bottone cliccato (un'euristica
+    fragile e dipendente dalla lingua, deliberatamente scartata - vedi il docstring di
+    `core/computer_agent.py`). `replay_step`/`dry_run_step` lo inoltrano a `ComputerAgent`, che
+    decide davvero se procedere."""
 
     action: str
     selector: ElementSelector
     text: str | None = None
+    risk_intent: str | None = None
 
     def __post_init__(self) -> None:
         if self.action not in _KNOWN_ACTIONS:
@@ -112,6 +121,8 @@ class RecordedStep:
         result: dict = {"action": self.action, "selector": self.selector.to_dict()}
         if self.text is not None:
             result["text"] = self.text
+        if self.risk_intent is not None:
+            result["risk_intent"] = self.risk_intent
         return result
 
     @classmethod
@@ -119,13 +130,14 @@ class RecordedStep:
         """L'inverso di `to_dict` - stesso principio "rifiuta invece di indovinare" gia' seguito
         da `ElementSelector.from_dict`: una chiave sconosciuta solleva `ValueError` invece di
         essere ignorata silenziosamente."""
-        unknown_keys = set(data) - {"action", "selector", "text"}
+        unknown_keys = set(data) - {"action", "selector", "text", "risk_intent"}
         if unknown_keys:
             raise ValueError(f"RecordedStep.from_dict: chiavi sconosciute {sorted(unknown_keys)}")
         if "action" not in data or "selector" not in data:
             raise ValueError("RecordedStep.from_dict richiede almeno 'action' e 'selector'")
         return cls(
             action=data["action"], selector=ElementSelector.from_dict(data["selector"]),
+            risk_intent=data.get("risk_intent"),
             text=data.get("text"),
         )
 
@@ -142,6 +154,7 @@ class UnknownActionError(Exception):
 def replay_step(
     agent: ComputerAgent, adapter: UIAutomationAdapter, step: RecordedStep,
     timeout_seconds: float = 5.0, idempotency_key: str | None = None, parameters: dict[str, str] | None = None,
+    policy_parameters: dict | None = None, automated: bool = False,
 ) -> ComputerActionResult:
     """Rigioca UN passo per davvero: trova la finestra (`find_window_by_title_containing`, F3.7 -
     stesso identico meccanismo di `SelectorEngine.locate`, F3.3.1) poi delega a `ComputerAgent.
@@ -158,7 +171,13 @@ def replay_step(
     sostituito PRIMA di scrivere - un placeholder senza valore corrispondente produce
     `ComputerActionResult(success=False, error="MISSING_PARAMETER")`, MAI il placeholder letterale
     scritto in un campo reale. Ignorato per `ACTION_CLICK` (un click non scrive nulla, `parameters`
-    passato comunque da un chiamante che rigioca una lista mista di passi resta innocuo)."""
+    passato comunque da un chiamante che rigioca una lista mista di passi resta innocuo).
+
+    `policy_parameters`/`automated` (F3.4.3, adozione): passati COSI' COME SONO a `click_element`/
+    `type_into_element` insieme a `step.risk_intent` (`None` se il passo non ne ha dichiarato uno -
+    comportamento invariato, F3.4.3 e' opt-in anche qui) - la verifica della policy resta intera
+    responsabilita' di `ComputerAgent`/`agent.policy_engine`, questo modulo non duplica la
+    decisione, solo inoltra il rischio gia' dichiarato in fase di registrazione."""
     from core.computer_use.ui_automation_adapter import WindowNotFoundError
 
     try:
@@ -170,7 +189,8 @@ def replay_step(
         return agent.click_element(
             root=window, name=step.selector.name, control_type=step.selector.control_type,
             automation_id=step.selector.automation_id, timeout_seconds=timeout_seconds,
-            idempotency_key=idempotency_key,
+            idempotency_key=idempotency_key, risk_intent=step.risk_intent,
+            policy_parameters=policy_parameters, automated=automated,
         )
     if step.action == ACTION_TYPE:
         try:
@@ -180,14 +200,15 @@ def replay_step(
         return agent.type_into_element(
             resolved_text, root=window, name=step.selector.name, control_type=step.selector.control_type,
             automation_id=step.selector.automation_id, timeout_seconds=timeout_seconds,
-            idempotency_key=idempotency_key,
+            idempotency_key=idempotency_key, risk_intent=step.risk_intent,
+            policy_parameters=policy_parameters, automated=automated,
         )
     raise UnknownActionError(f"azione sconosciuta: {step.action!r}")
 
 
 def replay_steps(
     agent: ComputerAgent, adapter: UIAutomationAdapter, steps: list[RecordedStep], timeout_seconds: float = 5.0,
-    parameters: dict[str, str] | None = None,
+    parameters: dict[str, str] | None = None, policy_parameters: dict | None = None, automated: bool = False,
 ) -> list[ComputerActionResult]:
     """Rigioca una LISTA di passi IN ORDINE, fermandosi al PRIMO fallimento (`success=False`) -
     coerente con lo spirito di F3.8.6 ("rilevare drift e sospendere la routine invece di
@@ -210,7 +231,10 @@ def replay_steps(
     (es. un id di corsa/procedura che F3.8.5, non ancora costruito, dovra' comunque generare)."""
     results: list[ComputerActionResult] = []
     for step in steps:
-        result = replay_step(agent, adapter, step, timeout_seconds=timeout_seconds, parameters=parameters)
+        result = replay_step(
+            agent, adapter, step, timeout_seconds=timeout_seconds, parameters=parameters,
+            policy_parameters=policy_parameters, automated=automated,
+        )
         results.append(result)
         if not result.success:
             break
@@ -240,12 +264,13 @@ class DryRunStepResult:
 
 def dry_run_step(
     adapter: UIAutomationAdapter, step: RecordedStep, timeout_seconds: float = 5.0,
-    parameters: dict[str, str] | None = None,
+    parameters: dict[str, str] | None = None, agent: ComputerAgent | None = None,
+    policy_parameters: dict | None = None, automated: bool = False,
 ) -> DryRunStepResult:
     """F3.8.4 (prima fetta - "testarla in dry-run e su dati innocui"): verifica se `step.selector`
     risolverebbe DAVVERO a esattamente un elemento nello stato ATTUALE dell'app - senza mai
-    cliccare/scrivere (nessun `ComputerAgent` coinvolto qui, a differenza di `replay_step`). Riusa
-    `SelectorEngine.locate()` (F3.3.1) per intero: la STESSA identica logica di risoluzione
+    cliccare/scrivere (nessuna azione DI COMPUTER USE vera qui, a differenza di `replay_step`).
+    Riusa `SelectorEngine.locate()` (F3.3.1) per intero: la STESSA identica logica di risoluzione
     finestra+elemento del replay vero, non una sua reimplementazione parallela che potrebbe
     disallinearsi nel tempo (es. dichiarare "risolverebbe" con un criterio che il replay vero
     interpreta diversamente).
@@ -255,6 +280,16 @@ def dry_run_step(
     "risolverebbe" ignorando un parametro mancante darebbe un falso senso di sicurezza, dato che
     il replay vero fallirebbe comunque con `MISSING_PARAMETER`.
 
+    `agent`/`policy_parameters`/`automated` (F3.4.3, adozione): se `agent` e' dato (e collegato a
+    un `policy_engine`) e `step.risk_intent` e' dato, riusa `ComputerAgent._check_policy` - la
+    STESSA identica decisione che il replay vero prenderebbe, non una sua reimplementazione - per
+    verificare ANCHE che la policy non fermerebbe il passo. Stesso principio di `parameters`
+    sopra: un dry-run che ignorasse la policy darebbe un falso senso di sicurezza per un passo che
+    il replay vero bloccherebbe con `POLICY_BLOCKED`/`CONFIRMATION_REQUIRED`/`AUTH_REQUIRED`.
+    `agent=None` (default) salta questo controllo per intero - un dry-run senza un `ComputerAgent`
+    a portata di mano non puo' verificare la policy, non deve fallire per un pre-requisito
+    mancante (comportamento invariato).
+
     **"su dati innocui" (la seconda meta' di F3.8.4) NON e' affrontato qui**: questo dry-run non
     tocca MAI l'app (nemmeno leggere un valore) - "dati innocui" implicherebbe invece eseguire
     l'azione per davvero ma contro un ambiente/dato sicuro (es. una copia, un account di prova),
@@ -262,6 +297,11 @@ def dry_run_step(
     target) non affrontato in questa prima fetta."""
     from core.computer_use.selector import AmbiguousSelectionError, NoMatchError, SelectorEngine
     from core.computer_use.ui_automation_adapter import WindowNotFoundError
+
+    if agent is not None:
+        policy_result = agent._check_policy(step.risk_intent, policy_parameters, automated)
+        if policy_result is not None:
+            return DryRunStepResult(step=step, would_succeed=False, error=policy_result.error)
 
     engine = SelectorEngine(adapter)
     try:
@@ -282,7 +322,8 @@ def dry_run_step(
 
 def dry_run_steps(
     adapter: UIAutomationAdapter, steps: list[RecordedStep], timeout_seconds: float = 5.0,
-    parameters: dict[str, str] | None = None,
+    parameters: dict[str, str] | None = None, agent: ComputerAgent | None = None,
+    policy_parameters: dict | None = None, automated: bool = False,
 ) -> list[DryRunStepResult]:
     """A differenza di `replay_steps` (che si ferma al PRIMO fallimento, perche' un'azione vera
     puo' dipendere dallo stato lasciato dalla precedente), un dry-run verifica OGNI passo fino in
@@ -290,4 +331,10 @@ def dry_run_steps(
     esiste uno stato che un passo "rompe" per i successivi: un chiamante vuole vedere TUTTI i
     passi che non risolverebbero oggi, non fermarsi al primo per poi dover rilanciare piu' volte
     per scoprire gli altri."""
-    return [dry_run_step(adapter, step, timeout_seconds=timeout_seconds, parameters=parameters) for step in steps]
+    return [
+        dry_run_step(
+            adapter, step, timeout_seconds=timeout_seconds, parameters=parameters, agent=agent,
+            policy_parameters=policy_parameters, automated=automated,
+        )
+        for step in steps
+    ]

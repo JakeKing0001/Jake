@@ -97,7 +97,31 @@ merita una revisione dedicata"; questa e' quella revisione, applicata pero' al l
 e piu' sicuro per farlo davvero (un'azione fisica sullo schermo), non ancora collegata alla chiave
 dell'intent-level ledger - un chiamante che vuole questa protezione deve passare esplicitamente
 `idempotency_key` (nessuna skill esistente e' toccata, il default resta `None`, comportamento
-identico a prima di F3.4.6)."""
+identico a prima di F3.4.6).
+
+`risk_intent`/`policy_parameters`/`automated` (F3.4.3, "richiedere policy prima di upload,
+submit, send, delete e purchase") - una decisione di design presa DELIBERATAMENTE, non l'unica
+possibile: `ComputerAgent` non puo' sapere da SOLO se cliccare un bottone chiamato "Elimina" e'
+un'azione distruttiva o innocua (un'euristica sul testo del bottone sarebbe fragile, dipendente
+dalla lingua, con falsi positivi/negativi reali) - il CHIAMANTE (una skill, una procedura di F3.8,
+un agente a passi) deve dichiarare esplicitamente il rischio passando `risk_intent` (lo stesso
+nome di intent gia' censito in `core/risk.py`/`core/policy_engine.py`, es. "DELETE_PATH"), non
+`ComputerAgent` che indovina dal contesto UI. `self.policy_engine` (`ComputerAgent.__init__`,
+opzionale, `None` di default - IDENTICO comportamento a prima di F3.4.3 per ogni chiamante
+esistente) e' lo stesso `PolicyEngine` gia' usato da `JakeCore`/`PlanExecutor` (F1), mai una
+seconda istanza/un motore diverso - stesso pattern di dependency injection gia' usato da
+`RunWorkflowSkill`. `automated` sceglie esplicitamente tra `decide_interactive`/`decide_automated`
+(la STESSA scelta che `JakeCore`/`PlanExecutor` fanno gia' in base al proprio contesto, mai
+inferita qui) - un `automated=True` spoglia SEMPRE i segnali di autorizzazione prima di decidere
+(`strip_authorization_signals`), lo stesso passo gia' richiesto da `decide_automated` per evitare
+esattamente il bug reale numero 1 gia' documentato nel modulo docstring di `core/policy_engine.py`
+("un piano automatico poteva auto-autorizzarsi"). `ComputerAgent` non implementa (e non deve: non
+ha un turno conversazionale a cui appartenere) il ciclo "chiedi conferma ora, riprova al turno
+successivo" di `JakeCore._authorize_command` - un `CONFIRMATION_REQUIRED`/`AUTH_REQUIRED` si
+comporta come un fallimento di ricerca (nessuna azione fisica tentata), lasciando al CHIAMANTE (che
+ha un ciclo conversazionale, `ComputerAgent` non ce l'ha) il compito di chiedere e ririchiamare con
+`policy_parameters={"confirmed": True, ...}` - la stessa busta di conferma che `JakeCore` gia'
+costruisce oggi per ogni altro intent, non un formato nuovo inventato per questo modulo."""
 import time
 from dataclasses import dataclass, replace
 
@@ -130,7 +154,7 @@ class ComputerActionResult:
 
 
 class ComputerAgent:
-    def __init__(self, idempotency_ttl_seconds: float = IDEMPOTENCY_TTL_SECONDS) -> None:
+    def __init__(self, idempotency_ttl_seconds: float = IDEMPOTENCY_TTL_SECONDS, policy_engine=None) -> None:
         """F3.4.6: `idempotency_ttl_seconds` iniettabile (non solo la costante di modulo) per lo
         stesso motivo per cui `timeout_seconds` e' gia' un parametro esplicito ovunque in questo
         progetto - un test deve poter usare una finestra brevissima per osservare una vera
@@ -139,9 +163,61 @@ class ComputerAgent:
         vita giusto per questa protezione (una skill la crea una volta e la riusa tra le proprie
         `execute()`, vedi `skills/screen_click.py`) - una cache di modulo condivisa tra istanze/
         skill diverse rischierebbe di far combaciare chiavi scelte da parti del sistema che non si
-        conoscono tra loro."""
+        conoscono tra loro.
+
+        `policy_engine` (F3.4.3, "richiedere policy prima di upload, submit, send, delete e
+        purchase"): opzionale, `None` di default - IDENTICO comportamento a prima di F3.4.3 per
+        ogni chiamante esistente che costruisce `ComputerAgent()` senza argomenti (`skills/
+        screen_click.py`, l'intera suite di test gia' scritta). Stesso pattern di dependency
+        injection gia' usato da `RunWorkflowSkill` (`core/jake_core.py`/`skills/workflow.py`) -
+        un'istanza costruita altrove (tipicamente `JakeCore.policy_engine`) assegnata post-
+        costruzione o passata qui, mai un singleton di modulo (che questo progetto non usa da
+        nessuna parte per `PolicyEngine`, verificato non assunto)."""
         self._idempotency_ttl_seconds = idempotency_ttl_seconds
         self._idempotency_cache: dict[str, tuple[float, ComputerActionResult]] = {}
+        self.policy_engine = policy_engine
+
+    def _check_policy(
+        self, risk_intent: str | None, policy_parameters: dict | None, automated: bool,
+    ) -> ComputerActionResult | None:
+        """F3.4.3: `None` (procedi, non c'e' nulla da bloccare) quando `risk_intent` non e' dato
+        (il chiamante non ha dichiarato alcun rischio - comportamento INVARIATO, coerente con
+        "opt-in" gia' seguito da ogni capability di `PolicyEngine`, es. `allowed_filesystem_roots`
+        vuoto di default) o quando `self.policy_engine` e' `None` (nessun motore collegato - un
+        `ComputerAgent()` senza `policy_engine` non puo' verificare nulla, non deve bloccare tutto
+        per un pre-requisito mancante). Altrimenti delega a `PolicyEngine.decide_interactive`/
+        `decide_automated` - la STESSA identica coppia gia' usata da `JakeCore`/`PlanExecutor`
+        (mai una terza via inventata qui), scelta esplicitamente da `automated` invece di
+        indovinata: `ComputerAgent` non sa da solo se sta girando dentro un turno interattivo o
+        un'automazione in background, la STESSA ambiguita' che il codice esistente risolve
+        lasciando che sia CHI CHIAMA a dichiararlo (`JakeCore` usa sempre `decide_interactive`,
+        `PlanExecutor` sempre `decide_automated` - nessuno dei due lo inferisce).
+
+        **`automated=True` spoglia sempre i segnali di autorizzazione PRIMA di decidere**
+        (`strip_authorization_signals`, lo stesso identico passo gia' richiesto da
+        `decide_automated` - vedi il suo docstring): un `automated=False` di default che
+        rispettasse `confirmed`/`authenticated` senza che nessuno li abbia genuinamente concessi
+        sarebbe esattamente il bug reale numero 1 gia' documentato nel modulo docstring di
+        `core/policy_engine.py` ("PlanExecutor.execute() non toglieva mai confirmed/authenticated
+        dai parametri di un passo: un piano automatico poteva auto-autorizzarsi")."""
+        if risk_intent is None or self.policy_engine is None:
+            return None
+        from core.policy_engine import PolicyDecision, strip_authorization_signals
+
+        parameters = policy_parameters or {}
+        if automated:
+            decision = self.policy_engine.decide_automated(risk_intent, strip_authorization_signals(parameters))
+        else:
+            decision = self.policy_engine.decide_interactive(risk_intent, parameters)
+        if decision == PolicyDecision.ALLOW:
+            return None
+        if decision == PolicyDecision.BLOCK:
+            return ComputerActionResult(success=False, error="POLICY_BLOCKED")
+        if decision == PolicyDecision.CONFIRM:
+            return ComputerActionResult(success=False, error="CONFIRMATION_REQUIRED")
+        if decision == PolicyDecision.REQUIRE_AUTH:
+            return ComputerActionResult(success=False, error="AUTH_REQUIRED")
+        raise AssertionError(f"PolicyDecision sconosciuta: {decision!r}")  # difesa, non dovrebbe mai accadere
 
     def _cached_action_result(self, idempotency_key: str | None) -> ComputerActionResult | None:
         """F3.4.6: `None` (mai sollevare, mai inventare un risultato) sia quando `idempotency_key`
@@ -279,7 +355,8 @@ class ComputerAgent:
     def click_element(
         self, *, window_title: str | None = None, root=None, name: str | None = None,
         control_type: str | None = None, automation_id: str | None = None, timeout_seconds: float = 5.0,
-        idempotency_key: str | None = None,
+        idempotency_key: str | None = None, risk_intent: str | None = None,
+        policy_parameters: dict | None = None, automated: bool = False,
     ) -> ComputerActionResult:
         """F3.4.2: trova un elemento per nome/ruolo/automation_id dentro `window_title` (o dentro
         `root`, un elemento gia' risolto - F3.6, un browser non ha un titolo di finestra
@@ -292,10 +369,24 @@ class ComputerAgent:
         chiamata restituisce SUBITO quel risultato - senza cercare l'elemento una seconda volta,
         senza muovere il mouse - invece di eseguire di nuovo l'azione. `None` (il default) lascia
         il comportamento IDENTICO a prima di F3.4.6: nessuna skill/chiamante esistente e' toccato
-        da questa aggiunta finche' non passa esplicitamente una chiave."""
+        da questa aggiunta finche' non passa esplicitamente una chiave.
+
+        `risk_intent`/`policy_parameters`/`automated` (F3.4.3, "richiedere policy prima di
+        upload, submit, send, delete e purchase"): se `risk_intent` e' dato E `self.policy_engine`
+        e' collegato (`ComputerAgent.__init__`), la policy viene verificata PRIMA di cercare
+        l'elemento/muovere il mouse - un `POLICY_BLOCKED`/`CONFIRMATION_REQUIRED`/`AUTH_REQUIRED`
+        si comporta come un fallimento di ricerca, nessuna azione fisica tentata. Controllato
+        DOPO la cache di idempotenza (un cache HIT restituisce un'azione GIA' avvenuta ed e' gia'
+        stata autorizzata a suo tempo, ricontrollare la policy per un'azione che non sta per
+        accadere non avrebbe senso) - vedi `_check_policy` per i dettagli. `risk_intent=None` (il
+        default) lascia il comportamento IDENTICO a prima di F3.4.3."""
         cached = self._cached_action_result(idempotency_key)
         if cached is not None:
             return cached
+
+        policy_result = self._check_policy(risk_intent, policy_parameters, automated)
+        if policy_result is not None:
+            return policy_result
 
         from core.computer_use.executor import ActionExecutor
         from core.computer_use.fallback import try_strategies_in_order
@@ -360,7 +451,8 @@ class ComputerAgent:
     def type_into_element(
         self, text: str, *, window_title: str | None = None, root=None, name: str | None = None,
         control_type: str | None = None, automation_id: str | None = None, timeout_seconds: float = 5.0,
-        idempotency_key: str | None = None,
+        idempotency_key: str | None = None, risk_intent: str | None = None,
+        policy_parameters: dict | None = None, automated: bool = False,
     ) -> ComputerActionResult:
         """F3.4.2 (resto - "unificare... type... nel ComputerAgent"): trova un campo di testo per
         nome/ruolo/automation_id dentro `window_title` (o dentro `root`, F3.6, come per
@@ -382,10 +474,18 @@ class ComputerAgent:
         non fare nulla (il ripiego pixel gia' seleziona tutto prima di scrivere per restare
         sicuro da incatenare CON SE STESSO in un'unica chiamata - vedi sopra - ma questo non
         protegge da una SECONDA chiamata dall'esterno con lo stesso intento logico, il caso che
-        `idempotency_key` copre)."""
+        `idempotency_key` copre).
+
+        `risk_intent`/`policy_parameters`/`automated` (F3.4.3): stessa identica protezione di
+        `click_element` - vedi il suo docstring. Verificato PRIMA di scrivere `text` da qualunque
+        parte, mai dopo (un `POLICY_BLOCKED` scoperto dopo aver gia' scritto sarebbe inutile)."""
         cached = self._cached_action_result(idempotency_key)
         if cached is not None:
             return cached
+
+        policy_result = self._check_policy(risk_intent, policy_parameters, automated)
+        if policy_result is not None:
+            return policy_result
 
         from core.computer_use.executor import ActionExecutor
         from core.computer_use.fallback import try_strategies_in_order

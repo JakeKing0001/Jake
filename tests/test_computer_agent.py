@@ -550,5 +550,185 @@ class IdempotencyKeyTests(unittest.TestCase):
         MockExecutor.return_value.invoke.assert_called_once()
 
 
+class PolicyIntegrationTests(unittest.TestCase):
+    """F3.4.3 ("richiedere policy prima di upload, submit, send, delete e purchase"):
+    `risk_intent`/`policy_parameters`/`automated` su `click_element`/`type_into_element`. Usa un
+    vero `PolicyEngine` (costruzione economica, nessun mock del motore stesso - solo dell'adapter/
+    selector/executor UI Automation, come il resto di questa classe) cosi' i test esercitano la
+    LOGICA DI DECISIONE reale, non un doppio che si limita a restituire cio' che gli si dice."""
+
+    def _mocked_adapter_and_engine(self, MockAdapter, MockEngine, *, element=mock.sentinel.element):
+        adapter = MockAdapter.return_value
+        adapter.find_window_by_title.return_value = mock.sentinel.window
+        adapter.describe_element.return_value = _BUTTON_INFO
+        engine = MockEngine.return_value
+        engine.wait_for_unique_element.return_value = element
+        return adapter, engine
+
+    def test_no_risk_intent_skips_policy_entirely_even_with_a_policy_engine_attached(self):
+        """Comportamento IDENTICO a prima di F3.4.3: un `policy_engine` collegato ma nessun
+        `risk_intent` dato non deve MAI bloccare nulla - l'opt-in e' sul CHIAMANTE che dichiara il
+        rischio, non sulla sola presenza di un motore."""
+        from core.policy_engine import PolicyEngine
+
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("core.computer_use.executor.ActionExecutor") as MockExecutor, \
+             mock.patch("core.vision.screen.capture_screenshot_image", side_effect=Exception("nessuno screenshot")), \
+             mock.patch("pyautogui.click"):
+            self._mocked_adapter_and_engine(MockAdapter, MockEngine)
+            engine = PolicyEngine(blocked_intents={"DELETE_PATH"})
+            agent = ComputerAgent(policy_engine=engine)
+            result = agent.click_element(window_title="Jake Computer Use Fixture", name="Aggiungi")
+
+        self.assertTrue(result.success)
+        MockExecutor.return_value.invoke.assert_called_once()
+
+    def test_a_risk_intent_without_a_policy_engine_attached_is_never_checked(self):
+        """`risk_intent` da solo, senza `policy_engine` collegato, non deve bloccare nulla - un
+        `ComputerAgent()` senza motore non puo' verificare, non deve fallire per un pre-requisito
+        mancante (comportamento IDENTICO a prima di F3.4.3 per ogni chiamante che non collega un
+        motore, es. `skills/screen_click.py`)."""
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("core.computer_use.executor.ActionExecutor") as MockExecutor, \
+             mock.patch("core.vision.screen.capture_screenshot_image", side_effect=Exception("nessuno screenshot")), \
+             mock.patch("pyautogui.click"):
+            self._mocked_adapter_and_engine(MockAdapter, MockEngine)
+            agent = ComputerAgent()
+            result = agent.click_element(window_title="Jake Computer Use Fixture", name="Aggiungi", risk_intent="DELETE_PATH")
+
+        self.assertTrue(result.success)
+        MockExecutor.return_value.invoke.assert_called_once()
+
+    def test_a_blocked_intent_is_refused_without_ever_touching_the_mouse(self):
+        from core.policy_engine import PolicyEngine
+
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("core.computer_use.executor.ActionExecutor") as MockExecutor, \
+             mock.patch("pyautogui.click") as click:
+            self._mocked_adapter_and_engine(MockAdapter, MockEngine)
+            engine = PolicyEngine(blocked_intents={"DELETE_PATH"})
+            agent = ComputerAgent(policy_engine=engine)
+            result = agent.click_element(window_title="Jake Computer Use Fixture", name="Elimina", risk_intent="DELETE_PATH")
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "POLICY_BLOCKED")
+        click.assert_not_called()
+        MockExecutor.return_value.invoke.assert_not_called()
+        MockAdapter.return_value.find_window_by_title.assert_not_called()
+
+    def test_an_intent_needing_confirmation_is_refused_without_a_confirmed_signal(self):
+        from core.policy_engine import PolicyEngine
+
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("core.computer_use.executor.ActionExecutor") as MockExecutor, \
+             mock.patch("pyautogui.click") as click:
+            self._mocked_adapter_and_engine(MockAdapter, MockEngine)
+            engine = PolicyEngine(always_confirm_intents={"DELETE_PATH"})
+            agent = ComputerAgent(policy_engine=engine)
+            result = agent.click_element(window_title="Jake Computer Use Fixture", name="Elimina", risk_intent="DELETE_PATH")
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "CONFIRMATION_REQUIRED")
+        click.assert_not_called()
+        MockExecutor.return_value.invoke.assert_not_called()
+
+    def test_a_confirmed_signal_allows_the_same_intent_to_proceed(self):
+        """La busta di conferma - `policy_parameters={"confirmed": True}` - e' la STESSA che
+        `JakeCore` gia' costruisce per ogni altro intent, non un formato nuovo per questo modulo."""
+        from core.policy_engine import PolicyEngine
+
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("core.computer_use.executor.ActionExecutor") as MockExecutor, \
+             mock.patch("core.vision.screen.capture_screenshot_image", side_effect=Exception("nessuno screenshot")), \
+             mock.patch("pyautogui.click"):
+            self._mocked_adapter_and_engine(MockAdapter, MockEngine)
+            engine = PolicyEngine(always_confirm_intents={"DELETE_PATH"})
+            agent = ComputerAgent(policy_engine=engine)
+            result = agent.click_element(
+                window_title="Jake Computer Use Fixture", name="Elimina", risk_intent="DELETE_PATH",
+                policy_parameters={"confirmed": True},
+            )
+
+        self.assertTrue(result.success)
+        MockExecutor.return_value.invoke.assert_called_once()
+
+    def test_automated_strips_a_forged_confirmed_signal_instead_of_trusting_it(self):
+        """Il bug reale numero 1 gia' documentato nel modulo docstring di core/policy_engine.py
+        ("un piano automatico poteva auto-autorizzarsi"): `automated=True` deve IGNORARE un
+        `confirmed=True` - nessun utente reale e' li' a concederlo in un contesto automatico -
+        restando bloccato su CONFIRMATION_REQUIRED invece di procedere."""
+        from core.policy_engine import PolicyEngine
+
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("core.computer_use.executor.ActionExecutor") as MockExecutor, \
+             mock.patch("pyautogui.click") as click:
+            self._mocked_adapter_and_engine(MockAdapter, MockEngine)
+            engine = PolicyEngine(always_confirm_intents={"DELETE_PATH"})
+            agent = ComputerAgent(policy_engine=engine)
+            result = agent.click_element(
+                window_title="Jake Computer Use Fixture", name="Elimina", risk_intent="DELETE_PATH",
+                policy_parameters={"confirmed": True}, automated=True,
+            )
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "CONFIRMATION_REQUIRED")
+        click.assert_not_called()
+        MockExecutor.return_value.invoke.assert_not_called()
+
+    def test_type_into_element_checks_policy_before_writing_anything(self):
+        from core.policy_engine import PolicyEngine
+
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("core.computer_use.executor.ActionExecutor") as MockExecutor, \
+             mock.patch("pyautogui.write") as write:
+            self._mocked_adapter_and_engine(MockAdapter, MockEngine)
+            engine = PolicyEngine(blocked_intents={"SEND_EMAIL"})
+            agent = ComputerAgent(policy_engine=engine)
+            result = agent.type_into_element(
+                "un messaggio", window_title="Jake Computer Use Fixture", name="Campo", risk_intent="SEND_EMAIL",
+            )
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "POLICY_BLOCKED")
+        write.assert_not_called()
+        MockExecutor.return_value.set_value.assert_not_called()
+
+    def test_an_idempotency_cache_hit_never_rechecks_policy(self):
+        """Un'azione GIA' avvenuta con successo (in cache, F3.4.6) era gia' stata autorizzata a
+        suo tempo - ricontrollare la policy per un'azione che non sta per accadere davvero non
+        avrebbe senso. Verificato con uno spy sul motore: `decide_interactive` deve essere
+        chiamato SOLO alla prima esecuzione, mai alla seconda (cache HIT)."""
+        from core.policy_engine import PolicyEngine
+
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("core.computer_use.executor.ActionExecutor") as MockExecutor, \
+             mock.patch("core.vision.screen.capture_screenshot_image", side_effect=Exception("nessuno screenshot")), \
+             mock.patch("pyautogui.click"):
+            self._mocked_adapter_and_engine(MockAdapter, MockEngine)
+            engine = PolicyEngine(always_confirm_intents={"DELETE_PATH"})
+            decide_spy = mock.Mock(wraps=engine.decide_interactive)
+            engine.decide_interactive = decide_spy
+            agent = ComputerAgent(policy_engine=engine)
+            agent.click_element(
+                window_title="Jake Computer Use Fixture", name="Elimina", risk_intent="DELETE_PATH",
+                policy_parameters={"confirmed": True}, idempotency_key="passo-elimina",
+            )
+            agent.click_element(
+                window_title="Jake Computer Use Fixture", name="Elimina", risk_intent="DELETE_PATH",
+                policy_parameters={"confirmed": True}, idempotency_key="passo-elimina",
+            )
+
+        self.assertEqual(decide_spy.call_count, 1, "la seconda chiamata deve venire dalla cache, mai ricontrollare la policy")
+        MockExecutor.return_value.invoke.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
