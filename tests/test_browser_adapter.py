@@ -140,6 +140,25 @@ class RealBrowserFixtureTests(unittest.TestCase):
 
         self.assertNotEqual(value_pattern.CurrentValue, "segreto123", "il valore vero non deve mai essere leggibile via UI Automation")
 
+    def test_clicking_a_real_link_navigates_to_a_second_local_page(self):
+        """F3.6.3 (prima fetta - "supportare navigazione"): nessun codice nuovo necessario - la
+        composizione gia' esistente di `click_element` (F3.4.2/F3.6, Invoke su un `Hyperlink`) +
+        `read_address_bar_text` (F3.6.5) + `find_page_document` (F3.6.1) basta gia' a dimostrare
+        una navigazione VERA (non un'ancora "#" sulla stessa pagina - il link della fixture punta
+        a `browser_fixture_page2.html`, una seconda pagina locale reale)."""
+        document = find_page_document(self.adapter, self.window)
+        agent = ComputerAgent()
+
+        click_result = agent.click_element(root=document, name="Un link di prova", control_type="Hyperlink")
+        self.assertTrue(click_result.success)
+
+        address_after = read_address_bar_text(self.adapter, self.window)
+        self.assertIn("browser_fixture_page2.html", address_after)
+
+        new_document = find_page_document(self.adapter, self.window)
+        info = self.adapter.describe_element(new_document)
+        self.assertEqual(info.name, "Jake Browser Fixture - Pagina 2", "la pagina caricata deve essere davvero la seconda, non la stessa")
+
 
 if __name__ == "__main__":
     unittest.main()

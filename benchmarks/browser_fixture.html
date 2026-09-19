@@ -15,6 +15,10 @@ Il campo password (F3.6.7, "redigere password e campi sensibili") ha un VALORE r
 Automation (`CurrentValue` restituisce caratteri sostitutivi, non il testo vero, verificato non
 assunto - vedi core/computer_use/browser_adapter.py::is_password_field), non un valore vuoto che
 non proverebbe nulla.
+
+Il link (F3.6.3, "supportare navigazione") punta a `browser_fixture_page2.html` - una seconda
+pagina locale reale, non un'ancora "#" sulla stessa pagina, cosi' un test puo' verificare una
+navigazione VERA (cambio di URL/pagina), non solo che il click non abbia sollevato.
 -->
 <html lang="it">
 <head>
@@ -26,7 +30,7 @@ non proverebbe nulla.
 <input type="text" id="fixture-input" aria-label="Campo di testo">
 <button id="fixture-add-button" onclick="document.getElementById('fixture-output').textContent = document.getElementById('fixture-input').value;">Aggiungi</button>
 <p id="fixture-output"></p>
-<a href="#" id="fixture-link">Un link di prova</a>
+<a href="browser_fixture_page2.html" id="fixture-link">Un link di prova</a>
 <input type="password" id="fixture-password" aria-label="Password" value="segreto123">
 </body>
 </html>

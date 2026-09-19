@@ -53,12 +53,23 @@ percorso diverso (OCR sullo schermo, F3.5.1 - i puntini mascherati SONO comunque
 solo non il valore vero) o il clipboard (se l'utente copia da un campo password) espongano il
 valore vero - entrambi fuori dallo scope di questo modulo, dichiarati non affrontati.
 
+**Quinta osservazione - F3.6.3, "supportare navigazione" (prima fetta, nessun codice nuovo
+necessario)**: la composizione GIA' esistente di `click_element` (F3.4.2, Invoke su un
+`Hyperlink`) + `read_address_bar_text` (F3.6.5) + `find_page_document` (F3.6.1) basta gia' a
+completare e verificare una navigazione VERA (non ipotizzata - vedi
+`tests/test_browser_adapter.py::test_clicking_a_real_link_navigates_to_a_second_local_page`, che
+clicca un link verso una seconda pagina locale reale, non un'ancora "#" sulla stessa pagina, e
+verifica sia il cambio di URL sia il nuovo `Document` caricato). Form/tab/download/upload
+restano invece NON affrontati (vedi sotto) - la navigazione tramite un link e' il caso piu'
+semplice tra quelli dichiarati da F3.6.3, non l'intero sotto-punto.
+
 Deliberatamente NON affrontati qui, passi successivi dichiarati (stesso principio "un incremento
 alla volta" di questa sessione):
 - F3.6.2 (resto): un vocabolario/euristica per "istruzioni dell'utente" dentro la pagina (oggi
   distingue solo chrome del browser da contenuto pagina, non contenuto pagina genuino da testo
   che TENTA di sembrare un'istruzione per l'agente);
-- F3.6.3 (form/tab/download/upload con policy specifica - oggi solo lettura, nessuna azione);
+- F3.6.3 (resto - form/tab/download/upload con policy specifica, e navigazione diretta per URL
+  invece che tramite un link esistente sulla pagina);
 - F3.6.4 (collegamento a `core/taint.py::EXTERNAL_CONTENT_INTENTS` - nessun intent/skill ancora
   legge testo di pagina, quindi non c'e' ancora un punto di produzione a cui collegarsi, lo stesso
   principio gia' seguito da F1.5.1 per introdurre un pezzo alla volta);
