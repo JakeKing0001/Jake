@@ -160,11 +160,38 @@ class UIAutomationAdapter:
         condition = self._uia.CreatePropertyCondition(UIA.UIA_ProcessIdPropertyId, process_id)
         return self._find_top_level_window(condition, f"del processo {process_id}", timeout_seconds)
 
+    def _retry_transient_com_error(self, call):
+        """Buco reale trovato in CI, non ipotizzato - TRE corse separate (non consecutive, in
+        incrementi diversi di questa sessione) hanno sollevato lo STESSO identico
+        `_ctypes.COMError: (-2146233083, ...)` (E_UNEXPECTED, un errore COM generico non
+        specifico di UI Automation) nello STESSO identico punto (`root.FindAll`/`root.FindFirst`
+        sui figli del desktop), sempre scomparso al solo rilancio del job senza alcuna modifica al
+        codice - mai una vera regressione, sempre lo stesso pattern "il subsystem UI Automation era
+        momentaneamente occupato sotto carico". I chiamanti di questo helper (`_find_top_level_
+        window`/`find_window_by_title_containing`/`snapshot_top_level_window_handles`) NON
+        catturavano affatto `comtypes.COMError` sulla chiamata `Find*` stessa (solo sui singoli
+        elementi CANDIDATI dopo, un `try`/`except` diverso e gia' esistente) - un errore transitorio
+        qui interrompeva l'intero polling con un'eccezione non gestita invece di essere assorbito
+        come "riprova", lo stesso trattamento che il codice gia' riserva a "nessuna finestra ancora
+        trovata". Un breve retry INTERNO (3 tentativi, ~50ms tra uno e l'altro - non il timeout
+        dichiarato dal chiamante, che resta invariato: questo assorbe un blip, non sostituisce il
+        polling esterno) - un errore che persiste oltre i 3 tentativi si propaga comunque, mai
+        nascosto per sempre."""
+        last_error = None
+        for _ in range(3):
+            try:
+                return call()
+            except comtypes.COMError as exc:
+                last_error = exc
+                time.sleep(0.05)
+        raise last_error
+
     def _find_top_level_window(self, condition, description: str, timeout_seconds: float):
         deadline = time.monotonic() + timeout_seconds
         while True:
-            root = self._uia.GetRootElement()
-            window = root.FindFirst(UIA.TreeScope_Children, condition)
+            window = self._retry_transient_com_error(
+                lambda: self._uia.GetRootElement().FindFirst(UIA.TreeScope_Children, condition)
+            )
             if window:
                 return window
             if time.monotonic() >= deadline:
@@ -191,8 +218,9 @@ class UIAutomationAdapter:
         deadline = time.monotonic() + timeout_seconds
         true_condition = self._uia.CreateTrueCondition()
         while True:
-            root = self._uia.GetRootElement()
-            candidates = root.FindAll(UIA.TreeScope_Children, true_condition)
+            candidates = self._retry_transient_com_error(
+                lambda: self._uia.GetRootElement().FindAll(UIA.TreeScope_Children, true_condition)
+            )
             matches = []
             for i in range(candidates.Length):
                 candidate = candidates.GetElement(i)
@@ -224,9 +252,10 @@ class UIAutomationAdapter:
         un'azione che potrebbe far comparire un dialogo modale imprevisto (il cui titolo non e'
         noto in anticipo), poi la passa a `wait_for_new_top_level_window` invece di un
         `time.sleep(N)` fisso seguito da un tentativo alla cieca."""
-        root = self._uia.GetRootElement()
         true_condition = self._uia.CreateTrueCondition()
-        candidates = root.FindAll(UIA.TreeScope_Children, true_condition)
+        candidates = self._retry_transient_com_error(
+            lambda: self._uia.GetRootElement().FindAll(UIA.TreeScope_Children, true_condition)
+        )
         handles: set[int] = set()
         for i in range(candidates.Length):
             candidate = candidates.GetElement(i)
@@ -260,8 +289,9 @@ class UIAutomationAdapter:
             if len(new_handles) == 1:
                 target_handle = next(iter(new_handles))
                 condition = self._uia.CreatePropertyCondition(UIA.UIA_NativeWindowHandlePropertyId, target_handle)
-                root = self._uia.GetRootElement()
-                window = root.FindFirst(UIA.TreeScope_Children, condition)
+                window = self._retry_transient_com_error(
+                    lambda condition=condition: self._uia.GetRootElement().FindFirst(UIA.TreeScope_Children, condition)
+                )
                 if window:
                     return window
             if time.monotonic() >= deadline:

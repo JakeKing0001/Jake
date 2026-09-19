@@ -14,6 +14,9 @@ import sys
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
+
+import comtypes
 
 from core.computer_use.ui_automation_adapter import (
     AmbiguousWindowError,
@@ -261,6 +264,55 @@ class WaitForNewTopLevelWindowTests(unittest.TestCase):
                     process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     process.kill()
+
+
+class RetryTransientComErrorTests(unittest.TestCase):
+    """`_retry_transient_com_error` (adozione, motivata da un buco reale trovato in CI - vedi il
+    suo docstring): a differenza del resto di questo file (dove mockare comtypes/IUIAutomation
+    testerebbe solo il mock, non Windows - vedi il docstring del modulo), questo metodo e' pura
+    logica di controllo Python (quante volte riprovare, quando arrendersi) - legittimamente
+    testabile con una funzione `call` finta, senza mockare alcuna interfaccia COM reale."""
+
+    def test_succeeds_immediately_without_retrying_when_the_first_call_works(self):
+        adapter = UIAutomationAdapter()
+        call = mock.Mock(return_value="ok")
+
+        result = adapter._retry_transient_com_error(call)
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(call.call_count, 1)
+
+    def test_retries_and_recovers_from_a_transient_com_error(self):
+        adapter = UIAutomationAdapter()
+        transient_error = comtypes.COMError(-2146233083, None, (None, None, None, 0, None))
+        call = mock.Mock(side_effect=[transient_error, transient_error, "ok"])
+
+        result = adapter._retry_transient_com_error(call)
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(call.call_count, 3)
+
+    def test_gives_up_after_three_attempts_and_reraises_the_last_error(self):
+        adapter = UIAutomationAdapter()
+        transient_error = comtypes.COMError(-2146233083, None, (None, None, None, 0, None))
+        call = mock.Mock(side_effect=[transient_error, transient_error, transient_error])
+
+        with self.assertRaises(comtypes.COMError):
+            adapter._retry_transient_com_error(call)
+
+        self.assertEqual(call.call_count, 3, "non deve mai riprovare piu' di 3 volte")
+
+    def test_a_non_com_error_propagates_immediately_without_retrying(self):
+        """Solo `comtypes.COMError` e' considerato un transitorio da assorbire - un errore
+        Python qualunque (es. un bug reale nel codice chiamante) deve propagare SUBITO, non essere
+        nascosto dietro 3 tentativi silenziosi."""
+        adapter = UIAutomationAdapter()
+        call = mock.Mock(side_effect=ValueError("questo non e' un COMError"))
+
+        with self.assertRaises(ValueError):
+            adapter._retry_transient_com_error(call)
+
+        self.assertEqual(call.call_count, 1)
 
 
 class _RealFixtureTestCase(unittest.TestCase):

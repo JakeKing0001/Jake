@@ -6267,6 +6267,46 @@ Criterio di uscita: una procedura dimostrata sopravvive a riavvio, resize e dati
   WINDOW_NOT_FOUND, sopravvive a un resize reale; difesa esplicita di `replay_step` per
   un'azione sconosciuta che ha aggirato la validazione). 3.071/3.071 test, ruff verde.
 
+- `F3.2` (resilienza - retry su un errore COM transitorio, trovato dopo TRE occorrenze identiche
+  in CI, non ipotizzato dopo la prima) — 19/09/2026: il commit precedente (F3.8.1) e' stato
+  contrassegnato fallito in CI dallo STESSO identico `_ctypes.COMError: (-2146233083, ...)`
+  (E_UNEXPECTED) gia' visto due volte in incrementi precedenti di questa sessione (terminale,
+  19/09/2026 mattina) - sempre nello STESSO punto (`root.FindAll`/`root.FindFirst` sui figli del
+  desktop, dentro `find_window_by_title_containing`/`_find_top_level_window`/
+  `snapshot_top_level_window_handles`), sempre scomparso al solo rilancio del job. Dopo la TERZA
+  occorrenza dello stesso identico pattern, rilanciare di nuovo senza fare nulla avrebbe
+  significato ignorare un segnale ormai chiaro - nuovo `UIAutomationAdapter.
+  _retry_transient_com_error()`, un breve retry INTERNO (3 tentativi, ~50ms tra uno e l'altro) sui
+  tre punti che chiamano `Find*` sui figli del desktop, MAI catturato prima (i chiamanti gia'
+  catturavano `comtypes.COMError` sui singoli elementi CANDIDATI dopo la ricerca, ma non sulla
+  chiamata `Find*` stessa - un errore transitorio li' interrompeva l'intero polling con
+  un'eccezione non gestita invece di essere assorbito come "riprova", lo stesso trattamento che il
+  codice gia' riserva a "nessuna finestra ancora trovata").
+
+  Il timeout dichiarato dal chiamante resta INVARIATO (il retry assorbe un blip di ~150ms al
+  massimo, non sostituisce il polling esterno gia' esistente) - un errore che persiste oltre i 3
+  tentativi si propaga comunque, mai nascosto per sempre. Verificato con un mock della sola
+  funzione `call` (non di comtypes/IUIAutomation - questo metodo e' pura logica di controllo
+  Python, legittimamente testabile senza una sessione UI Automation reale, a differenza del resto
+  del file): recupera da un errore transitorio dopo 2-3 tentativi, si arrende dopo 3 e rilancia
+  l'ultimo errore, un errore Python NON-COM (un vero bug del chiamante) propaga SUBITO senza
+  ritentare. Prova: 4 test nuovi in
+  `tests/test_ui_automation_adapter.py::RetryTransientComErrorTests`. 3.075/3.075 test, ruff verde.
+
+  **Correzione successiva (stesso 19/09/2026, trovata rieseguendo la suite COMPLETA) - un secondo
+  buco reale nel TEST di VS Code, stessa CONSEGUENZA gia' vista per il terminale ma una causa
+  DIVERSA**: la rete di sicurezza "nessun PID Code.exe pre-esistente deve sparire"
+  (`tests/test_vscode_adapter.py`) ha fatto fallire il test - non perche' `close_vscode_window()`
+  avesse toccato la finestra sbagliata (la sessione VS Code reale e' rimasta intatta, verificato:
+  il test passa pulito in isolamento), ma perche' VS Code (un'app Electron multi-processo) fa
+  nascere/terminare DA SOLO processi `Code.exe` AUSILIARI (utility process, GPU process,
+  extension host) come normale funzionamento interno, anche quando la sessione principale resta
+  aperta e stabile - a differenza di `explorer.exe` (un solo processo stabile per il guscio), il
+  NUMERO di processi `Code.exe` di una sessione gia' aperta puo' variare da solo nel tempo.
+  Rimossa la stessa singola asserzione globale gia' rimossa per `conhost.exe`, mantenuta la
+  verifica per IDENTITA' di PID (la finestra aperta da Jake non e' mai uno dei PID gia'
+  esistenti). 3.075/3.075 test invariato, ruff verde.
+
 ### Gate F3
 
 - ≥ 90% su 100 task fixture;
