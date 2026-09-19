@@ -74,6 +74,65 @@ class ElementSelectorSerializationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ElementSelector.from_dict({"nome": "Aggiungi"})  # typo reale: "nome" non "name"
 
+    def test_a_round_trip_preserves_window_title_contains_too(self):
+        """F3.3.1 (resto): un selettore auto-sufficiente (con il criterio della finestra, non solo
+        dell'elemento) deve sopravvivere al round-trip tanto quanto uno senza."""
+        original = ElementSelector(name="Aggiungi", control_type="Button", window_title_contains="Computer Use Fixture")
+        restored = ElementSelector.from_dict(original.to_dict())
+        self.assertEqual(original, restored)
+        self.assertEqual(restored.window_title_contains, "Computer Use Fixture")
+
+
+class LocateTests(_RealFixtureTestCase):
+    """F3.3.1 (resto - "selettori per... window"): `SelectorEngine.locate()` trova la finestra E
+    l'elemento da UN SOLO `ElementSelector` auto-sufficiente, senza che il chiamante debba prima
+    risolvere/passare un `root` - il caso motivante e' un selettore RICARICATO da
+    `ElementSelector.from_dict` (F3.3.4) in una sessione futura, senza alcuna finestra gia' trovata
+    a portata di mano."""
+
+    def setUp(self):
+        self.engine = SelectorEngine(self.adapter)
+
+    def test_locate_finds_the_window_and_the_element_from_a_single_self_sufficient_selector(self):
+        selector = ElementSelector(name="Aggiungi", control_type="Button", window_title_contains="Computer Use Fixture")
+
+        element = self.engine.locate(selector, timeout_seconds=5.0)
+
+        self.assertEqual(element.CurrentName, "Aggiungi")
+
+    def test_locate_round_tripped_through_dict_still_works(self):
+        """Il caso reale motivante: un selettore salvato su disco (`to_dict`) e poi ricaricato
+        (`from_dict`) in un momento diverso - senza mai passare da un `ElementSelector` costruito
+        a mano in questo stesso test."""
+        saved = ElementSelector(
+            name="Aggiungi", control_type="Button", window_title_contains="Computer Use Fixture",
+        ).to_dict()
+
+        reloaded = ElementSelector.from_dict(saved)
+        element = self.engine.locate(reloaded, timeout_seconds=5.0)
+
+        self.assertEqual(element.CurrentName, "Aggiungi")
+
+    def test_locate_without_a_window_criterion_raises_a_clear_value_error(self):
+        selector = ElementSelector(name="Aggiungi", control_type="Button")
+
+        with self.assertRaises(ValueError):
+            self.engine.locate(selector, timeout_seconds=1.0)
+
+    def test_locate_with_a_window_that_does_not_exist_raises_window_not_found(self):
+        from core.computer_use.ui_automation_adapter import WindowNotFoundError
+
+        selector = ElementSelector(name="Aggiungi", window_title_contains="Finestra che non esiste XYZ123")
+
+        with self.assertRaises(WindowNotFoundError):
+            self.engine.locate(selector, timeout_seconds=1.0)
+
+    def test_locate_with_an_element_that_does_not_exist_in_the_real_window_raises_no_match(self):
+        selector = ElementSelector(name="Questo elemento non esiste XYZ", window_title_contains="Computer Use Fixture")
+
+        with self.assertRaises(NoMatchError):
+            self.engine.locate(selector, timeout_seconds=1.0)
+
 
 class FindUniqueAgainstTheRealFixtureTests(_RealFixtureTestCase):
     def setUp(self):
