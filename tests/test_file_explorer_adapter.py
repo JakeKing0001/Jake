@@ -66,12 +66,22 @@ class RealFileExplorerTests(unittest.TestCase):
         self.assertFalse(psutil.pid_exists(window_pid), "il processo della finestra deve essere davvero terminato - close_explorer_window attende gia' la conferma")
 
     def test_list_files_reads_the_real_folder_contents_not_the_whole_window(self):
+        """Buco reale trovato in CI, non ipotizzato: Esplora File puo' NASCONDERE le estensioni
+        note (es. ".txt") a seconda di un'impostazione di sistema ("Nascondi le estensioni per i
+        tipi di file conosciuti") - VERO di default su un'installazione Windows pulita
+        (verificato: il runner CI mostra "documento1", non "documento1.txt"), FALSO su questa
+        macchina di sviluppo (dove le estensioni sono visibili) - entrambi i comportamenti
+        osservati per davvero, non un'assunzione su quale sia "normale". Il confronto verifica
+        quindi solo il NOME BASE, indipendente da questa impostazione dell'utente/dell'ambiente -
+        `list_files()` stessa resta invariata, legge onestamente cio' che Esplora File mostra
+        DAVVERO, non cio' che ci si aspetterebbe."""
         open_explorer_window(self.folder)
         window = find_explorer_window(self.adapter, self.folder.name, timeout_seconds=10.0)
 
         files = list_files(self.adapter, window)
 
-        self.assertEqual(sorted(files), ["documento1.txt", "documento2.txt"])
+        base_names = {Path(f).stem for f in files}
+        self.assertEqual(base_names, {"documento1", "documento2"})
 
 
 if __name__ == "__main__":
