@@ -21,10 +21,12 @@ alla volta" di questa sessione):
   window_title_contains` + `SelectorEngine.locate()` - vedi le loro docstring. Restano aperti
   "app/process" (nessun criterio per PID/nome eseguibile ancora) e "ancestor" (nessun modo di
   richiedere un antenato specifico oltre a scegliere manualmente il `root` giusto);
-- F3.3.2 (prima fetta - CHIUSA in un incremento successivo, 19/09/2026): il caso NoMatchError
-  spiega ora QUALE criterio sta escludendo tutto (`SelectorEngine._explain_no_match`) - resta
-  aperto il caso gemello (un vero punteggio tra PIU' candidati quando la ricerca trova qualcosa
-  ma e' ambigua, non quando non trova nulla);
+- F3.3.2 (CHIUSA in un incremento successivo, 19/09/2026): il caso NoMatchError spiega QUALE
+  criterio sta escludendo tutto (`_explain_no_match`), il caso gemello AmbiguousSelectionError
+  elenca invece OGNI candidato trovato (`_describe_ambiguous_matches`, automation_id/bounds) -
+  entrambi diagnostici, nessuno dei due cambia QUALI elementi vengono considerati un match (resta
+  un'uguaglianza esatta per criterio, mai un vero punteggio/ranking fuzzy tra candidati diversi -
+  quello resterebbe un cambiamento di comportamento, non solo diagnostico, non affrontato qui);
 - F3.3.4 (resto - CHIUSO in un incremento successivo, 19/09/2026): `ElementSelector.to_dict()`/
   `.from_dict()` - vedi le loro docstring;
 - F3.3.5 (invalidare selettori quando la struttura/versione dell'app cambia - non c'e' ancora
@@ -141,6 +143,25 @@ class SelectorEngine:
             parts.append(f"{count} con automation_id={selector.automation_id!r}")
         return "trovati singolarmente: " + "; ".join(parts)
 
+    def _describe_ambiguous_matches(self, matches) -> str:
+        """F3.3.2 (resto - "spiegare perche' un elemento e' stato scelto tra piu' candidati", qui
+        il caso gemello di `_explain_no_match`: non "perche' nessuno", ma "quali sono i troppi").
+        Una breve descrizione di OGNI candidato (`automation_id`/`bounds`, i due segnali piu'
+        utili per capire come restringere ulteriormente il selettore) invece del solo conteggio -
+        accetta sia `ElementInfo` gia' descritti (da `find_all`, usato da `find_unique`) sia
+        elementi COM GREZZI (`wait_for_unique_element`/`find_unique_element`, che non passano da
+        `find_all`), descrivendo questi ultimi al volo con lo stesso `describe_element` gia' usato
+        ovunque nel modulo - nessuna duplicazione della logica "onesto None su un provider
+        incompleto" gia' costruita li'."""
+        descriptions = []
+        for match in matches:
+            info = match if isinstance(match, ElementInfo) else self._adapter.describe_element(match)
+            if info is None:
+                descriptions.append("<non leggibile>")
+            else:
+                descriptions.append(f"automation_id={info.automation_id!r} bounds={info.bounds}")
+        return "; ".join(descriptions)
+
     def find_all(self, root, selector: ElementSelector) -> list[ElementInfo]:
         """Tutti gli elementi tra i discendenti di `root` che soddisfano il selettore, gia'
         descritti (`ElementInfo`, F3.2.3) - un elemento trovato ma non leggibile (lo stesso
@@ -162,7 +183,8 @@ class SelectorEngine:
             raise NoMatchError(f"nessun elemento corrisponde a {selector!r} ({self._explain_no_match(root, selector)})")
         if len(matches) > 1:
             raise AmbiguousSelectionError(
-                f"{len(matches)} elementi corrispondono a {selector!r}: servono criteri piu' precisi"
+                f"{len(matches)} elementi corrispondono a {selector!r}: servono criteri piu' precisi "
+                f"({self._describe_ambiguous_matches(matches)})"
             )
         return matches[0]
 
@@ -180,7 +202,8 @@ class SelectorEngine:
             )
             if len(matches) > 1:
                 raise AmbiguousSelectionError(
-                    f"{len(matches)} elementi corrispondono a {selector!r}: servono criteri piu' precisi"
+                    f"{len(matches)} elementi corrispondono a {selector!r}: servono criteri piu' precisi "
+                    f"({self._describe_ambiguous_matches(matches)})"
                 )
             if len(matches) == 1:
                 return matches[0]
@@ -210,7 +233,8 @@ class SelectorEngine:
             raise NoMatchError(f"nessun elemento corrisponde a {selector!r} ({self._explain_no_match(root, selector)})")
         if len(matches) > 1:
             raise AmbiguousSelectionError(
-                f"{len(matches)} elementi corrispondono a {selector!r}: servono criteri piu' precisi"
+                f"{len(matches)} elementi corrispondono a {selector!r}: servono criteri piu' precisi "
+                f"({self._describe_ambiguous_matches(matches)})"
             )
         return matches[0]
 
