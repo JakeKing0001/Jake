@@ -5747,6 +5747,52 @@ Criterio di uscita: cinque workflow reali completati in tre esecuzioni consecuti
   confrontando solo il NOME BASE (`Path(f).stem`), indipendente da questa impostazione. 3.025/3.025
   test in locale (dove le estensioni sono visibili, il test resta comunque corretto), ruff verde.
 
+- `F3.7.1` (VS Code, quarta app dell'ordine dichiarato - "Impostazioni" e "browser" gia'
+  affrontati/gia' fatti, vedi sotto) — 19/09/2026: nuovo `core/computer_use/vscode_adapter.py`,
+  stesso principio "riusa l'infrastruttura gia' costruita" di Esplora File/browser. VS Code e'
+  anch'esso un'app Electron/Chromium (come Edge) - non a caso condivide con esso lo stesso genere
+  di comportamenti gia' trovati li'.
+
+  **"Impostazioni" (l'app dichiarata SUBITO dopo Esplora File) DELIBERATAMENTE SALTATA - un
+  rischio verificato, non ipotizzato**: a differenza di Esplora File, l'app Impostazioni di
+  Windows e' un'app UWP SINGLE-INSTANCE per utente - verificato che l'utente ha GIA' una finestra
+  Impostazioni aperta (un processo `SystemSettings.exe` gia' in esecuzione PRIMA di questo
+  incremento) - non esiste un modo verificato per aprirne una copia ISOLATA come per Edge/VS Code:
+  automatizzarla ora rischierebbe di interagire con la finestra REALE gia' aperta dall'utente.
+  Rimandato a un incremento futuro che verifichi prima un modo sicuro di isolarla.
+
+  **Isolamento VERIFICATO nel modo piu' concreto possibile PRIMA di scrivere qualunque test**: VS
+  Code accetta `--user-data-dir`/`--extensions-dir` propri esattamente come `--inprivate` isola
+  Edge - verificato lanciando una finestra isolata MENTRE QUESTA STESSA sessione Claude Code
+  girava dentro un'altra finestra VS Code ("Roadmap - Jake - Visual Studio Code", il rischio piu'
+  concreto possibile per questo incremento): il PID della finestra isolata e' risultato SEPARATO,
+  terminarlo ha lasciato la finestra della sessione reale (e tutti gli altri 18 processi Code gia'
+  in esecuzione) del tutto intatti - verificato leggendo il conteggio dei processi prima e dopo,
+  non assunto.
+
+  **Buco reale trovato aprendo un file specifico invece di una cartella**: il titolo della
+  finestra NON contiene il nome della cartella se si apre un singolo FILE (solo "nomefile.md -
+  Visual Studio Code") - a differenza di Esplora File, dove il nome della cartella e' sempre nel
+  titolo. `find_vscode_window()` cerca quindi per il NOME DEL FILE (deliberatamente distintivo),
+  non per la cartella.
+
+  **Buco reale piu' importante, gia' noto a VS Code stesso - non un limite di questo codice**:
+  l'editor Monaco dichiara esplicitamente, leggibile via UI Automation, "The editor is not
+  accessible at this time. To enable screen reader optimized mode..." - il CONTENUTO del file
+  aperto NON e' esposto come testo via UI Automation per default (un'ottimizzazione deliberata
+  delle prestazioni di VS Code, non un buco del ponte di accessibilita' come per Qt in F3.4).
+  Dichiarato onestamente NON RISOLTO in questo incremento, non nascosto - richiederebbe abilitare
+  `editor.accessibilitySupport` nel profilo isolato, non affrontato qui.
+
+  Deliberatamente NON affrontati qui: lettura del contenuto reale dell'editor (vedi il buco
+  Monaco sopra), gestione del dialogo "Welcome to Visual Studio Code" (richiesta di accesso
+  GitHub Copilot, osservato comparire anche con un profilo isolato), qualunque azione (digitare,
+  salvare, eseguire un comando) - solo apertura/localizzazione/chiusura in questa prima fetta.
+  Prova: 1 test nuovo in `tests/test_vscode_adapter.py::RealVSCodeTests` (contro VS Code vero,
+  con la stessa rete di sicurezza esplicita gia' usata per Esplora File - nessun processo Code.exe
+  pre-esistente, inclusa potenzialmente questa stessa sessione, viene mai toccato). 3.026/3.026
+  test, ruff verde.
+
 ### F3.8 — Learn by demonstration
 
 Dipende da: F3.3, F3.4 e F5 procedural memory.
