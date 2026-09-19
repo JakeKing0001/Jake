@@ -6220,6 +6220,53 @@ Dipende da: F3.3, F3.4 e F5 procedural memory.
 
 Criterio di uscita: una procedura dimostrata sopravvive a riavvio, resize e dati differenti.
 
+- `F3.8.1` (prima fetta - "registrare azioni semantiche, non video o coordinate grezze", PRIMO
+  incremento di F3.8) — 19/09/2026: nuovo `core/computer_use/procedure.py::RecordedStep`/
+  `replay_step`/`replay_steps`. F3.8 dichiara la dipendenza "F3.3, F3.4 e F5 procedural memory" -
+  F5 NON esiste ancora in questo progetto, quindi questo incremento affronta SOLO il pezzo che non
+  ne dipende: la forma REGISTRABILE/SERIALIZZABILE/RIGIOCABILE di un passo, non dove una procedura
+  completa vive a lungo termine (quello resta F3.8.5, per quando F5 esistera').
+
+  `RecordedStep` = un'azione (`click`/`type`) + un `ElementSelector` (F3.3.1-F3.3.4) + un `text`
+  opzionale (solo per `type`) - MAI una coordinata pixel. A differenza di `ElementSelector` usato
+  al volo (dove `window_title_contains` resta opzionale), qui e' OBBLIGATORIO: un passo registrato
+  deve poter essere rigiocato in una sessione futura senza alcuna finestra gia' risolta a portata
+  di mano. `to_dict()`/`from_dict()` riusano `ElementSelector.to_dict()`/`.from_dict()` (F3.3.4)
+  per il campo `selector`, stesso principio "rifiuta una chiave sconosciuta invece di ignorarla".
+
+  **Verificato end-to-end contro la fixture VERA, il percorso reale non solo i pezzi**: un test
+  registra due passi (scrivi un testo, clicca "Aggiungi"), li fa passare DAVVERO per `to_dict()`
+  -> [simulato "su disco"] -> `from_dict()` (non un `RecordedStep` costruito a mano nel test, che
+  non proverebbe il caso reale "salva ora, ricarica dopo"), poi li rigioca con `replay_steps` -
+  l'elemento compare DAVVERO nella lista della fixture. Un secondo test dimostra la sopravvivenza
+  a un resize/move REALE della finestra tra la registrazione e il replay (F3.3.7, adozione diretta
+  - lo stesso identico meccanismo gia' dimostrato per un click singolo, qui per una procedura
+  intera). `replay_steps` si ferma al PRIMO fallimento (spirito minimo di F3.8.6, non una vera
+  rilevazione di drift) - un test dedicato verifica che un secondo passo dopo un fallimento non
+  venga MAI tentato.
+
+  **Buco reale trovato PRIMA di spedirlo, non ipotizzato - riflettendo su come F3.4.6 (la cache di
+  idempotenza appena costruita) interagirebbe con questo nuovo chiamante**: una prima versione di
+  `replay_steps` generava automaticamente un `idempotency_key` per indice di passo
+  (`f"replay-step-{index}"`) - ma la cache di `ComputerAgent` e' PER ISTANZA con una scadenza (30s
+  di default). Se la STESSA istanza `agent` rigiocasse due procedure diverse (o la stessa due
+  volte apposta) entro quella finestra, il passo 0 della seconda esecuzione avrebbe rischiato di
+  ricevere silenziosamente il risultato CACHATO della prima invece di eseguire per davvero -
+  rimosso, nessun `idempotency_key` generato automaticamente; un chiamante che la vuole puo'
+  chiamare `replay_step` direttamente con una chiave che SA essere univoca (es. un id di
+  corsa/procedura che F3.8.5 dovra' comunque generare).
+
+  Deliberatamente NON affrontati qui, passi successivi dichiarati: F3.8.2 (parametri
+  variabili/precondizioni - `text` e' sempre un valore letterale), F3.8.3 (mostrare la procedura
+  all'utente), F3.8.4 (dry-run), F3.8.5 (persistenza a lungo termine/versione/undo), F3.8.6
+  (vera rilevazione di drift, non solo "fermati al primo fallimento"), F3.8.7 (approvazione se
+  capability/impatto cambiano). Prova: 13 test nuovi in `tests/test_procedure.py` (validazione di
+  `RecordedStep` - azione sconosciuta, selettore senza finestra, type senza testo, click con
+  testo, round-trip, chiave sconosciuta in `from_dict`; end-to-end reale - procedura salvata e
+  ricaricata funziona davvero, si ferma al primo fallimento, finestra inesistente riporta
+  WINDOW_NOT_FOUND, sopravvive a un resize reale; difesa esplicita di `replay_step` per
+  un'azione sconosciuta che ha aggirato la validazione). 3.071/3.071 test, ruff verde.
+
 ### Gate F3
 
 - ≥ 90% su 100 task fixture;
