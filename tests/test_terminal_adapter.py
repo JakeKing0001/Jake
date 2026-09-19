@@ -2,9 +2,28 @@
 prima d'ora). Lancia DAVVERO `conhost.exe cmd.exe` (mai `cmd.exe`/`start` da soli - vedi il
 docstring del modulo per il rischio monarch/peasant di Windows Terminal, scoperto empiricamente e
 riprodotto DAVVERO in questo stesso incremento prima di scrivere questo adapter). Ogni test
-registra ESPLICITAMENTE quali PID `conhost.exe` esistono PRIMA di aprire qualunque finestra e
-verifica che nessuno di loro venga mai toccato - una rete di sicurezza nel test stesso, stesso
-schema gia' seguito per Esplora File/VS Code."""
+registra ESPLICITAMENTE quali PID `conhost.exe` esistono PRIMA di aprire qualunque finestra, cosi'
+da poter verificare che la PROPRIA finestra non sia mai per errore uno di quei PID gia' esistenti.
+
+**Buco reale trovato eseguendo la suite completa, non ipotizzato - a differenza di Esplora File/VS
+Code, QUI la rete di sicurezza "nessun PID pre-esistente deve sparire" e' stata rimossa, non
+aggiunta**: `explorer.exe` (il guscio, un solo processo stabile) e `Code.exe` (la sessione VS Code
+dello sviluppatore, anch'essa stabile) sono processi di LUNGA vita per costruzione, quindi
+verificare che nessun PID pre-esistente sparisca durante il test e' un segnale affidabile per
+loro. `conhost.exe` invece si e' rivelato un processo strutturalmente EFFIMERO su questa macchina
+(verificato: circa 10 istanze gia' in esecuzione in un momento qualunque, alcune legate a
+strumenti/terminali indipendenti da questo test, con tempi di avvio anche di giorni prima) - un
+run completo della suite ha fatto fallire il test con "il processo conhost.exe pre-esistente NNN
+non esiste piu'" quando quel PID e' semplicemente uscito da solo per un motivo estraneo a questo
+test (es. un altro strumento ha chiuso la propria shell), non perche' `close_terminal_window()`
+lo avesse mai toccato. Costruire una rete di sicurezza su un segnale che cambia da solo per motivi
+indipendenti dal codice sotto test sarebbe stato lo stesso errore gia' evitato per l'Office
+adapter (vedi ROADMAP_EXECUTION.md, F3.7.1) - qui pero' scoperto DOPO aver gia' scritto il test,
+non prima. La protezione reale resta quella gia' precisa per costruzione in ogni test: il PID
+della PROPRIA finestra non deve mai coincidere con uno gia' esistente al via (`setUp`), e
+(`test_two_windows_...`) chiudere una finestra propria non deve mai toccare l'ALTRA finestra
+propria - entrambe verificate per IDENTITA' di PID, non per un conteggio globale soggetto a
+rumore esterno."""
 import unittest
 import uuid
 
@@ -25,8 +44,9 @@ def _running_conhost_pids() -> set[int]:
 
 class RealTerminalTests(unittest.TestCase):
     def setUp(self):
-        # Rete di sicurezza (vedi il docstring del modulo): questi PID - qualunque finestra di
-        # console gia' aperta dall'utente prima del test - non devono MAI essere toccati.
+        # Snapshot usato SOLO per "la mia finestra non deve mai essere uno di questi PID" (vedi
+        # il docstring del modulo per perche' l'inverso - "nessuno di questi deve sparire" - e'
+        # stato deliberatamente rimosso: un falso positivo reale, non un rischio ipotetico).
         self._pre_existing_pids = _running_conhost_pids()
         self.adapter = UIAutomationAdapter()
         self._titles_to_cleanup: list[str] = []
@@ -38,10 +58,6 @@ class RealTerminalTests(unittest.TestCase):
                 close_terminal_window(self.adapter, title, timeout_seconds=5.0)
             except (WindowNotFoundError, RuntimeError):
                 pass
-        # Verifica finale di sicurezza, anche se un test fallisce a meta'.
-        for pid in self._pre_existing_pids:
-            if not psutil.pid_exists(pid):
-                self.fail(f"il processo conhost.exe pre-esistente {pid} non esiste piu' dopo il test")
 
     def _distinctive_title(self, label: str) -> str:
         title = f"jake_terminal_fixture_{label}_{uuid.uuid4().hex[:8]}"

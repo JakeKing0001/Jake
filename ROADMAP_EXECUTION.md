@@ -5841,9 +5841,24 @@ Criterio di uscita: cinque workflow reali completati in tre esecuzioni consecuti
   (resta NON supportato per il rischio monarch/peasant sopra - un incremento futuro potrebbe
   rivalutarlo se si trova un modo verificato di distinguere un PID sicuro da uno condiviso),
   `conhost.exe` sotto host diversi da `cmd.exe` (es. PowerShell, non verificato). Prova: 3 test
-  nuovi in `tests/test_terminal_adapter.py::RealTerminalTests` (contro conhost.exe vero, con la
-  stessa rete di sicurezza esplicita gia' usata per Esplora File/VS Code - nessun processo
-  conhost.exe pre-esistente viene mai toccato). 3.029/3.029 test, ruff verde in locale.
+  nuovi in `tests/test_terminal_adapter.py::RealTerminalTests` (contro conhost.exe vero). 3.029/
+  3.029 test, ruff verde in locale.
+
+  **Correzione successiva (stesso 19/09/2026, trovata eseguendo la suite COMPLETA non solo questo
+  file da solo) - un buco reale nel TEST, non nel codice di produzione**: la rete di sicurezza
+  "nessun PID `conhost.exe` pre-esistente deve sparire" (lo stesso schema gia' usato per Esplora
+  File/VS Code) ha fatto fallire il test in un run completo con "il processo conhost.exe
+  pre-esistente NNN non esiste piu'" - non perche' `close_terminal_window()` avesse toccato
+  qualcosa di sbagliato, ma perche' `conhost.exe` si e' rivelato un processo strutturalmente
+  EFFIMERO su questa macchina (verificato: circa 10 istanze in esecuzione in un momento qualunque,
+  legate a strumenti/terminali indipendenti da questo test) - a differenza di `explorer.exe`/
+  `Code.exe`, entrambi di lunga vita per costruzione, per cui lo stesso schema e' un segnale
+  affidabile. Rimossa quella singola asserzione globale (documentato onestamente nel docstring del
+  file di test il perche'), mantenute le verifiche gia' precise per IDENTITA' di PID che ogni test
+  aveva comunque (la propria finestra non e' mai un PID gia' esistente; chiudere una finestra
+  propria non tocca MAI l'altra finestra propria nel test a due finestre) - queste ultime restano
+  affidabili perche' non dipendono dal conteggio globale, soggetto a rumore esterno. 3.029/3.029
+  test invariato, ruff verde.
 
   **CI: un fallimento isolato in `test_file_explorer_adapter.py` (non in questo modulo), stessa
   categoria di flake gia' documentata due volte in precedenza in questa sessione**: la prima corsa
@@ -5856,6 +5871,87 @@ Criterio di uscita: cinque workflow reali completati in tre esecuzioni consecuti
   di chiamate UI Automation. Rilanciando SOLO il job fallito (`gh run rerun --failed`, nessuna
   modifica al codice) e' risultato verde pulito - confermando un flake transitorio, non una
   regressione reale, prima di considerare l'incremento concluso.
+
+- `F3.7.1` (Office - indagine, NESSUN codice prodotto, un rischio verificato non aggirabile in
+  questo incremento) — 19/09/2026: prima di scrivere `office_adapter.py`, ripetuto lo stesso test
+  a due finestre gia' usato per il terminale ("apri due finestre, verifica PID diversi, chiudi
+  una, verifica che l'altra sopravviva") contro Word (`WINWORD.EXE`, verificato installato su
+  questa macchina in `C:\Program Files\Microsoft Office\root\Office16\`). **Stesso rischio del
+  terminale, verificato non ipotizzato**: due documenti Word aperti in sequenza (mai aperti prima
+  d'ora da Jake) hanno condiviso lo STESSO `CurrentProcessId` - Word usa un modello a istanza
+  singola per sessione (un solo `WINWORD.EXE` ospita tutte le finestre aperte dopo la prima,
+  verificato: il PID del *launcher* della seconda finestra e' risultato diverso dal PID della
+  finestra REALE, che ha invece riusato quello della prima - lo stesso genere di indirezione gia'
+  visto per Esplora File). Riprodotto l'incidente per davvero: terminare il PID della prima
+  finestra ha chiuso anche la seconda.
+
+  **A differenza del terminale, NESSUN bypass verificato trovato**: non esiste un eseguibile
+  equivalente a `conhost.exe` per Word (nessun flag da riga di comando documentato per forzare
+  un'istanza/processo separato per `WINWORD.EXE`). Un secondo tentativo di mitigazione - contare
+  quante finestre di primo livello condividono lo stesso PID PRIMA di chiuderlo, e rifiutarsi di
+  chiudere se piu' di una (idea annotata come possibile passo successivo nel docstring del
+  terminal adapter) - e' stato provato con un probe dedicato ma **scartato perche' il segnale si
+  e' rivelato inaffidabile**: lo stesso identico scenario (UN solo documento reale aperto, nessuna
+  condivisione vera) ha riportato conteggi DIVERSI in run successive (3 finestre condivise in un
+  run, 1 sola in un altro) - verificato non assunto, quasi certamente per finestre transitorie di
+  avvio di Word (prompt di attivazione, schermata iniziale) presenti in modo incostante al momento
+  esatto del controllo. Costruire una decisione di sicurezza ("e' sicuro chiudere questo PID?") su
+  un segnale che varia per lo stesso identico scenario sarebbe stato costruire su un'assunzione
+  travestita da verifica - esattamente cio' che questa sessione ha sempre evitato.
+
+  **Deferimento onesto, stesso trattamento gia' dato a "Impostazioni"**: Office (Word, e per lo
+  stesso modello architetturale probabilmente anche Excel/PowerPoint - non verificato
+  singolarmente) resta NON supportato da nessun adapter in questo incremento. Rimandato a un
+  incremento futuro che trovi un segnale di condivisione del processo davvero affidabile (es.
+  interrogare l'albero di automazione con un ritardo/retry per escludere finestre transitorie, o
+  un'API Office diversa da UI Automation) prima di costruire qualunque logica di chiusura. Nessun
+  file nuovo, nessun test nuovo - 3.029/3.029 test invariato.
+
+- `F3.4.6` ("evitare doppia esecuzione sui retry") — 19/09/2026: `ComputerAgent.click_element`/
+  `type_into_element` accettano ora un `idempotency_key: str | None = None` opzionale
+  (`core/computer_agent.py`). Se dato e una chiamata RIUSCITA con la stessa chiave e' ancora in
+  cache, la chiamata successiva restituisce SUBITO quel risultato - senza ricercare l'elemento,
+  senza muovere il mouse/tastiera - invece di rieseguire l'azione. Motivato da un caso concreto
+  gia' possibile con l'infrastruttura esistente: l'evidenza di verifica di questa classe e'
+  dichiaratamente DEBOLE (pixel diff sull'intero schermo, F3.5.5) - un'azione puo' riuscire
+  DAVVERO ma essere riportata `verified=False` (gia' riprodotto per `type_into_element` in un
+  incremento precedente), spingendo un chiamante a ritentare un'azione gia' avvenuta (es. l'invio
+  di un modulo) - il caso esatto che F3.4.6 esiste per evitare.
+
+  **Una decisione di policy gia' esplicitamente rimandata altrove nel progetto, qui applicata per
+  la prima volta**: `core/action_ledger.py::idempotency_key_of` (F1.1) calcola gia' una chiave
+  stabile per la stessa famiglia di scopo ma dichiara esplicitamente di NON applicare ancora
+  un'enforcement ("richiederebbe decidere cosa succede quando una chiave combacia... una
+  decisione di policy che merita una revisione dedicata"). Questo incremento e' quella revisione,
+  ma applicata al livello PIU' BASSO e piu' sicuro per farlo con fiducia - un'azione fisica gia'
+  eseguita sullo schermo, non ancora collegata alla chiave dell'intent-level ledger (una
+  decisione di adozione a parte, non affrontata qui).
+
+  **Design verificato con test dedicati, non solo dichiarato**: cache PER ISTANZA di
+  `ComputerAgent` (mai di modulo - una skill crea la propria istanza una volta e la riusa tra le
+  proprie `execute()`, vedi `skills/screen_click.py`; una cache di modulo condivisa rischierebbe
+  di far combaciare chiavi scelte da parti del sistema che non si conoscono tra loro), con
+  scadenza esplicita (30s di default, iniettabile via `ComputerAgent(idempotency_ttl_seconds=...)`
+  - copre un retry immediato dello stesso passo, non una richiesta scorrelata ore dopo) e che
+  memorizza SOLO i risultati riusciti (`success=True`) - un'azione fallita resta normalmente
+  ritentabile, bloccarla dietro la stessa chiave trasformerebbe la protezione in un modo
+  accidentale di impedire per sempre un secondo tentativo legittimo dopo un fallimento
+  transitorio. Il risultato restituito dalla cache e' una copia indipendente
+  (`dataclasses.replace`), mai lo stesso oggetto - un chiamante che lo mutasse non deve poter
+  corrompere la voce per una chiamata futura (verificato con un test dedicato). Nessuna skill
+  esistente e' toccata: il parametro e' opzionale, il default (`None`) lascia il comportamento
+  IDENTICO a prima di questo incremento.
+
+  Deliberatamente NON affrontati qui: collegamento alla chiave dell'intent-level ledger
+  (`idempotency_key_of`, F1.1 - restano due meccanismi paralleli non collegati), applicazione
+  della stessa protezione a `click_point`/`click_text` (che non hanno un concetto di "stesso
+  elemento" su cui ancorare una chiave logica nello stesso modo), persistenza della cache oltre
+  la vita del processo (oggi solo in memoria, coerente con l'ambito dichiarato "un retry dello
+  stesso passo", non un log a lungo termine - quello resta il ledger). Prova: 7 test nuovi in
+  `tests/test_computer_agent.py::IdempotencyKeyTests` (chiave ripetuta non riclicca, nessuna
+  chiave si comporta come prima, un fallimento non viene mai messo in cache, una chiave scaduta
+  torna a rieseguire, chiavi diverse non collidono, stessa protezione per `type_into_element`,
+  la copia restituita e' indipendente dalla cache). 3.036/3.036 test, ruff verde.
 
 ### F3.8 — Learn by demonstration
 

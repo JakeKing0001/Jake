@@ -1,6 +1,7 @@
 """Test unitari per il controller unificato dello schermo (v3.7, core/computer_agent.py):
 osserva/localizza/clicca/verifica come un'unica pipeline. Nessun vero mouse/schermo: pyautogui e
 le funzioni di cattura schermo sono mockate."""
+import time
 import unittest
 from unittest import mock
 
@@ -405,6 +406,148 @@ class TypeIntoElementTests(unittest.TestCase):
             result = ComputerAgent().type_into_element("hunter2_super_secret", window_title="Jake Computer Use Fixture", name="Campo")
 
         self.assertNotIn("hunter2_super_secret", str(result))
+
+
+class IdempotencyKeyTests(unittest.TestCase):
+    """F3.4.6 ("evitare doppia esecuzione sui retry"): `idempotency_key` su click_element/
+    type_into_element - una cache PER ISTANZA (vedi ComputerAgent.__init__) che restituisce il
+    risultato gia' ottenuto invece di rieseguire l'azione quando la stessa chiave e' ancora
+    valida. Stessa infrastruttura mockata di ClickElementTests/TypeIntoElementTests sopra."""
+
+    def _mocked_adapter_and_engine(self, MockAdapter, MockEngine, *, element=mock.sentinel.element):
+        adapter = MockAdapter.return_value
+        adapter.find_window_by_title.return_value = mock.sentinel.window
+        adapter.describe_element.return_value = _BUTTON_INFO
+        engine = MockEngine.return_value
+        engine.wait_for_unique_element.return_value = element
+        return adapter, engine
+
+    def test_a_repeated_key_after_a_successful_click_returns_the_cached_result_without_clicking_again(self):
+        before = Image.new("RGB", (10, 10), (0, 0, 0))
+        after = Image.new("RGB", (10, 10), (255, 255, 255))
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("core.computer_use.executor.ActionExecutor") as MockExecutor, \
+             mock.patch("core.vision.screen.capture_screenshot_image", side_effect=[before, after]), \
+             mock.patch("pyautogui.click"), mock.patch("time.sleep"):
+            self._mocked_adapter_and_engine(MockAdapter, MockEngine)
+            agent = ComputerAgent()
+            first = agent.click_element(window_title="Jake Computer Use Fixture", name="Aggiungi", idempotency_key="passo-42")
+            second = agent.click_element(window_title="Jake Computer Use Fixture", name="Aggiungi", idempotency_key="passo-42")
+
+        MockExecutor.return_value.invoke.assert_called_once_with(mock.sentinel.element)
+        MockAdapter.return_value.find_window_by_title.assert_called_once()
+        self.assertEqual(first, second)
+        self.assertTrue(second.success)
+
+    def test_without_a_key_every_call_clicks_again_unchanged_default_behavior(self):
+        before = Image.new("RGB", (10, 10), (0, 0, 0))
+        after = Image.new("RGB", (10, 10), (255, 255, 255))
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("core.computer_use.executor.ActionExecutor") as MockExecutor, \
+             mock.patch(
+                 "core.vision.screen.capture_screenshot_image",
+                 side_effect=[before, after, before.copy(), after.copy()],
+             ), \
+             mock.patch("pyautogui.click"), mock.patch("time.sleep"):
+            self._mocked_adapter_and_engine(MockAdapter, MockEngine)
+            agent = ComputerAgent()
+            agent.click_element(window_title="Jake Computer Use Fixture", name="Aggiungi")
+            agent.click_element(window_title="Jake Computer Use Fixture", name="Aggiungi")
+
+        self.assertEqual(MockExecutor.return_value.invoke.call_count, 2)
+
+    def test_a_failed_lookup_is_never_cached_so_a_retry_with_the_same_key_tries_again(self):
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("pyautogui.click") as click:
+            MockAdapter.return_value.find_window_by_title.return_value = mock.sentinel.window
+            MockEngine.return_value.wait_for_unique_element.side_effect = NoMatchError("nessuno")
+            agent = ComputerAgent()
+            first = agent.click_element(window_title="Jake Computer Use Fixture", name="Non c'e'", idempotency_key="passo-7")
+            second = agent.click_element(window_title="Jake Computer Use Fixture", name="Non c'e'", idempotency_key="passo-7")
+
+        click.assert_not_called()
+        self.assertFalse(first.success)
+        self.assertFalse(second.success)
+        self.assertEqual(MockEngine.return_value.wait_for_unique_element.call_count, 2, "un fallimento non deve mai bloccare un retry legittimo")
+
+    def test_an_expired_key_is_treated_as_a_miss_and_clicks_again(self):
+        """Nessun `mock.patch("time.sleep")` qui, a differenza degli altri test di questa classe:
+        patcherebbe l'UNICO oggetto modulo `time` condiviso da tutto il processo, rendendo un
+        vero `time.sleep(...)` in questo stesso test un no-op e impedendo di osservare una
+        scadenza reale della cache - la TTL brevissima (0.05s) tiene comunque il costo aggiuntivo
+        di un'attesa vera minimo."""
+        before = Image.new("RGB", (10, 10), (0, 0, 0))
+        after = Image.new("RGB", (10, 10), (255, 255, 255))
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("core.computer_use.executor.ActionExecutor") as MockExecutor, \
+             mock.patch(
+                 "core.vision.screen.capture_screenshot_image",
+                 side_effect=[before, after, before.copy(), after.copy()],
+             ), \
+             mock.patch("pyautogui.click"):
+            self._mocked_adapter_and_engine(MockAdapter, MockEngine)
+            agent = ComputerAgent(idempotency_ttl_seconds=0.05)
+            agent.click_element(window_title="Jake Computer Use Fixture", name="Aggiungi", idempotency_key="passo-scaduto")
+            time.sleep(0.15)
+            agent.click_element(window_title="Jake Computer Use Fixture", name="Aggiungi", idempotency_key="passo-scaduto")
+
+        self.assertEqual(MockExecutor.return_value.invoke.call_count, 2, "una chiave scaduta non deve piu' fare da cache")
+
+    def test_different_keys_never_collide_with_each_other(self):
+        before = Image.new("RGB", (10, 10), (0, 0, 0))
+        after = Image.new("RGB", (10, 10), (255, 255, 255))
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("core.computer_use.executor.ActionExecutor") as MockExecutor, \
+             mock.patch(
+                 "core.vision.screen.capture_screenshot_image",
+                 side_effect=[before, after, before.copy(), after.copy()],
+             ), \
+             mock.patch("pyautogui.click"), mock.patch("time.sleep"):
+            self._mocked_adapter_and_engine(MockAdapter, MockEngine)
+            agent = ComputerAgent()
+            agent.click_element(window_title="Jake Computer Use Fixture", name="Aggiungi", idempotency_key="a")
+            agent.click_element(window_title="Jake Computer Use Fixture", name="Aggiungi", idempotency_key="b")
+
+        self.assertEqual(MockExecutor.return_value.invoke.call_count, 2)
+
+    def test_a_repeated_key_works_the_same_way_for_type_into_element(self):
+        before = Image.new("RGB", (10, 10), (0, 0, 0))
+        after = Image.new("RGB", (10, 10), (255, 255, 255))
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("core.computer_use.executor.ActionExecutor") as MockExecutor, \
+             mock.patch("core.vision.screen.capture_screenshot_image", side_effect=[before, after]), \
+             mock.patch("pyautogui.write") as write, mock.patch("time.sleep"):
+            self._mocked_adapter_and_engine(MockAdapter, MockEngine)
+            agent = ComputerAgent()
+            first = agent.type_into_element("un segreto", window_title="Jake Computer Use Fixture", name="Campo", idempotency_key="passo-9")
+            second = agent.type_into_element("un segreto", window_title="Jake Computer Use Fixture", name="Campo", idempotency_key="passo-9")
+
+        MockExecutor.return_value.set_value.assert_called_once_with(mock.sentinel.element, "un segreto")
+        write.assert_not_called()
+        self.assertEqual(first, second)
+
+    def test_the_cached_result_is_an_independent_copy_mutating_it_does_not_corrupt_the_cache(self):
+        before = Image.new("RGB", (10, 10), (0, 0, 0))
+        after = Image.new("RGB", (10, 10), (255, 255, 255))
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter, \
+             mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine, \
+             mock.patch("core.computer_use.executor.ActionExecutor") as MockExecutor, \
+             mock.patch("core.vision.screen.capture_screenshot_image", side_effect=[before, after]), \
+             mock.patch("pyautogui.click"), mock.patch("time.sleep"):
+            self._mocked_adapter_and_engine(MockAdapter, MockEngine)
+            agent = ComputerAgent()
+            first = agent.click_element(window_title="Jake Computer Use Fixture", name="Aggiungi", idempotency_key="passo-mut")
+            first.matched = "manomesso"
+            second = agent.click_element(window_title="Jake Computer Use Fixture", name="Aggiungi", idempotency_key="passo-mut")
+
+        self.assertEqual(second.matched, "Aggiungi")
+        MockExecutor.return_value.invoke.assert_called_once()
 
 
 if __name__ == "__main__":
