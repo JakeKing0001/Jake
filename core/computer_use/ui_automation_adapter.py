@@ -138,6 +138,20 @@ class UIAutomationAdapter:
         null in questo stesso modulo (vedi `describe_tree` per l'identico buco nel cammino
         dell'albero)."""
         condition = self._uia.CreatePropertyCondition(UIA.UIA_NamePropertyId, title)
+        return self._find_top_level_window(condition, f"con titolo {title!r}", timeout_seconds)
+
+    def find_window_by_process_id(self, process_id: int, timeout_seconds: float = 5.0):
+        """F3.6 (adozione, motivata da un browser - vedi `core/computer_use/browser_adapter.py`):
+        trova la finestra di primo livello di un PROCESSO noto (es. `subprocess.Popen(...).pid`)
+        invece che per titolo - necessario quando il titolo della finestra e' imprevedibile in
+        anticipo (il titolo di un browser cambia con ogni pagina caricata, il nome della scheda
+        attiva, il profilo). Stessa identica logica di `find_window_by_title` (fattorizzata in
+        `_find_top_level_window`, condivisa da entrambi), solo il criterio di corrispondenza
+        cambia."""
+        condition = self._uia.CreatePropertyCondition(UIA.UIA_ProcessIdPropertyId, process_id)
+        return self._find_top_level_window(condition, f"del processo {process_id}", timeout_seconds)
+
+    def _find_top_level_window(self, condition, description: str, timeout_seconds: float):
         deadline = time.monotonic() + timeout_seconds
         while True:
             root = self._uia.GetRootElement()
@@ -145,9 +159,7 @@ class UIAutomationAdapter:
             if window:
                 return window
             if time.monotonic() >= deadline:
-                raise WindowNotFoundError(
-                    f"nessuna finestra visibile con titolo {title!r} entro {timeout_seconds}s"
-                )
+                raise WindowNotFoundError(f"nessuna finestra visibile {description} entro {timeout_seconds}s")
             time.sleep(0.1)
 
     def describe_element(self, element) -> ElementInfo | None:

@@ -5474,6 +5474,64 @@ Dipende da: F1.5 e F3.5.
 
 Criterio di uscita: suite di siti fixture locale verde e zero injection dal contenuto pagina.
 
+- `F3.6.1`/`F3.6.2` (prima fetta - "Browser adapter", mai iniziata prima d'ora) — 19/09/2026:
+  nuovo `core/computer_use/browser_adapter.py`, nuovo `benchmarks/browser_fixture.html` (stesso
+  ruolo della fixture Qt di F3.1.1, ma per il browser - locale, deterministica, senza risorse
+  esterne). Decisione tecnica esplicitamente scelta insieme all'utente (vedi la richiesta di
+  chiarimento posta prima di iniziare): NESSUNA libreria di automazione browser nuova (Selenium/
+  Playwright/CDP) - un browser Chromium espone GIA' la propria struttura DOM come un vero albero
+  di UI Automation (lo stesso meccanismo di uno screen reader), quindi l'intera infrastruttura
+  gia' costruita in F3.2-F3.5 (`UIAutomationAdapter`/`SelectorEngine`) si riusa per intero, non
+  si duplica.
+
+  **Primo buco reale trovato lanciando davvero Edge contro la fixture, non ipotizzato**: Chromium
+  NON espone il proprio DOM come albero di UI Automation SUBITO al lancio - resta "addormentato"
+  (solo il chrome del browser visibile, il contenuto della pagina assente anche se gia' caricato
+  per intero, verificato con una ricerca immediata che restituisce zero risultati) finche' un
+  client UI Automation non lo "sveglia" con una prima interrogazione - da quel momento resta
+  sveglio per il resto della sessione. Nuovo `find_page_document()` fa da sveglia E da selettore
+  nello stesso gesto: isola il nodo `Document` (il confine STRUTTURALE tra contenuto pagina e
+  chrome del browser, F3.6.2 - non un elenco di nomi "chrome" da escludere a mano) e lo restituisce
+  gia' pronto per essere interrogato con `SelectorEngine` esistente.
+
+  **Secondo buco reale, un rischio di PRIVACY concreto - non teorico**: lanciare Edge con un
+  `--user-data-dir` vuoto/nuovo (l'isolamento normalmente sufficiente per gli altri processi
+  lanciati in questa sessione) NON basta a evitare che il browser si colleghi comunque
+  all'account Microsoft REALE dell'utente gia' collegato a Windows - un dialogo di
+  sincronizzazione del profilo e' comparso durante l'indagine mostrando l'indirizzo email vero
+  dell'utente (mai salvato ne' mostrato oltre la finestra di debug locale di quella sessione, il
+  processo e' stato terminato subito). `launch_isolated_browser()` usa quindi flag ESPLICITI
+  (`--inprivate --disable-sync --disable-features=msEdgeAccountLinking,...`), non solo un profilo
+  vuoto - qualunque futuro codice che lanci un browser reale per Jake DEVE passare da qui.
+
+  **Terzo buco reale, minore ma reale**: `subprocess.Popen(...).pid` NON e' sempre "il PID che
+  possiede la finestra" (verificato per la fixture Qt: un launcher della venv puo' rieseguirsi in
+  un processo figlio, lasciando due PID diversi) - per Edge (lanciato direttamente, senza wrapper)
+  i due PID coincidono, verificato non assunto. Nuovo `UIAutomationAdapter.
+  find_window_by_process_id()` (fattorizzato insieme a `find_window_by_title` in un
+  `_find_top_level_window` condiviso) - necessario perche' il titolo di una finestra browser
+  cambia con ogni pagina/tab caricata, non prevedibile in anticipo come per una fixture Qt fissa.
+
+  **Quarto buco reale, trovato USANDO il modulo dopo averlo scritto (rieseguendo i test piu'
+  volte), non ipotizzato**: 19 profili temporanei vuoti accumulati in `%TEMP%` dopo poche
+  esecuzioni - `launch_isolated_browser()` restituiva solo il `subprocess.Popen`, nessun
+  riferimento al percorso del profilo creato per lui, quindi nessun chiamante poteva mai
+  ripulirlo. Corretto con `IsolatedBrowserProcess` (processo + percorso profilo) e
+  `.terminate_and_cleanup()` (termina POI cancella, mai l'inverso - cancellare un profilo ancora
+  in uso fallirebbe silenziosamente su Windows per i file bloccati).
+
+  Deliberatamente NON affrontati qui, passi successivi dichiarati: F3.6.2 (resto - un vocabolario
+  per "istruzioni dell'utente" dentro la pagina, oggi solo chrome/pagina), F3.6.3 (form/tab/
+  download/upload con policy), F3.6.4 (collegamento a `core/taint.py::EXTERNAL_CONTENT_INTENTS` -
+  nessuna skill/intent legge ancora testo di pagina, quindi nessun punto di produzione a cui
+  collegarsi), F3.6.5 (verifica URL/stato/risposta), F3.6.6 (CAPTCHA/login/anti-automazione),
+  F3.6.7 (redazione password), solo Edge supportato (Chrome/Firefox no). Prova: 2 test nuovi in
+  `tests/test_ui_automation_adapter.py::FindWindowByProcessIdTests` + 4 test nuovi in
+  `tests/test_browser_adapter.py::RealBrowserFixtureTests` (contro Edge vero, saltati
+  esplicitamente - non falliti - se Edge non e' installato in questo ambiente, stesso principio
+  gia' seguito per l'OCR in F3.5.1). 3.012/3.012 test in locale (dove Edge e' installato, i test
+  girano per davvero, non saltano), ruff verde.
+
 ### F3.7 — Adapter applicativi
 
 Dipende da: F3.4.

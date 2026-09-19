@@ -44,6 +44,53 @@ class FindWindowByTitleTests(unittest.TestCase):
         self.assertLess(elapsed, 4.0, "non deve restare bloccato molto oltre il timeout dichiarato")
 
 
+class FindWindowByProcessIdTests(unittest.TestCase):
+    """F3.6 (adozione): `find_window_by_process_id`, motivato da un browser il cui titolo di
+    finestra e' imprevedibile in anticipo (vedi `core/computer_use/browser_adapter.py`) - stessa
+    logica di `find_window_by_title` sopra, qui verificata contro un PID vero (la fixture Qt gia'
+    esistente, non serve un browser per testare questo meccanismo generico)."""
+
+    def test_a_process_id_that_does_not_exist_raises_within_the_timeout(self):
+        adapter = UIAutomationAdapter()
+        started = time.monotonic()
+
+        with self.assertRaises(WindowNotFoundError):
+            adapter.find_window_by_process_id(999_999_999, timeout_seconds=1.0)
+
+        elapsed = time.monotonic() - started
+        self.assertGreaterEqual(elapsed, 1.0, "deve rispettare davvero il timeout dato, non arrendersi prima")
+
+    def test_finds_the_real_window_of_a_running_process(self):
+        """Buco reale trovato scrivendo questo test, non ipotizzato: `subprocess.Popen(...).pid`
+        NON e' affidabile come "il PID che possiede la finestra" per QUESTA fixture - `python -m
+        benchmarks.computer_use_fixture` puo' rieseguirsi in un processo figlio (il launcher della
+        venv), lasciando il PID del `Popen` diverso da quello riportato da UI Automation per la
+        finestra reale (verificato: numeri diversi, non un'assunzione). Per un browser lanciato
+        direttamente (es. `msedge.exe`, il caso motivante di questo metodo - vedi
+        `core/computer_use/browser_adapter.py`) i due PID COINCIDONO; qui il test verifica la
+        CORRETTEZZA del metodo usando il PID gia' confermato dalla finestra stessa (via
+        `find_window_by_title`), non l'assunzione fragile sul PID del `Popen`."""
+        process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        try:
+            adapter = UIAutomationAdapter()
+            window_by_title = adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+            real_pid = window_by_title.CurrentProcessId
+
+            window_by_pid = adapter.find_window_by_process_id(real_pid, timeout_seconds=5.0)
+
+            info = adapter.describe_element(window_by_pid)
+            self.assertEqual(info.name, _FIXTURE_WINDOW_TITLE, "deve trovare la finestra del PID dato, non una qualunque")
+        finally:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+
+
 class _RealFixtureTestCase(unittest.TestCase):
     """Un solo processo fixture condiviso da TUTTI i test di questa classe (nessuno muta lo stato
     della fixture, tutti sono read-only - lanciarne uno per test sarebbe solo piu' lento senza
