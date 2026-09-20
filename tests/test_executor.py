@@ -177,6 +177,49 @@ class ToggleTests(_ExecutorFixtureTestCase):
             self.executor.toggle(add_button)
 
 
+class RangeValueTests(_ExecutorFixtureTestCase):
+    """F3.1.2 Task 14 (adozione) - il pattern RangeValue su un `QSlider` reale, MAI dichiarato
+    dall'elenco originale di F3.4.1 (Invoke/Value/Toggle/SelectionItem/ExpandCollapse/Scroll/
+    Window) ma aggiunto quando lo slider e' comparso nella fixture. A differenza di
+    `ExpandCollapseKnownLimitationTests`/`ScrollKnownLimitationTests` sotto, QUESTO pattern
+    funziona GIA' correttamente su Qt - verificato leggendo `CurrentValue` PRIMA/DOPO, non solo
+    che `SetValue()` non sollevi."""
+
+    def tearDown(self):
+        self._reset_fixture()
+
+    def _current_slider_value(self, element) -> float:
+        from comtypes.gen import UIAutomationClient as UIA
+        pattern = element.GetCurrentPattern(UIA.UIA_RangeValuePatternId).QueryInterface(UIA.IUIAutomationRangeValuePattern)
+        return pattern.CurrentValue
+
+    def test_setting_the_value_actually_changes_it(self):
+        slider = self._element(automation_id="QApplication.jake_fixture_window.fixture_slider")
+        self.assertEqual(self._current_slider_value(slider), 0.0, "stato iniziale atteso, altrimenti il test non proverebbe un vero cambiamento")
+
+        self.executor.set_range_value(slider, 42.0)
+        time.sleep(_SETTLE_SECONDS)
+
+        slider_after = self._element(automation_id="QApplication.jake_fixture_window.fixture_slider")
+        self.assertEqual(self._current_slider_value(slider_after), 42.0)
+
+    def test_reset_returns_the_slider_to_zero(self):
+        slider = self._element(automation_id="QApplication.jake_fixture_window.fixture_slider")
+        self.executor.set_range_value(slider, 77.0)
+        time.sleep(_SETTLE_SECONDS)
+
+        self._reset_fixture()
+
+        slider_after = self._element(automation_id="QApplication.jake_fixture_window.fixture_slider")
+        self.assertEqual(self._current_slider_value(slider_after), 0.0)
+
+    def test_a_button_does_not_support_range_value(self):
+        add_button = self._element(name="Aggiungi", control_type="Button")
+
+        with self.assertRaises(ElementNotInteractableError):
+            self.executor.set_range_value(add_button, 10.0)
+
+
 class ExpandCollapseKnownLimitationTests(_ExecutorFixtureTestCase):
     """**Documenta un buco reale, non lo nasconde**: il pattern ExpandCollapse e' presente su un
     `QTreeWidgetItem` (GetCurrentPattern lo trova, Expand()/Collapse() non sollevano mai), ma il

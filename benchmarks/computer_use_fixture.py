@@ -81,6 +81,23 @@ stessa classe di buco gia' nota per `QListWidgetItem`, F3.4/F3.5) - richiede un 
 coordinate pixel, verificato con un probe dedicato PRIMA di scrivere il test - vedi
 `tests/test_computer_use_integration.py::ComboBoxSelectionEndToEndTests`.
 
+**Tredicesima fetta (20/09/2026, un incremento successivo) - Task 13 di F3.1.2**: un menu
+contestuale reale (`item_list.customContextMenuRequested`, azione "Duplica") - un `QMenu` NON
+compare nell'enumerazione dei figli del desktop secondo UI Automation, ma esiste davvero come
+finestra Win32 (buco reale RISOLTO, non solo documentato - vedi
+`core/computer_use/ui_automation_adapter.py::snapshot_win32_top_level_window_handles`/
+`element_from_handle`, che risolvono la STESSA classe di buco anche per il dialogo nativo "Apri"
+di Windows, F3.6.3). Selezionare la voce del menu richiede, come per Task 12, un click reale a
+coordinate pixel - vedi `tests/test_computer_use_integration.py::ContextMenuEndToEndTests`.
+
+**Quattordicesima fetta (20/09/2026, un incremento successivo) - Task 14 di F3.1.2**: un cursore
+(`value_slider`, `QSlider`) - un OTTAVO pattern UI Automation (`RangeValue`), mai dichiarato
+dall'elenco originale di F3.4.1 ma aggiunto quando questo controllo e' comparso nella fixture. A
+differenza di lista/combobox/menu (tutti richiedono un click pixel reale per selezionare),
+`RangeValue.SetValue()` funziona GIA' correttamente via UI Automation pura - verificato con un
+probe dedicato PRIMA di scrivere `ActionExecutor.set_range_value()` - vedi
+`tests/test_executor.py::RangeValueTests`.
+
 PySide6 invece di Win32/WinForms nativo: gia' una dipendenza del progetto
 (requirements/hud.txt, usata dall'HUD - vedi core/gui/hud/), ed espone i propri widget a UI
 Automation su Windows tramite il ponte di accessibilita' di Qt (QAccessible) - non perfettamente
@@ -94,7 +111,7 @@ import sys
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QMenu, QMessageBox, QPushButton, QTabWidget, QTreeWidget, QTreeWidgetItem,
+    QListWidget, QMenu, QMessageBox, QPushButton, QSlider, QTabWidget, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget,
 )
 
@@ -275,6 +292,18 @@ class ComputerUseFixtureWindow(QWidget):
         self.option_combo.setAccessibleName("Opzione a tendina")
         self.option_combo.addItems(["Opzione 1", "Opzione 2", "Opzione 3"])
 
+        # Task 14 (F3.1.2 continua verso i 100): un cursore (RangeValue, MAI un pattern
+        # dichiarato/esercitato finora in questo progetto - Invoke/Value/Selection/Toggle/
+        # ExpandCollapse/Scroll/Window erano gia' tutti coperti, F3.4.1) - da verificare
+        # empiricamente se supporta il pattern nativamente o richiede lo stesso ripiego a
+        # tastiera/pixel gia' visto per i controlli precedenti.
+        self.value_slider = QSlider(Qt.Orientation.Horizontal)
+        self.value_slider.setObjectName("fixture_slider")
+        self.value_slider.setAccessibleName("Cursore valore")
+        self.value_slider.setMinimum(0)
+        self.value_slider.setMaximum(100)
+        self.value_slider.setValue(0)
+
         buttons_row = QHBoxLayout()
         buttons_row.addWidget(self.add_button)
         buttons_row.addWidget(self.reset_button)
@@ -299,6 +328,7 @@ class ComputerUseFixtureWindow(QWidget):
         layout.addLayout(dynamic_row)
         layout.addLayout(ambiguous_row)
         layout.addWidget(self.option_combo)
+        layout.addWidget(self.value_slider)
 
     def _add_current_text(self) -> None:
         """Task 1/10 di F3.1.2 (gli altri 9 restano un passo successivo dichiarato): digitare un
@@ -398,6 +428,7 @@ class ComputerUseFixtureWindow(QWidget):
         self.action_b_clicks = 0
         self._update_action_counts_label()
         self.option_combo.setCurrentIndex(0)
+        self.value_slider.setValue(0)
 
     def current_combo_option(self) -> str:
         """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`)."""

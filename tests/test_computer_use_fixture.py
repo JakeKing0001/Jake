@@ -41,13 +41,14 @@ class AutomationPropertiesTests(unittest.TestCase):
         self.assertEqual(window.action_button_a.objectName(), "fixture_action_a")
         self.assertEqual(window.action_button_b.objectName(), "fixture_action_b")
         self.assertEqual(window.option_combo.objectName(), "fixture_combo")
+        self.assertEqual(window.value_slider.objectName(), "fixture_slider")
 
     def test_every_control_has_a_non_empty_accessible_name(self):
         window = ComputerUseFixtureWindow()
         for widget in (
             window.input_field, window.add_button, window.reset_button, window.item_list, window.tree,
             window.tabs, window.option_checkbox, window.scroll_list, window.load_button, window.dynamic_button,
-            window.action_button_a, window.action_button_b, window.option_combo,
+            window.action_button_a, window.action_button_b, window.option_combo, window.value_slider,
         ):
             self.assertTrue(widget.accessibleName(), f"{widget.objectName()} non ha un accessibleName")
 
@@ -558,6 +559,31 @@ class ComboBoxTests(unittest.TestCase):
         window.reset_state()
 
         self.assertEqual(window.current_combo_option(), "Opzione 1")
+
+
+class SliderTests(unittest.TestCase):
+    """Task 14 di F3.1.2 (continua verso i 100): `value_slider` (`QSlider`) - vedi
+    `tests/test_executor.py::RangeValueTests` per la dimostrazione end-to-end via UI Automation
+    (il pattern RangeValue funziona gia' correttamente, a differenza di quelli documentati come
+    limitati altrove in questa fixture)."""
+
+    def test_the_value_starts_at_zero(self):
+        window = ComputerUseFixtureWindow()
+        self.assertEqual(window.value_slider.value(), 0)
+
+    def test_the_range_is_zero_to_one_hundred(self):
+        window = ComputerUseFixtureWindow()
+        self.assertEqual(window.value_slider.minimum(), 0)
+        self.assertEqual(window.value_slider.maximum(), 100)
+
+    def test_reset_returns_the_slider_to_zero(self):
+        window = ComputerUseFixtureWindow()
+        window.value_slider.setValue(55)
+        self.assertEqual(window.value_slider.value(), 55)
+
+        window.reset_state()
+
+        self.assertEqual(window.value_slider.value(), 0)
 
 
 if __name__ == "__main__":

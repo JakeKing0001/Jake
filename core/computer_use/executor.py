@@ -106,7 +106,14 @@ restituisce un codice di uscita reale, non un `terminate()` forzato dal test). A
 onora `Close()` correttamente, lo stesso comportamento del bottone nativo di chiusura della
 finestra. Le altre azioni del pattern Window (minimizzare/massimizzare/ripristinare via
 `SetWindowVisualState`) restano deliberatamente FUORI da questo incremento (vedi sopra) - dipendono
-da `CurrentWindowVisualState`, un segnale non ancora verificato contro Qt."""
+da `CurrentWindowVisualState`, un segnale non ancora verificato contro Qt.
+
+`set_range_value()` (F3.1.2 Task 14, adozione - un OTTAVO pattern, mai dichiarato dall'elenco
+originale di F3.4.1 ma aggiunto quando un cursore reale, `QSlider`, e' comparso nella fixture):
+a differenza dei tre buchi documentati sopra, `RangeValue.SetValue()` su un `QSlider` funziona
+GIA' correttamente via UI Automation pura - verificato con un probe dedicato (il valore letto
+DOPO la chiamata riflette davvero quello impostato) PRIMA di scrivere questo metodo, non assunto
+per analogia con gli altri pattern che invece si sono rivelati inaffidabili."""
 import time
 from dataclasses import dataclass, field
 
@@ -187,6 +194,19 @@ class ActionExecutor:
         pattern = self._require_pattern(element, UIA.UIA_ValuePatternId, UIA.IUIAutomationValuePattern, "Value")
         receipt = self._receipt("set_value", "Value", element)
         pattern.SetValue(text)
+        return receipt
+
+    def set_range_value(self, element, value: float) -> ElementActionReceipt:
+        """Cursore/slider - il pattern RangeValue ("imposta il valore numerico a"). F3.1.2 Task 14
+        (adozione): a differenza di `SelectionItem`/`Invoke` su `QListWidgetItem`/popup di
+        `QComboBox`/`MenuItem` (gia' documentati NON avere un effetto reale su Qt), `RangeValue.
+        SetValue()` su un `QSlider` funziona GIA' correttamente via UI Automation pura - verificato
+        con un probe dedicato PRIMA di aggiungere questo metodo, non assunto per analogia con gli
+        altri pattern."""
+        self._require_enabled(element)
+        pattern = self._require_pattern(element, UIA.UIA_RangeValuePatternId, UIA.IUIAutomationRangeValuePattern, "RangeValue")
+        receipt = self._receipt("set_range_value", "RangeValue", element)
+        pattern.SetValue(value)
         return receipt
 
     def toggle(self, element) -> ElementActionReceipt:

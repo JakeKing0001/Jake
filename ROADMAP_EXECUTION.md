@@ -4897,6 +4897,28 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   specifico da un solo ambiente osservato - lo stesso principio "non assumere da una sola
   osservazione" gia' seguito piu' volte in questa sessione per bug trovati in CI.
 
+- `F3.1.2` (Task 14 - "trascina un cursore a un valore") — 20/09/2026: nuovo `value_slider`
+  (`QSlider`) nella fixture - un OTTAVO pattern UI Automation (`RangeValue`), mai dichiarato
+  dall'elenco originale di F3.4.1 (Invoke/Value/Toggle/SelectionItem/ExpandCollapse/Scroll/
+  Window) ma aggiunto quando questo controllo e' comparso nella fixture.
+
+  **Scoperta incoraggiante, non un altro buco**: a differenza di lista (Task 11)/combobox
+  (Task 12)/menu (Task 13), che richiedono TUTTI un click reale a coordinate pixel per
+  selezionare qualcosa (`Invoke()`/`SelectionItem` UIA senza effetto reale su Qt, gia'
+  documentato tre volte), `RangeValue.SetValue()` funziona GIA' correttamente via UI Automation
+  pura - verificato con un probe dedicato PRIMA di scrivere codice: il valore letto DOPO la
+  chiamata riflette davvero quello impostato, non solo che la chiamata non sollevi.
+
+  Nuovo `ActionExecutor.set_range_value()` (`core/computer_use/executor.py`) - lo stesso schema
+  di `set_value()`/`toggle()` gia' esistenti, nessuna sorpresa architetturale.
+
+  Prova: 3 test nuovi in `tests/test_executor.py::RangeValueTests` (`SetValue()` cambia davvero il
+  valore; il reset della fixture lo riporta a zero; un bottone non supporta il pattern, solleva
+  `ElementNotInteractableError`) + 3 test nuovi in
+  `tests/test_computer_use_fixture.py::SliderTests` (valore iniziale, intervallo 0-100, reset) +
+  `value_slider` aggiunto ai controlli gia' verificati per object name/accessible name non vuoti.
+  3.189/3.189 test, ruff verde.
+
 ### F3.2 — Windows UI Automation adapter
 
 Dipende da: F3.1.
