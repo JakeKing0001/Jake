@@ -38,12 +38,15 @@ class AutomationPropertiesTests(unittest.TestCase):
         self.assertEqual(window.scroll_list.objectName(), "fixture_scroll_list")
         self.assertEqual(window.load_button.objectName(), "fixture_load_button")
         self.assertEqual(window.dynamic_button.objectName(), "fixture_dynamic_button")
+        self.assertEqual(window.action_button_a.objectName(), "fixture_action_a")
+        self.assertEqual(window.action_button_b.objectName(), "fixture_action_b")
 
     def test_every_control_has_a_non_empty_accessible_name(self):
         window = ComputerUseFixtureWindow()
         for widget in (
             window.input_field, window.add_button, window.reset_button, window.item_list, window.tree,
             window.tabs, window.option_checkbox, window.scroll_list, window.load_button, window.dynamic_button,
+            window.action_button_a, window.action_button_b,
         ):
             self.assertTrue(widget.accessibleName(), f"{widget.objectName()} non ha un accessibleName")
 
@@ -239,6 +242,50 @@ class DynamicButtonTests(unittest.TestCase):
         QTest.mouseClick(window.load_button, Qt.LeftButton)
 
         self.assertFalse(window.dynamic_button.isEnabled(), "il secondo click deve far ripartire il timer da capo")
+
+
+class AmbiguousButtonsTests(unittest.TestCase):
+    """Task 7/10 di F3.1.2 (F3.1.6, RESTO - "controlli ambigui", il bersaglio DEDICATO che
+    mancava in questa fixture). `action_button_a`/`action_button_b` condividono lo STESSO
+    accessibleName ("Azione") - una UI Automation reale (F3.2+) che cercasse solo per nome
+    troverebbe entrambi, ambiguamente; qui a livello Qt si verifica solo che i DUE contatori
+    restino davvero INDIPENDENTI, la base su cui un test end-to-end futuro potra' dimostrare la
+    disambiguazione per automation_id."""
+
+    def test_both_buttons_share_the_same_accessible_name(self):
+        window = ComputerUseFixtureWindow()
+        self.assertEqual(window.action_button_a.accessibleName(), "Azione")
+        self.assertEqual(window.action_button_b.accessibleName(), "Azione")
+
+    def test_the_two_buttons_have_different_object_names(self):
+        window = ComputerUseFixtureWindow()
+        self.assertNotEqual(window.action_button_a.objectName(), window.action_button_b.objectName())
+
+    def test_clicking_button_a_only_increments_its_own_counter(self):
+        window = ComputerUseFixtureWindow()
+
+        QTest.mouseClick(window.action_button_a, Qt.LeftButton)
+
+        self.assertEqual(window.action_a_clicks, 1)
+        self.assertEqual(window.action_b_clicks, 0)
+
+    def test_clicking_button_b_only_increments_its_own_counter(self):
+        window = ComputerUseFixtureWindow()
+
+        QTest.mouseClick(window.action_button_b, Qt.LeftButton)
+
+        self.assertEqual(window.action_a_clicks, 0)
+        self.assertEqual(window.action_b_clicks, 1)
+
+    def test_reset_clears_both_counters(self):
+        window = ComputerUseFixtureWindow()
+        QTest.mouseClick(window.action_button_a, Qt.LeftButton)
+        QTest.mouseClick(window.action_button_b, Qt.LeftButton)
+
+        QTest.mouseClick(window.reset_button, Qt.LeftButton)
+
+        self.assertEqual(window.action_a_clicks, 0)
+        self.assertEqual(window.action_b_clicks, 0)
 
 
 class ConfirmationDialogAutomationPropertiesTests(unittest.TestCase):

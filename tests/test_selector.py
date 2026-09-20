@@ -4,6 +4,7 @@ davvero la fixture di F3.1.1 in un processo separato e cerca elementi con UI Aut
 selettore che "funziona" solo contro un albero finto (ElementInfo costruiti a mano) non
 proverebbe che le condizioni COM native (FindAll + CreateAndCondition) sono corrette, il punto
 centrale di questo modulo."""
+import re
 import subprocess
 import sys
 import threading
@@ -167,13 +168,23 @@ class FindUniqueAgainstTheRealFixtureTests(_RealFixtureTestCase):
         invece di "Aggiungi") combinato con un `control_type` corretto deve produrre un messaggio
         che distingue i due - 0 per il nome sbagliato, PIU' di 0 per control_type="Button" - non
         solo "nessun elemento corrisponde", che da solo non direbbe QUALE dei due criteri e' il
-        problema."""
+        problema.
+
+        **Buco reale trovato in un incremento successivo, non nel codice di produzione**: un
+        confronto per SOTTOSTRINGA letterale (`assertNotIn("0 con control_type='Button'", ...)`)
+        era un falso positivo in attesa di accadere - "10 con control_type='Button'" CONTIENE
+        letteralmente "0 con control_type='Button'" come sottostringa, un conteggio reale che
+        finisce per "0" (10, 20...) avrebbe fatto fallire questo test anche se
+        `_explain_no_match` funzionasse perfettamente. Corretto leggendo il numero VERO con una
+        regex invece di cercare una sottostringa."""
         with self.assertRaises(NoMatchError) as ctx:
             self.engine.find_unique(self.window, ElementSelector(name="Aggiugni", control_type="Button"))
 
         message = str(ctx.exception)
         self.assertIn("0 con name='Aggiugni'", message)
-        self.assertNotIn("0 con control_type='Button'", message, "control_type='Button' deve avere DEI match, non zero")
+        match = re.search(r"(\d+) con control_type='Button'", message)
+        self.assertIsNotNone(match, message)
+        self.assertGreater(int(match.group(1)), 0, "control_type='Button' deve avere DEI match, non zero")
 
     def test_a_selector_matching_several_elements_raises_ambiguous(self):
         """Le due voci dell'albero ('Categoria A'/'Categoria B') condividono lo stesso
@@ -272,7 +283,8 @@ class WaitForUniqueElementTests(_RealFixtureTestCase):
     def test_no_match_after_timeout_explains_which_criterion_excluded_everything(self):
         """Stessa protezione di `FindUniqueAgainstTheRealFixtureTests`, qui per il percorso a
         timeout - la spiegazione deve arrivare una volta sola, DOPO la scadenza, non a ogni
-        iterazione del polling."""
+        iterazione del polling. Stesso fix del falso positivo su sottostringa gia' corretto li'
+        (un conteggio reale che finisce per "0" farebbe scattare un `assertNotIn` letterale)."""
         with self.assertRaises(NoMatchError) as ctx:
             self.engine.wait_for_unique_element(
                 self.window, ElementSelector(name="Aggiugni", control_type="Button"), timeout_seconds=1.0,
@@ -280,7 +292,9 @@ class WaitForUniqueElementTests(_RealFixtureTestCase):
 
         message = str(ctx.exception)
         self.assertIn("0 con name='Aggiugni'", message)
-        self.assertNotIn("0 con control_type='Button'", message)
+        match = re.search(r"(\d+) con control_type='Button'", message)
+        self.assertIsNotNone(match, message)
+        self.assertGreater(int(match.group(1)), 0)
 
     def test_an_ambiguous_match_raises_immediately_not_after_the_full_timeout(self):
         """Le due voci dell'albero condividono lo stesso control_type - aspettare non risolverebbe

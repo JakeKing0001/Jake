@@ -22,14 +22,21 @@ che lo scopre), `dynamic_button` si abilita solo dopo un vero `QTimer.singleShot
 un'operazione lunga, dove un selettore che leggesse lo stato SUBITO dopo il click troverebbe
 DAVVERO il controllo ancora nello stato precedente, non un flag gia' cambiato per costruzione.
 
+**Settima fetta (20/09/2026, un incremento successivo) - Task 7/10 di F3.1.2, CHIUDE F3.1.6 per
+intero**: `action_button_a`/`action_button_b` - due bottoni con lo STESSO `accessibleName`
+("Azione", lo scenario reale di un modulo con "Invia"/"Applica" ripetuto in piu' sezioni) ma
+`objectName`/automation_id DIVERSI - il bersaglio DEDICATO per "controlli ambigui" che mancava
+ancora in questa fixture (F3.3.2/F3.3.3 avevano gia' dimostrato la stessa cosa altrove con
+'Categoria A'/'Categoria B' dell'albero, un caso di RUOLO condiviso non di NOME). Un contatore
+INDIPENDENTE per bottone (non condiviso) rende osservabile QUALE dei due e' stato cliccato
+davvero, non solo che "un" click sia arrivato da qualche parte - la prova che serve per
+dimostrare che l'automation_id sceglie quello GIUSTO, non uno a caso tra i due ambigui.
+
 Deliberatamente NON affrontati qui, passi successivi dichiarati:
-- F3.1.2 (4 dei 10 task rimangono ora - sei dimostrati: "aggiungi", "rimuovi con conferma",
+- F3.1.2 (3 dei 10 task rimangono ora - sette dimostrati: "aggiungi", "rimuovi con conferma",
   "espandi e seleziona", "cambia tab e spunta l'opzione", "scorri e seleziona l'ultima riga",
-  "attendi un controllo dinamico e attivalo");
+  "attendi un controllo dinamico e attivalo", "disambigua due controlli ambigui per nome");
 - F3.1.5 (DPI, piu' monitor, finestre sovrapposte, temi diversi);
-- F3.1.6 (resto - "controlli ambigui", gia' dimostrato altrove in questa sessione con
-  'Categoria A'/'Categoria B' dello stesso `control_type`, F3.3.2/F3.3.3, ma non con un bersaglio
-  DEDICATO in questa fixture);
 - l'intera F3.2 (`UIAutomationAdapter`, ancora da costruire).
 
 PySide6 invece di Win32/WinForms nativo: gia' una dipendenza del progetto
@@ -121,6 +128,41 @@ class ComputerUseFixtureWindow(QWidget):
         self._load_timer.setInterval(1000)
         self._load_timer.timeout.connect(lambda: self.dynamic_button.setEnabled(True))
 
+        # Task 7/10 di F3.1.2 (F3.1.6 RESTO - "controlli ambigui" - gia' dimostrato altrove in
+        # questa sessione con 'Categoria A'/'Categoria B' dell'albero, F3.3.2/F3.3.3, ma MAI con
+        # un bersaglio dedicato in QUESTA fixture): due bottoni con lo STESSO accessibleName
+        # ("Azione", lo scenario reale di un modulo web con "Invia" ripetuto in piu' sezioni) ma
+        # `objectName`/automation_id DIVERSI - un selettore per il solo nome e' deliberatamente
+        # ambiguo, richiede automation_id per scegliere quello giusto. Un contatore INDIPENDENTE
+        # per bottone (non un contatore condiviso) rende osservabile QUALE dei due e' stato
+        # cliccato davvero, non solo che "un" click sia arrivato da qualche parte.
+        self.action_button_a = QPushButton("Azione")
+        self.action_button_a.setObjectName("fixture_action_a")
+        self.action_button_a.setAccessibleName("Azione")
+        self.action_button_a.clicked.connect(self._click_action_a)
+        self.action_a_clicks = 0
+
+        self.action_button_b = QPushButton("Azione")
+        self.action_button_b.setObjectName("fixture_action_b")
+        self.action_button_b.setAccessibleName("Azione")
+        self.action_button_b.clicked.connect(self._click_action_b)
+        self.action_b_clicks = 0
+
+        # I due contatori sopra sono stato IN PROCESSO (utile solo a un test nello stesso
+        # processo Qt, stesso limite gia' dichiarato per list_items()) - un test end-to-end VERO
+        # guidato dall'esterno (un processo separato, UI Automation) ha bisogno di un modo di
+        # OSSERVARLI sullo schermo per dimostrare quale dei due bottoni ambigui e' stato cliccato
+        # davvero: questa etichetta e' quel modo, aggiornata dagli stessi due gestori sotto.
+        self.action_counts_label = QLabel("A:0 B:0")
+        self.action_counts_label.setObjectName("fixture_action_counts")
+        # NESSUN setAccessibleName() qui, deliberatamente - a differenza di ogni altro controllo
+        # in questa fixture: un accessibleName FISSO congelerebbe il Name esposto a UI Automation
+        # al valore dato UNA VOLTA, ignorando ogni `.setText()` successivo (buco reale trovato
+        # scrivendo il test end-to-end, non ipotizzato: il test leggeva sempre "Conteggio azioni",
+        # mai il conteggio vero). Senza un accessibleName esplicito, il ponte di accessibilita' di
+        # Qt deriva il Name di una QLabel dal suo `.text()` corrente - verificato, non assunto -
+        # cosi' un aggiornamento reale del testo e' DAVVERO osservabile via UI Automation.
+
         self.item_list = QListWidget()
         self.item_list.setObjectName("fixture_list")
         self.item_list.setAccessibleName("Elenco elementi")
@@ -164,6 +206,11 @@ class ComputerUseFixtureWindow(QWidget):
         dynamic_row.addWidget(self.load_button)
         dynamic_row.addWidget(self.dynamic_button)
 
+        ambiguous_row = QHBoxLayout()
+        ambiguous_row.addWidget(self.action_button_a)
+        ambiguous_row.addWidget(self.action_button_b)
+        ambiguous_row.addWidget(self.action_counts_label)
+
         layout = QVBoxLayout(self)
         layout.addWidget(self.input_field)
         layout.addLayout(buttons_row)
@@ -172,6 +219,7 @@ class ComputerUseFixtureWindow(QWidget):
         layout.addWidget(self.tabs)
         layout.addWidget(self.scroll_list)
         layout.addLayout(dynamic_row)
+        layout.addLayout(ambiguous_row)
 
     def _add_current_text(self) -> None:
         """Task 1/10 di F3.1.2 (gli altri 9 restano un passo successivo dichiarato): digitare un
@@ -267,6 +315,20 @@ class ComputerUseFixtureWindow(QWidget):
         self._load_timer.stop()
         self.dynamic_button.setEnabled(False)
         self.dynamic_action_activated = False
+        self.action_a_clicks = 0
+        self.action_b_clicks = 0
+        self._update_action_counts_label()
+
+    def _click_action_a(self) -> None:
+        self.action_a_clicks += 1
+        self._update_action_counts_label()
+
+    def _click_action_b(self) -> None:
+        self.action_b_clicks += 1
+        self._update_action_counts_label()
+
+    def _update_action_counts_label(self) -> None:
+        self.action_counts_label.setText(f"A:{self.action_a_clicks} B:{self.action_b_clicks}")
 
     def _start_loading(self) -> None:
         """Task 6/10 di F3.1.2 (F3.1.6, "controlli dinamici" - la parte MAI affrontata finora:

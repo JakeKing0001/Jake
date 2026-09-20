@@ -82,7 +82,7 @@ from pathlib import Path
 from core.computer_agent import ComputerAgent
 from core.computer_use.executor import ActionExecutor
 from core.computer_use.fallback import try_strategies_in_order
-from core.computer_use.selector import ElementSelector, SelectorEngine
+from core.computer_use.selector import AmbiguousSelectionError, ElementSelector, SelectorEngine
 from core.computer_use.ui_automation_adapter import UIAutomationAdapter
 from core.computer_use.vision_verify import word_visible_in_window, word_visible_in_window_eventually
 from core.vision.screen import ocr_available
@@ -428,6 +428,58 @@ class DynamicControlEndToEndTests(unittest.TestCase):
         # Una volta davvero abilitato, si puo' interagire con lui come con qualunque altro bottone.
         dynamic_element = self.engine.find_unique_element(self.window, dynamic_selector)
         self.executor.invoke(dynamic_element)
+
+
+class AmbiguousButtonsEndToEndTests(unittest.TestCase):
+    """Task 7/10 di F3.1.2 (F3.1.6, CHIUDE il resto - "controlli ambigui" con un bersaglio
+    DEDICATO in questa fixture): due bottoni condividono lo STESSO Name ("Azione") - un selettore
+    che cercasse solo per nome DEVE fallire con `AmbiguousSelectionError` (F3.3.3), mai scegliere
+    uno a caso; l'automation_id li disambigua, e il click arriva DAVVERO al bottone giusto -
+    verificato leggendo l'etichetta dei conteggi (`fixture_action_counts`) via UI Automation, non
+    assunto dal solo fatto che `invoke()` non abbia sollevato."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def _read_counts_label(self) -> str:
+        label = self.engine.find_unique(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_action_counts"),
+        )
+        return label.name
+
+    def test_a_name_only_selector_is_rejected_as_ambiguous(self):
+        with self.assertRaises(AmbiguousSelectionError):
+            self.engine.find_unique(self.window, ElementSelector(name="Azione", control_type="Button"))
+
+    def test_automation_id_disambiguates_and_the_click_reaches_the_right_button(self):
+        self.assertEqual(self._read_counts_label(), "A:0 B:0")
+
+        button_b = self.engine.find_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_action_b"),
+        )
+        self.executor.invoke(button_b)
+
+        deadline = time.monotonic() + 3.0
+        while self._read_counts_label() == "A:0 B:0" and time.monotonic() < deadline:
+            time.sleep(0.05)
+
+        self.assertEqual(self._read_counts_label(), "A:0 B:1", "solo il contatore B deve essere salito - la prova che il click e' arrivato al bottone giusto, non a caso")
 
 
 class ClickElementRealFixtureTests(unittest.TestCase):

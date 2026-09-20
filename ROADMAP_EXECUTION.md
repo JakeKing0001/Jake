@@ -4712,6 +4712,49 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   a polling che rispetta davvero il ritardo del timer, non un tempismo fortunato). 3.110/3.110
   test, ruff verde.
 
+- `F3.1.2` (Task 7/10 - CHIUDE F3.1.6 per intero) — 20/09/2026: nuovi `action_button_a`/
+  `action_button_b` nella fixture - due bottoni con lo STESSO `accessibleName` ("Azione", lo
+  scenario reale di un modulo con "Invia"/"Applica" ripetuto in piu' sezioni) ma `objectName`/
+  automation_id DIVERSI - il bersaglio DEDICATO per "controlli ambigui" che mancava ancora in
+  QUESTA fixture (F3.3.2/F3.3.3 avevano gia' dimostrato la stessa cosa altrove con 'Categoria A'/
+  'Categoria B' dell'albero, un caso di RUOLO condiviso non di NOME).
+
+  **Buco reale trovato scrivendo il test end-to-end, non ipotizzato - lo stesso genere di
+  insidia gia' incontrata per il timer di Task 6/10**: la prima versione dell'etichetta
+  osservabile (`action_counts_label`, aggiunta per dimostrare via UI Automation QUALE dei due
+  bottoni fosse stato cliccato davvero) chiamava `setAccessibleName("Conteggio azioni")` come
+  ogni altro controllo della fixture - ma un `accessibleName` FISSO congela il `Name` esposto a
+  UI Automation al valore dato UNA VOLTA, ignorando ogni `.setText()` successivo: il test leggeva
+  sempre "Conteggio azioni", MAI il conteggio vero, indipendentemente da quanti click arrivassero
+  davvero. Corretto rimuovendo `setAccessibleName()` per QUESTA label soltanto - verificato (non
+  assunto) che senza un accessibleName esplicito il ponte di accessibilita' di Qt deriva il
+  `Name` di una `QLabel` dal suo `.text()` CORRENTE, cosi' un aggiornamento reale del testo
+  diventa davvero osservabile.
+
+  Con questo, F3.1.2 ha ora 7 dei 10 task dimostrati (Task 3, "espandi categoria", resta l'unico
+  bloccato da un limite Qt reale gia' documentato) e F3.1.6 e' CHIUSO per intero (disabilitati,
+  dinamici, ambigui - tutti e tre con un bersaglio dedicato in questa fixture). Prova: 5 test
+  nuovi in `tests/test_computer_use_fixture.py::AmbiguousButtonsTests` (stesso accessibleName,
+  object name diversi, ogni bottone incrementa SOLO il proprio contatore, reset azzera entrambi)
+  + 2 test estesi per i nomi di automazione + 2 test end-to-end nuovi in
+  `tests/test_computer_use_integration.py::AmbiguousButtonsEndToEndTests` (un selettore solo per
+  nome viene rifiutato con `AmbiguousSelectionError`; l'automation_id disambigua e il click
+  arriva DAVVERO al bottone giusto, verificato leggendo l'etichetta dei conteggi via UI
+  Automation, non assunto dal solo `invoke()` che non solleva). 3.131/3.131 test, ruff verde.
+
+  **Correzione successiva (stesso 20/09/2026, trovata rieseguendo la suite COMPLETA) - un secondo
+  buco reale, questa volta in DUE test preesistenti (F3.3.2), non nel codice di produzione**:
+  `tests/test_selector.py` usava `assertNotIn("0 con control_type='Button'", message)` per
+  verificare che `_explain_no_match` riportasse DEI match per `control_type='Button'` - un
+  confronto per SOTTOSTRINGA letterale, un falso positivo in attesa di accadere: aggiungendo
+  `action_button_a`/`action_button_b` il conteggio reale di bottoni e' salito a 10, e "10 con
+  control_type='Button'" CONTIENE letteralmente "0 con control_type='Button'" come sottostringa -
+  il test avrebbe fallito con QUALUNQUE conteggio che terminasse per "0" (10, 20...),
+  indipendentemente da se `_explain_no_match` funzionasse correttamente. Corretto in entrambi i
+  test leggendo il numero VERO con una regex (`re.search(r"(\d+) con control_type='Button'",
+  ...)` poi `assertGreater(..., 0)`) invece di cercare una sottostringa. 3.131/3.131 test
+  invariato, ruff verde.
+
 ### F3.2 — Windows UI Automation adapter
 
 Dipende da: F3.1.
