@@ -4525,12 +4525,14 @@ Criterio di uscita: nessuna contaminazione di memoria o permesso tra profili nei
 
 - Stato: `DOING` (G1 superato il 16/09/2026, vedi Gate G1 sopra - riga NON aggiornata dal 19/09/2026
   fino al 20/09/2026, quando questo incremento l'ha ricalcolata leggendo l'intera sezione invece di
-  fidarsi del riepilogo stantio: F3.1.1 chiusa per intero; F3.1.2 [9/10 task completati end-to-end
-  (aggiungi/rimuovi con conferma/espandi e seleziona/cambia tab e spunta/scorri e seleziona/
-  attendi un controllo dinamico/disambigua controlli ambigui/tema/traduzione), Task 3 ("espandi
-  categoria") INDAGATO ma bloccato da un limite Qt reale (ExpandCollapse senza effetto, nessuna
-  strategia di ripiego trovata) - resta l'unico dei 10 non dimostrato]; F3.1.5 (DPI/multi-monitor -
-  "tema" ora coperto da F3.3.7) non affrontata; F3.1.6 (controlli ambigui/disabilitati/dinamici)
+  fidarsi del riepilogo stantio: F3.1.1 chiusa per intero; F3.1.2 CHIUSA per intero, 100/100 task
+  dichiarati dal criterio di uscita ("arrivare progressivamente a 100") - vedi le voci datate
+  20/09/2026 nella sua sezione per il dettaglio di ognuno, incluso Task 3 ("espandi categoria"),
+  l'unico dei 10 iniziali risolto per CONCLUSIONE (bloccato da un limite Qt reale, ExpandCollapse
+  senza effetto, nessuna strategia di ripiego trovata) invece che per dimostrazione diretta -
+  questa riga di riepilogo restera' probabilmente stantia anche lei, come le precedenti: fidarsi
+  sempre delle voci datate nella sezione F3.1.2, non di questo paragrafo; F3.1.5 (DPI/multi-monitor
+  - "tema" ora coperto da F3.3.7) non affrontata; F3.1.6 (controlli ambigui/disabilitati/dinamici)
   CHIUSO per intero; F3.2 [criterio "cinque app reali" soddisfatto - Calcolatrice/Paint/Esplora
   File/Edge/terminale, VS Code investigato e trovato NON idoneo, F3.2.6 (scope/privacy) e F3.2.7
   (benchmark) chiusi con verifica reale - resta aperto solo F3.2.2 meta' (cache)/F3.2.4 (eventi,
