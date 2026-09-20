@@ -35,12 +35,17 @@ alla volta" di questa sessione):
   `dry_run_step()`/`dry_run_steps()` - vedi le loro docstring. Resta aperta la seconda meta'
   ("su dati innocui" - eseguire per davvero ma contro un ambiente/dato sicuro, diverso da "non
   eseguire affatto");
-- F3.8.5 (salvare versione/app target/selector/undo - nessuna persistenza a lungo termine, solo
-  la forma serializzabile di un singolo passo/lista di passi in memoria);
+- F3.8.5 (prima fetta - "salvare... selector" - CHIUSA in un incremento successivo, 19/09/2026):
+  `core/procedure_manager.py::ProcedureManager` - salva/richiama una LISTA di `RecordedStep` con
+  un nome, stesso principio di `WorkflowManager` (riusa la memoria a lungo termine gia'
+  costruita, mai un file per nome su disco). Restano aperti "versione"/"app target"/"undo" -
+  solo il nome e la lista di passi sono persistiti oggi, nessun versionamento ne' un modo di
+  annullare una procedura gia' eseguita;
 - F3.8.6 (rilevare drift e sospendersi - `replay_steps` si ferma al primo fallimento, F3.5, ma non
   distingue "l'app e' cambiata struttura" da un qualunque altro fallimento transitorio);
-- F3.8.7 (richiedere nuova approvazione se capability/impatto cambiano - nessun collegamento a
-  `core/policy_engine.py` qui, gia' escluso esplicitamente anche da F3.4.3)."""
+- F3.8.7 (richiedere nuova approvazione se capability/impatto CAMBIANO nel tempo - `core/
+  policy_engine.py` E' gia' collegato per la decisione INIZIALE, F3.4.3, ma nessun meccanismo
+  rileva se il rischio di una procedura gia' approvata una volta e' aumentato da quando)."""
 import re
 from dataclasses import dataclass
 

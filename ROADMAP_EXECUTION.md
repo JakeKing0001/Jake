@@ -6470,6 +6470,36 @@ Criterio di uscita: una procedura dimostrata sopravvive a riavvio, resize e dati
   nella lista, un parametro mancante non scrive mai il placeholder letterale, lo stesso caso
   rilevato in anticipo da un dry-run). 3.089/3.089 test, ruff verde.
 
+- `F3.8.5` (prima fetta - "salvare... selector", QUARTO incremento di F3.8) — 20/09/2026: nuovo
+  `core/procedure_manager.py::ProcedureManager` - salva/richiama una LISTA di `RecordedStep` con
+  un nome, esattamente lo stesso concetto di un workflow (`core/workflow_manager.py`, "sequenze
+  di passi con nome"), qui applicato a passi di COMPUTER USE invece che a passi di skill.
+
+  **Riusa la memoria a lungo termine gia' costruita invece di inventare un formato nuovo - il
+  precedente piu' vicino gia' esistente, non uno nuovo scritto da zero**: `WorkflowManager` salva
+  gia' sequenze nominate come righe in `core/memory_manager.py` (categoria dedicata), non come
+  file per nome su disco - questo modulo fa lo stesso (`CATEGORY = "computer_procedure"`). La
+  motivazione e' piu' che stilistica: un "nome" scelto da un chiamante/dall'utente che finisse
+  come componente di un PERCORSO FILE avrebbe richiesto sanitizzarlo contro un path traversal
+  (nessun precedente diretto per questo nel progetto) - come CHIAVE di una riga di database,
+  quel rischio non esiste per costruzione, la stessa ragione per cui `WorkflowManager` non ha
+  mai dovuto affrontarlo.
+
+  Stessa identica API di `WorkflowManager` (`save`/`load`/`list_names`, `MAX_PROCEDURES` come
+  tetto di sicurezza non un limite di prodotto - lo stesso principio gia' corretto per
+  `WorkflowManager`/`TriggerManager` quando un limite fisso troncava silenziosamente le voci piu'
+  vecchie): `load()` di un nome inesistente restituisce `None` (onesto - mai una lista vuota
+  indovinata), mentre una procedura VUOTA salvata davvero (`steps=[]`) restituisce `[]` - due
+  fatti diversi, non lo stesso caso. Salvare due volte con lo stesso nome sostituisce (upsert su
+  key+categoria, la stessa garanzia gia' offerta da `MemoryManager.remember()`), non duplica.
+
+  Restano aperti "versione"/"app target"/"undo" (la seconda meta' di F3.8.5) - solo il nome e la
+  lista di passi sono persistiti oggi, nessun versionamento ne' un modo di annullare una
+  procedura gia' eseguita. Prova: 7 test nuovi in `tests/test_procedure_manager.py` (round-trip
+  di una procedura reale con parametro/risk_intent; nome inconosciuto restituisce `None`; una
+  procedura vuota restituisce `[]`; salvare due volte sostituisce; elenco dei nomi; nessun limite
+  piu' basso nascosto per questa categoria). 3.117/3.117 test, ruff verde.
+
 ### Gate F3
 
 - ≥ 90% su 100 task fixture;
