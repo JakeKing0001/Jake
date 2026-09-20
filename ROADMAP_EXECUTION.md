@@ -4818,6 +4818,29 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   `tests/test_computer_use_integration.py` (64 test) riverificata verde dopo il cambio di
   `SelectionMode`. 3.172/3.172 test, ruff verde.
 
+- `F3.1.2` (Task 12 - "apri un menu a tendina e scegli un'opzione") — 20/09/2026: nuovo
+  `option_combo` (`QComboBox`) nella fixture - un terzo genere di controllo a selezione, diverso
+  sia dalla lista (`QListWidget`, F3.4.1) sia dall'albero (`QTreeWidget`, che non espone MAI i
+  propri figli via UI Automation, F3.4/F3.5).
+
+  Scoperta empirica in DUE meta', verificate con un probe dedicato PRIMA di scrivere il test, non
+  assunte: (1) APRIRE il popup funziona GIA' semanticamente via UI Automation -
+  `ExpandCollapsePattern.Expand()` (`ActionExecutor.expand()`, F3.4.1, gia' esistente, mai prima
+  provato contro una combobox) apre davvero il popup; (2) SELEZIONARE un'opzione dal popup NO - un
+  `Invoke()` UIA sul `ListItem` del popup non ha alcun effetto (stessa classe di buco gia' nota
+  per `QListWidgetItem`, F3.4/F3.5 - un pattern UIA sintatticamente valido che l'app semplicemente
+  ignora), verificato leggendo il pattern Value della combobox PRIMA/DOPO l'`Invoke()` (invariato)
+  e poi dopo un click reale a coordinate pixel (cambia davvero). Anche il pattern Value stesso e'
+  READ-ONLY per una combobox non editabile: un `SetValue()` diretto non solleva ma non cambia
+  affatto la selezione - scoperto PRIMA di tentare il click pixel, non assunto.
+
+  Prova: 2 test nuovi in `tests/test_computer_use_integration.py::ComboBoxSelectionEndToEndTests`
+  (espandere via UIA + click pixel sulla voce del popup seleziona davvero; un `Invoke()` sulla
+  voce del popup documenta esplicitamente il buco, nessun effetto) + 3 test nuovi in
+  `tests/test_computer_use_fixture.py::ComboBoxTests` (opzione iniziale, elenco opzioni in
+  ordine, reset torna alla prima) + `option_combo` aggiunto ai controlli gia' verificati per
+  object name/accessible name non vuoti. 3.177/3.177 test, ruff verde.
+
 ### F3.2 — Windows UI Automation adapter
 
 Dipende da: F3.1.

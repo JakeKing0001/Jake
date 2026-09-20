@@ -64,6 +64,23 @@ test, non assunto) basta a dimostrare un flusso guidato SOLO dalla tastiera (`Se
 digitato con tasti veri + Tab + Spazio), mai il mouse - vedi
 `tests/test_computer_use_integration.py::KeyboardOnlyNavigationEndToEndTests`.
 
+**Undicesima fetta (20/09/2026, un incremento successivo) - Task 11 di F3.1.2, continua oltre i
+"10 task iniziali" verso i 100 dichiarati dal criterio di uscita di F3**: `item_list` passata da
+`SingleSelection` a `ExtendedSelection` (Ctrl+Click aggiunge alla selezione) - verificato
+retrocompatibile con Task 2/10 PRIMA del cambio (`_update_remove_button_enabled`/
+`_remove_selected_with_confirmation` usano gia' solo `currentItem()`, invariato da
+`ExtendedSelection` per un click senza modificatori) - vedi
+`tests/test_computer_use_integration.py::MultiSelectEndToEndTests`.
+
+**Dodicesima fetta (20/09/2026, un incremento successivo) - Task 12 di F3.1.2**: `option_combo`
+(`QComboBox`) - un terzo genere di controllo a selezione, mai presente in questa fixture finora
+(diverso sia dalla lista sia dall'albero). Scoperta empirica in due meta': APRIRE il popup
+funziona gia' semanticamente via UI Automation (`ExpandCollapsePattern.Expand()`), SELEZIONARE
+un'opzione dal popup NO (un `Invoke()` UIA su un `ListItem` del popup non ha alcun effetto -
+stessa classe di buco gia' nota per `QListWidgetItem`, F3.4/F3.5) - richiede un click reale a
+coordinate pixel, verificato con un probe dedicato PRIMA di scrivere il test - vedi
+`tests/test_computer_use_integration.py::ComboBoxSelectionEndToEndTests`.
+
 PySide6 invece di Win32/WinForms nativo: gia' una dipendenza del progetto
 (requirements/hud.txt, usata dall'HUD - vedi core/gui/hud/), ed espone i propri widget a UI
 Automation su Windows tramite il ponte di accessibilita' di Qt (QAccessible) - non perfettamente
@@ -76,8 +93,9 @@ import sys
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QMessageBox, QPushButton, QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit,
+    QListWidget, QMessageBox, QPushButton, QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
+    QWidget,
 )
 
 # Terza fetta (albero): due categorie, due figli ciascuna - nomi stabili anche per i dati, non
@@ -242,6 +260,15 @@ class ComputerUseFixtureWindow(QWidget):
         self.scroll_list.setMaximumHeight(90)
         self.scroll_list.addItems([f"Riga {i}" for i in range(1, _SCROLL_LIST_ROW_COUNT + 1)])
 
+        # Dodicesima fetta (F3.1.2 Task 12, continua verso i 100): un menu a tendina, il pattern
+        # ExpandCollapse+Selection di un QComboBox - MAI un bersaglio in questa fixture finora,
+        # diverso sia dalla lista (F3.4.1) sia dall'albero (gia' noto NON esporre i figli via UIA,
+        # F3.4/F3.5) - da verificare empiricamente se lo stesso limite si applica qui.
+        self.option_combo = QComboBox()
+        self.option_combo.setObjectName("fixture_combo")
+        self.option_combo.setAccessibleName("Opzione a tendina")
+        self.option_combo.addItems(["Opzione 1", "Opzione 2", "Opzione 3"])
+
         buttons_row = QHBoxLayout()
         buttons_row.addWidget(self.add_button)
         buttons_row.addWidget(self.reset_button)
@@ -265,6 +292,7 @@ class ComputerUseFixtureWindow(QWidget):
         layout.addWidget(self.scroll_list)
         layout.addLayout(dynamic_row)
         layout.addLayout(ambiguous_row)
+        layout.addWidget(self.option_combo)
 
     def _add_current_text(self) -> None:
         """Task 1/10 di F3.1.2 (gli altri 9 restano un passo successivo dichiarato): digitare un
@@ -363,6 +391,11 @@ class ComputerUseFixtureWindow(QWidget):
         self.action_a_clicks = 0
         self.action_b_clicks = 0
         self._update_action_counts_label()
+        self.option_combo.setCurrentIndex(0)
+
+    def current_combo_option(self) -> str:
+        """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`)."""
+        return self.option_combo.currentText()
 
     def _click_action_a(self) -> None:
         self.action_a_clicks += 1

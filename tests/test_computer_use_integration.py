@@ -557,6 +557,88 @@ class MultiSelectEndToEndTests(unittest.TestCase):
         self.assertFalse(selected_b, "un click SENZA Ctrl non deve mai aggiungere alla selezione esistente")
 
 
+class ComboBoxSelectionEndToEndTests(unittest.TestCase):
+    """Task 12 (F3.1.2 continua verso i 100) - "apri un menu a tendina e scegli un'opzione":
+    `QComboBox`, MAI un bersaglio in questa fixture finora - un terzo genere di controllo a
+    selezione, diverso sia dalla lista (`QListWidget`, F3.4.1) sia dall'albero (`QTreeWidget`, che
+    non espone MAI i propri figli via UI Automation, F3.4/F3.5).
+
+    Scoperta empirica in DUE meta', verificate con un probe dedicato PRIMA di scrivere questo
+    test, non assunte: (1) APRIRE il popup funziona gia' semanticamente via UI Automation -
+    `ExpandCollapsePattern.Expand()` (`ActionExecutor.expand()`, F3.4.1, gia' esistente, mai prima
+    provato contro una combobox) apre DAVVERO il popup, verificato cercando un'opzione che compare
+    solo dopo l'espansione; (2) SELEZIONARE un'opzione dal popup NO - un `Invoke()` UIA sul
+    `ListItem` del popup non ha alcun effetto (stessa classe di buco gia' nota per
+    `QListWidgetItem`, F3.4/F3.5: un pattern UIA sintatticamente valido che l'app semplicemente
+    ignora), verificato leggendo il pattern Value della combobox PRIMA/DOPO - resta invariato dopo
+    un `Invoke()`, cambia DAVVERO solo dopo un click reale a coordinate pixel."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def _current_combo_value(self, combo) -> str:
+        from comtypes.gen import UIAutomationClient as UIA
+        pattern = combo.GetCurrentPattern(UIA.UIA_ValuePatternId).QueryInterface(UIA.IUIAutomationValuePattern)
+        return pattern.CurrentValue
+
+    def test_expanding_via_uia_then_clicking_the_popup_item_selects_it_for_real(self):
+        import pyautogui
+
+        combo = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_combo"),
+        )
+        self.assertEqual(self._current_combo_value(combo), "Opzione 1", "stato iniziale atteso, altrimenti il test non proverebbe un vero cambiamento")
+
+        self.executor.expand(combo)
+        option = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Opzione 2"), timeout_seconds=2.0)
+        bounds = self.adapter.describe_element(option).bounds
+
+        def _click_the_popup_item():
+            pyautogui.click(bounds[0] + bounds[2] // 2, bounds[1] + bounds[3] // 2)
+
+        def _selection_really_changed():
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                if self._current_combo_value(combo) == "Opzione 2":
+                    return True
+                time.sleep(0.1)
+            return False
+
+        outcome = try_strategies_in_order([("pixel_click_on_popup_item", _click_the_popup_item)], verify=_selection_really_changed)
+
+        self.assertTrue(outcome.succeeded, outcome.attempts)
+
+    def test_invoke_on_the_popup_item_has_no_real_effect(self):
+        """Documenta il buco esplicitamente, non solo implicitamente nel test sopra - un
+        `Invoke()` UIA sull'opzione del popup non deve MAI sembrare riuscito quando non lo e'."""
+        combo = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_combo"),
+        )
+        self.executor.expand(combo)
+        option = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Opzione 3"), timeout_seconds=2.0)
+
+        self.executor.invoke(option)
+        time.sleep(0.3)
+
+        self.assertEqual(self._current_combo_value(combo), "Opzione 1", "Invoke() su un'opzione del popup non deve mai cambiare la selezione davvero")
+
+
 class DynamicControlEndToEndTests(unittest.TestCase):
     """Task 6/10 di F3.1.2 (F3.1.6, la parte DINAMICA mai affrontata finora - vedi
     `benchmarks/computer_use_fixture.py` per il perche' `remove_button`, gia' un "primo assaggio",

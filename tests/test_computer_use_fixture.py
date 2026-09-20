@@ -40,13 +40,14 @@ class AutomationPropertiesTests(unittest.TestCase):
         self.assertEqual(window.dynamic_button.objectName(), "fixture_dynamic_button")
         self.assertEqual(window.action_button_a.objectName(), "fixture_action_a")
         self.assertEqual(window.action_button_b.objectName(), "fixture_action_b")
+        self.assertEqual(window.option_combo.objectName(), "fixture_combo")
 
     def test_every_control_has_a_non_empty_accessible_name(self):
         window = ComputerUseFixtureWindow()
         for widget in (
             window.input_field, window.add_button, window.reset_button, window.item_list, window.tree,
             window.tabs, window.option_checkbox, window.scroll_list, window.load_button, window.dynamic_button,
-            window.action_button_a, window.action_button_b,
+            window.action_button_a, window.action_button_b, window.option_combo,
         ):
             self.assertTrue(widget.accessibleName(), f"{widget.objectName()} non ha un accessibleName")
 
@@ -531,6 +532,32 @@ class ScrollListTests(unittest.TestCase):
 
         self.assertFalse(window.is_scrolled_to_bottom())
         self.assertIsNone(window.selected_scroll_item_text())
+
+
+class ComboBoxTests(unittest.TestCase):
+    """Task 12 di F3.1.2 (continua verso i 100): `option_combo`, un terzo genere di controllo a
+    selezione mai presente in questa fixture (diverso da lista e albero) - vedi
+    `tests/test_computer_use_integration.py::ComboBoxSelectionEndToEndTests` per la dimostrazione
+    end-to-end via UI Automation (che ha gia' trovato il buco reale: selezionare un'opzione dal
+    popup richiede un click pixel, un `Invoke()` UIA non ha effetto)."""
+
+    def test_the_first_option_is_selected_by_default(self):
+        window = ComputerUseFixtureWindow()
+        self.assertEqual(window.current_combo_option(), "Opzione 1")
+
+    def test_all_three_options_are_present_in_order(self):
+        window = ComputerUseFixtureWindow()
+        options = [window.option_combo.itemText(i) for i in range(window.option_combo.count())]
+        self.assertEqual(options, ["Opzione 1", "Opzione 2", "Opzione 3"])
+
+    def test_reset_returns_the_combo_to_the_first_option(self):
+        window = ComputerUseFixtureWindow()
+        window.option_combo.setCurrentIndex(2)
+        self.assertEqual(window.current_combo_option(), "Opzione 3")
+
+        window.reset_state()
+
+        self.assertEqual(window.current_combo_option(), "Opzione 1")
 
 
 if __name__ == "__main__":
