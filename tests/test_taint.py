@@ -31,7 +31,7 @@ class WrapExternalContentTests(unittest.TestCase):
         self.assertIsNone(wrap_external_content("READ_FILE_TEXT", None))
 
     def test_every_verified_external_content_intent_is_covered(self):
-        """Le tredici skill censite a mano nel docstring del modulo - se una viene rinominata o
+        """Le quattordici skill censite a mano nel docstring del modulo - se una viene rinominata o
         rimossa senza aggiornare questo elenco, questo test non lo scoprirebbe da solo (non
         introspeziona skills/), ma documenta esplicitamente cosa ci si aspetta di trovare qui."""
         self.assertEqual(EXTERNAL_CONTENT_INTENTS, frozenset({
@@ -39,7 +39,7 @@ class WrapExternalContentTests(unittest.TestCase):
             "WEB_SEARCH", "RESEARCH", "GET_BROWSER_HISTORY",
             "FIND_FILE", "FIND_LARGE_FILES", "LIST_RECENT_FILES",
             "SEARCH_FILES", "HYBRID_SEARCH_FILES", "SEMANTIC_SEARCH_FILES",
-            "DESCRIBE_SCREEN",
+            "DESCRIBE_SCREEN", "READ_WEB_PAGE",
         }))
 
 

@@ -71,6 +71,7 @@ _NOT_FOUND_BY_INTENT = {
     "EXTRACT_URLS_FROM_TEXT": "Non ho trovato nessun link in quel testo.",
     "GET_BROWSER_HISTORY": "Non ho trovato cronologia recente nel browser.",
     "READ_SCREEN": "Non ho trovato testo leggibile sullo schermo.",
+    "READ_WEB_PAGE": "Non ho trovato testo leggibile in quella pagina.",
     "GET_ACTIVE_WINDOW": "Non riesco a determinare la finestra attiva.",
     "RESEARCH": "Non ho trovato nulla, ne' sul web ne' nei file locali, su questo argomento.",
     "CANCEL_TIMER": "Non hai timer attivi.",
@@ -141,6 +142,8 @@ def _format_error(intent: str, result: SkillResult) -> str:
         return f"'{data.get('at_time', '')}' non è un orario valido (usa HH:MM)."
     if error == "OCR_UNAVAILABLE":
         return "Non ho un motore OCR disponibile per la lingua di questo PC."
+    if error == "BROWSER_UNAVAILABLE":
+        return "Non trovo Microsoft Edge su questo PC, mi serve per leggere pagine web."
     if error == "VISION_UNAVAILABLE":
         return "Non riesco a vedere lo schermo in questo momento (verifica che il modello di visione sia installato: 'ollama pull qwen2.5vl:7b')."
     if error == "BROWSER_HISTORY_UNAVAILABLE":
@@ -456,6 +459,9 @@ def _format_success(intent: str, result: SkillResult, registry=None) -> str | No
     if intent == "READ_FILE_TEXT":
         suffisso = " (troncato)" if data.get("truncated") else ""
         return f"Contenuto{suffisso}:\n{data['text']}"
+    if intent == "READ_WEB_PAGE":
+        suffisso = " (troncato)" if data.get("truncated") else ""
+        return f"Contenuto di {data['url']}{suffisso}:\n{data['text']}"
     if intent == "DUPLICATE_FILE":
         return f"Ho duplicato il file in {data['destination']}"
     if intent == "GET_FOLDER_SIZE":

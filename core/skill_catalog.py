@@ -45,6 +45,7 @@ from skills.open_url import OpenUrlSkill
 from skills.browser_history import GetBrowserHistorySkill
 from skills.network_utils import PingHostSkill, TraceRouteSkill, CheckWebsiteStatusSkill
 from skills.browser_search import SearchInBrowserSkill, PlayMediaSkill
+from skills.read_web_page import ReadWebPageSkill
 
 from skills.remember import RememberSkill
 from skills.recall import RecallSkill
@@ -201,6 +202,7 @@ def build_web_skills(config, web_search_skill) -> dict:
         "SEARCH_IN_BROWSER": SearchInBrowserSkill(),
         "PLAY_MEDIA": PlayMediaSkill(),
         "OPEN_INCOGNITO_WINDOW": OpenIncognitoWindowSkill(),
+        "READ_WEB_PAGE": ReadWebPageSkill(),
     }
 
 

@@ -4541,9 +4541,11 @@ Criterio di uscita: nessuna contaminazione di memoria o permesso tra profili nei
   (inspector HUD, fuori scope per lavoro backend)]; F3.4 chiusa per intero (F3.4.1-F3.4.7 tutti
   affrontati, F3.4.3 collegato a policy_engine con risk_intent esplicito - 19/09/2026); F3.5 chiusa
   per intero (F3.5.1-F3.5.7 tutti affrontati); F3.6
-  avviata (F3.6.1/F3.6.2 resto/F3.6.3/F3.6.5/F3.6.7 prima fetta fatti, resta F3.6.4/F3.6.6/F3.6.7
-  resto, solo Edge - F3.8 ha inoltre verificato empiricamente che le procedure funzionano gia'
-  contro una pagina browser); F3.7 avviata (Esplora File/browser/VS Code/terminale fatti,
+  avviata (F3.6.1/F3.6.2 resto/F3.6.3 prima fetta/F3.6.4/F3.6.5/F3.6.7 prima fetta fatti, resta
+  F3.6.3 resto (form/tab/download-upload, upload INDAGATO ma bloccato da un limite UI Automation
+  reale)/F3.6.6/F3.6.7 resto, solo Edge - F3.8 ha inoltre verificato empiricamente che le
+  procedure funzionano gia' contro una pagina browser); F3.7 avviata (Esplora File/browser/VS
+  Code/terminale fatti,
   Impostazioni/Office/media rimandati per un rischio verificato o una privacy non autorizzata,
   messaggistica non affrontata); F3.8 CHIUDE IL CERCHIO (RecordedStep/replay/dry-run/parametri/
   ProcedureManager/RunComputerProcedureSkill/is_likely_drift tutti costruiti, resta F3.8.5 resto -
@@ -6175,6 +6177,37 @@ Criterio di uscita: suite di siti fixture locale verde e zero injection dal cont
   Prova: 1 test nuovo in `tests/test_browser_adapter.py::RealBrowserFixtureTests` (contro Edge
   vero - verifica sia il caso positivo, il testo vero c'e', sia quello di sicurezza, il valore
   vero del campo password non compare mai). 3.020/3.020 test in locale, ruff verde.
+
+- `F3.6.4` (CHIUSO - "isolare testo web come non fidato") — 20/09/2026: nuovo
+  `skills/read_web_page.py::ReadWebPageSkill` (`READ_WEB_PAGE`) - la PRIMA skill reale che usa
+  `launch_isolated_browser`/`find_page_document`/`read_page_text` (F3.6, dichiarati "additivi, mai
+  usati da nessuna skill" fin dal loro stesso docstring), lo stesso genere di gap gia' chiuso per
+  F3.8 da `RunComputerProcedureSkill`. Dato un URL pubblico, legge il testo visibile della pagina
+  in un browser ISOLATO (mai il profilo reale dell'utente, F3.6.1) e lo restituisce in
+  `data["text"]` - il browser e' SEMPRE terminato/ripulito in un blocco `finally` prima che
+  `execute()` ritorni, nessuno stato persistente sopravvive.
+
+  Ora esiste finalmente un intent REALE da registrare in `core/taint.py::EXTERNAL_CONTENT_INTENTS`
+  (il blocco dichiarato mancante nell'incremento precedente): `READ_WEB_PAGE` aggiunto li', con lo
+  stesso trattamento gia' riservato a `WEB_SEARCH`/`RESEARCH` (`RiskLevel.READ_ONLY`/
+  `EFFECT_CLASS_READ` in `core/risk.py`/`core/action_contracts.py` - legge, nessuna azione
+  persistente - ma il TESTO resta comunque contenuto esterno, tassonomia diversa dal livello di
+  rischio). Validazione URL deliberatamente duplicata da `skills/open_url.py::OpenUrlSkill` (solo
+  http/https, schemi pericolosi come `file:`/`javascript:` rifiutati subito) - un `file://` locale
+  non deve mai passare, leggerebbe file arbitrari del disco invece di una pagina web.
+
+  **Limite dichiarato apertamente**: un browser isolato non porta MAI cookie/sessione dell'utente
+  reale (F3.6.1) - questa skill legge quindi SOLO pagine pubbliche, mai contenuto dietro un login,
+  lo stesso genere di limite gia' accettato per VS Code/Notepad in F3.2.
+
+  Prova: 7 test nuovi in `tests/test_read_web_page_skill.py` - validazione (parametro mancante,
+  schema pericoloso, `file://` rifiutato, URL senza dominio, nessun browser toccato per questi) +
+  un test end-to-end REALE che legge `benchmarks/browser_fixture.html` servita via un piccolo
+  server HTTP locale su 127.0.0.1 (un `file://` verrebbe rifiutato dalla stessa validazione della
+  skill, nessun altro modo onesto di provare la skill VERA per intero senza toccare internet reale)
+  - verifica il testo REALE della pagina (titolo, bottone "Aggiungi") e che il valore vero del
+  campo password ("segreto123") non compaia mai, coerente con F3.6.7. `tests/test_taint.py`
+  aggiornato (14 intent censiti, non piu' 13). 3.166/3.166 test, ruff verde.
 
 ### F3.7 — Adapter applicativi
 

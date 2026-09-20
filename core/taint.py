@@ -27,6 +27,9 @@ campo di `SkillResult.data` che finisce nell'osservazione dell'agente:
   un repository clonato, un file scaricato);
 - `WEB_SEARCH` (`data["summary"]`, DuckDuckGo Instant Answer) e `RESEARCH` (`data["synthesis"]`,
   combina web + file locali): testo pubblicato da terzi;
+- `READ_WEB_PAGE` (`data["text"]`, F3.6.4, adozione 20/09/2026): il testo VISIBILE per intero di
+  una pagina web reale (letto via UI Automation da un browser isolato, F3.6.1) - non un riassunto
+  curato come WEB_SEARCH/RESEARCH, il testo grezzo scritto da chiunque possieda la pagina;
 - `GET_BROWSER_HISTORY` (titoli/URL delle pagine visitate): il titolo di una pagina e' scelto dal
   suo autore, non dall'utente.
 
@@ -81,6 +84,11 @@ EXTERNAL_CONTENT_INTENTS = frozenset({
     # no, pur restituendo lo stesso genere di testo derivato da cio' che c'e' VERAMENTE sullo
     # schermo (response_formatter.py restituisce data["description"] verbatim).
     "DESCRIBE_SCREEN",
+    # F3.6.4 (adozione, 20/09/2026): READ_WEB_PAGE (skills/read_web_page.py) - la PRIMA skill che
+    # legge davvero il testo di una pagina web reale (data["text"], F3.6.1) invece del solo
+    # riassunto curato di WEB_SEARCH/RESEARCH - il testo e' scritto da chiunque possieda la
+    # pagina, esattamente lo stesso rischio gia' riconosciuto per quelle due.
+    "READ_WEB_PAGE",
 })
 
 EXTERNAL_CONTENT_MARKER = "[CONTENUTO ESTERNO"

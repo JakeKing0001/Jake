@@ -104,6 +104,7 @@ SKILL_RISK: dict[str, RiskLevel] = {
     "GET_NEWS": RiskLevel.READ_ONLY,
     "OPEN_URL": RiskLevel.LOCAL_REVERSIBLE,
     "GET_BROWSER_HISTORY": RiskLevel.READ_ONLY,
+    "READ_WEB_PAGE": RiskLevel.READ_ONLY,  # legge, il browser isolato e' terminato prima che execute() ritorni
     "PING_HOST": RiskLevel.READ_ONLY,
     "TRACE_ROUTE": RiskLevel.READ_ONLY,
     "CHECK_WEBSITE_STATUS": RiskLevel.READ_ONLY,
