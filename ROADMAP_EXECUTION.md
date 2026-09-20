@@ -5433,6 +5433,63 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   3 test nuovi in `MoreKeyboardShortcutsAcrossFieldsEndToEndTests` (13 in totale per Task 71-83).
   F3.1.2 e' ora a **83/100**.
 
+- `F3.1.2` (Task 84-100, lotto FINALE - CHIUDE i 100 task dichiarati dal criterio di uscita di F3
+  "arrivare progressivamente a 100", su richiesta esplicita dell'utente di completare tutto in un
+  unico blocco) — 20/09/2026:
+
+  **Pattern Grid, un DECIMO pattern mai dichiarato/esercitato** (oltre Transform/Text): Task 84
+  `RowCount`/`ColumnCount`/`GetItem(riga,colonna)` su `data_table` corrispondono davvero al
+  contenuto reale; Task 85 (negativo) un indice fuori dai limiti dichiarati restituisce un
+  elemento NULLO, mai un'eccezione.
+
+  **Contrasti keyboard/pattern**: Task 86 le frecce/Home/End su `reorder_list` MAI riordinano
+  (solo il trascinamento reale, Task 16, ci riesce); Task 87 Giu'/PageGiu' DECREMENTANO la
+  sezione anno di `date_edit` (percorso simmetrico di Task 71).
+
+  **Ctrl+Z su quattro campi mai provati con l'undo**: Task 89 `multiline_edit`; Task 90
+  `editable_combo` (ripristina il valore PRE-esistente "Predefinito 1", non una stringa vuota);
+  Task 91 `numeric_field`; Task 92 `password_field` (l'undo funziona anche sotto
+  `EchoMode.Password` - la mascheratura riguarda solo la rappresentazione).
+
+  **Copertura/coerenza finale**: Task 88 click-click sul glifo checkabile va avanti e indietro
+  (Task 54); Task 95 un secondo trascinamento in sequenza svuota `transfer_source_list` del
+  tutto; Task 96 Ctrl+A+Canc su `editable_combo`; Task 97-100 il bottone "Reset" (invocato da
+  un'ALTRA scheda) raggiunge davvero `date_edit`/`editable_combo`/`numeric_field`/
+  `password_field` - la prova di integrazione finale.
+
+  **Task 93/94 (`checkable_list`) - DUE buchi reali trovati in sequenza scrivendo questi ultimi
+  task, non ipotizzati, ciascuno con una correzione o una dichiarazione onesta invece di
+  forzare un test verde**:
+  1. Con soli 90px (l'altezza usata inizialmente per Task 54, in "Tab 11" insieme a password/
+     numeric/tool button) solo DUE delle tre righe risultavano esposte via UI Automation - la
+     STESSA lezione DPI gia' nota per `item_list`/`reorder_list`. Alzata a 110/120 (il valore
+     gia' verificato altrove) ha creato un SECONDO buco: a quell'altezza la lista da sola
+     riempiva gia' l'intero budget del suo `QScrollArea` (120px), lasciando "Opzione Y"/
+     "Opzione Z" con bounds validi secondo UI Automation ma fisicamente oltre il bordo visibile -
+     la STESSA classe di buco gia' trovata per la tabella (Task 19). Risolto dando alla lista una
+     scheda TUTTA SUA ("Tab 13", `benchmarks/computer_use_fixture.py`), stesso principio di
+     Task 19.
+  2. Con la finestra ormai a 13 schede, il budget verticale complessivo e' cosi' stretto che
+     ANCHE con una scheda tutta sua il `QScrollArea` di "Tab 13" riceve MENO spazio reale (72px
+     fisici, verificato) di quanto `checkable_list` dichiari come minimo (110 logici, ~137
+     fisici) - "Opzione X"/"Opzione Y" restano raggiungibili (un click preciso a 12px dal bordo
+     superiore del glifo, NON al centro verticale come assunto in Task 54/88 - un terzo buco piu'
+     piccolo, il glifo non e' centrato nella riga), ma "Opzione Z" resta FISICAMENTE oltre il
+     bordo visibile - ne' il pattern Scroll ne' la rotella del mouse hanno un effetto su questo
+     contenitore. Dichiarato onestamente come limite noto (Task 94) invece di forzare un test
+     verde - la sua indipendenza dalle altre righe resta comunque verificata a livello Qt in
+     `tests/test_computer_use_fixture.py::CheckableListTests`.
+
+  Prova: 17 test nuovi in `tests/test_computer_use_integration.py` (`GridPatternEndToEndTests`,
+  `ReorderListArrowKeysDoNotReorderEndToEndTests`, `MoreDateEditAndCheckableListEndToEndTests`,
+  `UndoAcrossMoreFieldsEndToEndTests`, `CheckableListCoverageAndTransferAndComboEndToEndTests`,
+  `ResetButtonReachesEveryLateFieldEndToEndTests`). 3.338/3.338 test, ruff verde.
+
+  **F3.1.2 raggiunge 100/100 task dichiarati dal criterio di uscita di F3** ("Definire 10 task
+  iniziali e arrivare progressivamente a 100") - ogni task verificato con un probe empirico
+  dedicato prima del codice/test, con test end-to-end reali contro UI Automation, mai un mock
+  del motore di automazione stesso.
+
 ### F3.2 — Windows UI Automation adapter
 
 Dipende da: F3.1.

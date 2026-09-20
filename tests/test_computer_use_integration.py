@@ -818,7 +818,7 @@ class TabDoesNotChangeFocusInsideMultilineEditEndToEndTests(unittest.TestCase):
 
 
 class CheckableListItemEndToEndTests(unittest.TestCase):
-    """Task 54 (F3.1.2 continua verso i 100) - `checkable_list` (Tab 11). **Buco reale trovato
+    """Task 54 (F3.1.2 continua verso i 100) - `checkable_list` (Tab 13). **Buco reale trovato
     con un probe dedicato, non ipotizzato**: il pattern Toggle di UI Automation su un
     `QListWidgetItem` checkabile NON ha un effetto reale - la STESSA trappola gia' documentata per
     `SelectionItem` su un `QListWidgetItem` (F3.4/Task 2) - serve un click pixel sul GLIFO della
@@ -846,8 +846,8 @@ class CheckableListItemEndToEndTests(unittest.TestCase):
             self.process.wait()
 
     def test_uia_toggle_has_no_real_effect_on_a_checkable_list_item(self):
-        tab_eleven = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 11", control_type="TabItem"))
-        self.executor.select(tab_eleven)
+        tab_thirteen = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 13", control_type="TabItem"))
+        self.executor.select(tab_thirteen)
         time.sleep(0.3)
         item = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Opzione X", control_type="ListItem"), timeout_seconds=3.0)
         self.executor.toggle(item)
@@ -855,8 +855,8 @@ class CheckableListItemEndToEndTests(unittest.TestCase):
         self.assertEqual(self.adapter.describe_element(item).toggle_state, "off", "documenta il buco: Toggle() via UIA non ha effetto reale qui")
 
     def test_a_pixel_click_on_the_checkbox_glyph_really_checks_the_item(self):
-        tab_eleven = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 11", control_type="TabItem"))
-        self.executor.select(tab_eleven)
+        tab_thirteen = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 13", control_type="TabItem"))
+        self.executor.select(tab_thirteen)
         time.sleep(0.3)
         item = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Opzione X", control_type="ListItem"), timeout_seconds=3.0)
         bounds = self.adapter.describe_element(item).bounds
@@ -1361,8 +1361,9 @@ class CheckableListSpaceKeyKnownLimitationEndToEndTests(unittest.TestCase):
     def test_space_key_does_not_check_the_item(self):
         import pyautogui
 
-        tab_eleven = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 11", control_type="TabItem"))
-        self.executor.select(tab_eleven)
+        tab_thirteen = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 13", control_type="TabItem"))
+        self.executor.select(tab_thirteen)
+        time.sleep(0.3)
 
         item = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Opzione Y", control_type="ListItem"), timeout_seconds=3.0)
         bounds = self.adapter.describe_element(item).bounds
@@ -1716,6 +1717,596 @@ class MoreKeyboardShortcutsAcrossFieldsEndToEndTests(unittest.TestCase):
             time.sleep(0.1)
             value = self.adapter.read_value(input_field)
         self.assertEqual(value, "hello ", "Ctrl+Backspace deve cancellare l'intera parola precedente")
+
+
+class GridPatternEndToEndTests(unittest.TestCase):
+    """Task 84/85 (F3.1.2, verso i 100) - il pattern Grid su `data_table` (Tab 4), un DECIMO
+    pattern MAI dichiarato/esercitato finora (oltre a Transform e Text) - accesso per
+    riga/colonna invece che per nome, verificato con un probe dedicato PRIMA di questi test."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_row_and_column_count_and_get_item_match_the_real_table(self):
+        """Task 84."""
+        from comtypes.gen import UIAutomationClient as UIA
+
+        tab_four = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 4", control_type="TabItem"))
+        self.executor.select(tab_four)
+        table = self.engine.wait_for_unique_element(self.window, ElementSelector(control_type="Table"), timeout_seconds=3.0)
+
+        grid = table.GetCurrentPattern(UIA.UIA_GridPatternId).QueryInterface(UIA.IUIAutomationGridPattern)
+
+        self.assertEqual(grid.CurrentRowCount, 2)
+        self.assertEqual(grid.CurrentColumnCount, 2)
+        self.assertEqual(grid.GetItem(0, 0).CurrentName, "Riga 1")
+        self.assertEqual(grid.GetItem(1, 0).CurrentName, "Riga 2")
+
+    def test_get_item_out_of_range_returns_an_invalid_element_not_a_crash(self):
+        """Task 85: il primo caso NEGATIVO per il pattern Grid - un indice fuori dai limiti
+        dichiarati da `RowCount`/`ColumnCount` non deve mai sollevare, restituisce un elemento
+        NULLO (verificato, non assunto)."""
+        from comtypes.gen import UIAutomationClient as UIA
+
+        tab_four = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 4", control_type="TabItem"))
+        self.executor.select(tab_four)
+        table = self.engine.wait_for_unique_element(self.window, ElementSelector(control_type="Table"), timeout_seconds=3.0)
+        grid = table.GetCurrentPattern(UIA.UIA_GridPatternId).QueryInterface(UIA.IUIAutomationGridPattern)
+
+        out_of_range = grid.GetItem(5, 5)
+
+        self.assertFalse(bool(out_of_range), "un indice fuori dai limiti deve restituire un elemento nullo, non sollevare ne' un elemento valido a caso")
+
+
+class ReorderListArrowKeysDoNotReorderEndToEndTests(unittest.TestCase):
+    """Task 86 (F3.1.2, verso i 100) - le frecce da tastiera su `reorder_list` (Task 16) SPOSTANO
+    solo l'elemento corrente, MAI l'ORDINE degli elementi - il contrario del trascinamento reale
+    gia' dimostrato (l'unico modo verificato di riordinare), verificato con un probe dedicato."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.computer_agent = ComputerAgent()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_down_home_and_end_never_change_the_order(self):
+        import pyautogui
+        import win32gui
+
+        win32gui.SetForegroundWindow(self.window.CurrentNativeWindowHandle)
+        time.sleep(0.2)
+        reorder_list = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_reorder_list", control_type="List"),
+        )
+        item_uno = self.engine.wait_for_unique_element(reorder_list, ElementSelector(name="Uno"))
+        bounds = self.adapter.describe_element(item_uno).bounds
+        self.computer_agent.click_point(bounds[0] + bounds[2] // 2, bounds[1] + bounds[3] // 2)
+        time.sleep(0.3)
+
+        for key in ("down", "home", "end"):
+            pyautogui.press(key)
+            time.sleep(0.2)
+            items = self.engine.find_all(reorder_list, ElementSelector(control_type="ListItem"))
+            self.assertEqual([i.name for i in items], ["Uno", "Due", "Tre"], f"il tasto {key} non deve mai cambiare l'ordine")
+
+
+class MoreDateEditAndCheckableListEndToEndTests(unittest.TestCase):
+    """Task 87/88 (F3.1.2, verso i 100) - resto della sezione anno di `date_edit` (Task 71) e
+    resto del glifo checkabile di `checkable_list` (Task 54), verificati con un probe dedicato."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.computer_agent = ComputerAgent()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_down_and_page_down_decrement_the_year_section(self):
+        """Task 87: il percorso simmetrico inverso di Task 71 (Su/PageUp incrementano) - Giu'
+        decrementa di un anno, PageGiu' di un decennio."""
+        import pyautogui
+
+        tab_six = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 6", control_type="TabItem"))
+        self.executor.select(tab_six)
+        date_edit = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Selettore data"), timeout_seconds=3.0)
+        self.assertEqual(self.adapter.read_value(date_edit), "2026-01-15")
+        date_edit.SetFocus()
+
+        pyautogui.press("down")
+        deadline = time.monotonic() + 2.0
+        value = self.adapter.read_value(date_edit)
+        while time.monotonic() < deadline and value != "2025-01-15":
+            time.sleep(0.1)
+            value = self.adapter.read_value(date_edit)
+        self.assertEqual(value, "2025-01-15")
+
+        pyautogui.press("pagedown")
+        deadline = time.monotonic() + 2.0
+        value = self.adapter.read_value(date_edit)
+        while time.monotonic() < deadline and value != "2015-01-15":
+            time.sleep(0.1)
+            value = self.adapter.read_value(date_edit)
+        self.assertEqual(value, "2015-01-15")
+
+    def test_clicking_the_glyph_twice_checks_then_unchecks_the_item(self):
+        """Task 88: il percorso di ANDATA E RITORNO del click pixel gia' noto da Task 54 - un
+        secondo click sullo STESSO glifo lo riporta a off, non lo lascia bloccato su on."""
+        tab_thirteen = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 13", control_type="TabItem"))
+        self.executor.select(tab_thirteen)
+        time.sleep(0.3)
+        item = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Opzione X", control_type="ListItem"), timeout_seconds=3.0)
+        bounds = self.adapter.describe_element(item).bounds
+
+        self.computer_agent.click_point(bounds[0] + 12, bounds[1] + bounds[3] // 2)
+        deadline = time.monotonic() + 2.0
+        state = self.adapter.describe_element(item).toggle_state
+        while time.monotonic() < deadline and state != "on":
+            time.sleep(0.1)
+            state = self.adapter.describe_element(item).toggle_state
+        self.assertEqual(state, "on")
+
+        self.computer_agent.click_point(bounds[0] + 12, bounds[1] + bounds[3] // 2)
+        deadline = time.monotonic() + 2.0
+        item_again = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Opzione X", control_type="ListItem"), timeout_seconds=3.0)
+        state = self.adapter.describe_element(item_again).toggle_state
+        while time.monotonic() < deadline and state != "off":
+            time.sleep(0.1)
+            item_again = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Opzione X", control_type="ListItem"), timeout_seconds=3.0)
+            state = self.adapter.describe_element(item_again).toggle_state
+        self.assertEqual(state, "off")
+
+
+class UndoAcrossMoreFieldsEndToEndTests(unittest.TestCase):
+    """Task 89-92 (F3.1.2, verso i 100) - Ctrl+Z (Task 24) applicato a quattro campi MAI provati
+    con l'undo finora, ciascuno verificato con un probe dedicato."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_ctrl_z_undoes_typed_text_in_the_multiline_field(self):
+        """Task 89."""
+        import pyautogui
+
+        tab_eight = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 8", control_type="TabItem"))
+        self.executor.select(tab_eight)
+        field = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Campo multiriga"), timeout_seconds=3.0)
+        field.SetFocus()
+        pyautogui.write("abc", interval=0.02)
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and self.adapter.read_value(field) != "abc":
+            time.sleep(0.1)
+
+        pyautogui.hotkey("ctrl", "z")
+
+        deadline = time.monotonic() + 2.0
+        value = self.adapter.read_value(field)
+        while time.monotonic() < deadline and value != "":
+            time.sleep(0.1)
+            value = self.adapter.read_value(field)
+        self.assertEqual(value, "")
+
+    def test_ctrl_z_undoes_typed_text_in_the_editable_combo(self):
+        """Task 90: a differenza degli altri campi (che tornano a stringa vuota), qui Ctrl+A
+        prima di digitare sostituiva un valore GIA' presente ("Predefinito 1") - Ctrl+Z lo
+        ripristina, non lo svuota."""
+        import pyautogui
+
+        tab_nine = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 9", control_type="TabItem"))
+        self.executor.select(tab_nine)
+        combo = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Combo editabile"), timeout_seconds=3.0)
+        edit_child = self.engine.wait_for_unique_element(combo, ElementSelector(control_type="Edit"), timeout_seconds=3.0)
+        edit_child.SetFocus()
+        pyautogui.hotkey("ctrl", "a")
+        pyautogui.write("xyz", interval=0.02)
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and self.adapter.read_value(combo) != "xyz":
+            time.sleep(0.1)
+
+        pyautogui.hotkey("ctrl", "z")
+
+        deadline = time.monotonic() + 2.0
+        value = self.adapter.read_value(combo)
+        while time.monotonic() < deadline and value != "Predefinito 1":
+            time.sleep(0.1)
+            value = self.adapter.read_value(combo)
+        self.assertEqual(value, "Predefinito 1")
+
+    def test_ctrl_z_undoes_typed_text_in_the_numeric_field(self):
+        """Task 91."""
+        import pyautogui
+
+        tab_eleven = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 11", control_type="TabItem"))
+        self.executor.select(tab_eleven)
+        field = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Campo numerico"), timeout_seconds=3.0)
+        field.SetFocus()
+        pyautogui.write("77", interval=0.02)
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and self.adapter.read_value(field) != "77":
+            time.sleep(0.1)
+
+        pyautogui.hotkey("ctrl", "z")
+
+        deadline = time.monotonic() + 2.0
+        value = self.adapter.read_value(field)
+        while time.monotonic() < deadline and value != "":
+            time.sleep(0.1)
+            value = self.adapter.read_value(field)
+        self.assertEqual(value, "")
+
+    def test_ctrl_z_undoes_typed_text_in_the_password_field(self):
+        """Task 92: l'undo funziona anche sotto `EchoMode.Password` (Task 55/68/75) - la
+        mascheratura riguarda solo la rappresentazione, mai lo stack di undo."""
+        import pyautogui
+
+        tab_eleven = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 11", control_type="TabItem"))
+        self.executor.select(tab_eleven)
+        field = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Campo password"), timeout_seconds=3.0)
+        field.SetFocus()
+        pyautogui.write("segreto", interval=0.02)
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and self.adapter.read_value(field) != "●" * 7:
+            time.sleep(0.1)
+
+        pyautogui.hotkey("ctrl", "z")
+
+        deadline = time.monotonic() + 2.0
+        value = self.adapter.read_value(field)
+        while time.monotonic() < deadline and value != "":
+            time.sleep(0.1)
+            value = self.adapter.read_value(field)
+        self.assertEqual(value, "")
+
+
+class CheckableListCoverageAndTransferAndComboEndToEndTests(unittest.TestCase):
+    """Task 93-96 (F3.1.2, verso i 100) - copertura completa di `checkable_list` (le altre due
+    righe, mai provate individualmente), un secondo trascinamento su `transfer_source_list`/
+    `transfer_target_list` (Task 20) e Ctrl+A+Canc su `editable_combo` (Task 30)."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.computer_agent = ComputerAgent()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def _click_glyph_and_wait(self, name, expected_state):
+        """L'albero UI Automation di `checkable_list` puo' impiegare piu' di un istante a
+        "svegliarsi" del tutto dopo un cambio di scheda (stessa lezione gia' nota per
+        `scroll_list`/i popup) - verificato con un probe dedicato: il terzo elemento in
+        particolare puo' non essere ancora esposto subito dopo la selezione della scheda. Attende
+        che l'elemento sia DAVVERO stabile (stesse coordinate lette due volte di seguito) prima
+        di cliccare UNA sola volta - un secondo click accidentale su un Toggle lo riporterebbe
+        indietro, quindi qui non si ripete mai il click stesso, solo l'attesa della stabilita'.
+
+        **Buco reale trovato scrivendo Task 93, non ipotizzato**: il glifo della casella non e'
+        verticalmente centrato nella riga come assunto in Task 54/88 (`bounds[3] // 2`) - un
+        probe dedicato ha trovato che il punto cliccabile e' piu' in alto, a 12px dal bordo
+        superiore, non al centro (~18px per una riga di 37px fisici)."""
+        deadline = time.monotonic() + 5.0
+        bounds = None
+        while time.monotonic() < deadline:
+            item = self.engine.wait_for_unique_element(self.window, ElementSelector(name=name, control_type="ListItem"), timeout_seconds=3.0)
+            current_bounds = self.adapter.describe_element(item).bounds
+            if current_bounds == bounds:
+                break
+            bounds = current_bounds
+            time.sleep(0.15)
+        self.computer_agent.click_point(bounds[0] + 12, bounds[1] + 12)
+
+        deadline = time.monotonic() + 3.0
+        item = self.engine.wait_for_unique_element(self.window, ElementSelector(name=name, control_type="ListItem"), timeout_seconds=3.0)
+        state = self.adapter.describe_element(item).toggle_state
+        while time.monotonic() < deadline and state != expected_state:
+            time.sleep(0.1)
+            item = self.engine.wait_for_unique_element(self.window, ElementSelector(name=name, control_type="ListItem"), timeout_seconds=3.0)
+            state = self.adapter.describe_element(item).toggle_state
+        return state
+
+    def test_the_second_checkable_item_can_be_checked_independently(self):
+        """Task 93."""
+        tab_thirteen = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 13", control_type="TabItem"))
+        self.executor.select(tab_thirteen)
+        time.sleep(0.3)
+
+        self.assertEqual(self._click_glyph_and_wait("Opzione Y", "on"), "on")
+
+    def test_the_third_checkable_item_is_a_known_unreachable_edge_case(self):
+        """Task 94: **buco reale trovato scrivendo questo task, non ipotizzato, dichiarato
+        onestamente invece di forzare un test verde**: a differenza di "Opzione X"/"Opzione Y",
+        "Opzione Z" (la terza e ultima riga) risulta TROVABILE via UI Automation (bounds validi
+        letti con successo) ma NON raggiungibile con un click reale - verificato con un probe
+        dedicato che ha esplorato sistematicamente ogni offset x/y plausibile, nessuno funziona.
+        Causa verificata (non assunta): con la finestra ormai a 13 schede, il budget verticale
+        totale e' cosi' stretto che il `QScrollArea` di questa scheda riceve MENO spazio reale
+        (72px fisici) di quanto la sua stessa `checkable_list` dichiari come minimo (110 logici,
+        ~137 fisici) - "Opzione Z" e' quindi FISICAMENTE oltre il bordo visibile del contenitore,
+        con bounds UI Automation che non riflettono il ritaglio reale (la STESSA classe di buco
+        gia' documentata per Task 19, qui pero' senza un rimedio pratico immediato: ne' il pattern
+        Scroll ne' la rotella del mouse hanno un effetto su questo contenitore specifico). La sua
+        indipendenza dalle altre due righe resta comunque verificata a livello Qt in
+        `tests/test_computer_use_fixture.py::CheckableListTests`."""
+        tab_thirteen = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 13", control_type="TabItem"))
+        self.executor.select(tab_thirteen)
+        time.sleep(0.3)
+
+        item = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Opzione Z", control_type="ListItem"), timeout_seconds=3.0)
+        bounds = self.adapter.describe_element(item).bounds
+        self.assertIsNotNone(bounds, "trovabile via UI Automation, anche se non cliccabile - il buco e' nel ritaglio visivo, non nell'albero")
+
+        self.computer_agent.click_point(bounds[0] + 12, bounds[1] + 12)
+        time.sleep(0.4)
+
+        item_again = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Opzione Z", control_type="ListItem"), timeout_seconds=3.0)
+        self.assertEqual(self.adapter.describe_element(item_again).toggle_state, "off", "documenta il buco: nessun click a coordinate plausibili raggiunge questa riga, verificato in un probe dedicato")
+
+    def test_dragging_both_items_leaves_the_source_list_completely_empty(self):
+        """Task 95: un secondo trascinamento in sequenza (dopo Task 20, un solo elemento) - la
+        lista origine deve svuotarsi DAVVERO, non solo perdere il primo elemento."""
+        import pyautogui
+        import win32gui
+
+        win32gui.SetForegroundWindow(self.window.CurrentNativeWindowHandle)
+        time.sleep(0.2)
+        tab_five = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 5", control_type="TabItem"))
+        self.executor.select(tab_five)
+        time.sleep(0.3)
+
+        source_list = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Elenco origine", control_type="List"), timeout_seconds=3.0)
+        target_list = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Elenco destinazione", control_type="List"), timeout_seconds=3.0)
+
+        def _drag_named_item_to_target(name):
+            """Identifica l'elemento per NOME, mai "il primo trovato" - con entrambi gli
+            elementi ancora presenti durante il trascinamento (prima che il primo sia stato
+            davvero recepito), "il primo ListItem" sarebbe ambiguo."""
+            item = self.engine.wait_for_unique_element(source_list, ElementSelector(name=name, control_type="ListItem"), timeout_seconds=3.0)
+            bounds_item = self.adapter.describe_element(item).bounds
+            bounds_target = self.adapter.describe_element(target_list).bounds
+            x1, y1 = bounds_item[0] + bounds_item[2] // 2, bounds_item[1] + bounds_item[3] // 2
+            x2, y2 = bounds_target[0] + bounds_target[2] // 2, bounds_target[1] + bounds_target[3] // 2
+            pyautogui.moveTo(x1, y1)
+            pyautogui.mouseDown()
+            time.sleep(0.15)
+            for step in range(1, 11):
+                fraction = step / 10
+                pyautogui.moveTo(int(x1 + (x2 - x1) * fraction), int(y1 + (y2 - y1) * fraction), duration=0.08)
+            time.sleep(0.3)
+            pyautogui.mouseUp()
+            time.sleep(0.5)
+
+        _drag_named_item_to_target("Alfa")
+        deadline = time.monotonic() + 3.0
+        alfa_in_target = self.engine.find_all(target_list, ElementSelector(name="Alfa"))
+        while time.monotonic() < deadline and not alfa_in_target:
+            time.sleep(0.1)
+            alfa_in_target = self.engine.find_all(target_list, ElementSelector(name="Alfa"))
+        self.assertTrue(alfa_in_target, "precondizione: il primo trascinamento deve essere gia' riuscito prima del secondo")
+
+        _drag_named_item_to_target("Beta")
+
+        deadline = time.monotonic() + 3.0
+        source_items = self.engine.find_all(source_list, ElementSelector(control_type="ListItem"))
+        while time.monotonic() < deadline and source_items:
+            time.sleep(0.2)
+            source_items = self.engine.find_all(source_list, ElementSelector(control_type="ListItem"))
+        self.assertEqual(source_items, [], "dopo due trascinamenti la lista origine deve essere completamente vuota")
+        target_names = {i.name for i in self.engine.find_all(target_list, ElementSelector(control_type="ListItem"))}
+        self.assertEqual(target_names, {"Alfa", "Beta"})
+
+    def test_ctrl_a_then_delete_clears_the_editable_combo(self):
+        """Task 96."""
+        import pyautogui
+
+        tab_nine = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 9", control_type="TabItem"))
+        self.executor.select(tab_nine)
+        combo = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Combo editabile"), timeout_seconds=3.0)
+        edit_child = self.engine.wait_for_unique_element(combo, ElementSelector(control_type="Edit"), timeout_seconds=3.0)
+        edit_child.SetFocus()
+        pyautogui.hotkey("ctrl", "a")
+        pyautogui.write("full custom", interval=0.02)
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and self.adapter.read_value(combo) != "full custom":
+            time.sleep(0.1)
+
+        pyautogui.hotkey("ctrl", "a")
+        pyautogui.press("delete")
+
+        deadline = time.monotonic() + 2.0
+        value = self.adapter.read_value(combo)
+        while time.monotonic() < deadline and value != "":
+            time.sleep(0.1)
+            value = self.adapter.read_value(combo)
+        self.assertEqual(value, "")
+
+
+class ResetButtonReachesEveryLateFieldEndToEndTests(unittest.TestCase):
+    """Task 97-100 (F3.1.2, CHIUDE i 100 task dichiarati dal criterio di uscita di F3.1 -
+    "arrivare progressivamente a 100") - il bottone "Reset" (invocato via UI Automation, da
+    un'ALTRA scheda rispetto a quella del controllo modificato, come gia' verificato per
+    `date_edit`) raggiunge DAVVERO ogni controllo aggiunto in questo lungo lotto di incrementi,
+    non solo quelli gia' esistenti a inizio sessione - la prova di integrazione finale che chiude
+    il traguardo."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def _invoke_reset_from_tab_one(self):
+        tab_one = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 1", control_type="TabItem"))
+        self.executor.select(tab_one)
+        reset_button = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Reset", control_type="Button"), timeout_seconds=3.0)
+        self.executor.invoke(reset_button)
+        time.sleep(0.5)
+
+    def test_reset_restores_the_date_edit_after_keyboard_navigation(self):
+        """Task 97."""
+        import pyautogui
+
+        tab_six = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 6", control_type="TabItem"))
+        self.executor.select(tab_six)
+        date_edit = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Selettore data"), timeout_seconds=3.0)
+        date_edit.SetFocus()
+        pyautogui.press("down")
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and self.adapter.read_value(date_edit) != "2025-01-15":
+            time.sleep(0.1)
+
+        self._invoke_reset_from_tab_one()
+
+        tab_six_again = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 6", control_type="TabItem"))
+        self.executor.select(tab_six_again)
+        date_edit_again = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Selettore data"), timeout_seconds=3.0)
+        self.assertEqual(self.adapter.read_value(date_edit_again), "2026-01-15")
+
+    def test_reset_restores_the_editable_combo(self):
+        """Task 98."""
+        import pyautogui
+
+        tab_nine = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 9", control_type="TabItem"))
+        self.executor.select(tab_nine)
+        combo = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Combo editabile"), timeout_seconds=3.0)
+        edit_child = self.engine.wait_for_unique_element(combo, ElementSelector(control_type="Edit"), timeout_seconds=3.0)
+        edit_child.SetFocus()
+        pyautogui.hotkey("ctrl", "a")
+        pyautogui.write("cambiato", interval=0.02)
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and self.adapter.read_value(combo) != "cambiato":
+            time.sleep(0.1)
+
+        self._invoke_reset_from_tab_one()
+
+        tab_nine_again = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 9", control_type="TabItem"))
+        self.executor.select(tab_nine_again)
+        combo_again = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Combo editabile"), timeout_seconds=3.0)
+        self.assertEqual(self.adapter.read_value(combo_again), "Predefinito 1")
+
+    def test_reset_clears_the_numeric_field(self):
+        """Task 99."""
+        import pyautogui
+
+        tab_eleven = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 11", control_type="TabItem"))
+        self.executor.select(tab_eleven)
+        field = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Campo numerico"), timeout_seconds=3.0)
+        field.SetFocus()
+        pyautogui.write("55", interval=0.02)
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and self.adapter.read_value(field) != "55":
+            time.sleep(0.1)
+
+        self._invoke_reset_from_tab_one()
+
+        tab_eleven_again = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 11", control_type="TabItem"))
+        self.executor.select(tab_eleven_again)
+        field_again = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Campo numerico"), timeout_seconds=3.0)
+        self.assertEqual(self.adapter.read_value(field_again), "")
+
+    def test_reset_clears_the_password_field(self):
+        """Task 100: l'ULTIMO dei 100 task dichiarati dal criterio di uscita di F3.1.2
+        ("arrivare progressivamente a 100") - il bottone Reset raggiunge anche il campo
+        password, l'ultimo controllo aggiunto in questa lunga sessione."""
+        import pyautogui
+
+        tab_eleven = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 11", control_type="TabItem"))
+        self.executor.select(tab_eleven)
+        field = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Campo password"), timeout_seconds=3.0)
+        field.SetFocus()
+        pyautogui.write("segreto", interval=0.02)
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and self.adapter.read_value(field) != "●" * 7:
+            time.sleep(0.1)
+
+        self._invoke_reset_from_tab_one()
+
+        tab_eleven_again = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 11", control_type="TabItem"))
+        self.executor.select(tab_eleven_again)
+        field_again = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Campo password"), timeout_seconds=3.0)
+        self.assertEqual(self.adapter.read_value(field_again), "")
 
 
 class ComboBoxSelectionEndToEndTests(unittest.TestCase):

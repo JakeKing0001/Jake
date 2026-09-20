@@ -654,23 +654,9 @@ class ComputerUseFixtureWindow(QWidget):
         tenth_tab_scroll.setWidget(tenth_tab)
         self.tabs.addTab(tenth_tab_scroll, "Tab 10")
 
-        # Task 54 (F3.1.2 continua verso i 100): una lista con elementi CHECKABILI
-        # (`ItemIsUserCheckable`) - ogni riga ha una propria casella, diverso da `item_list`
-        # (selezione) e da `option_checkbox`/`tristate_checkbox` (un controllo unico, non per
-        # riga) - il pattern reale "scegli quali file esportare".
         eleventh_tab = QWidget()
         eleventh_tab.setObjectName("fixture_tab_eleven_content")
         eleventh_tab_layout = QVBoxLayout(eleventh_tab)
-        self.checkable_list = QListWidget()
-        self.checkable_list.setObjectName("fixture_checkable_list")
-        self.checkable_list.setAccessibleName("Elenco con caselle")
-        for label in ("Opzione X", "Opzione Y", "Opzione Z"):
-            item = QListWidgetItem(label)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Unchecked)
-            self.checkable_list.addItem(item)
-        self.checkable_list.setMaximumHeight(90)
-        eleventh_tab_layout.addWidget(self.checkable_list)
 
         # Task 55 (F3.1.2 continua verso i 100): un campo PASSWORD (`EchoMode.Password`) - il
         # testo digitato non e' mai visibile sullo schermo, collegato al tema gia' esercitato in
@@ -727,6 +713,45 @@ class ComputerUseFixtureWindow(QWidget):
         twelfth_tab_scroll.setMaximumHeight(120)
         twelfth_tab_scroll.setWidget(twelfth_tab)
         self.tabs.addTab(twelfth_tab_scroll, "Tab 12")
+
+        # Task 54 (F3.1.2 continua verso i 100): una lista con elementi CHECKABILI
+        # (`ItemIsUserCheckable`) - ogni riga ha una propria casella, diverso da `item_list`
+        # (selezione) e da `option_checkbox`/`tristate_checkbox` (un controllo unico, non per
+        # riga) - il pattern reale "scegli quali file esportare".
+        #
+        # **Buco reale trovato scrivendo Task 93/94, non ipotizzato - in DUE fasi**: prima messa
+        # in "Tab 11" insieme a password/numeric/tool button, con soli 90px di altezza - SOLO due
+        # delle tre righe risultavano davvero esposte via UI Automation ("Opzione Z" mai
+        # raggiungibile), la STESSA lezione DPI gia' affrontata per `item_list`/`reorder_list`.
+        # Alzata a 110/120 (lo stesso valore verificato altrove) ha CREATO un secondo buco,
+        # diverso: a quell'altezza la lista da sola riempiva gia' l'intero budget del suo
+        # `QScrollArea` (120px), lasciando "Opzione Y"/"Opzione Z" con bounds validi secondo UI
+        # Automation ma FISICAMENTE oltre il bordo visibile del contenitore - la STESSA classe di
+        # buco gia' trovata per la tabella (Task 19: bounds non ricalcolati per contenuto
+        # scrollato fuori vista in un `QScrollArea`). Risolto dando alla lista una scheda TUTTA
+        # SUA ("Tab 13"), invece di condividerla con altri tre controlli - stesso principio gia'
+        # applicato in Task 19.
+        thirteenth_tab = QWidget()
+        thirteenth_tab.setObjectName("fixture_tab_thirteen_content")
+        thirteenth_tab_layout = QVBoxLayout(thirteenth_tab)
+        self.checkable_list = QListWidget()
+        self.checkable_list.setObjectName("fixture_checkable_list")
+        self.checkable_list.setAccessibleName("Elenco con caselle")
+        for label in ("Opzione X", "Opzione Y", "Opzione Z"):
+            item = QListWidgetItem(label)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Unchecked)
+            self.checkable_list.addItem(item)
+        self.checkable_list.setMinimumHeight(110)
+        self.checkable_list.setMaximumHeight(120)
+        thirteenth_tab_layout.addWidget(self.checkable_list)
+        thirteenth_tab_layout.addStretch()
+        thirteenth_tab_scroll = QScrollArea()
+        thirteenth_tab_scroll.setObjectName("fixture_tab_thirteen_scroll")
+        thirteenth_tab_scroll.setWidgetResizable(True)
+        thirteenth_tab_scroll.setMaximumHeight(120)
+        thirteenth_tab_scroll.setWidget(thirteenth_tab)
+        self.tabs.addTab(thirteenth_tab_scroll, "Tab 13")
 
         # Task 59 (F3.1.2 continua verso i 100): una scorciatoia GLOBALE (`QShortcut`, Ctrl+N)
         # collegata ad `_add_current_text` - diverso da ogni scorciatoia gia' esercitata (tutte
