@@ -4523,25 +4523,32 @@ Criterio di uscita: nessuna contaminazione di memoria o permesso tra profili nei
 
 ## 9. F3 — Computer Use Engine 3.0
 
-- Stato: `DOING` (G1 superato il 16/09/2026, vedi Gate G1 sopra - riga NON aggiornata dal 18/09/2026
-  fino al 19/09/2026, quando questo incremento l'ha ricalcolata leggendo l'intera sezione invece di
-  fidarsi del riepilogo stantio: F3.1.1 chiusa per intero; F3.1.2 [4/10 task completati end-to-end
-  (1/2/4/5), Task 3 INDAGATO ma bloccato da un limite Qt reale (ExpandCollapse senza effetto,
-  nessuna strategia di ripiego trovata), Task 6-10 mai definiti nella fixture]; F3.1.5 (DPI/multi-
-  monitor/temi) non affrontata; F3.1.6 (controlli ambigui/disabilitati/dinamici) solo un assaggio
-  via il bottone "Rimuovi selezionato" disabilitato, non l'intero punto; F3.2 [criterio
-  "cinque app reali" soddisfatto - Calcolatrice/Paint/Esplora File/Edge/terminale, VS Code
-  investigato e trovato NON idoneo, F3.2.7 chiuso con un benchmark vero e ripetibile - resta
-  aperto solo F3.2.2 meta'/F3.2.4/F3.2.5/F3.2.6];
-  F3.3 [F3.3.1 (window)/F3.3.2/F3.3.3/F3.3.4/F3.3.7 prima fetta chiusi, resta solo F3.3.1
-  (app/process/ancestor)/F3.3.5/F3.3.6]; F3.4 chiusa per intero (F3.4.1-F3.4.7 tutti affrontati,
-  F3.4.3 collegato a policy_engine con risk_intent esplicito - 19/09/2026); F3.5 chiusa per intero
-  (F3.5.1-F3.5.7 tutti affrontati); F3.6
+- Stato: `DOING` (G1 superato il 16/09/2026, vedi Gate G1 sopra - riga NON aggiornata dal 19/09/2026
+  fino al 20/09/2026, quando questo incremento l'ha ricalcolata leggendo l'intera sezione invece di
+  fidarsi del riepilogo stantio: F3.1.1 chiusa per intero; F3.1.2 [9/10 task completati end-to-end
+  (aggiungi/rimuovi con conferma/espandi e seleziona/cambia tab e spunta/scorri e seleziona/
+  attendi un controllo dinamico/disambigua controlli ambigui/tema/traduzione), Task 3 ("espandi
+  categoria") INDAGATO ma bloccato da un limite Qt reale (ExpandCollapse senza effetto, nessuna
+  strategia di ripiego trovata) - resta l'unico dei 10 non dimostrato]; F3.1.5 (DPI/multi-monitor -
+  "tema" ora coperto da F3.3.7) non affrontata; F3.1.6 (controlli ambigui/disabilitati/dinamici)
+  CHIUSO per intero; F3.2 [criterio "cinque app reali" soddisfatto - Calcolatrice/Paint/Esplora
+  File/Edge/terminale, VS Code investigato e trovato NON idoneo, F3.2.6 (scope/privacy) e F3.2.7
+  (benchmark) chiusi con verifica reale - resta aperto solo F3.2.2 meta' (cache)/F3.2.4 (eventi,
+  dipende dalla cache)/F3.2.5 (finestre elevate, mai testato)];
+  F3.3 [F3.3.1 CHIUSO per intero (window/app-process, resta solo "ancestor", un incremento a se'),
+  F3.3.2/F3.3.3/F3.3.4/F3.3.7 CHIUSI per intero (resize/move + reorder + tema + traduzione), resta
+  solo F3.3.5 (invalidazione - nessuna cache di selettori esiste ancora, dipende da F3.2.2)/F3.3.6
+  (inspector HUD, fuori scope per lavoro backend)]; F3.4 chiusa per intero (F3.4.1-F3.4.7 tutti
+  affrontati, F3.4.3 collegato a policy_engine con risk_intent esplicito - 19/09/2026); F3.5 chiusa
+  per intero (F3.5.1-F3.5.7 tutti affrontati); F3.6
   avviata (F3.6.1/F3.6.2 resto/F3.6.3/F3.6.5/F3.6.7 prima fetta fatti, resta F3.6.4/F3.6.6/F3.6.7
-  resto, solo Edge); F3.7 avviata (Esplora File/browser/VS Code/terminale fatti, Impostazioni/
-  Office/media rimandati per un rischio verificato o una privacy non autorizzata, messaggistica
-  non affrontata); F3.8 non iniziata - vedi le sezioni sotto per i dettagli e le date esatte di
-  ogni incremento)
+  resto, solo Edge - F3.8 ha inoltre verificato empiricamente che le procedure funzionano gia'
+  contro una pagina browser); F3.7 avviata (Esplora File/browser/VS Code/terminale fatti,
+  Impostazioni/Office/media rimandati per un rischio verificato o una privacy non autorizzata,
+  messaggistica non affrontata); F3.8 CHIUDE IL CERCHIO (RecordedStep/replay/dry-run/parametri/
+  ProcedureManager/RunComputerProcedureSkill/is_likely_drift tutti costruiti, resta F3.8.5 resto -
+  versione/app target/undo, F3.8.6 resto - sospendere la routine, F3.8.7 resto - ri-approvazione -
+  vedi le sezioni sotto per i dettagli e le date esatte di ogni incremento)
 - Priorità: `P1`
 - Output: Jake controlla Windows per semantica, verifica il risultato e usa i pixel come fallback.
 
@@ -4942,6 +4949,30 @@ Criterio di uscita: dump semantico stabile della fixture e di cinque app reali s
   restano deliberatamente fuori da `tests/`, stesso principio gia' dichiarato in
   `benchmarks/_report.py`) - 3.050/3.050 test invariato, ruff verde.
 
+- `F3.2.6` ("limitare scope alla finestra target per prestazioni e privacy", CHIUSO per intero) —
+  20/09/2026: la leva di PRESTAZIONI era gia' dimostrata sopra (F3.2.7, il benchmark sull'albero
+  grande) - qui verificata per la prima volta la proprieta' GEMELLA di PRIVACY, mai testata
+  esplicitamente finora: una ricerca con `root` uguale alla finestra A non deve MAI restituire un
+  elemento che appartiene a una finestra B DIVERSA, anche quando entrambe esistono
+  contemporaneamente. Nuovo `tests/test_ui_automation_adapter.py::ScopeLimitedToTargetWindowTests`
+  (due istanze reali della fixture, stesso schema HWND-based gia' usato da
+  `LocalizationAfterReorderTests`, F3.3.7 "reorder"): un elemento aggiunto SOLO in B non compare
+  mai in una ricerca scoped ad A (verificato con un controllo positivo indipendente - l'elemento
+  esiste davvero in B - prima del controllo negativo su A, altrimenti un risultato vuoto non
+  proverebbe nulla); una ricerca AMPIA (ogni `Button`, senza nome) scoped ad A restituisce solo
+  bottoni che appartengono DAVVERO al processo di A (verificato per PID, F3.3.1, non per
+  conteggio).
+
+  **Buco reale trovato scrivendo QUESTO test, non ipotizzato**: una prima versione verificava il
+  controllo positivo con un singolo `find_matching_elements` IMMEDIATAMENTE dopo `executor.
+  invoke()`, senza polling - falliva (0 invece di 1) nonostante il click fosse arrivato davvero.
+  L'aggiornamento della lista Qt dopo un `Invoke` via UI Automation non e' garantito sincrono dal
+  punto di vista del chiamante esterno, anche se il gestore lo e' internamente al processo Qt -
+  ogni altro test in questa sessione che verifica un click seguito da un controllo usa gia'
+  `wait_for_unique_element` (a polling) per questo motivo, mai un singolo tentativo; corretto
+  allineando questo nuovo test allo stesso schema gia' consolidato. Prova: 2 test nuovi.
+  3.159/3.159 test, ruff verde.
+
 ### F3.3 — Selector engine
 
 Dipende da: F3.2.
@@ -5066,6 +5097,33 @@ Criterio di uscita: gli stessi task passano dopo resize, tema e spostamento fine
   Restano aperti "traduzione" (nessuna build multilingua della fixture) e "tema" (nessuna
   variazione di tema testata) - F3.3.7 non e' ancora chiuso per intero. Prova: 2 test nuovi.
   3.152/3.152 test, ruff verde.
+
+- `F3.3.7` (resto - "tema", Task 8/10 di F3.1.2) — 20/09/2026: nuovo
+  `benchmarks/computer_use_fixture.py::_apply_dark_theme()`/`--dark-theme` (palette Fusion scura
+  VERA, non un `setStyleSheet` cosmetico) + `tests/test_selector.py::ThemeChangeTests`.
+  Deliberatamente NON tocca `accessibleName`/`objectName`/control type - le uniche proprieta' che
+  UI Automation espone (F3.2.3) - un selettore per nome/automation_id sopravvive quindi per
+  costruzione, verificato con uno screenshot REALE della finestra ritagliato sui suoi bounds
+  (`core/vision/screen.py::capture_screenshot_image`, gia' usata altrove in questa suite) - la
+  luminosita' media di una regione centrale deve essere bassa, non solo "il flag non ha
+  sollevato". Prova: 2 test nuovi. 3.154/3.154 test, ruff verde.
+
+- `F3.3.7` (resto - "traduzione", Task 9/10 di F3.1.2, CHIUDE F3.3.7 per intero) — 20/09/2026:
+  nuovo `benchmarks/computer_use_fixture.py::_ADD_BUTTON_LABELS`/`--language` - SOLO il bottone
+  "Aggiungi"/"Add" e' tradotto (una i18n completa dell'intera fixture avrebbe rotto ogni test
+  esistente che gia' asserisce nomi in italiano, senza alcun beneficio aggiuntivo per il punto da
+  dimostrare - "un incremento alla volta"). L'`automation_id` (`fixture_add_button`) resta
+  identico in ogni lingua per costruzione (mai stato nel dizionario di traduzione).
+
+  Prova: 3 test nuovi in `tests/test_selector.py::TranslationChangeTests` - il selettore per nome
+  in italiano ("Aggiungi") smette di funzionare sotto la build inglese (`NoMatchError`); il
+  selettore per il nome tradotto ("Add") funziona e clicca davvero; lo STESSO automation_id gia'
+  usato contro la fixture italiana altrove nel file funziona SENZA MODIFICHE sotto la build
+  inglese - il punto centrale di F3.3.7 "traduzione": un selettore procedurale per automation_id
+  (F3.3.4/F3.8) non deve mai essere riscritto quando la lingua dell'app cambia. Con questo, F3.3.7
+  e' CHIUSO per intero (resize/move + reorder + tema + traduzione, quattro incrementi in questa
+  sessione). F3.1.2 ha ora 9 dei 10 task dichiarati dimostrati (solo Task 3, "espandi categoria",
+  resta bloccato da un limite Qt reale gia' documentato). 3.157/3.157 test, ruff verde.
 
 - `F3.3.2` (prima fetta - "spiegare perche'", il caso NoMatchError) — 19/09/2026: nuovo
   `SelectorEngine._explain_no_match()` (`core/computer_use/selector.py`), collegato ai tre punti

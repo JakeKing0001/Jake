@@ -463,5 +463,100 @@ class FindMatchingElementsProcessIdTests(_RealFixtureTestCase):
             self.adapter.find_matching_elements(self.window)
 
 
+class ScopeLimitedToTargetWindowTests(unittest.TestCase):
+    """F3.2.6 ("limitare scope alla finestra target per prestazioni e privacy", CHIUSO in questo
+    incremento, 20/09/2026): verifica DAVVERO la proprieta' di PRIVACY dichiarata dalla roadmap,
+    non solo quella di prestazioni gia' misurata a parte (vedi ROADMAP_EXECUTION.md, il benchmark
+    F3.2.7 sull'albero grande) - una ricerca con `root` uguale alla finestra A non deve MAI
+    restituire un elemento che appartiene a una finestra B DIVERSA, anche quando entrambe esistono
+    contemporaneamente come finestre di primo livello (`TreeScope_Descendants` di UI Automation
+    cammina solo i DISCENDENTI del root dato, mai i fratelli - una proprieta' strutturale di COM,
+    qui verificata empiricamente con due istanze reali della fixture, non assunta dalla
+    documentazione).
+
+    Due istanze REALI della fixture (stesso titolo, distinte per HWND - stesso schema gia' usato
+    da `tests/test_selector.py::LocalizationAfterReorderTests`, F3.3.7 resto "reorder")."""
+
+    def setUp(self):
+        self.process_a = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_a)
+        self.adapter = UIAutomationAdapter()
+        self.window_a = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+        baseline = self.adapter.snapshot_top_level_window_handles()
+        self.process_b = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_b)
+        self.window_b = self.adapter.wait_for_new_top_level_window(baseline, timeout_seconds=15.0)
+
+    def _terminate_a(self):
+        self.process_a.terminate()
+        try:
+            self.process_a.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process_a.kill()
+
+    def _terminate_b(self):
+        self.process_b.terminate()
+        try:
+            self.process_b.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process_b.kill()
+
+    def _add_item_in(self, window, text: str) -> None:
+        from core.computer_use.executor import ActionExecutor
+        from core.computer_use.selector import ElementSelector, SelectorEngine
+
+        engine = SelectorEngine(self.adapter)
+        executor = ActionExecutor()
+        input_field = engine.find_unique_element(
+            window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_input"),
+        )
+        executor.set_value(input_field, text)
+        add_button = engine.find_unique_element(window, ElementSelector(name="Aggiungi", control_type="Button"))
+        executor.invoke(add_button)
+
+    def test_content_added_only_in_b_never_leaks_into_a_search_scoped_to_a(self):
+        from core.computer_use.selector import ElementSelector, SelectorEngine
+
+        self._add_item_in(self.window_b, "esiste solo in B")
+        # Controllo positivo indipendente: l'elemento esiste DAVVERO da qualche parte (in B) -
+        # senza questo, un risultato vuoto scoped ad A non proverebbe nulla (potrebbe essere
+        # vuoto anche per un bug che impedisse all'elemento di comparire affatto). `wait_for_
+        # unique_element` (a polling), non un singolo tentativo: **buco reale trovato scrivendo
+        # QUESTO test, non ipotizzato** - un `find_matching_elements` immediato subito dopo
+        # `executor.invoke()` falliva qui (0 invece di 1), mentre lo stesso identico schema
+        # click-poi-verifica funziona altrove in questo file SOLO perche' usa gia' un polling
+        # (`wait_for_unique_element`, mai un singolo tentativo) - l'aggiornamento della lista Qt
+        # dopo un Invoke via UI Automation non e' garantito sincrono dal punto di vista del
+        # chiamante, anche se il gestore stesso lo e' internamente al processo Qt.
+        engine = SelectorEngine(self.adapter)
+        engine.wait_for_unique_element(
+            self.window_b, ElementSelector(name="esiste solo in B", control_type="ListItem"), timeout_seconds=3.0,
+        )
+
+        in_a = self.adapter.find_matching_elements(self.window_a, name="esiste solo in B")
+        self.assertEqual(in_a, [], "una ricerca scoped ad A non deve MAI vedere il contenuto di B")
+
+    def test_a_broad_control_type_search_scoped_to_a_never_returns_bs_elements(self):
+        """Non solo un nome specifico (test sopra) - anche una ricerca AMPIA (ogni `Button`, senza
+        alcun nome) scoped ad A deve contenere solo bottoni CHE APPARTENGONO ad A, mai a B -
+        verificato per PID (F3.3.1, gia' chiuso in un incremento precedente), non per conteggio
+        (un conteggio uguale da solo non proverebbe l'APPARTENENZA corretta di ognuno)."""
+        real_pid_a = self.window_a.CurrentProcessId
+        real_pid_b = self.window_b.CurrentProcessId
+        self.assertNotEqual(real_pid_a, real_pid_b, "le due istanze devono davvero essere processi diversi")
+
+        buttons_in_a = self.adapter.find_matching_elements(self.window_a, control_type="Button")
+        self.assertGreater(len(buttons_in_a), 0)
+        for button in buttons_in_a:
+            self.assertEqual(button.CurrentProcessId, real_pid_a, "ogni bottone trovato scoped ad A deve appartenere al processo di A")
+
+
 if __name__ == "__main__":
     unittest.main()
