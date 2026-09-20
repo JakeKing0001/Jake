@@ -32,11 +32,28 @@ INDIPENDENTE per bottone (non condiviso) rende osservabile QUALE dei due e' stat
 davvero, non solo che "un" click sia arrivato da qualche parte - la prova che serve per
 dimostrare che l'automation_id sceglie quello GIUSTO, non uno a caso tra i due ambigui.
 
+**Ottava fetta (20/09/2026, un incremento successivo) - Task 8/10 di F3.1.2, F3.3.7 (resto -
+"tema")**: `_apply_dark_theme()`/`--dark-theme` - un cambio di tema VERO (palette Fusion scura),
+non un flag cosmetico. Deliberatamente NON tocca `accessibleName`/`objectName`/control type - le
+uniche proprieta' che UI Automation espone (F3.2.3) - cosi' un selettore per nome/automation_id
+sopravvive per costruzione, verificato con uno screenshot reale in
+`tests/test_selector.py::ThemeChangeTests`, non solo assunto dal fatto che il flag non sollevi.
+
+**Nona fetta (20/09/2026, un incremento successivo) - Task 9/10 di F3.1.2, F3.3.7 (resto -
+"traduzione", CHIUDE F3.3.7 per intero)**: `_ADD_BUTTON_LABELS`/`--language` - SOLO il bottone
+"Aggiungi"/"Add" e' tradotto (vedi il commento accanto a `_ADD_BUTTON_LABELS` per il motivo di
+non tradurre l'intera fixture). L'`automation_id` (`fixture_add_button`) resta identico in ogni
+lingua per costruzione - un selettore per automation_id sopravvive alla traduzione, uno per nome
+no (deve essere aggiornato per la lingua corrente), verificato in
+`tests/test_selector.py::TranslationChangeTests`.
+
 Deliberatamente NON affrontati qui, passi successivi dichiarati:
-- F3.1.2 (3 dei 10 task rimangono ora - sette dimostrati: "aggiungi", "rimuovi con conferma",
+- F3.1.2 (1 dei 10 task rimane ora - nove dimostrati: "aggiungi", "rimuovi con conferma",
   "espandi e seleziona", "cambia tab e spunta l'opzione", "scorri e seleziona l'ultima riga",
-  "attendi un controllo dinamico e attivalo", "disambigua due controlli ambigui per nome");
-- F3.1.5 (DPI, piu' monitor, finestre sovrapposte, temi diversi);
+  "attendi un controllo dinamico e attivalo", "disambigua due controlli ambigui per nome", "trova
+  e agisci sotto un tema diverso", "trova e agisci sotto una lingua diversa");
+- F3.1.5 (DPI, piu' monitor, finestre sovrapposte - "tema"/"lingua" sono ora coperti da F3.3.7
+  sopra);
 - l'intera F3.2 (`UIAutomationAdapter`, ancora da costruire).
 
 PySide6 invece di Win32/WinForms nativo: gia' una dipendenza del progetto
@@ -67,6 +84,16 @@ _TREE_STRUCTURE = {
 # e' garantita fuori vista finche' qualcuno non scorre davvero, non solo in teoria.
 _SCROLL_LIST_ROW_COUNT = 30
 
+# Nona fetta (F3.3.7 resto - "traduzione"): SOLO il bottone "Aggiungi" e' tradotto, non l'intera
+# fixture - il punto da dimostrare (un selettore per automation_id sopravvive alla lingua, uno per
+# nome no) non richiede una i18n completa, e tradurre OGNI stringa (albero/tab/checkbox) userebbe
+# ogni test esistente che gia' asserisce quei nomi in italiano, un rischio di regressione senza
+# alcun beneficio aggiuntivo - "un incremento alla volta", lo stesso principio gia' seguito per
+# ogni fetta precedente di questa fixture. L'`objectName`/automation_id ("fixture_add_button")
+# resta IDENTICO in ogni lingua per costruzione (mai stato nel dizionario) - e' esattamente il
+# punto da dimostrare.
+_ADD_BUTTON_LABELS = {"it": "Aggiungi", "en": "Add"}
+
 
 class ComputerUseFixtureWindow(QWidget):
     """Finestra fixture: un campo di testo + un bottone 'Aggiungi' che sposta il testo digitato
@@ -79,8 +106,10 @@ class ComputerUseFixtureWindow(QWidget):
 
     WINDOW_TITLE = "Jake Computer Use Fixture"
 
-    def __init__(self) -> None:
+    def __init__(self, language: str = "it") -> None:
         super().__init__()
+        if language not in _ADD_BUTTON_LABELS:
+            raise ValueError(f"lingua sconosciuta: {language!r} (attese: {sorted(_ADD_BUTTON_LABELS)})")
         self.setWindowTitle(self.WINDOW_TITLE)
         self.setObjectName("jake_fixture_window")
         self.resize(360, 640)
@@ -90,9 +119,10 @@ class ComputerUseFixtureWindow(QWidget):
         self.input_field.setAccessibleName("Campo di testo")
         self.input_field.setPlaceholderText("Scrivi qualcosa...")
 
-        self.add_button = QPushButton("Aggiungi")
+        add_button_label = _ADD_BUTTON_LABELS[language]
+        self.add_button = QPushButton(add_button_label)
         self.add_button.setObjectName("fixture_add_button")
-        self.add_button.setAccessibleName("Aggiungi")
+        self.add_button.setAccessibleName(add_button_label)
         self.add_button.clicked.connect(self._add_current_text)
 
         self.reset_button = QPushButton("Reset")
@@ -402,16 +432,50 @@ class ComputerUseFixtureWindow(QWidget):
         return [self.item_list.item(i).text() for i in range(self.item_list.count())]
 
 
+def _apply_dark_theme(app: QApplication) -> None:
+    """Ottava fetta (20/09/2026) - Task 8/10 di F3.1.2, F3.3.7 (resto - "tema"): un cambio di tema
+    VERO (palette Fusion scura, non un semplice `setStyleSheet` cosmetico che potrebbe non
+    applicarsi uniformemente a ogni widget) - deliberatamente NON tocca MAI `accessibleName`/
+    `objectName`/control type, le uniche proprieta' che UI Automation espone (F3.2.3): un
+    selettore per nome/automation_id deve quindi sopravvivere per costruzione, verificato non
+    assunto in `tests/test_selector.py::ThemeChangeTests` (incluso un controllo VISIVO reale via
+    screenshot, non solo "il flag non ha sollevato")."""
+    from PySide6.QtGui import QColor, QPalette
+    from PySide6.QtWidgets import QStyleFactory
+
+    app.setStyle(QStyleFactory.create("Fusion"))
+    palette = QPalette()
+    palette.setColor(QPalette.ColorRole.Window, QColor(45, 45, 45))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor(230, 230, 230))
+    palette.setColor(QPalette.ColorRole.Base, QColor(30, 30, 30))
+    palette.setColor(QPalette.ColorRole.Text, QColor(230, 230, 230))
+    palette.setColor(QPalette.ColorRole.Button, QColor(45, 45, 45))
+    palette.setColor(QPalette.ColorRole.ButtonText, QColor(230, 230, 230))
+    app.setPalette(palette)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--auto-close-after", type=float, default=None,
         help="Chiude la finestra da sola dopo N secondi (per lanci automatizzati/CI, mai per l'uso manuale).",
     )
+    parser.add_argument(
+        "--dark-theme", action="store_true",
+        help="Applica un tema scuro reale (palette Fusion) - per F3.3.7, verificare che i selettori "
+        "sopravvivano a un cambio di tema, non solo di geometria.",
+    )
+    parser.add_argument(
+        "--language", choices=sorted(_ADD_BUTTON_LABELS), default="it",
+        help="Lingua del bottone 'Aggiungi'/'Add' - per F3.3.7, verificare che un selettore per "
+        "automation_id sopravviva alla traduzione mentre uno per nome no.",
+    )
     args = parser.parse_args()
 
     app = QApplication.instance() or QApplication(sys.argv)
-    window = ComputerUseFixtureWindow()
+    if args.dark_theme:
+        _apply_dark_theme(app)
+    window = ComputerUseFixtureWindow(language=args.language)
     window.show()
 
     if args.auto_close_after is not None:

@@ -544,5 +544,131 @@ class LocalizationAfterReorderTests(unittest.TestCase):
         )
 
 
+class ThemeChangeTests(unittest.TestCase):
+    """F3.3.7 (resto - "tema"): la fixture lanciata con `--dark-theme` (una palette Fusion scura
+    VERA, `benchmarks/computer_use_fixture.py::_apply_dark_theme`) - verificato con uno screenshot
+    REALE della finestra che il tema e' DAVVERO cambiato (non solo che il flag non abbia
+    sollevato, lo stesso principio "prova l'effetto vero" gia' seguito ovunque in questa sessione),
+    poi che un selettore per nome/automation_id continua a trovare E AD AGIRE correttamente
+    sull'elemento sotto il tema diverso - `accessibleName`/`objectName`/control type non dipendono
+    mai dalla palette (F3.2.3), quindi questo deve sopravvivere per costruzione."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30", "--dark-theme"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+
+    def test_the_window_is_really_visually_dark_not_just_a_flag_that_did_nothing(self):
+        from PIL import ImageStat
+
+        from core.vision.screen import capture_screenshot_image
+
+        info = self.adapter.describe_element(self.window)
+        left, top, width, height = info.bounds
+        window_image = capture_screenshot_image().crop((left, top, left + width, top + height)).convert("RGB")
+        # Campiona una regione centrale, evitando la barra del titolo nativa (mai ricolorata da
+        # una QPalette dell'app) e i bordi.
+        sample = window_image.crop((width // 4, height // 3, 3 * width // 4, 2 * height // 3))
+        average_brightness = ImageStat.Stat(sample.convert("L")).mean[0]
+
+        self.assertLess(
+            average_brightness, 110,
+            f"un tema scuro reale deve avere una luminosita' media bassa, letta {average_brightness}",
+        )
+
+    def test_a_name_based_selector_still_finds_and_clicks_correctly_under_the_dark_theme(self):
+        executor = ActionExecutor()
+        input_field = self.engine.find_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_input"),
+        )
+        executor.set_value(input_field, "sotto tema scuro")
+        add_button = self.engine.find_unique_element(self.window, ElementSelector(name="Aggiungi", control_type="Button"))
+        executor.invoke(add_button)
+
+        item = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(name="sotto tema scuro", control_type="ListItem"), timeout_seconds=3.0,
+        )
+        self.assertEqual(item.CurrentName, "sotto tema scuro")
+
+
+class TranslationChangeTests(unittest.TestCase):
+    """F3.3.7 (resto - "traduzione", CHIUDE F3.3.7 per intero): la fixture lanciata con
+    `--language en` traduce SOLO il bottone "Aggiungi" in "Add" (vedi
+    `benchmarks/computer_use_fixture.py::_ADD_BUTTON_LABELS`) - il punto da dimostrare e' che un
+    selettore per NOME dipende dalla lingua corrente (deve essere aggiornato quando la lingua
+    cambia), mentre un selettore per `automation_id` sopravvive per costruzione (mai stato nel
+    dizionario di traduzione)."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30", "--language", "en"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+
+    def test_the_italian_name_no_longer_matches_under_the_english_build(self):
+        with self.assertRaises(NoMatchError):
+            self.engine.find_unique(self.window, ElementSelector(name="Aggiungi", control_type="Button"))
+
+    def test_the_translated_name_matches_and_the_click_works(self):
+        executor = ActionExecutor()
+        input_field = self.engine.find_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_input"),
+        )
+        executor.set_value(input_field, "via il bottone tradotto")
+        add_button = self.engine.find_unique(self.window, ElementSelector(name="Add", control_type="Button"))
+        self.assertEqual(add_button.name, "Add")
+
+        add_button_element = self.engine.find_unique_element(self.window, ElementSelector(name="Add", control_type="Button"))
+        executor.invoke(add_button_element)
+
+        item = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(name="via il bottone tradotto", control_type="ListItem"), timeout_seconds=3.0,
+        )
+        self.assertEqual(item.CurrentName, "via il bottone tradotto")
+
+    def test_the_automation_id_selector_works_regardless_of_the_current_language(self):
+        """Il punto centrale di F3.3.7 "traduzione": lo STESSO identico automation_id gia' usato
+        contro la fixture in italiano altrove in questo file funziona QUI SENZA MODIFICHE, sotto
+        la build inglese - un selettore procedurale (F3.3.4/F3.8) per automation_id non deve mai
+        essere riscritto quando la lingua dell'app cambia."""
+        executor = ActionExecutor()
+        input_field = self.engine.find_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_input"),
+        )
+        executor.set_value(input_field, "via automation_id")
+        add_button = self.engine.find_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_add_button"),
+        )
+        executor.invoke(add_button)
+
+        item = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(name="via automation_id", control_type="ListItem"), timeout_seconds=3.0,
+        )
+        self.assertEqual(item.CurrentName, "via automation_id")
+
+
 if __name__ == "__main__":
     unittest.main()
