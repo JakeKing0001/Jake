@@ -53,6 +53,8 @@ class AutomationPropertiesTests(unittest.TestCase):
         self.assertEqual(window.transfer_source_list.objectName(), "fixture_transfer_source")
         self.assertEqual(window.transfer_target_list.objectName(), "fixture_transfer_target")
         self.assertEqual(window.date_edit.objectName(), "fixture_date_edit")
+        self.assertEqual(window.filter_input.objectName(), "fixture_filter_input")
+        self.assertEqual(window.filter_list.objectName(), "fixture_filter_list")
 
     def test_every_control_has_a_non_empty_accessible_name(self):
         window = ComputerUseFixtureWindow()
@@ -63,6 +65,7 @@ class AutomationPropertiesTests(unittest.TestCase):
             window.value_spinbox, window.radio_red, window.radio_green, window.radio_blue,
             window.progress_bar, window.start_progress_button, window.reorder_list, window.data_table,
             window.transfer_source_list, window.transfer_target_list, window.date_edit,
+            window.filter_input, window.filter_list,
         ):
             self.assertTrue(widget.accessibleName(), f"{widget.objectName()} non ha un accessibleName")
 
@@ -797,6 +800,46 @@ class DateEditTests(unittest.TestCase):
         window.reset_state()
 
         self.assertEqual(window.current_date_text(), "2026-01-15")
+
+
+class FilterListTests(unittest.TestCase):
+    """Task 23 di F3.1.2 (continua verso i 100, in "Tab 7") - un campo di ricerca che filtra dal
+    vivo una lista (nasconde le righe non corrispondenti, MAI le rimuove/ricrea), un pattern reale
+    molto comune mai esercitato finora in questa fixture."""
+
+    def test_all_items_are_visible_with_an_empty_filter(self):
+        window = ComputerUseFixtureWindow()
+        self.assertEqual(window.visible_filter_items(), ["Mela", "Banana", "Pera", "Mango", "Kiwi"])
+
+    def test_filtering_by_a_substring_hides_non_matching_items(self):
+        window = ComputerUseFixtureWindow()
+        window.filter_input.setText("an")
+        self.assertEqual(window.visible_filter_items(), ["Banana", "Mango"])
+
+    def test_the_filter_is_case_insensitive(self):
+        window = ComputerUseFixtureWindow()
+        window.filter_input.setText("BANANA")
+        self.assertEqual(window.visible_filter_items(), ["Banana"])
+
+    def test_clearing_the_filter_shows_every_item_again(self):
+        window = ComputerUseFixtureWindow()
+        window.filter_input.setText("an")
+        window.filter_input.setText("")
+        self.assertEqual(window.visible_filter_items(), ["Mela", "Banana", "Pera", "Mango", "Kiwi"])
+
+    def test_a_filter_matching_nothing_leaves_the_list_empty(self):
+        window = ComputerUseFixtureWindow()
+        window.filter_input.setText("xyz")
+        self.assertEqual(window.visible_filter_items(), [])
+
+    def test_reset_clears_the_filter_and_shows_every_item(self):
+        window = ComputerUseFixtureWindow()
+        window.filter_input.setText("an")
+
+        window.reset_state()
+
+        self.assertEqual(window.filter_input.text(), "")
+        self.assertEqual(window.visible_filter_items(), ["Mela", "Banana", "Pera", "Mango", "Kiwi"])
 
 
 if __name__ == "__main__":

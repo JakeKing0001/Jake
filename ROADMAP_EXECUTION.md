@@ -5174,6 +5174,25 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   tre frecce destra + Invio sposta la data di 3 giorni, verificato rileggendo `date_edit` con
   `read_value`). 3.224/3.224 test, ruff verde.
 
+- `F3.1.2` (Task 23 - "digita in un campo di ricerca e la lista si restringe dal vivo", in "Tab
+  7") — 20/09/2026: nuovi `filter_input`/`filter_list` - un pattern reale molto comune (una
+  casella di ricerca), mai esercitato finora: nessun controllo precedente aveva mai guidato la
+  RICOSTRUZIONE visibile di un'altra lista. `_apply_filter` nasconde (`QListWidgetItem.
+  setHidden`, MAI rimuove/ricrea gli item - lo STESSO oggetto riappare intatto quando il filtro si
+  allarga) ogni riga il cui testo non contiene la sottostringa digitata (case-insensitive).
+
+  Verificato con un probe dedicato PRIMA di scrivere il test, non assunto: UI Automation riflette
+  correttamente `setHidden` - un elemento nascosto smette del tutto di essere raggiungibile
+  tramite `find_all`/un selettore per nome (non solo "scorso fuori vista" come gia' noto per
+  `scroll_list`), e ridiventa raggiungibile svuotando il filtro.
+
+  Prova: 6 test nuovi in `tests/test_computer_use_fixture.py::FilterListTests` (stato iniziale
+  tutti visibili; un filtro nasconde le righe non corrispondenti; case-insensitive; svuotare il
+  filtro le rimostra tutte; un filtro senza corrispondenze svuota la vista; reset pulisce il
+  filtro) + 2 test nuovi in `tests/test_computer_use_integration.py::LiveFilterEndToEndTests`
+  (digitare "an" lascia raggiungibili solo "Banana"/"Mango", non "Mela"; svuotare il filtro
+  rirende raggiungibile "Mela"). 3.232/3.232 test, ruff verde.
+
 ### F3.2 — Windows UI Automation adapter
 
 Dipende da: F3.1.

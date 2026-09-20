@@ -224,6 +224,11 @@ _REORDER_LIST_ITEMS = ["Uno", "Due", "Tre"]
 # tra due liste - nomi distinti da ogni altra lista della fixture, per lo stesso motivo sopra.
 _TRANSFER_SOURCE_ITEMS = ["Alfa", "Beta"]
 
+# Task 23 (F3.1.2 continua verso i 100): elementi della lista filtrabile - due contengono "an"
+# ("Banana", "Mango"), gli altri no, cosi' un filtro su "an" ha un risultato PARZIALE (non tutto,
+# non niente) da poter verificare.
+_FILTER_LIST_ITEMS = ["Mela", "Banana", "Pera", "Mango", "Kiwi"]
+
 # Nona fetta (F3.3.7 resto - "traduzione"): SOLO il bottone "Aggiungi" e' tradotto, non l'intera
 # fixture - il punto da dimostrare (un selettore per automation_id sopravvive alla lingua, uno per
 # nome no) non richiede una i18n completa, e tradurre OGNI stringa (albero/tab/checkbox) userebbe
@@ -535,6 +540,32 @@ class ComputerUseFixtureWindow(QWidget):
         sixth_tab_scroll.setWidget(sixth_tab)
         self.tabs.addTab(sixth_tab_scroll, "Tab 6")
 
+        # Task 23 (F3.1.2 continua verso i 100): un campo di ricerca che FILTRA dal vivo una
+        # lista (digitare restringe gli elementi visibili) - un pattern reale molto comune (una
+        # casella di ricerca), MAI un bersaglio in questa fixture finora: diverso da ogni campo
+        # gia' esercitato (nessuno ha mai guidato la RICOSTRUZIONE di un'altra lista). Scheda
+        # propria ("Tab 7"), stesso motivo dichiarato per Task 19/20/22.
+        seventh_tab = QWidget()
+        seventh_tab.setObjectName("fixture_tab_seven_content")
+        seventh_tab_layout = QVBoxLayout(seventh_tab)
+        self.filter_input = QLineEdit()
+        self.filter_input.setObjectName("fixture_filter_input")
+        self.filter_input.setAccessibleName("Campo di ricerca")
+        self.filter_input.textChanged.connect(self._apply_filter)
+        self.filter_list = QListWidget()
+        self.filter_list.setObjectName("fixture_filter_list")
+        self.filter_list.setAccessibleName("Elenco filtrabile")
+        self.filter_list.addItems(_FILTER_LIST_ITEMS)
+        self.filter_list.setMaximumHeight(90)
+        seventh_tab_layout.addWidget(self.filter_input)
+        seventh_tab_layout.addWidget(self.filter_list)
+        seventh_tab_scroll = QScrollArea()
+        seventh_tab_scroll.setObjectName("fixture_tab_seven_scroll")
+        seventh_tab_scroll.setWidgetResizable(True)
+        seventh_tab_scroll.setMaximumHeight(120)
+        seventh_tab_scroll.setWidget(seventh_tab)
+        self.tabs.addTab(seventh_tab_scroll, "Tab 7")
+
         self.scroll_list = QListWidget()
         self.scroll_list.setObjectName("fixture_scroll_list")
         self.scroll_list.setAccessibleName("Elenco con scorrimento")
@@ -744,6 +775,8 @@ class ComputerUseFixtureWindow(QWidget):
         self.transfer_source_list.addItems(_TRANSFER_SOURCE_ITEMS)
         self.transfer_target_list.clear()
         self.date_edit.setDate(QDate(2026, 1, 15))
+        self.filter_input.clear()
+        self._apply_filter("")
 
     def current_combo_option(self) -> str:
         """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`)."""
@@ -763,6 +796,14 @@ class ComputerUseFixtureWindow(QWidget):
     def transfer_target_items(self) -> list[str]:
         """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`)."""
         return [self.transfer_target_list.item(i).text() for i in range(self.transfer_target_list.count())]
+
+    def visible_filter_items(self) -> list[str]:
+        """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`) - SOLO gli
+        elementi non nascosti dal filtro corrente, nell'ordine originale."""
+        return [
+            self.filter_list.item(i).text() for i in range(self.filter_list.count())
+            if not self.filter_list.item(i).isHidden()
+        ]
 
     def current_date_text(self) -> str:
         """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`)."""
@@ -803,6 +844,16 @@ class ComputerUseFixtureWindow(QWidget):
         chosen = menu.exec(self.item_list.mapToGlobal(pos))
         if chosen is duplicate_action:
             self.item_list.addItem(item.text())
+
+    def _apply_filter(self, text: str) -> None:
+        """Task 23 di F3.1.2: nasconde (`setHidden`, MAI rimuove/ricrea gli item - un elemento
+        nascosto resta lo STESSO oggetto, riappare intatto quando il filtro si allarga di nuovo)
+        ogni riga il cui testo non contiene `text` (case-insensitive, sottostringa - non un match
+        esatto ne' un prefisso)."""
+        needle = text.strip().lower()
+        for i in range(self.filter_list.count()):
+            item = self.filter_list.item(i)
+            item.setHidden(bool(needle) and needle not in item.text().lower())
 
     def _click_action_a(self) -> None:
         self.action_a_clicks += 1

@@ -1164,6 +1164,78 @@ class DateEditCalendarPopupEndToEndTests(unittest.TestCase):
         self.assertTrue(outcome.succeeded, outcome.attempts)
 
 
+class LiveFilterEndToEndTests(unittest.TestCase):
+    """Task 23 (F3.1.2 continua verso i 100) - "digita in un campo di ricerca e la lista si
+    restringe dal vivo": `filter_input`/`filter_list` (in "Tab 7"), un pattern reale molto comune
+    mai esercitato finora - nasconde le righe non corrispondenti (`setHidden`), MAI le rimuove/
+    ricrea."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_typing_a_substring_hides_non_matching_items_for_real(self):
+        tab_seven = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 7", control_type="TabItem"))
+        self.executor.select(tab_seven)
+
+        filter_input = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Campo di ricerca"), timeout_seconds=3.0)
+        filter_list = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(name="Elenco filtrabile", control_type="List"), timeout_seconds=3.0,
+        )
+        self.executor.set_value(filter_input, "an")
+
+        deadline = time.monotonic() + 3.0
+        banana = mango = mela = None
+        while time.monotonic() < deadline:
+            banana = self.engine.find_all(filter_list, ElementSelector(name="Banana"))
+            mango = self.engine.find_all(filter_list, ElementSelector(name="Mango"))
+            mela = self.engine.find_all(filter_list, ElementSelector(name="Mela"))
+            if banana and mango and not mela:
+                break
+            time.sleep(0.1)
+
+        self.assertTrue(banana, "Banana contiene 'an', deve restare raggiungibile")
+        self.assertTrue(mango, "Mango contiene 'an', deve restare raggiungibile")
+        self.assertFalse(mela, "Mela non contiene 'an', non deve piu' essere raggiungibile")
+
+    def test_clearing_the_filter_makes_hidden_items_reachable_again(self):
+        tab_seven = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 7", control_type="TabItem"))
+        self.executor.select(tab_seven)
+
+        filter_input = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Campo di ricerca"), timeout_seconds=3.0)
+        filter_list = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(name="Elenco filtrabile", control_type="List"), timeout_seconds=3.0,
+        )
+        self.executor.set_value(filter_input, "an")
+        time.sleep(0.3)
+        self.executor.set_value(filter_input, "")
+
+        def _mela_is_reachable_again():
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline:
+                if self.engine.find_all(filter_list, ElementSelector(name="Mela")):
+                    return True
+                time.sleep(0.1)
+            return False
+
+        self.assertTrue(_mela_is_reachable_again(), "un elemento nascosto dal filtro deve tornare raggiungibile quando il filtro si svuota")
+
+
 class DynamicControlEndToEndTests(unittest.TestCase):
     """Task 6/10 di F3.1.2 (F3.1.6, la parte DINAMICA mai affrontata finora - vedi
     `benchmarks/computer_use_fixture.py` per il perche' `remove_button`, gia' un "primo assaggio",
