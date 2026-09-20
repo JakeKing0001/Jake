@@ -533,6 +533,37 @@ class FindMatchingElementsProcessIdTests(_RealFixtureTestCase):
             self.adapter.find_matching_elements(self.window)
 
 
+class ReadValueTests(_RealFixtureTestCase):
+    """F3.1.2 Task 22 (adozione) - `UIAutomationAdapter.read_value`, la meta' "lettura" del
+    pattern Value mai esposta finora (`ActionExecutor.set_value`, F3.4, copre gia' la scrittura).
+    Il campo di testo e' il bersaglio giusto: il suo `Name` (`describe_element`) e' l'
+    `accessibleName` STATICO ("Campo di testo"), mai il testo digitato - a differenza di un
+    `QListWidgetItem`/una cella di `QTableWidget`, dove `Name` E' gia' il contenuto - quindi solo
+    `read_value` puo' rivelare il testo corrente via UI Automation."""
+
+    def test_reads_the_current_text_of_the_input_field(self):
+        matches = self.adapter.find_matching_elements(self.window, name="Campo di testo")
+        self.assertEqual(len(matches), 1)
+
+        value = self.adapter.read_value(matches[0])
+
+        self.assertEqual(value, "")
+
+    def test_a_button_without_a_real_value_reports_an_empty_string_not_none(self):
+        """Buco reale trovato scrivendo questo test, non ipotizzato: il bridge UI Automation di
+        Qt riporta il pattern Value come disponibile (`CurrentValue=""`) anche su un `QPushButton`,
+        che semanticamente non ha alcun valore testuale - `None` (il ripiego onesto per un
+        pattern DAVVERO non supportato) non e' quindi raggiungibile per un bottone Qt, solo per un
+        vero errore COM. Documenta il comportamento reale invece di quello ipotizzato inizialmente
+        (vedi il docstring di `read_value`)."""
+        matches = self.adapter.find_matching_elements(self.window, name="Aggiungi", control_type="Button")
+        self.assertEqual(len(matches), 1)
+
+        value = self.adapter.read_value(matches[0])
+
+        self.assertEqual(value, "")
+
+
 class ScopeLimitedToTargetWindowTests(unittest.TestCase):
     """F3.2.6 ("limitare scope alla finestra target per prestazioni e privacy", CHIUSO in questo
     incremento, 20/09/2026): verifica DAVVERO la proprieta' di PRIVACY dichiarata dalla roadmap,

@@ -6,7 +6,7 @@ costruire i widget), mai una vera finestra mostrata (show()), click simulati con
 cliccabile, non solo che il suo metodo funzioni se chiamato a mano."""
 import unittest
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QDate, Qt, QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
 
@@ -52,6 +52,7 @@ class AutomationPropertiesTests(unittest.TestCase):
         self.assertEqual(window.data_table.objectName(), "fixture_table")
         self.assertEqual(window.transfer_source_list.objectName(), "fixture_transfer_source")
         self.assertEqual(window.transfer_target_list.objectName(), "fixture_transfer_target")
+        self.assertEqual(window.date_edit.objectName(), "fixture_date_edit")
 
     def test_every_control_has_a_non_empty_accessible_name(self):
         window = ComputerUseFixtureWindow()
@@ -61,7 +62,7 @@ class AutomationPropertiesTests(unittest.TestCase):
             window.action_button_a, window.action_button_b, window.option_combo, window.value_slider,
             window.value_spinbox, window.radio_red, window.radio_green, window.radio_blue,
             window.progress_bar, window.start_progress_button, window.reorder_list, window.data_table,
-            window.transfer_source_list, window.transfer_target_list,
+            window.transfer_source_list, window.transfer_target_list, window.date_edit,
         ):
             self.assertTrue(widget.accessibleName(), f"{widget.objectName()} non ha un accessibleName")
 
@@ -774,6 +775,28 @@ class TransferListTests(unittest.TestCase):
 
         self.assertEqual(window.transfer_source_items(), ["Alfa", "Beta"])
         self.assertEqual(window.transfer_target_items(), [])
+
+
+class DateEditTests(unittest.TestCase):
+    """Task 22 di F3.1.2 (continua verso i 100, in "Tab 6") - un `QDateEdit` con popup calendario
+    (`setCalendarPopup(True)`), MAI un bersaglio in questa fixture finora."""
+
+    def test_the_initial_date_is_the_fixed_start_date(self):
+        window = ComputerUseFixtureWindow()
+        self.assertEqual(window.current_date_text(), "2026-01-15")
+
+    def test_setting_a_new_date_changes_the_observable_text(self):
+        window = ComputerUseFixtureWindow()
+        window.date_edit.setDate(QDate(2026, 3, 1))
+        self.assertEqual(window.current_date_text(), "2026-03-01")
+
+    def test_reset_returns_to_the_fixed_start_date(self):
+        window = ComputerUseFixtureWindow()
+        window.date_edit.setDate(QDate(2026, 12, 31))
+
+        window.reset_state()
+
+        self.assertEqual(window.current_date_text(), "2026-01-15")
 
 
 if __name__ == "__main__":

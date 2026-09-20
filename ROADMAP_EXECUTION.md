@@ -5129,6 +5129,51 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   lunga prima di `mouseUp`) - un tentativo ragionato, non garantito, riverificato con una nuova
   run CI reale prima di dichiarare l'incremento chiuso.
 
+- `F3.1.2` (Task 21 - "seleziona un intervallo con Shift+Click") — 20/09/2026: nessun codice
+  nuovo nella fixture - `item_list` era gia' passata a `ExtendedSelection` per Task 11
+  (Ctrl+Click), il cui stesso commento dichiarava GIA' che Shift+Click seleziona un intervallo,
+  mai dimostrato finora. Nuovo test in `tests/test_computer_use_integration.py::
+  MultiSelectEndToEndTests` (stessa classe di Task 11): click su A poi Shift+Click su C (con
+  `pyautogui.keyDown`/`keyUp`, non un pattern UIA) seleziona A, B (l'elemento DI MEZZO) e C - il
+  contrario esatto di Task 11, dove B doveva restare escluso. 1 test nuovo, verde al primo
+  tentativo.
+
+- `F3.1.2` (Task 22 - "apri un popup calendario e scegli un'altra data", in "Tab 6") — 20/09/2026:
+  nuovo `date_edit` (`QDateEdit`, `setCalendarPopup(True)`) - un popup DIVERSO da quello gia' noto
+  di `QComboBox` (Task 12), il cui contenuto e' un `QCalendarWidget` con celle giorno.
+
+  **Due buchi reali trovati con un probe dedicato PRIMA di scrivere il test, non ipotizzati**: (1)
+  `date_edit` e' esposto come `control_type='Spinner'` SENZA alcun figlio via UI Automation
+  (`children=()`) - a differenza di `QComboBox`, la freccetta del popup non e' un elemento
+  separato trovabile per nome, serve un click reale a coordinate pixel sul bordo destro del
+  widget. (2) il popup calendario e' raggiungibile con la normale enumerazione di primo livello
+  (`wait_for_new_top_level_window`, MAI `wait_for_new_win32_window` - diverso da `QMenu`/dal
+  dialogo nativo "Apri") - ma le sue celle giorno (`qt_calendar_calendarview`, `control_type=
+  'Table'`) non espongono NESSUN figlio via UI Automation, un limite Qt/UIA imparentato con quello
+  di Task 19 (bounds/contenuto di una `Table` non pienamente affidabili) ma per una ragione
+  diversa qui - impossibile selezionare un giorno per nome/posizione semantica. Risolto con la
+  TASTIERA invece del click pixel: il calendario riceve il fuoco appena si apre (verificato), le
+  frecce spostano la data evidenziata di un giorno, Invio la conferma e chiude il popup.
+
+  **Adozione**: nuovo `UIAutomationAdapter.read_value(element)` - la meta' "lettura" del pattern
+  Value, mai esposta finora (`ActionExecutor.set_value`, F3.4, copre gia' la scrittura). Necessario
+  perche' il `Name` di `date_edit` resta il suo `accessibleName` statico ("Selettore data"), MAI
+  la data corrente - a differenza di un `QListWidgetItem`/una cella di `QTableWidget`, dove `Name`
+  E' gia' il contenuto. **Buco reale trovato scrivendo il SUO test**: `None` era pensato per un
+  elemento che non supporta affatto il pattern Value (stesso principio di `_toggle_state_of`) - ma
+  il bridge UI Automation di Qt riporta il pattern Value come disponibile (`CurrentValue=""`)
+  anche su elementi che semanticamente non hanno un valore testuale, es. un `QPushButton`/un
+  `QTreeWidget` (verificato con un probe dedicato) - `None` resta raggiungibile solo per un vero
+  errore COM, non per "pattern non supportato" su un elemento Qt.
+
+  Prova: 3 test nuovi in `tests/test_computer_use_fixture.py::DateEditTests` (data iniziale fissa;
+  `setDate` cambia il testo osservabile; reset ripristina la data fissa) + 2 test nuovi in
+  `tests/test_ui_automation_adapter.py::ReadValueTests` (legge il testo corrente di un campo di
+  testo vero; un bottone senza un valore reale riporta stringa vuota, non `None`) + 1 test nuovo
+  in `tests/test_computer_use_integration.py::DateEditCalendarPopupEndToEndTests` (apri il popup,
+  tre frecce destra + Invio sposta la data di 3 giorni, verificato rileggendo `date_edit` con
+  `read_value`). 3.224/3.224 test, ruff verde.
+
 ### F3.2 — Windows UI Automation adapter
 
 Dipende da: F3.1.

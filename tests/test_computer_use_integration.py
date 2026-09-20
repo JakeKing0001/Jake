@@ -556,6 +556,42 @@ class MultiSelectEndToEndTests(unittest.TestCase):
         self.assertTrue(selected_a, "il click singolo deve ancora selezionare l'elemento cliccato")
         self.assertFalse(selected_b, "un click SENZA Ctrl non deve mai aggiungere alla selezione esistente")
 
+    def test_shift_click_selects_a_contiguous_range_including_the_middle_item(self):
+        """Task 21 (F3.1.2 continua verso i 100) - "seleziona un intervallo con Shift+Click",
+        diverso da Task 11 (Ctrl+Click, elementi NON adiacenti): `ExtendedSelection` (gia' abilitata
+        per Task 11) supporta anche Shift+Click per un intervallo CONTIGUO - mai dimostrato finora,
+        solo dichiarato nel commento del modulo fixture. A differenza di Ctrl+Click, qui l'elemento
+        DI MEZZO deve risultare selezionato (non escluso) - il punto stesso da dimostrare."""
+        import pyautogui
+
+        item_a = self._add_item("intervallo A")
+        self._add_item("intervallo B")
+        item_c = self._add_item("intervallo C")
+
+        bounds_a = self.adapter.describe_element(item_a).bounds
+        bounds_c = self.adapter.describe_element(item_c).bounds
+
+        def _click_a_then_shift_click_c():
+            pyautogui.click(bounds_a[0] + bounds_a[2] // 2, bounds_a[1] + bounds_a[3] // 2)
+            time.sleep(0.3)
+            pyautogui.keyDown("shift")
+            try:
+                pyautogui.click(bounds_c[0] + bounds_c[2] // 2, bounds_c[1] + bounds_c[3] // 2)
+            finally:
+                pyautogui.keyUp("shift")
+
+        def _a_b_and_c_all_selected():
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline:
+                if self._is_selected("intervallo A") and self._is_selected("intervallo B") and self._is_selected("intervallo C"):
+                    return True
+                time.sleep(0.1)
+            return False
+
+        outcome = try_strategies_in_order([("shift_click", _click_a_then_shift_click_c)], verify=_a_b_and_c_all_selected)
+
+        self.assertTrue(outcome.succeeded, outcome.attempts)
+
 
 class ComboBoxSelectionEndToEndTests(unittest.TestCase):
     """Task 12 (F3.1.2 continua verso i 100) - "apri un menu a tendina e scegli un'opzione":
@@ -1045,6 +1081,85 @@ class CrossListDragEndToEndTests(unittest.TestCase):
             return False
 
         outcome = try_strategies_in_order([("synthetic_mouse_drag", _drag_alfa_to_target)], verify=_alfa_moved_to_target)
+
+        self.assertTrue(outcome.succeeded, outcome.attempts)
+
+
+class DateEditCalendarPopupEndToEndTests(unittest.TestCase):
+    """Task 22 (F3.1.2 continua verso i 100) - "apri il popup calendario di un selettore data e
+    scegli un'altra data": `date_edit` (`QDateEdit`, `setCalendarPopup(True)`, in "Tab 6") - un
+    popup DIVERSO da quello gia' noto di `QComboBox` (Task 12), il cui contenuto e' un
+    `QCalendarWidget` con celle giorno.
+
+    **Due buchi reali trovati con un probe dedicato PRIMA di scrivere questo test, non
+    ipotizzati**: (1) `date_edit` stesso e' esposto come `control_type='Spinner'` SENZA figli via
+    UI Automation (`children=()`) - a differenza di `QComboBox`, non si puo' trovare la freccetta
+    del popup come elemento separato, serve un click reale a coordinate pixel sul bordo destro del
+    widget. (2) il popup calendario, a differenza di un `QMenu` (Task 13)/del dialogo nativo
+    "Apri" (F3.6.3), e' raggiungibile con la normale enumerazione UI Automation di primo livello
+    (`wait_for_new_top_level_window`, MAI `wait_for_new_win32_window`) - ma le sue celle giorno
+    (`qt_calendar_calendarview`, `control_type='Table'`) non espongono NESSUN figlio via UI
+    Automation (stesso limite gia' trovato per Task 19 con `QScrollArea`, qui per una ragione
+    diversa) - impossibile selezionare un giorno specifico per nome/posizione semantica. Risolto
+    con la TASTIERA (il calendario riceve il fuoco appena si apre, verificato) invece del click
+    pixel: le frecce spostano la data evidenziata di un giorno, Invio la conferma e chiude il
+    popup - verificato rileggendo `date_edit` con `UIAutomationAdapter.read_value` (F3.1.2 Task 22,
+    adozione - il `Name` di `date_edit` resta il suo `accessibleName` statico, mai la data
+    corrente)."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.computer_agent = ComputerAgent()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_navigating_the_popup_with_arrow_keys_and_enter_changes_the_date(self):
+        import pyautogui
+        import win32gui
+
+        win32gui.SetForegroundWindow(self.window.CurrentNativeWindowHandle)
+        time.sleep(0.2)
+        tab_six = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 6", control_type="TabItem"))
+        self.executor.select(tab_six)
+        time.sleep(0.3)
+
+        date_edit = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Selettore data"), timeout_seconds=3.0)
+        left, top, width, height = self.adapter.describe_element(date_edit).bounds
+        dropdown_x, dropdown_y = left + width - 12, top + height // 2
+
+        baseline = self.adapter.snapshot_top_level_window_handles()
+
+        def _open_popup_and_pick_three_days_later():
+            self.computer_agent.click_point(dropdown_x, dropdown_y)
+            self.adapter.wait_for_new_top_level_window(baseline, timeout_seconds=2.0)
+            pyautogui.press("right")
+            pyautogui.press("right")
+            pyautogui.press("right")
+            pyautogui.press("enter")
+
+        def _date_is_three_days_later():
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline:
+                if self.adapter.read_value(date_edit) == "2026-01-18":
+                    return True
+                time.sleep(0.1)
+            return False
+
+        outcome = try_strategies_in_order([("calendar_popup_keyboard", _open_popup_and_pick_three_days_later)], verify=_date_is_three_days_later)
 
         self.assertTrue(outcome.succeeded, outcome.attempts)
 

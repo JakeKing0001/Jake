@@ -395,6 +395,31 @@ class UIAutomationAdapter:
             toggle_state=self._toggle_state_of(element), focused=focused,
         )
 
+    def read_value(self, element) -> str | None:
+        """F3.1.2 Task 22 (adozione): la meta' "lettura" del pattern Value, mai esposta finora -
+        `ActionExecutor.set_value` (F3.4) copre gia' la scrittura, ma nessun chiamante aveva ancora
+        avuto bisogno di RILEGGERE un valore corrente via UI Automation invece che dal `Name`
+        dell'elemento (che per un `QDateEdit`/`QLineEdit` resta l'`accessibleName` statico, MAI il
+        testo corrente - a differenza di un `QListWidgetItem`/una cella di `QTableWidget`, dove
+        `Name` E' gia' il contenuto).
+
+        **Buco reale trovato scrivendo il test, non ipotizzato**: `None` era pensato per un
+        elemento che non supporta affatto il pattern Value (stesso principio di
+        `_toggle_state_of`/`_selection_state_of`) - ma il bridge UI Automation di Qt riporta il
+        pattern Value come disponibile (con `CurrentValue=""`) anche su elementi che
+        semanticamente NON hanno un valore testuale, es. un `QPushButton`/un `QTreeWidget`
+        (verificato con un probe dedicato, non assunto). `None` resta raggiungibile solo per un
+        vero errore COM (elemento non piu' valido) - per Qt, distinguere "nessun valore" da
+        "pattern non supportato" non e' possibile tramite questo solo pattern."""
+        try:
+            pattern = element.GetCurrentPattern(UIA.UIA_ValuePatternId)
+            if not pattern:
+                return None
+            value_pattern = pattern.QueryInterface(UIA.IUIAutomationValuePattern)
+            return value_pattern.CurrentValue
+        except (ValueError, comtypes.COMError):
+            return None
+
     def _toggle_state_of(self, element) -> str | None:
         """None (non una stringa a caso) per un elemento che non supporta affatto il pattern
         Toggle - stesso principio di `_selection_state_of` sotto. "on"/"off"/"indeterminate"

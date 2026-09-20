@@ -195,11 +195,11 @@ esplicitamente app non-Qt reali (Esplora file, VS Code, browser, Office...)."""
 import argparse
 import sys
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QDate, Qt, QTimer
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QMenu, QMessageBox, QProgressBar, QPushButton, QRadioButton, QScrollArea,
-    QSlider, QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget, QTreeWidget, QTreeWidgetItem,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDateEdit, QHBoxLayout, QLabel,
+    QLineEdit, QListWidget, QMenu, QMessageBox, QProgressBar, QPushButton, QRadioButton,
+    QScrollArea, QSlider, QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget,
 )
 
@@ -512,6 +512,29 @@ class ComputerUseFixtureWindow(QWidget):
         fifth_tab_scroll.setWidget(fifth_tab)
         self.tabs.addTab(fifth_tab_scroll, "Tab 5")
 
+        # Task 22 (F3.1.2 continua verso i 100): un selettore di data (`QDateEdit`) con il popup
+        # calendario abilitato (`setCalendarPopup(True)`) - MAI un bersaglio in questa fixture
+        # finora, un popup DIVERSO da quello gia' noto di `QComboBox` (Task 12): qui il contenuto
+        # e' un `QCalendarWidget` con celle giorno, non un elenco di stringhe. Scheda propria
+        # ("Tab 6"), stesso motivo dichiarato per Task 19/20.
+        fixed_start_date = QDate(2026, 1, 15)
+        self.date_edit = QDateEdit(fixed_start_date)
+        self.date_edit.setObjectName("fixture_date_edit")
+        self.date_edit.setAccessibleName("Selettore data")
+        self.date_edit.setCalendarPopup(True)
+        self.date_edit.setDisplayFormat("yyyy-MM-dd")
+        sixth_tab = QWidget()
+        sixth_tab.setObjectName("fixture_tab_six_content")
+        sixth_tab_layout = QVBoxLayout(sixth_tab)
+        sixth_tab_layout.addWidget(self.date_edit)
+        sixth_tab_layout.addStretch()
+        sixth_tab_scroll = QScrollArea()
+        sixth_tab_scroll.setObjectName("fixture_tab_six_scroll")
+        sixth_tab_scroll.setWidgetResizable(True)
+        sixth_tab_scroll.setMaximumHeight(120)
+        sixth_tab_scroll.setWidget(sixth_tab)
+        self.tabs.addTab(sixth_tab_scroll, "Tab 6")
+
         self.scroll_list = QListWidget()
         self.scroll_list.setObjectName("fixture_scroll_list")
         self.scroll_list.setAccessibleName("Elenco con scorrimento")
@@ -720,6 +743,7 @@ class ComputerUseFixtureWindow(QWidget):
         self.transfer_source_list.clear()
         self.transfer_source_list.addItems(_TRANSFER_SOURCE_ITEMS)
         self.transfer_target_list.clear()
+        self.date_edit.setDate(QDate(2026, 1, 15))
 
     def current_combo_option(self) -> str:
         """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`)."""
@@ -739,6 +763,10 @@ class ComputerUseFixtureWindow(QWidget):
     def transfer_target_items(self) -> list[str]:
         """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`)."""
         return [self.transfer_target_list.item(i).text() for i in range(self.transfer_target_list.count())]
+
+    def current_date_text(self) -> str:
+        """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`)."""
+        return self.date_edit.date().toString("yyyy-MM-dd")
 
     def table_cell_text(self, row: int, column: int) -> str:
         """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`)."""
