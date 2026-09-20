@@ -1016,13 +1016,23 @@ class CrossListDragEndToEndTests(unittest.TestCase):
         x2, y2 = bounds_target[0] + bounds_target[2] // 2, bounds_target[1] + bounds_target[3] // 2
 
         def _drag_alfa_to_target():
+            # Passi PIU' numerosi/lenti e una pausa esplicita dopo mouseDown (rispetto allo
+            # stesso schema di Task 16) - un trasferimento TRA due widget invoca il vero
+            # drag-and-drop OLE di Windows (QDrag.exec(), mai coinvolto da un InternalMove dentro
+            # una sola lista), piu' sensibile al TIMING dell'input sintetico: un CI reale ha
+            # fallito con questo passo piu' rapido (verifica fallita dopo l'azione, non
+            # un'eccezione - l'azione e' stata eseguita ma senza l'effetto), mai riprodotto in
+            # locale - stessa cautela gia' dichiarata per F3.6.1 (nessun accesso interattivo al
+            # runner per osservare cosa succede DAVVERO).
             pyautogui.moveTo(x1, y1)
             pyautogui.mouseDown()
-            for step in range(1, 6):
-                fraction = step / 5
-                pyautogui.moveTo(int(x1 + (x2 - x1) * fraction), int(y1 + (y2 - y1) * fraction), duration=0.05)
-            time.sleep(0.2)
+            time.sleep(0.15)
+            for step in range(1, 11):
+                fraction = step / 10
+                pyautogui.moveTo(int(x1 + (x2 - x1) * fraction), int(y1 + (y2 - y1) * fraction), duration=0.08)
+            time.sleep(0.3)
             pyautogui.mouseUp()
+            time.sleep(0.2)
 
         def _alfa_moved_to_target():
             deadline = time.monotonic() + 3.0

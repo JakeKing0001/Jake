@@ -5117,6 +5117,18 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   "Alfa" lo sposta davvero da `transfer_source_list` a `transfer_target_list`, verificato
   rileggendo entrambe le liste via UI Automation). 3.217/3.217 test, ruff verde.
 
+  **Correzione successiva (stesso 20/09/2026) - fallito SOLO in CI, mai in locale**: il test e2e
+  ha fallito sul runner reale ("verifica fallita dopo l'azione" - l'azione e' stata eseguita senza
+  sollevare, ma senza l'effetto atteso), mai riprodotto in locale nonostante ripetute esecuzioni.
+  Ipotesi motivata (non verificabile con certezza senza accesso interattivo al runner, stessa
+  cautela gia' dichiarata per F3.6.1): un trasferimento TRA due widget invoca il vero
+  drag-and-drop OLE di Windows (`QDrag.exec()`), mai coinvolto da un `InternalMove` dentro una
+  sola lista (Task 16) - piu' sensibile al TIMING dell'input sintetico. Corretto allungando
+  passi/pause (`tests/test_computer_use_integration.py::CrossListDragEndToEndTests`: pausa
+  esplicita dopo `mouseDown` prima di muovere, 10 passi da 0.08s invece di 5 da 0.05s, pausa piu'
+  lunga prima di `mouseUp`) - un tentativo ragionato, non garantito, riverificato con una nuova
+  run CI reale prima di dichiarare l'incremento chiuso.
+
 ### F3.2 — Windows UI Automation adapter
 
 Dipende da: F3.1.
