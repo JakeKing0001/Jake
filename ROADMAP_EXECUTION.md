@@ -6586,6 +6586,40 @@ Criterio di uscita: una procedura dimostrata sopravvive a riavvio, resize e dati
   osservando la lista) + verificato manualmente che `SkillRegistry()`/`list_capabilities()`
   espongono la nuova skill correttamente. 3.124/3.124 test, ruff verde.
 
+- `F3.8` (scoperta empirica - "le procedure funzionano gia' contro un browser", nessun nuovo
+  codice di produzione) — 20/09/2026: indagine mirata su un possibile buco di integrazione tra
+  F3.6 (browser adapter, che passa sempre `root=document` esplicitamente a `click_element`/
+  `type_into_element`, mai un titolo di finestra - i titoli dei browser sono imprevedibili) e F3.8
+  (`RecordedStep` richiede SEMPRE `selector.window_title_contains`, mai `root=` gia' risolto).
+  Verificato con un probe reale prima di scrivere qualunque codice: `replay_steps` con due
+  `RecordedStep` (scrivi in `automation_id="fixture-input"`, clicca
+  `automation_id="fixture-add-button"`, entrambi con `window_title_contains="Jake Browser
+  Fixture"`) contro un'istanza Edge isolata (`launch_isolated_browser`, F3.6.1) e' riuscito al
+  primo tentativo, senza alcuna modifica a `procedure.py`.
+
+  Motivo strutturale, non una coincidenza: `replay_step` risolve la finestra per titolo
+  (`find_window_by_title_containing`, F3.7) e la passa come `root=` a `click_element`/
+  `type_into_element` - la cui ricerca sottostante esplora TUTTI i discendenti del root, incluso
+  il contenuto della pagina dentro il nodo `Document`, anche quando `root` e' l'INTERA finestra
+  del browser (chrome + pagina) invece che il solo `Document` come fa `find_page_document`
+  (F3.6.1). Il `<title>` della pagina fixture compare nel titolo della finestra Edge e resta
+  stabile finche' la pagina non cambia, rendendo `window_title_contains` gia' utilizzabile senza
+  bisogno di svegliare l'albero di accessibilita' a parte (F3.6, "buco reale" del risveglio) -
+  `replay_step`/`click_element` lo svegliano da soli quando serve.
+
+  **Limite reale dichiarato, non solo un successo**: cercare sull'INTERA finestra (non solo sul
+  `Document`) espone in linea di principio un selettore per SOLO `name`/`control_type` (senza
+  `automation_id`) al rischio di collidere con un elemento del chrome del browser che condivide
+  lo stesso nome/tipo. Mai osservato con la fixture attuale (`automation_id` univoci, l'attributo
+  HTML `id` mappato direttamente da Chromium) - non ulteriormente mitigato in questo incremento,
+  dichiarato onesto come limite noto (si ricollega a F3.8.6, "rilevare drift", non ancora
+  costruito) invece di un problema silenzioso.
+
+  Prova: nuovo `tests/test_procedure.py::ReplayAgainstARealBrowserPageTests` (1 test, Edge reale
+  isolato contro `benchmarks/browser_fixture.html`, verifica diretta del paragrafo di output dopo
+  il replay, non solo l'assenza di eccezioni) + `core/computer_use/procedure.py` documenta la
+  scoperta nel proprio docstring di modulo. 3.132/3.132 test, ruff verde.
+
 ### Gate F3
 
 - ≥ 90% su 100 task fixture;

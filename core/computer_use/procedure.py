@@ -45,7 +45,20 @@ alla volta" di questa sessione):
   distingue "l'app e' cambiata struttura" da un qualunque altro fallimento transitorio);
 - F3.8.7 (richiedere nuova approvazione se capability/impatto CAMBIANO nel tempo - `core/
   policy_engine.py` E' gia' collegato per la decisione INIZIALE, F3.4.3, ma nessun meccanismo
-  rileva se il rischio di una procedura gia' approvata una volta e' aumentato da quando)."""
+  rileva se il rischio di una procedura gia' approvata una volta e' aumentato da quando).
+
+**Scoperta empirica (20/09/2026), non assunta**: `RecordedStep`/`replay_steps` funzionano GIA'
+contro una pagina web reale (Edge, `benchmarks/browser_fixture.html`), senza alcuna modifica a
+questo modulo - vedi `tests/test_procedure.py::ReplayAgainstARealBrowserPageTests`. `replay_step`
+risolve sempre la finestra per TITOLO (mai per `root=` gia' risolto) e la passa come `root=` a
+`click_element`/`type_into_element` - la cui ricerca esplora TUTTI i discendenti del root, incluso
+il contenuto della pagina dentro il nodo `Document`, anche quando `root` e' l'INTERA finestra del
+browser (chrome + pagina), non ristretta al `Document` come fa invece
+`core/computer_use/browser_adapter.py::find_page_document`. Un limite reale, non solo un
+successo: cercare sull'intera finestra (non solo sul `Document`) rende un selettore per SOLO
+`name`/`control_type` (senza `automation_id`) teoricamente esposto a collidere con un elemento del
+chrome del browser - non osservato con la fixture attuale (automation_id univoci), non
+ulteriormente mitigato qui."""
 import re
 from dataclasses import dataclass
 

@@ -11,6 +11,12 @@ import unittest
 from pathlib import Path
 
 from core.computer_agent import ComputerAgent
+from core.computer_use.browser_adapter import (
+    BrowserNotFoundError,
+    find_edge_executable,
+    find_page_document,
+    launch_isolated_browser,
+)
 from core.computer_use.procedure import (
     ACTION_CLICK,
     ACTION_TYPE,
@@ -33,6 +39,15 @@ from tests.test_ui_automation_adapter import _RealFixtureTestCase
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _FIXTURE_WINDOW_TITLE = "Jake Computer Use Fixture"
+_BROWSER_FIXTURE_URL = f"file:///{(_REPO_ROOT / 'benchmarks' / 'browser_fixture.html').as_posix()}"
+
+
+def _edge_available() -> bool:
+    try:
+        find_edge_executable()
+        return True
+    except BrowserNotFoundError:
+        return False
 
 
 class RecordedStepValidationTests(unittest.TestCase):
@@ -277,6 +292,65 @@ class ReplayAgainstTheRealFixtureTests(unittest.TestCase):
         value_pattern = input_element.GetCurrentPattern(UIA.UIA_ValuePatternId).QueryInterface(UIA.IUIAutomationValuePattern)
         self.assertNotIn("${utente}", value_pattern.CurrentValue)
         self.assertEqual(value_pattern.CurrentValue, "", "il campo deve restare vuoto, mai scritto a meta'")
+
+
+@unittest.skipUnless(_edge_available(), "Microsoft Edge non e' installato in questo ambiente")
+class ReplayAgainstARealBrowserPageTests(unittest.TestCase):
+    """Scoperta empirica, non assunta (vedi ROADMAP_EXECUTION.md sezione F3.8): un `RecordedStep`
+    (che richiede SEMPRE `selector.window_title_contains`, mai un `root=` gia' risolto - vedi il
+    docstring della classe) funziona GIA' contro una pagina web reale, senza alcun codice nuovo in
+    `procedure.py`. `replay_step` risolve la finestra per TITOLO (F3.7,
+    `find_window_by_title_containing`) e la passa come `root=` a `click_element`/
+    `type_into_element` (F3.4.2), la cui ricerca sottostante esplora TUTTI i discendenti del root -
+    incluso il contenuto della pagina dentro il nodo `Document`, anche se `root` qui e' l'INTERA
+    finestra del browser (chrome + pagina), non ristretto al `Document` come fa invece
+    `core/computer_use/browser_adapter.py::find_page_document` (F3.6.1, che passa `root=document`
+    esplicitamente). Il `<title>` della pagina fixture ("Jake Browser Fixture") compare nel titolo
+    della finestra Edge - a differenza di un URL (normalizzato/imprevedibile, F3.6.5), resta
+    STABILE finche' la pagina non cambia, rendendo `window_title_contains` gia' utilizzabile qui
+    senza bisogno di svegliare esplicitamente l'albero di accessibilita' prima (la ricerca della
+    finestra stessa non richiede il `Document`, solo `replay_step`/`click_element` in poi ne hanno
+    bisogno, e lo svegliano da soli - verificato, non assunto).
+
+    **Avvertenza reale, non solo un successo**: la ricerca avviene sull'INTERA finestra del
+    browser, non solo sul `Document` - un selettore per SOLO `name`/`control_type` (senza
+    `automation_id`) rischierebbe quindi, in linea di principio, di collidere con un elemento del
+    chrome del browser (barra indirizzi, tab, bottoni) che condivide lo stesso nome/tipo. Mai
+    osservato con QUESTA fixture (che usa `automation_id` univoci, l'attributo HTML `id` mappato
+    direttamente da Chromium) - non ulteriormente mitigato qui, dichiarato onesto come limite noto
+    invece di un problema silenzioso, coerente con F3.8.6 (rilevare drift), non ancora costruito."""
+
+    def setUp(self):
+        self.browser = launch_isolated_browser(_BROWSER_FIXTURE_URL)
+        self.addCleanup(self.browser.terminate_and_cleanup)
+        self.adapter = UIAutomationAdapter()
+        self.window = self.adapter.find_window_by_process_id(self.browser.process.pid, timeout_seconds=15.0)
+        self.agent = ComputerAgent()
+
+    def test_a_recorded_procedure_replays_for_real_against_a_real_browser_page(self):
+        steps = [
+            RecordedStep(
+                action=ACTION_TYPE,
+                selector=ElementSelector(automation_id="fixture-input", window_title_contains="Jake Browser Fixture"),
+                text="dalla procedura",
+            ),
+            RecordedStep(
+                action=ACTION_CLICK,
+                selector=ElementSelector(automation_id="fixture-add-button", window_title_contains="Jake Browser Fixture"),
+            ),
+        ]
+
+        results = replay_steps(self.agent, self.adapter, steps, timeout_seconds=10.0)
+
+        self.assertEqual(len(results), 2)
+        self.assertTrue(all(r.success for r in results), results)
+
+        # Verifica diretta e indipendente dell'effetto reale (non solo che le chiamate non
+        # abbiano sollevato) - stesso principio gia' seguito da
+        # tests/test_browser_adapter.py::test_computer_agent_click_and_type_work_against_the_document_root.
+        document = find_page_document(self.adapter, self.window)
+        matches = self.adapter.find_matching_elements(document, name="dalla procedura")
+        self.assertEqual(len(matches), 1, "il paragrafo di output deve mostrare davvero il testo digitato")
 
 
 class DryRunAgainstTheRealFixtureTests(_RealFixtureTestCase):
