@@ -45,6 +45,7 @@ class AutomationPropertiesTests(unittest.TestCase):
         self.assertEqual(window.progress_bar.objectName(), "fixture_progress")
         self.assertEqual(window.start_progress_button.objectName(), "fixture_start_progress_button")
         self.assertEqual(window.reorder_list.objectName(), "fixture_reorder_list")
+        self.assertEqual(window.value_spinbox.objectName(), "fixture_spinbox")
 
     def test_every_control_has_a_non_empty_accessible_name(self):
         window = ComputerUseFixtureWindow()
@@ -52,6 +53,7 @@ class AutomationPropertiesTests(unittest.TestCase):
             window.input_field, window.add_button, window.reset_button, window.item_list, window.tree,
             window.tabs, window.option_checkbox, window.scroll_list, window.load_button, window.dynamic_button,
             window.action_button_a, window.action_button_b, window.option_combo, window.value_slider,
+            window.value_spinbox,
             window.progress_bar, window.start_progress_button, window.reorder_list,
         ):
             self.assertTrue(widget.accessibleName(), f"{widget.objectName()} non ha un accessibleName")
@@ -660,6 +662,33 @@ class ReorderListTests(unittest.TestCase):
         window.reset_state()
 
         self.assertEqual(window.reorder_list_items(), ["Uno", "Due", "Tre"])
+
+
+class SpinBoxTests(unittest.TestCase):
+    """Task 17 di F3.1.2 (continua verso i 100) - il primo bersaglio della nuova "Tab 3", un
+    contenitore dedicato ai task futuri invece di continuare ad allungare la colonna verticale
+    principale (buco reale gia' trovato per Task 16, vedi il docstring della fixture). Stesso
+    pattern RangeValue di `value_slider` (Task 14), verificato funzionare identicamente su un
+    `QSpinBox` - vedi `tests/test_executor.py::RangeValueOnSpinBoxTests` per la dimostrazione via
+    UI Automation."""
+
+    def test_the_value_starts_at_zero(self):
+        window = ComputerUseFixtureWindow()
+        self.assertEqual(window.value_spinbox.value(), 0)
+
+    def test_the_range_is_zero_to_one_hundred(self):
+        window = ComputerUseFixtureWindow()
+        self.assertEqual(window.value_spinbox.minimum(), 0)
+        self.assertEqual(window.value_spinbox.maximum(), 100)
+
+    def test_reset_returns_the_spinbox_to_zero(self):
+        window = ComputerUseFixtureWindow()
+        window.value_spinbox.setValue(33)
+        self.assertEqual(window.value_spinbox.value(), 33)
+
+        window.reset_state()
+
+        self.assertEqual(window.value_spinbox.value(), 0)
 
 
 if __name__ == "__main__":

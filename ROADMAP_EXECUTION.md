@@ -4976,6 +4976,30 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   `tests/test_executor.py`/`tests/test_selector.py` (149 test) riverificata verde dopo entrambi i
   fix di altezza. 3.198/3.198 test, ruff verde.
 
+- `F3.1.2` (Task 17 + nuova infrastruttura "Tab 3", CHIUDE la lezione di Task 16 per COSTRUZIONE
+  invece che con un'altra toppa) — 20/09/2026: nuova scheda `Tab 3` nel `QTabWidget` gia'
+  esistente, dedicata ad ospitare i task FUTURI invece di continuare ad allungare la colonna
+  verticale principale (la finestra rischiava di uscire dallo schermo dopo 16 task impilati,
+  buco reale gia' trovato per Task 16). Nuovo `value_spinbox` (`QSpinBox`) come primo bersaglio
+  di questa scheda - stesso pattern `RangeValue` gia' verificato funzionante per Task 14 (lo
+  slider), verificato QUI funzionare identicamente, non assunto per analogia.
+
+  **Due buchi reali trovati scrivendo il test end-to-end, non ipotizzati**: (1) l'automation_id
+  dello spinbox e' un percorso QUALIFICATO che include l'INTERA catena di antenati (tab genitrice
+  compresa) - lo stesso genere di sorpresa gia' documentato per il checkbox di Tab 2 (F3.2, Task
+  4/10), aggirato cercando per NOME invece, piu' semplice e comunque univoco; (2) il contenuto di
+  una tab NON attiva non compare affatto nell'albero UI Automation finche' la tab non viene
+  selezionata per davvero - richiede `wait_for_unique_element` (mai un singolo tentativo) dopo il
+  cambio scheda, lo stesso genere di ritardo "sveglia" gia' incontrato per il `Document` di un
+  browser (F3.6.1) e per il popup di una combobox (Task 12).
+
+  Prova: 2 test nuovi in `tests/test_executor.py::RangeValueOnSpinBoxTests` (`SetValue()` cambia
+  davvero il valore attraverso il cambio scheda; il reset riporta sia lo spinbox a zero sia
+  l'interfaccia alla prima scheda) + 3 test nuovi in
+  `tests/test_computer_use_fixture.py::SpinBoxTests` (valore iniziale, intervallo 0-100, reset) +
+  `value_spinbox` aggiunto ai controlli gia' verificati per object name/accessible name non
+  vuoti. 3.203/3.203 test, ruff verde.
+
 ### F3.2 — Windows UI Automation adapter
 
 Dipende da: F3.1.

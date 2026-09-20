@@ -135,6 +135,23 @@ REALI via UI Automation dopo il fix, non assunto per analogia. Lezione generale 
 questa fixture: ogni lista con un contenuto potenzialmente multi-riga merita un'altezza minima
 dichiarata fin dall'inizio, non lasciata al caso di quanto spazio rimane libero nel layout.
 
+**Diciassettesima fetta (20/09/2026, un incremento successivo) - Task 17 di F3.1.2 + nuova
+infrastruttura "Tab 3"**: la lezione di Task 16 (la finestra rischiava di uscire dallo schermo
+dopo 16 task impilati in verticale) applicata per COSTRUZIONE invece che con un'altra toppa - una
+nuova scheda dedicata (`Tab 3`) ospita `value_spinbox` (`QSpinBox`), il primo di eventuali task
+FUTURI, invece di continuare ad allungare la colonna verticale principale. Stesso pattern
+`RangeValue` gia' verificato funzionante per Task 14 - vedi
+`tests/test_executor.py::RangeValueOnSpinBoxTests`.
+
+**Due buchi reali trovati scrivendo QUEL test, non ipotizzati**: (1) l'automation_id dello
+spinbox e' un percorso QUALIFICATO che include l'INTERA catena di antenati (tab genitrice
+compresa) - lo stesso genere di sorpresa gia' documentato per il checkbox di Tab 2 (F3.2),
+aggirato cercando per NOME invece; (2) il contenuto di una tab NON attiva non compare affatto
+nell'albero UI Automation finche' la tab non viene selezionata per davvero - richiede un
+`wait_for_unique_element` (mai un singolo tentativo) dopo il cambio scheda per lasciare il tempo
+all'albero di "svegliarsi", lo stesso genere di ritardo gia' incontrato per il `Document` di un
+browser (F3.6.1) e per il popup di una combobox (Task 12).
+
 PySide6 invece di Win32/WinForms nativo: gia' una dipendenza del progetto
 (requirements/hud.txt, usata dall'HUD - vedi core/gui/hud/), ed espone i propri widget a UI
 Automation su Windows tramite il ponte di accessibilita' di Qt (QAccessible) - non perfettamente
@@ -148,8 +165,8 @@ import sys
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QMenu, QMessageBox, QProgressBar, QPushButton, QSlider, QTabWidget, QTreeWidget,
-    QTreeWidgetItem, QVBoxLayout, QWidget,
+    QListWidget, QMenu, QMessageBox, QProgressBar, QPushButton, QSlider, QSpinBox, QTabWidget,
+    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 # Terza fetta (albero): due categorie, due figli ciascuna - nomi stabili anche per i dati, non
@@ -327,6 +344,22 @@ class ComputerUseFixtureWindow(QWidget):
         self.option_checkbox.setAccessibleName("Opzione")
         QVBoxLayout(second_tab).addWidget(self.option_checkbox)
         self.tabs.addTab(second_tab, "Tab 2")
+
+        # Task 17 (F3.1.2 continua verso i 100) - e infrastruttura per i task FUTURI: "Tab 3" e'
+        # il primo bersaglio di un nuovo contenitore dedicato invece di continuare ad allungare la
+        # colonna verticale principale (buco reale gia' trovato per Task 16, la finestra era
+        # cresciuta fino a rischiare di uscire dallo schermo) - i prossimi task oltre il 17
+        # dovrebbero preferire QUESTA scheda (o una successiva), non altri widget in coda al
+        # layout principale.
+        third_tab = QWidget()
+        third_tab.setObjectName("fixture_tab_three_content")
+        self.value_spinbox = QSpinBox()
+        self.value_spinbox.setObjectName("fixture_spinbox")
+        self.value_spinbox.setAccessibleName("Selettore numerico")
+        self.value_spinbox.setRange(0, 100)
+        self.value_spinbox.setValue(0)
+        QVBoxLayout(third_tab).addWidget(self.value_spinbox)
+        self.tabs.addTab(third_tab, "Tab 3")
 
         self.scroll_list = QListWidget()
         self.scroll_list.setObjectName("fixture_scroll_list")
@@ -527,6 +560,7 @@ class ComputerUseFixtureWindow(QWidget):
         self.progress_bar.setValue(0)
         self.reorder_list.clear()
         self.reorder_list.addItems(_REORDER_LIST_ITEMS)
+        self.value_spinbox.setValue(0)
 
     def current_combo_option(self) -> str:
         """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`)."""

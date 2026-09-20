@@ -220,6 +220,62 @@ class RangeValueTests(_ExecutorFixtureTestCase):
             self.executor.set_range_value(add_button, 10.0)
 
 
+class RangeValueOnSpinBoxTests(_ExecutorFixtureTestCase):
+    """F3.1.2 Task 17 (adozione) - lo STESSO pattern RangeValue, qui su un `QSpinBox` (`Tab 3`,
+    la nuova scheda dedicata ai task futuri - vedi il docstring della fixture per il motivo:
+    continuare ad allungare la colonna verticale principale rischiava di far uscire la finestra
+    dallo schermo, un buco reale gia' trovato per Task 16). Verificato funzionare correttamente
+    come per lo slider (Task 14), non assunto per analogia.
+
+    **Buco reale trovato scrivendo QUESTO test, non ipotizzato**: l'automation_id dello spinbox e'
+    un percorso QUALIFICATO che include l'INTERA catena di antenati (tab genitrice compresa,
+    "...fixture_tabs.qt_tabwidget_stackedwidget.fixture_tab_three_content.fixture_spinbox") - lo
+    stesso genere di sorpresa gia' documentato per il checkbox di Tab 2 (F3.2) - cercato per NOME
+    invece, piu' semplice e comunque univoco qui. Un secondo buco, DIVERSO: il contenuto di una
+    tab NON attiva non compare affatto nell'albero UI Automation finche' la tab non viene
+    selezionata per davvero (`wait_for_unique_element`, non un singolo tentativo, per lasciare
+    il tempo all'albero di "svegliarsi" dopo il cambio scheda)."""
+
+    def tearDown(self):
+        self._reset_fixture()
+
+    def _current_spinbox_value(self, element) -> float:
+        from comtypes.gen import UIAutomationClient as UIA
+        pattern = element.GetCurrentPattern(UIA.UIA_RangeValuePatternId).QueryInterface(UIA.IUIAutomationRangeValuePattern)
+        return pattern.CurrentValue
+
+    def _spinbox_on_tab_three(self):
+        tab_three = self._element(name="Tab 3", control_type="TabItem")
+        self.executor.select(tab_three)
+        time.sleep(_SETTLE_SECONDS)
+        from core.computer_use.selector import ElementSelector, SelectorEngine
+        engine = SelectorEngine(self.adapter)
+        return engine.wait_for_unique_element(self.window, ElementSelector(name="Selettore numerico", control_type="Spinner"), timeout_seconds=3.0)
+
+    def test_setting_the_value_actually_changes_it(self):
+        spinbox = self._spinbox_on_tab_three()
+        self.assertEqual(self._current_spinbox_value(spinbox), 0.0, "stato iniziale atteso, altrimenti il test non proverebbe un vero cambiamento")
+
+        self.executor.set_range_value(spinbox, 55.0)
+        time.sleep(_SETTLE_SECONDS)
+
+        spinbox_after = self._spinbox_on_tab_three()
+        self.assertEqual(self._current_spinbox_value(spinbox_after), 55.0)
+
+    def test_reset_returns_the_spinbox_to_zero_and_the_active_tab_to_the_first(self):
+        spinbox = self._spinbox_on_tab_three()
+        self.executor.set_range_value(spinbox, 90.0)
+        time.sleep(_SETTLE_SECONDS)
+
+        self._reset_fixture()
+
+        tab_one = self._element(name="Tab 1", control_type="TabItem")
+        self.assertTrue(self.adapter.describe_element(tab_one).selected, "reset deve riportare anche l'interfaccia alla prima scheda")
+
+        spinbox_after = self._spinbox_on_tab_three()
+        self.assertEqual(self._current_spinbox_value(spinbox_after), 0.0)
+
+
 class ExpandCollapseKnownLimitationTests(_ExecutorFixtureTestCase):
     """**Documenta un buco reale, non lo nasconde**: il pattern ExpandCollapse e' presente su un
     `QTreeWidgetItem` (GetCurrentPattern lo trova, Expand()/Collapse() non sollevano mai), ma il
