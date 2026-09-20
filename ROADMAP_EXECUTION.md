@@ -5098,6 +5098,25 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   pixel seleziona/focalizza davvero la cella; click+digitazione+Invio sostituisce il testo,
   verificato rileggendo il `DataItem`). 3.214/3.214 test, ruff verde.
 
+- `F3.1.2` (Task 20 - "trascina un elemento da una lista a un'altra", in "Tab 5") — 20/09/2026:
+  nuovi `transfer_source_list`/`transfer_target_list` (due `QListWidget` distinti,
+  `DragDropMode.DragDrop` + `DefaultDropAction.MoveAction`) - diverso da Task 16 (riordino DENTRO
+  la stessa lista): qui l'elemento cambia CONTENITORE, non solo posizione. Scheda propria ("Tab
+  5") per lo stesso motivo dichiarato per Task 19 - mai condividere una scheda gia' quasi piena
+  senza prima verificare che il nuovo contenuto resti dentro i 120px visibili del suo
+  `QScrollArea`.
+
+  Verificato empiricamente PRIMA di scrivere il test, non assunto: lo STESSO trascinamento
+  sintetico gia' noto affidabile da Task 16 (`pyautogui.moveTo`+`mouseDown`+piu' `moveTo`
+  intermedi+`mouseUp`, mai un singolo salto) funziona anche TRA due widget distinti, non solo
+  dentro uno solo - nessuna sorpresa qui, a differenza di Task 19.
+
+  Prova: 2 test nuovi in `tests/test_computer_use_fixture.py::TransferListTests` (stato iniziale
+  due elementi in origine/nessuno in destinazione; reset ripristina la divisione iniziale) + 1
+  test nuovo in `tests/test_computer_use_integration.py::CrossListDragEndToEndTests` (trascinare
+  "Alfa" lo sposta davvero da `transfer_source_list` a `transfer_target_list`, verificato
+  rileggendo entrambe le liste via UI Automation). 3.217/3.217 test, ruff verde.
+
 ### F3.2 — Windows UI Automation adapter
 
 Dipende da: F3.1.

@@ -220,6 +220,10 @@ _SCROLL_LIST_ROW_COUNT = 30
 # eventuale controllo per nome che cerchi nell'intera finestra).
 _REORDER_LIST_ITEMS = ["Uno", "Due", "Tre"]
 
+# Task 20 (F3.1.2 continua verso i 100): elementi iniziali della lista origine del trasferimento
+# tra due liste - nomi distinti da ogni altra lista della fixture, per lo stesso motivo sopra.
+_TRANSFER_SOURCE_ITEMS = ["Alfa", "Beta"]
+
 # Nona fetta (F3.3.7 resto - "traduzione"): SOLO il bottone "Aggiungi" e' tradotto, non l'intera
 # fixture - il punto da dimostrare (un selettore per automation_id sopravvive alla lingua, uno per
 # nome no) non richiede una i18n completa, e tradurre OGNI stringa (albero/tab/checkbox) userebbe
@@ -478,6 +482,36 @@ class ComputerUseFixtureWindow(QWidget):
         fourth_tab_scroll.setWidget(fourth_tab)
         self.tabs.addTab(fourth_tab_scroll, "Tab 4")
 
+        # Task 20 (F3.1.2 continua verso i 100): trascinare un elemento da UNA lista a un'ALTRA -
+        # diverso da Task 16 (riordino DENTRO la stessa lista): qui l'elemento cambia CONTENITORE,
+        # non solo posizione. Una scheda propria ("Tab 5"), stessa lezione di Task 19: mai
+        # condividere una scheda gia' quasi piena (Tab 4 ha gia' la tabella) senza prima verificare
+        # che tutto il nuovo contenuto resti DAVVERO dentro i 120px visibili.
+        fifth_tab = QWidget()
+        fifth_tab.setObjectName("fixture_tab_five_content")
+        fifth_tab_layout = QHBoxLayout(fifth_tab)
+        self.transfer_source_list = QListWidget()
+        self.transfer_source_list.setObjectName("fixture_transfer_source")
+        self.transfer_source_list.setAccessibleName("Elenco origine")
+        self.transfer_source_list.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self.transfer_source_list.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.transfer_source_list.addItems(_TRANSFER_SOURCE_ITEMS)
+        self.transfer_source_list.setMaximumHeight(100)
+        self.transfer_target_list = QListWidget()
+        self.transfer_target_list.setObjectName("fixture_transfer_target")
+        self.transfer_target_list.setAccessibleName("Elenco destinazione")
+        self.transfer_target_list.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self.transfer_target_list.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.transfer_target_list.setMaximumHeight(100)
+        fifth_tab_layout.addWidget(self.transfer_source_list)
+        fifth_tab_layout.addWidget(self.transfer_target_list)
+        fifth_tab_scroll = QScrollArea()
+        fifth_tab_scroll.setObjectName("fixture_tab_five_scroll")
+        fifth_tab_scroll.setWidgetResizable(True)
+        fifth_tab_scroll.setMaximumHeight(120)
+        fifth_tab_scroll.setWidget(fifth_tab)
+        self.tabs.addTab(fifth_tab_scroll, "Tab 5")
+
         self.scroll_list = QListWidget()
         self.scroll_list.setObjectName("fixture_scroll_list")
         self.scroll_list.setAccessibleName("Elenco con scorrimento")
@@ -683,6 +717,9 @@ class ComputerUseFixtureWindow(QWidget):
         self.data_table.item(0, 1).setText("")
         self.data_table.item(1, 1).setText("")
         self.data_table.clearSelection()
+        self.transfer_source_list.clear()
+        self.transfer_source_list.addItems(_TRANSFER_SOURCE_ITEMS)
+        self.transfer_target_list.clear()
 
     def current_combo_option(self) -> str:
         """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`)."""
@@ -694,6 +731,14 @@ class ComputerUseFixtureWindow(QWidget):
             if radio.isChecked():
                 return radio.text()
         return None
+
+    def transfer_source_items(self) -> list[str]:
+        """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`)."""
+        return [self.transfer_source_list.item(i).text() for i in range(self.transfer_source_list.count())]
+
+    def transfer_target_items(self) -> list[str]:
+        """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`)."""
+        return [self.transfer_target_list.item(i).text() for i in range(self.transfer_target_list.count())]
 
     def table_cell_text(self, row: int, column: int) -> str:
         """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`)."""

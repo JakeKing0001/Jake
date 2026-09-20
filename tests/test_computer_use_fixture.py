@@ -50,6 +50,8 @@ class AutomationPropertiesTests(unittest.TestCase):
         self.assertEqual(window.radio_green.objectName(), "fixture_radio_green")
         self.assertEqual(window.radio_blue.objectName(), "fixture_radio_blue")
         self.assertEqual(window.data_table.objectName(), "fixture_table")
+        self.assertEqual(window.transfer_source_list.objectName(), "fixture_transfer_source")
+        self.assertEqual(window.transfer_target_list.objectName(), "fixture_transfer_target")
 
     def test_every_control_has_a_non_empty_accessible_name(self):
         window = ComputerUseFixtureWindow()
@@ -59,6 +61,7 @@ class AutomationPropertiesTests(unittest.TestCase):
             window.action_button_a, window.action_button_b, window.option_combo, window.value_slider,
             window.value_spinbox, window.radio_red, window.radio_green, window.radio_blue,
             window.progress_bar, window.start_progress_button, window.reorder_list, window.data_table,
+            window.transfer_source_list, window.transfer_target_list,
         ):
             self.assertTrue(widget.accessibleName(), f"{widget.objectName()} non ha un accessibleName")
 
@@ -750,6 +753,27 @@ class TableTests(unittest.TestCase):
         self.assertEqual(window.table_cell_text(0, 1), "")
         self.assertEqual(window.table_cell_text(1, 1), "")
         self.assertEqual(window.table_cell_text(0, 0), "Riga 1", "solo le celle modificabili vanno azzerate, non le etichette di riga")
+
+
+class TransferListTests(unittest.TestCase):
+    """Task 20 di F3.1.2 (continua verso i 100, in "Tab 5") - trascinare un elemento da UNA lista
+    a un'ALTRA, diverso da Task 16 (riordino DENTRO la stessa lista): qui l'elemento cambia
+    CONTENITORE."""
+
+    def test_initial_state_has_two_items_in_source_and_none_in_target(self):
+        window = ComputerUseFixtureWindow()
+        self.assertEqual(window.transfer_source_items(), ["Alfa", "Beta"])
+        self.assertEqual(window.transfer_target_items(), [])
+
+    def test_reset_restores_the_initial_split(self):
+        window = ComputerUseFixtureWindow()
+        window.transfer_source_list.takeItem(0)
+        window.transfer_target_list.addItem("Alfa")
+
+        window.reset_state()
+
+        self.assertEqual(window.transfer_source_items(), ["Alfa", "Beta"])
+        self.assertEqual(window.transfer_target_items(), [])
 
 
 if __name__ == "__main__":

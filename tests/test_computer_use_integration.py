@@ -966,6 +966,79 @@ class TableCellEditEndToEndTests(unittest.TestCase):
         self.assertTrue(info.focused, "un click pixel deve dare il fuoco Qt davvero alla cella")
 
 
+class CrossListDragEndToEndTests(unittest.TestCase):
+    """Task 20 (F3.1.2 continua verso i 100) - "trascina un elemento da una lista a un'altra",
+    diverso da Task 16 (riordino DENTRO la stessa `reorder_list`): qui l'elemento cambia
+    CONTENITORE, da `transfer_source_list` a `transfer_target_list` (entrambe con
+    `DragDropMode.DragDrop`, in "Tab 5"). Verificato con lo STESSO trascinamento sintetico gia'
+    noto affidabile da Task 16 (`pyautogui.moveTo`+`mouseDown`+piu' `moveTo` intermedi+`mouseUp`) -
+    funziona anche TRA due widget distinti, non solo dentro uno solo."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_dragging_an_item_from_the_source_list_moves_it_to_the_target_list(self):
+        import pyautogui
+        import win32gui
+
+        win32gui.SetForegroundWindow(self.window.CurrentNativeWindowHandle)
+        time.sleep(0.2)
+        tab_five = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 5", control_type="TabItem"))
+        self.executor.select(tab_five)
+        time.sleep(0.3)
+
+        source_list = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(name="Elenco origine", control_type="List"), timeout_seconds=3.0,
+        )
+        target_list = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(name="Elenco destinazione", control_type="List"), timeout_seconds=3.0,
+        )
+        item_alfa = self.engine.wait_for_unique_element(source_list, ElementSelector(name="Alfa"))
+        bounds_alfa = self.adapter.describe_element(item_alfa).bounds
+        bounds_target = self.adapter.describe_element(target_list).bounds
+        x1, y1 = bounds_alfa[0] + bounds_alfa[2] // 2, bounds_alfa[1] + bounds_alfa[3] // 2
+        x2, y2 = bounds_target[0] + bounds_target[2] // 2, bounds_target[1] + bounds_target[3] // 2
+
+        def _drag_alfa_to_target():
+            pyautogui.moveTo(x1, y1)
+            pyautogui.mouseDown()
+            for step in range(1, 6):
+                fraction = step / 5
+                pyautogui.moveTo(int(x1 + (x2 - x1) * fraction), int(y1 + (y2 - y1) * fraction), duration=0.05)
+            time.sleep(0.2)
+            pyautogui.mouseUp()
+
+        def _alfa_moved_to_target():
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline:
+                source_names = [i.name for i in self.engine.find_all(source_list, ElementSelector(control_type="ListItem"))]
+                target_names = [i.name for i in self.engine.find_all(target_list, ElementSelector(control_type="ListItem"))]
+                if source_names == ["Beta"] and target_names == ["Alfa"]:
+                    return True
+                time.sleep(0.1)
+            return False
+
+        outcome = try_strategies_in_order([("synthetic_mouse_drag", _drag_alfa_to_target)], verify=_alfa_moved_to_target)
+
+        self.assertTrue(outcome.succeeded, outcome.attempts)
+
+
 class DynamicControlEndToEndTests(unittest.TestCase):
     """Task 6/10 di F3.1.2 (F3.1.6, la parte DINAMICA mai affrontata finora - vedi
     `benchmarks/computer_use_fixture.py` per il perche' `remove_button`, gia' un "primo assaggio",
