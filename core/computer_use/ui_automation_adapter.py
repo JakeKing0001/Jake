@@ -176,12 +176,21 @@ class UIAutomationAdapter:
         trovata". Un breve retry INTERNO (3 tentativi, ~50ms tra uno e l'altro - non il timeout
         dichiarato dal chiamante, che resta invariato: questo assorbe un blip, non sostituisce il
         polling esterno) - un errore che persiste oltre i 3 tentativi si propaga comunque, mai
-        nascosto per sempre."""
+        nascosto per sempre.
+
+        **Esteso a `ValueError` (F3.1.2 Task 70, adozione)**: `find_matching_elements` (mai
+        protetto da questo retry finora - un buco reale, non ipotizzato, riemerso piu' spesso con
+        la fixture cresciuta a 12 schede/70+ controlli di questa sessione) ha sollevato lo STESSO
+        genere di blip transitorio ma come `ValueError: NULL COM pointer access` su
+        `results.GetElement(i)` (lo stesso `ValueError` gia' considerato "elemento non davvero
+        leggibile" in `describe_element` - non un errore di programmazione, il segnale che il
+        provider COM era momentaneamente occupato), non `comtypes.COMError` - catturato ora
+        insieme."""
         last_error = None
         for _ in range(3):
             try:
                 return call()
-            except comtypes.COMError as exc:
+            except (comtypes.COMError, ValueError) as exc:
                 last_error = exc
                 time.sleep(0.05)
         raise last_error
@@ -553,5 +562,9 @@ class UIAutomationAdapter:
         combined = conditions[0]
         for extra_condition in conditions[1:]:
             combined = self._uia.CreateAndCondition(combined, extra_condition)
-        results = root.FindAll(UIA.TreeScope_Descendants, combined)
-        return [results.GetElement(i) for i in range(results.Length)]
+
+        def _find_all():
+            results = root.FindAll(UIA.TreeScope_Descendants, combined)
+            return [results.GetElement(i) for i in range(results.Length)]
+
+        return self._retry_transient_com_error(_find_all)

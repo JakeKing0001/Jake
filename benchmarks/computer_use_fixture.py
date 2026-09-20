@@ -196,11 +196,12 @@ import argparse
 import sys
 
 from PySide6.QtCore import QDate, Qt, QTimer
+from PySide6.QtGui import QIntValidator, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDateEdit, QHBoxLayout, QLabel,
-    QLineEdit, QListWidget, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
-    QRadioButton, QScrollArea, QSlider, QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget,
-    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox, QPlainTextEdit, QProgressBar,
+    QPushButton, QRadioButton, QScrollArea, QSlider, QSpinBox, QTableWidget, QTableWidgetItem,
+    QTabWidget, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 # Terza fetta (albero): due categorie, due figli ciascuna - nomi stabili anche per i dati, non
@@ -653,6 +654,88 @@ class ComputerUseFixtureWindow(QWidget):
         tenth_tab_scroll.setWidget(tenth_tab)
         self.tabs.addTab(tenth_tab_scroll, "Tab 10")
 
+        # Task 54 (F3.1.2 continua verso i 100): una lista con elementi CHECKABILI
+        # (`ItemIsUserCheckable`) - ogni riga ha una propria casella, diverso da `item_list`
+        # (selezione) e da `option_checkbox`/`tristate_checkbox` (un controllo unico, non per
+        # riga) - il pattern reale "scegli quali file esportare".
+        eleventh_tab = QWidget()
+        eleventh_tab.setObjectName("fixture_tab_eleven_content")
+        eleventh_tab_layout = QVBoxLayout(eleventh_tab)
+        self.checkable_list = QListWidget()
+        self.checkable_list.setObjectName("fixture_checkable_list")
+        self.checkable_list.setAccessibleName("Elenco con caselle")
+        for label in ("Opzione X", "Opzione Y", "Opzione Z"):
+            item = QListWidgetItem(label)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Unchecked)
+            self.checkable_list.addItem(item)
+        self.checkable_list.setMaximumHeight(90)
+        eleventh_tab_layout.addWidget(self.checkable_list)
+
+        # Task 55 (F3.1.2 continua verso i 100): un campo PASSWORD (`EchoMode.Password`) - il
+        # testo digitato non e' mai visibile sullo schermo, collegato al tema gia' esercitato in
+        # F3.6.7 (OCR/clipboard non espongono mai una password reale) ma qui per un campo LOCALE,
+        # mai il browser.
+        self.password_field = QLineEdit()
+        self.password_field.setObjectName("fixture_password_field")
+        self.password_field.setAccessibleName("Campo password")
+        self.password_field.setEchoMode(QLineEdit.EchoMode.Password)
+        eleventh_tab_layout.addWidget(self.password_field)
+
+        # Task 56 (F3.1.2 continua verso i 100): un campo con un VALIDATORE (`QIntValidator`,
+        # solo cifre) - digitare un carattere non valido non ha alcun effetto, diverso da ogni
+        # campo di testo gia' esercitato (nessuno filtrava l'input).
+        self.numeric_field = QLineEdit()
+        self.numeric_field.setObjectName("fixture_numeric_field")
+        self.numeric_field.setAccessibleName("Campo numerico")
+        self.numeric_field.setValidator(QIntValidator(0, 999, self))
+        eleventh_tab_layout.addWidget(self.numeric_field)
+
+        # Task 57 (F3.1.2 continua verso i 100): un `QToolButton` CHECKABLE - diverso da
+        # `QPushButton` (mai checkable in questa fixture) e da `QCheckBox` (un controllo/ruolo UIA
+        # diverso da bottone).
+        self.toggle_tool_button = QToolButton()
+        self.toggle_tool_button.setText("Attiva")
+        self.toggle_tool_button.setObjectName("fixture_toggle_tool_button")
+        self.toggle_tool_button.setAccessibleName("Bottone attivabile")
+        self.toggle_tool_button.setCheckable(True)
+        eleventh_tab_layout.addWidget(self.toggle_tool_button)
+        eleventh_tab_layout.addStretch()
+        eleventh_tab_scroll = QScrollArea()
+        eleventh_tab_scroll.setObjectName("fixture_tab_eleven_scroll")
+        eleventh_tab_scroll.setWidgetResizable(True)
+        eleventh_tab_scroll.setMaximumHeight(120)
+        eleventh_tab_scroll.setWidget(eleventh_tab)
+        self.tabs.addTab(eleventh_tab_scroll, "Tab 11")
+
+        # Task 58 (F3.1.2 continua verso i 100): una barra di avanzamento INDETERMINATA
+        # (`setRange(0, 0)`, la convenzione Qt per "occupato, durata sconosciuta") - diverso da
+        # `progress_bar` (Task 15, un valore reale che avanza) - qui NON esiste un valore
+        # intermedio significativo da osservare, solo lo stato "in corso".
+        twelfth_tab = QWidget()
+        twelfth_tab.setObjectName("fixture_tab_twelve_content")
+        twelfth_tab_layout = QVBoxLayout(twelfth_tab)
+        self.busy_indicator = QProgressBar()
+        self.busy_indicator.setObjectName("fixture_busy_indicator")
+        self.busy_indicator.setAccessibleName("Indicatore di attesa")
+        self.busy_indicator.setRange(0, 0)
+        twelfth_tab_layout.addWidget(self.busy_indicator)
+        twelfth_tab_layout.addStretch()
+        twelfth_tab_scroll = QScrollArea()
+        twelfth_tab_scroll.setObjectName("fixture_tab_twelve_scroll")
+        twelfth_tab_scroll.setWidgetResizable(True)
+        twelfth_tab_scroll.setMaximumHeight(120)
+        twelfth_tab_scroll.setWidget(twelfth_tab)
+        self.tabs.addTab(twelfth_tab_scroll, "Tab 12")
+
+        # Task 59 (F3.1.2 continua verso i 100): una scorciatoia GLOBALE (`QShortcut`, Ctrl+N)
+        # collegata ad `_add_current_text` - diverso da ogni scorciatoia gia' esercitata (tutte
+        # richiedevano il FUOCO su un controllo specifico, es. Spazio su una checkbox con
+        # focus): un `QShortcut` sulla finestra funziona indipendentemente da quale controllo ha
+        # il fuoco in quel momento.
+        self.add_shortcut = QShortcut(Qt.CTRL | Qt.Key_N, self)
+        self.add_shortcut.activated.connect(self._add_current_text)
+
         self.scroll_list = QListWidget()
         self.scroll_list.setObjectName("fixture_scroll_list")
         self.scroll_list.setAccessibleName("Elenco con scorrimento")
@@ -881,6 +964,11 @@ class ComputerUseFixtureWindow(QWidget):
         self.multiline_edit.clear()
         self.editable_combo.setCurrentIndex(0)
         self.tristate_checkbox.setCheckState(Qt.CheckState.Unchecked)
+        for i in range(self.checkable_list.count()):
+            self.checkable_list.item(i).setCheckState(Qt.CheckState.Unchecked)
+        self.password_field.clear()
+        self.numeric_field.clear()
+        self.toggle_tool_button.setChecked(False)
 
     def current_combo_option(self) -> str:
         """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`)."""
@@ -946,15 +1034,27 @@ class ComputerUseFixtureWindow(QWidget):
     def _show_item_context_menu(self, pos) -> None:
         """Task 13 di F3.1.2: tasto destro su un elemento della lista mostra un menu con
         "Duplica" - duplicarlo aggiunge una SECONDA copia identica, l'effetto osservabile che
-        prova che l'azione del menu e' arrivata DAVVERO, non solo che il menu si sia aperto."""
+        prova che l'azione del menu e' arrivata DAVVERO, non solo che il menu si sia aperto.
+
+        Task 63/64 (F3.1.2 continua verso i 100): esteso con un SOTTOMENU ("Altro" -> "Maiuscolo",
+        mai un bersaglio in questa fixture finora - un menu annidato, non solo una lista piatta di
+        voci) e una voce DISABILITATA ("Elimina tutto") - il primo caso di un'azione di menu MAI
+        eseguibile in questa fixture, per costruzione (non un limite trovato, una scelta
+        deliberata)."""
         item = self.item_list.itemAt(pos)
         if item is None:
             return
         menu = QMenu(self.item_list)
         duplicate_action = menu.addAction("Duplica")
+        submenu = menu.addMenu("Altro")
+        uppercase_action = submenu.addAction("Maiuscolo")
+        delete_all_action = menu.addAction("Elimina tutto")
+        delete_all_action.setEnabled(False)
         chosen = menu.exec(self.item_list.mapToGlobal(pos))
         if chosen is duplicate_action:
             self.item_list.addItem(item.text())
+        elif chosen is uppercase_action:
+            item.setText(item.text().upper())
 
     def _apply_filter(self, text: str) -> None:
         """Task 23 di F3.1.2: nasconde (`setHidden`, MAI rimuove/ricrea gli item - un elemento

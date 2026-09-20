@@ -817,6 +817,565 @@ class TabDoesNotChangeFocusInsideMultilineEditEndToEndTests(unittest.TestCase):
         self.assertEqual(value, "abc\tdef")
 
 
+class CheckableListItemEndToEndTests(unittest.TestCase):
+    """Task 54 (F3.1.2 continua verso i 100) - `checkable_list` (Tab 11). **Buco reale trovato
+    con un probe dedicato, non ipotizzato**: il pattern Toggle di UI Automation su un
+    `QListWidgetItem` checkabile NON ha un effetto reale - la STESSA trappola gia' documentata per
+    `SelectionItem` su un `QListWidgetItem` (F3.4/Task 2) - serve un click pixel sul GLIFO della
+    casella (12px dal bordo sinistro dell'elemento, trovato empiricamente, non un valore Qt
+    documentato)."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.computer_agent = ComputerAgent()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_uia_toggle_has_no_real_effect_on_a_checkable_list_item(self):
+        tab_eleven = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 11", control_type="TabItem"))
+        self.executor.select(tab_eleven)
+        time.sleep(0.3)
+        item = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Opzione X", control_type="ListItem"), timeout_seconds=3.0)
+        self.executor.toggle(item)
+        time.sleep(0.3)
+        self.assertEqual(self.adapter.describe_element(item).toggle_state, "off", "documenta il buco: Toggle() via UIA non ha effetto reale qui")
+
+    def test_a_pixel_click_on_the_checkbox_glyph_really_checks_the_item(self):
+        tab_eleven = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 11", control_type="TabItem"))
+        self.executor.select(tab_eleven)
+        time.sleep(0.3)
+        item = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Opzione X", control_type="ListItem"), timeout_seconds=3.0)
+        bounds = self.adapter.describe_element(item).bounds
+
+        self.computer_agent.click_point(bounds[0] + 12, bounds[1] + bounds[3] // 2)
+
+        deadline = time.monotonic() + 2.0
+        state = self.adapter.describe_element(item).toggle_state
+        while time.monotonic() < deadline and state != "on":
+            time.sleep(0.1)
+            state = self.adapter.describe_element(item).toggle_state
+        self.assertEqual(state, "on")
+
+
+class PasswordFieldEndToEndTests(unittest.TestCase):
+    """Task 55 (F3.1.2 continua verso i 100) - `password_field` (Tab 11). Collegato al tema gia'
+    esercitato in F3.6.7 (OCR/clipboard non espongono mai una password reale) ma per un campo
+    LOCALE: qui e' il pattern Value di UI Automation stesso a non esporre mai il testo vero."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_uia_value_shows_masked_characters_not_the_real_password(self):
+        import pyautogui
+
+        tab_eleven = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 11", control_type="TabItem"))
+        self.executor.select(tab_eleven)
+        time.sleep(0.3)
+        field = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Campo password"), timeout_seconds=3.0)
+        field.SetFocus()
+        pyautogui.write("segreto123", interval=0.02)
+
+        deadline = time.monotonic() + 2.0
+        value = self.adapter.read_value(field)
+        while time.monotonic() < deadline and value != "●" * 10:
+            time.sleep(0.1)
+            value = self.adapter.read_value(field)
+        self.assertEqual(value, "●" * 10, "UI Automation non deve mai esporre il testo reale di un campo password")
+        self.assertNotIn("segreto123", value or "")
+
+
+class ValidatedNumericFieldEndToEndTests(unittest.TestCase):
+    """Task 56 (F3.1.2 continua verso i 100) - `numeric_field` (Tab 11, `QIntValidator(0, 999)`).
+    Digitare caratteri non validi o un valore fuori range non ha alcun effetto sul testo."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_typing_letters_and_an_out_of_range_digit_are_both_rejected(self):
+        import pyautogui
+
+        tab_eleven = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 11", control_type="TabItem"))
+        self.executor.select(tab_eleven)
+        time.sleep(0.3)
+        field = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Campo numerico"), timeout_seconds=3.0)
+        field.SetFocus()
+        pyautogui.write("12ab34", interval=0.02)
+
+        deadline = time.monotonic() + 2.0
+        value = self.adapter.read_value(field)
+        while time.monotonic() < deadline and value != "123":
+            time.sleep(0.1)
+            value = self.adapter.read_value(field)
+        self.assertEqual(value, "123", "le lettere devono essere filtrate e il 4o digit rifiutato (supererebbe il massimo 999)")
+
+
+class ToggleToolButtonEndToEndTests(unittest.TestCase):
+    """Task 57 (F3.1.2 continua verso i 100) - `toggle_tool_button` (Tab 11, `QToolButton`
+    checkable). A differenza di un `QListWidgetItem` (Task 54), il pattern Toggle di UI
+    Automation funziona QUI in modo affidabile - esposto come `control_type='CheckBox'`, non
+    'Button', verificato con un probe dedicato."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_uia_toggle_really_checks_the_tool_button(self):
+        tab_eleven = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 11", control_type="TabItem"))
+        self.executor.select(tab_eleven)
+        time.sleep(0.3)
+        button = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Bottone attivabile", control_type="CheckBox"), timeout_seconds=3.0)
+        self.assertEqual(self.adapter.describe_element(button).toggle_state, "off")
+
+        self.executor.toggle(button)
+
+        deadline = time.monotonic() + 2.0
+        state = self.adapter.describe_element(button).toggle_state
+        while time.monotonic() < deadline and state != "on":
+            time.sleep(0.1)
+            state = self.adapter.describe_element(button).toggle_state
+        self.assertEqual(state, "on")
+
+
+class BusyIndicatorEndToEndTests(unittest.TestCase):
+    """Task 58 (F3.1.2 continua verso i 100) - `busy_indicator` (Tab 12, range 0-0). Verificato
+    con un probe dedicato: Qt segnala lo stato "indeterminato" a UI Automation con una firma
+    precisa - `CurrentMinimum`/`CurrentMaximum` entrambi 0, `CurrentValue` FUORI da quel range
+    (-1), diverso da qualunque `progress_bar` determinata gia' esercitata (Task 15/29)."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_range_value_reports_the_indeterminate_signature(self):
+        from comtypes.gen import UIAutomationClient as UIA
+
+        tab_twelve = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 12", control_type="TabItem"))
+        self.executor.select(tab_twelve)
+        time.sleep(0.3)
+        busy = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Indicatore di attesa"), timeout_seconds=3.0)
+
+        pattern = busy.GetCurrentPattern(UIA.UIA_RangeValuePatternId).QueryInterface(UIA.IUIAutomationRangeValuePattern)
+
+        self.assertEqual(pattern.CurrentMinimum, 0.0)
+        self.assertEqual(pattern.CurrentMaximum, 0.0)
+        self.assertLess(pattern.CurrentValue, 0.0, "il valore deve restare FUORI dall'intervallo [0, 0] per segnalare 'indeterminato'")
+
+
+class GlobalShortcutEndToEndTests(unittest.TestCase):
+    """Task 59 (F3.1.2 continua verso i 100) - una scorciatoia GLOBALE (`QShortcut`, Ctrl+N)
+    collegata ad "Aggiungi", diverso da ogni scorciatoia gia' esercitata (tutte richiedevano il
+    FUOCO su un controllo specifico): un `QShortcut` sulla finestra funziona indipendentemente da
+    quale controllo ha il fuoco."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_ctrl_n_adds_the_current_input_text_to_the_list(self):
+        import pyautogui
+
+        input_field = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_input"),
+        )
+        self.executor.set_value(input_field, "via shortcut")
+
+        pyautogui.hotkey("ctrl", "n")
+
+        matches = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(name="via shortcut", control_type="ListItem"), timeout_seconds=3.0,
+        )
+        self.assertIsNotNone(matches)
+
+
+class MoreMouseAndFocusEndToEndTests(unittest.TestCase):
+    """Task 60-62 (F3.1.2 continua verso i 100) - un lotto di pattern mouse/focus mai esercitati,
+    tutti verificati con un probe combinato PRIMA di questi test."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_scrolling_the_mouse_wheel_over_the_combo_changes_the_selection(self):
+        """Task 60: diverso da Task 12 (click apre il popup) - la rotella cambia l'opzione
+        SENZA mai aprire il popup, il comportamento standard Qt/Windows per un `QComboBox` con il
+        cursore sopra."""
+        import pyautogui
+
+        combo = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Opzione a tendina"))
+        bounds = self.adapter.describe_element(combo).bounds
+        pyautogui.moveTo(bounds[0] + bounds[2] // 2, bounds[1] + bounds[3] // 2)
+        self.assertEqual(self.adapter.read_value(combo), "Opzione 1")
+
+        pyautogui.scroll(-3)
+
+        deadline = time.monotonic() + 2.0
+        value = self.adapter.read_value(combo)
+        while time.monotonic() < deadline and value != "Opzione 2":
+            time.sleep(0.1)
+            value = self.adapter.read_value(combo)
+        self.assertEqual(value, "Opzione 2")
+
+    def test_middle_click_on_add_does_not_add_anything(self):
+        """Task 61: il primo caso NEGATIVO per un click su un bottone - `QPushButton.clicked`
+        non scatta mai per un click centrale, solo sinistro."""
+        import pyautogui
+
+        input_field = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_input"),
+        )
+        self.executor.set_value(input_field, "middleclick test")
+        add_button = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Aggiungi", control_type="Button"))
+        bounds = self.adapter.describe_element(add_button).bounds
+
+        pyautogui.click(bounds[0] + bounds[2] // 2, bounds[1] + bounds[3] // 2, button="middle")
+        time.sleep(0.4)
+
+        matches = self.engine.find_all(self.window, ElementSelector(name="middleclick test", control_type="ListItem"))
+        self.assertEqual(matches, [], "un click centrale non deve mai attivare il bottone")
+
+    def test_tab_order_skips_the_disabled_remove_button(self):
+        """Task 62: `remove_button` (Task 2/10) e' disabilitato senza selezione - un secondo Tab
+        dal campo di testo deve saltarlo del tutto e arrivare a "Reset", mai fermarsi su un
+        controllo non raggiungibile."""
+        import pyautogui
+
+        input_field = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_input"),
+        )
+        reset_button = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Reset", control_type="Button"))
+        remove_button = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Rimuovi selezionato", control_type="Button"))
+
+        input_field.SetFocus()
+        pyautogui.press("tab")
+        time.sleep(0.1)
+        pyautogui.press("tab")
+
+        deadline = time.monotonic() + 2.0
+        focused = False
+        while time.monotonic() < deadline:
+            focused = self.adapter.describe_element(reset_button).focused
+            if focused:
+                break
+            time.sleep(0.1)
+        self.assertTrue(focused, "il secondo Tab deve saltare il bottone disabilitato e arrivare a Reset")
+        self.assertFalse(self.adapter.describe_element(remove_button).focused, "un controllo disabilitato non deve mai ricevere il fuoco")
+
+
+class ContextMenuSubmenuAndDisabledItemEndToEndTests(unittest.TestCase):
+    """Task 63/64 (F3.1.2 continua verso i 100) - estende il menu contestuale di Task 13 con un
+    SOTTOMENU ("Altro" -> "Maiuscolo") e una voce DISABILITATA ("Elimina tutto"), mai esercitati
+    finora - verificati con un probe dedicato PRIMA di questi test."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.computer_agent = ComputerAgent()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def _add_item_and_open_menu(self, text: str):
+        input_field = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_input"),
+        )
+        add_button = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Aggiungi", control_type="Button"))
+        self.executor.set_value(input_field, text)
+        self.executor.invoke(add_button)
+        item = self.engine.wait_for_unique_element(self.window, ElementSelector(name=text, control_type="ListItem"), timeout_seconds=3.0)
+        bounds = self.adapter.describe_element(item).bounds
+        baseline = self.adapter.snapshot_win32_top_level_window_handles()
+        self.computer_agent.click_point(bounds[0] + bounds[2] // 2, bounds[1] + bounds[3] // 2, button="right")
+        return self.adapter.wait_for_new_win32_window(baseline, timeout_seconds=3.0)
+
+    def test_delete_all_is_reported_as_disabled(self):
+        """Task 64: la voce non deve mai risultare invocabile - un fatto REALE riportato da UI
+        Automation (`enabled=False`), non una convenzione visiva da soli."""
+        menu = self._add_item_and_open_menu("menu64")
+        delete_all = self.engine.wait_for_unique_element(menu, ElementSelector(name="Elimina tutto"), timeout_seconds=3.0)
+
+        self.assertFalse(self.adapter.describe_element(delete_all).enabled)
+
+    def test_clicking_the_submenu_then_its_item_really_applies_the_action(self):
+        """Task 63: aprire "Altro" (click pixel, come per il menu principale - Invoke UIA su un
+        `MenuItem` non ha mai effetto reale, F3.6.6) fa comparire una NUOVA finestra (il
+        sottomenu), raggiungibile con lo stesso `wait_for_new_win32_window` gia' noto da Task 13."""
+        menu = self._add_item_and_open_menu("menu63")
+        submenu_trigger = self.engine.wait_for_unique_element(menu, ElementSelector(name="Altro"), timeout_seconds=3.0)
+        bounds = self.adapter.describe_element(submenu_trigger).bounds
+
+        baseline = self.adapter.snapshot_win32_top_level_window_handles()
+        self.computer_agent.click_point(bounds[0] + bounds[2] // 2, bounds[1] + bounds[3] // 2)
+        submenu = self.adapter.wait_for_new_win32_window(baseline, timeout_seconds=3.0)
+
+        uppercase = self.engine.wait_for_unique_element(submenu, ElementSelector(name="Maiuscolo"), timeout_seconds=3.0)
+        ub = self.adapter.describe_element(uppercase).bounds
+        self.computer_agent.click_point(ub[0] + ub[2] // 2, ub[1] + ub[3] // 2)
+
+        deadline = time.monotonic() + 2.0
+        matches = self.engine.find_all(self.window, ElementSelector(name="MENU63"))
+        while time.monotonic() < deadline and not matches:
+            time.sleep(0.1)
+            matches = self.engine.find_all(self.window, ElementSelector(name="MENU63"))
+        self.assertTrue(matches, "l'azione del sottomenu deve applicare DAVVERO la maiuscolizzazione")
+
+
+class RadioArrowNavigationAndAccessibilityPropertiesEndToEndTests(unittest.TestCase):
+    """Task 65/66 (F3.1.2 continua verso i 100) - verificati con un probe dedicato PRIMA di questi
+    test."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.computer_agent = ComputerAgent()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_down_arrow_moves_focus_and_selection_to_the_next_radio_button(self):
+        """Task 65: mai provato da tastiera prima d'ora (Task 18 usava solo SelectionItem/click) -
+        la freccia Giu' su un gruppo di radio button SPOSTA sia il fuoco SIA la selezione al
+        prossimo bottone, il comportamento standard Qt/Windows."""
+        import pyautogui
+
+        tab_three = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 3", control_type="TabItem"))
+        self.executor.select(tab_three)
+        time.sleep(0.3)
+        radio_red = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Rosso"), timeout_seconds=3.0)
+        radio_red.SetFocus()
+
+        pyautogui.press("down")
+
+        radio_green = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Verde"))
+        deadline = time.monotonic() + 2.0
+        state = self.adapter.describe_element(radio_green).toggle_state
+        while time.monotonic() < deadline and state != "on":
+            time.sleep(0.1)
+            state = self.adapter.describe_element(radio_green).toggle_state
+        self.assertEqual(state, "on")
+        self.assertTrue(self.adapter.describe_element(radio_green).focused)
+
+    def test_the_add_button_reports_standard_accessibility_properties(self):
+        """Task 66: proprieta' di accessibilita' MAI lette finora in questa fixture
+        (`IsControlElement`/`IsContentElement`/`LocalizedControlType`) - diverse da
+        `control_type` (l'intero opaco gia' esercitato ovunque)."""
+        add_button = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Aggiungi", control_type="Button"))
+
+        self.assertTrue(add_button.CurrentIsControlElement)
+        self.assertTrue(add_button.CurrentIsContentElement)
+        self.assertTrue(add_button.CurrentLocalizedControlType, "un tipo di controllo leggibile, localizzato, deve esistere")
+
+    def test_delete_key_on_the_list_has_no_effect(self):
+        """Task 67: il primo caso NEGATIVO per il tasto Canc - `item_list` non ha alcuna
+        scorciatoia da tastiera per rimuovere, solo il bottone "Rimuovi selezionato" + conferma
+        (Task 2/10). Verificato, non assunto: nessuna scorciatoia e' mai stata wired."""
+        import pyautogui
+
+        input_field = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_input"),
+        )
+        add_button = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Aggiungi", control_type="Button"))
+        self.executor.set_value(input_field, "delkey test")
+        self.executor.invoke(add_button)
+        item = self.engine.wait_for_unique_element(self.window, ElementSelector(name="delkey test", control_type="ListItem"), timeout_seconds=3.0)
+        bounds = self.adapter.describe_element(item).bounds
+
+        self.computer_agent.click_point(bounds[0] + bounds[2] // 2, bounds[1] + bounds[3] // 2)
+        time.sleep(0.3)
+        pyautogui.press("delete")
+        time.sleep(0.4)
+
+        matches = self.engine.find_all(self.window, ElementSelector(name="delkey test", control_type="ListItem"))
+        self.assertEqual(len(matches), 1, "il tasto Canc non deve mai rimuovere un elemento, solo il flusso completo di Task 2/10 puo' farlo")
+
+    def test_is_password_property_is_true_only_for_the_password_field(self):
+        """Task 68: `IsPassword`, una proprieta' UI Automation DEDICATA (booleana), mai letta
+        finora - diversa da `EchoMode` (un fatto Qt) o dal testo mascherato (Task 55, il pattern
+        Value): un chiamante puo' riconoscere un campo password SENZA dover interpretare i
+        caratteri."""
+        tab_eleven = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 11", control_type="TabItem"))
+        self.executor.select(tab_eleven)
+
+        password_field = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Campo password"), timeout_seconds=3.0)
+        self.assertTrue(password_field.CurrentIsPassword)
+
+        add_button = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Aggiungi", control_type="Button"))
+        self.assertFalse(add_button.CurrentIsPassword)
+
+
+class CheckableListSpaceKeyKnownLimitationEndToEndTests(unittest.TestCase):
+    """Task 69 (F3.1.2 continua verso i 100) - estende il buco gia' documentato in Task 54: NE'
+    il pattern Toggle di UI Automation NE' il tasto Spazio (la convenzione standard Qt/Windows,
+    gia' affidabile per `option_checkbox`/Task 37) hanno un effetto reale su un
+    `QListWidgetItem` checkabile - SOLO un click pixel sul glifo (Task 54) funziona."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.computer_agent = ComputerAgent()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_space_key_does_not_check_the_item(self):
+        import pyautogui
+
+        tab_eleven = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 11", control_type="TabItem"))
+        self.executor.select(tab_eleven)
+
+        item = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Opzione Y", control_type="ListItem"), timeout_seconds=3.0)
+        bounds = self.adapter.describe_element(item).bounds
+        self.computer_agent.click_point(bounds[0] + bounds[2] // 2, bounds[1] + bounds[3] // 2)
+        time.sleep(0.3)
+
+        pyautogui.press("space")
+        time.sleep(0.4)
+
+        item_again = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Opzione Y", control_type="ListItem"), timeout_seconds=3.0)
+        self.assertEqual(self.adapter.describe_element(item_again).toggle_state, "off", "documenta il buco: Spazio non ha effetto reale qui, diverso da option_checkbox (Task 37)")
+
+
 class ComboBoxSelectionEndToEndTests(unittest.TestCase):
     """Task 12 (F3.1.2 continua verso i 100) - "apri un menu a tendina e scegli un'opzione":
     `QComboBox`, MAI un bersaglio in questa fixture finora - un terzo genere di controllo a

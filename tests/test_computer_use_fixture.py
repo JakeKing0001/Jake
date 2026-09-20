@@ -7,8 +7,9 @@ cliccabile, non solo che il suo metodo funzioni se chiamato a mano."""
 import unittest
 
 from PySide6.QtCore import QDate, Qt, QTimer
+from PySide6.QtGui import QIntValidator
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
+from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox, QPushButton
 
 from benchmarks.computer_use_fixture import ComputerUseFixtureWindow
 
@@ -61,6 +62,11 @@ class AutomationPropertiesTests(unittest.TestCase):
         self.assertEqual(window.readonly_field.objectName(), "fixture_readonly_field")
         self.assertEqual(window.tristate_checkbox.objectName(), "fixture_tristate_checkbox")
         self.assertEqual(window.no_selection_list.objectName(), "fixture_no_selection_list")
+        self.assertEqual(window.checkable_list.objectName(), "fixture_checkable_list")
+        self.assertEqual(window.password_field.objectName(), "fixture_password_field")
+        self.assertEqual(window.numeric_field.objectName(), "fixture_numeric_field")
+        self.assertEqual(window.toggle_tool_button.objectName(), "fixture_toggle_tool_button")
+        self.assertEqual(window.busy_indicator.objectName(), "fixture_busy_indicator")
 
     def test_every_control_has_a_non_empty_accessible_name(self):
         window = ComputerUseFixtureWindow()
@@ -73,6 +79,8 @@ class AutomationPropertiesTests(unittest.TestCase):
             window.transfer_source_list, window.transfer_target_list, window.date_edit,
             window.filter_input, window.filter_list, window.multiline_edit, window.cancel_progress_button,
             window.editable_combo, window.readonly_field, window.tristate_checkbox, window.no_selection_list,
+            window.checkable_list, window.password_field, window.numeric_field, window.toggle_tool_button,
+            window.busy_indicator,
         ):
             self.assertTrue(widget.accessibleName(), f"{widget.objectName()} non ha un accessibleName")
 
@@ -855,6 +863,95 @@ class TristateCheckboxTests(unittest.TestCase):
         window.reset_state()
 
         self.assertEqual(window.tristate_checkbox.checkState(), Qt.CheckState.Unchecked)
+
+
+class CheckableListTests(unittest.TestCase):
+    """Task 54 di F3.1.2 (continua verso i 100, in "Tab 11") - `checkable_list`, ogni riga ha una
+    propria casella (`ItemIsUserCheckable`) - il pattern reale "scegli quali file esportare"."""
+
+    def test_every_item_starts_unchecked(self):
+        window = ComputerUseFixtureWindow()
+        for i in range(window.checkable_list.count()):
+            self.assertEqual(window.checkable_list.item(i).checkState(), Qt.CheckState.Unchecked)
+
+    def test_checking_one_item_leaves_the_others_untouched(self):
+        window = ComputerUseFixtureWindow()
+        window.checkable_list.item(0).setCheckState(Qt.CheckState.Checked)
+        self.assertEqual(window.checkable_list.item(0).checkState(), Qt.CheckState.Checked)
+        self.assertEqual(window.checkable_list.item(1).checkState(), Qt.CheckState.Unchecked)
+
+    def test_reset_unchecks_every_item(self):
+        window = ComputerUseFixtureWindow()
+        window.checkable_list.item(0).setCheckState(Qt.CheckState.Checked)
+        window.checkable_list.item(2).setCheckState(Qt.CheckState.Checked)
+
+        window.reset_state()
+
+        for i in range(window.checkable_list.count()):
+            self.assertEqual(window.checkable_list.item(i).checkState(), Qt.CheckState.Unchecked)
+
+
+class PasswordFieldTests(unittest.TestCase):
+    """Task 55 di F3.1.2 (continua verso i 100, in "Tab 11") - `password_field`
+    (`EchoMode.Password`), collegato al tema gia' esercitato in F3.6.7 ma per un campo LOCALE."""
+
+    def test_the_echo_mode_is_password(self):
+        window = ComputerUseFixtureWindow()
+        self.assertEqual(window.password_field.echoMode(), QLineEdit.EchoMode.Password)
+
+    def test_the_real_text_is_still_readable_at_the_qt_level(self):
+        """A LIVELLO QT il testo vero resta leggibile (`.text()`) - solo la RAPPRESENTAZIONE
+        VISIVA/UI Automation e' mascherata (vedi il test e2e), non il valore stesso."""
+        window = ComputerUseFixtureWindow()
+        window.password_field.setText("segreto123")
+        self.assertEqual(window.password_field.text(), "segreto123")
+
+
+class ValidatedNumericFieldTests(unittest.TestCase):
+    """Task 56 di F3.1.2 (continua verso i 100, in "Tab 11") - `numeric_field`
+    (`QIntValidator(0, 999)`), diverso da ogni campo di testo gia' esercitato (nessuno filtrava
+    l'input)."""
+
+    def test_the_field_starts_empty(self):
+        window = ComputerUseFixtureWindow()
+        self.assertEqual(window.numeric_field.text(), "")
+
+    def test_the_validator_accepts_only_digits_within_range(self):
+        window = ComputerUseFixtureWindow()
+        validator = window.numeric_field.validator()
+        self.assertIsNotNone(validator)
+        state, _, _ = validator.validate("999", 0)
+        self.assertEqual(state, QIntValidator.State.Acceptable)
+        state, _, _ = validator.validate("1234", 0)
+        self.assertNotEqual(state, QIntValidator.State.Acceptable, "1234 supera il massimo dichiarato (999)")
+
+
+class ToggleToolButtonTests(unittest.TestCase):
+    """Task 57 di F3.1.2 (continua verso i 100, in "Tab 11") - `toggle_tool_button`
+    (`QToolButton` checkable), diverso da `QPushButton`/`QCheckBox` gia' esercitati."""
+
+    def test_starts_unchecked(self):
+        window = ComputerUseFixtureWindow()
+        self.assertFalse(window.toggle_tool_button.isChecked())
+
+    def test_reset_unchecks_it(self):
+        window = ComputerUseFixtureWindow()
+        window.toggle_tool_button.setChecked(True)
+
+        window.reset_state()
+
+        self.assertFalse(window.toggle_tool_button.isChecked())
+
+
+class BusyIndicatorTests(unittest.TestCase):
+    """Task 58 di F3.1.2 (continua verso i 100, in "Tab 12") - `busy_indicator`
+    (`setRange(0, 0)`, la convenzione Qt "occupato, durata sconosciuta"), diverso da
+    `progress_bar` (Task 15, un valore reale che avanza)."""
+
+    def test_the_range_is_zero_to_zero(self):
+        window = ComputerUseFixtureWindow()
+        self.assertEqual(window.busy_indicator.minimum(), 0)
+        self.assertEqual(window.busy_indicator.maximum(), 0)
 
 
 class NoSelectionListTests(unittest.TestCase):

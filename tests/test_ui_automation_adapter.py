@@ -372,17 +372,31 @@ class RetryTransientComErrorTests(unittest.TestCase):
 
         self.assertEqual(call.call_count, 3, "non deve mai riprovare piu' di 3 volte")
 
-    def test_a_non_com_error_propagates_immediately_without_retrying(self):
-        """Solo `comtypes.COMError` e' considerato un transitorio da assorbire - un errore
-        Python qualunque (es. un bug reale nel codice chiamante) deve propagare SUBITO, non essere
-        nascosto dietro 3 tentativi silenziosi."""
+    def test_an_unrelated_error_propagates_immediately_without_retrying(self):
+        """Solo `comtypes.COMError`/`ValueError` (F3.1.2 Task 70, adozione - vedi il docstring del
+        metodo) sono considerati transitori da assorbire - un errore Python di tutt'altra natura
+        (es. un bug reale nel codice chiamante) deve propagare SUBITO, non essere nascosto dietro
+        3 tentativi silenziosi."""
         adapter = UIAutomationAdapter()
-        call = mock.Mock(side_effect=ValueError("questo non e' un COMError"))
+        call = mock.Mock(side_effect=RuntimeError("questo non e' un blip transitorio"))
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(RuntimeError):
             adapter._retry_transient_com_error(call)
 
         self.assertEqual(call.call_count, 1)
+
+    def test_retries_and_recovers_from_a_transient_value_error(self):
+        """F3.1.2 Task 70 (adozione): lo stesso `ValueError: NULL COM pointer access' gia'
+        riconosciuto altrove (`describe_element`) come un blip transitorio, non un bug - deve
+        essere riprovato esattamente come un `comtypes.COMError`."""
+        adapter = UIAutomationAdapter()
+        transient_error = ValueError("NULL COM pointer access")
+        call = mock.Mock(side_effect=[transient_error, transient_error, "ok"])
+
+        result = adapter._retry_transient_com_error(call)
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(call.call_count, 3)
 
 
 class _RealFixtureTestCase(unittest.TestCase):

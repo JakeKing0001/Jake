@@ -293,6 +293,31 @@ class ActionExecutor:
         pattern.Close()
         return receipt
 
+    def resize_window(self, element, width: float, height: float) -> ElementActionReceipt:
+        """F3.1.2 Task 52 (adozione): il pattern Transform, MAI dichiarato/esercitato finora in
+        questo progetto (un OTTAVO pattern, oltre ai sette gia' elencati da F3.4.1). **Verificato
+        con un probe dedicato PRIMA di aggiungere questo metodo**: `Resize()` ha un effetto REALE
+        ma CLAMPATO dai vincoli di dimensione della finestra Qt (i `QScrollArea` con altezza
+        massima esplicita di questa fixture, F3.1.2 Task 17+) - la larghezza/altezza finali
+        NON coincidono necessariamente con quelle richieste, un chiamante non deve assumere un
+        target pixel-perfetto."""
+        self._require_enabled(element)
+        pattern = self._require_pattern(element, UIA.UIA_TransformPatternId, UIA.IUIAutomationTransformPattern, "Transform")
+        receipt = self._receipt("resize_window", "Transform", element)
+        pattern.Resize(width, height)
+        return receipt
+
+    def move_window(self, element, x: float, y: float) -> ElementActionReceipt:
+        """F3.1.2 Task 53 (adozione): il pattern Transform, resto - `Move()`. Stessa cautela di
+        `resize_window`: verificato con un probe dedicato che la posizione finale cambia
+        DAVVERO, ma non necessariamente alle coordinate ESATTE richieste (comportamento reale del
+        window manager, non un buco di questo metodo)."""
+        self._require_enabled(element)
+        pattern = self._require_pattern(element, UIA.UIA_TransformPatternId, UIA.IUIAutomationTransformPattern, "Transform")
+        receipt = self._receipt("move_window", "Transform", element)
+        pattern.Move(x, y)
+        return receipt
+
     def minimize_window(self, element) -> ElementActionReceipt:
         """F3.1.2 Task 28 (adozione - resto del pattern Window, F3.4.1): `SetWindowVisualState`
         verso "minimizzata" - verificato funzionante contro un vero processo Qt con un probe

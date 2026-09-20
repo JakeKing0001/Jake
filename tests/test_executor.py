@@ -450,6 +450,73 @@ class WindowPatternTests(unittest.TestCase):
         self.assertEqual(restore_receipt.pattern, "Window")
 
 
+class TransformPatternTests(unittest.TestCase):
+    """F3.1.2 Task 51-53 (continua verso i 100) - il pattern Transform, un OTTAVO pattern MAI
+    dichiarato/esercitato finora in questo progetto (oltre ai sette di F3.4.1). Stesso processo
+    fixture dedicato di `WindowPatternTests` - ridimensionare/spostare la finestra e' un'azione
+    che potrebbe interferire con altri test se condivisa."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._cleanup_process)
+        self.adapter = UIAutomationAdapter()
+        self.executor = ActionExecutor()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _cleanup_process(self):
+        if self.process.poll() is None:
+            self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_the_window_reports_it_can_move_and_resize_but_not_rotate(self):
+        """Task 51."""
+        from comtypes.gen import UIAutomationClient as UIA
+        pattern = self.window.GetCurrentPattern(UIA.UIA_TransformPatternId).QueryInterface(UIA.IUIAutomationTransformPattern)
+
+        self.assertTrue(pattern.CurrentCanMove)
+        self.assertTrue(pattern.CurrentCanResize)
+        self.assertFalse(pattern.CurrentCanRotate)
+
+    def test_resizing_the_window_really_changes_its_width(self):
+        """Task 52. **Verificato con un probe dedicato, non assunto**: la larghezza finale non
+        coincide necessariamente con quella richiesta (clampata dai vincoli di layout Qt) - questo
+        test verifica solo che CAMBI davvero, non un valore esatto."""
+        before = self.adapter.describe_element(self.window).bounds
+
+        self.executor.resize_window(self.window, before[2] + 50, before[3])
+
+        after = self.adapter.describe_element(self.window).bounds
+        self.assertGreater(after[2], before[2], "la larghezza deve aumentare davvero, non solo che Resize() non sollevi")
+
+    def test_moving_the_window_really_changes_its_position(self):
+        """Task 53. Stessa cautela di Task 52: verifica solo che la posizione cambi, non le
+        coordinate esatte."""
+        before = self.adapter.describe_element(self.window).bounds
+
+        self.executor.move_window(self.window, before[0] + 20, before[1] + 10)
+
+        after = self.adapter.describe_element(self.window).bounds
+        self.assertNotEqual((after[0], after[1]), (before[0], before[1]), "la posizione deve cambiare davvero")
+
+    def test_resize_and_move_return_receipts_naming_the_transform_pattern(self):
+        before = self.adapter.describe_element(self.window).bounds
+
+        resize_receipt = self.executor.resize_window(self.window, before[2] + 10, before[3])
+        move_receipt = self.executor.move_window(self.window, before[0] + 5, before[1] + 5)
+
+        self.assertEqual(resize_receipt.action, "resize_window")
+        self.assertEqual(resize_receipt.pattern, "Transform")
+        self.assertEqual(move_receipt.action, "move_window")
+        self.assertEqual(move_receipt.pattern, "Transform")
+
+
 class ActionReceiptTests(_ExecutorFixtureTestCase):
     """F3.4.5: ogni metodo pubblico restituisce ora un `ElementActionReceipt` invece di `None` -
     CHI ha agito (l'elemento) e CON QUALE pattern, non che l'azione abbia avuto un effetto reale

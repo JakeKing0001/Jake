@@ -5326,6 +5326,79 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   verde. Con questo F3.1.2 raggiunge **50/100** task dichiarati dal criterio di uscita di F3
   ("arrivare progressivamente a 100").
 
+- `F3.1.2` (Task 51-64, secondo lotto esteso verso i 100 - stessa cadenza rapida del lotto
+  32-50) — 20/09/2026:
+
+  **Pattern Transform, un OTTAVO pattern MAI dichiarato/esercitato finora** (oltre ai sette di
+  F3.4.1): nuovi `ActionExecutor.resize_window`/`move_window`. Task 51 la finestra riporta
+  `CanMove`/`CanResize` veri, `CanRotate` falso; Task 52 `Resize()` cambia DAVVERO la larghezza ma
+  **CLAMPATA** dai vincoli di layout Qt (verificato con un probe dedicato: la dimensione finale
+  non coincide con quella richiesta); Task 53 `Move()` cambia DAVVERO la posizione, stessa
+  cautela sulle coordinate esatte.
+
+  **Tre controlli nuovi**: Task 54 `checkable_list` ("Tab 11", righe con casella propria) -
+  **buco reale**: il pattern Toggle di UI Automation su un `QListWidgetItem` checkabile NON ha
+  effetto reale (la stessa trappola di `SelectionItem`/F3.4/Task 2), serve un click pixel sul
+  glifo (12px dal bordo sinistro, trovato empiricamente); Task 55 `password_field`
+  (`EchoMode.Password`) - UI Automation mostra SOLO caratteri mascherati (●), mai il testo vero,
+  un secondo esempio del tema F3.6.7 ma per un campo locale; Task 56 `numeric_field`
+  (`QIntValidator(0, 999)`) - lettere filtrate E un 4o digit rifiutato perche' supererebbe il
+  massimo; Task 57 `toggle_tool_button` (`QToolButton` checkable, esposto come `control_type=
+  'CheckBox'`) - qui il Toggle di UI Automation funziona AFFIDABILE, contrasto diretto con Task
+  54; Task 58 `busy_indicator` (range 0-0) - Qt segnala "indeterminato" con una firma precisa
+  (`CurrentValue` fuori dall'intervallo `[0,0]`, verificato `-1.0`); Task 59 una scorciatoia
+  GLOBALE (`QShortcut`, Ctrl+N) funziona indipendentemente da quale controllo ha il fuoco.
+
+  **Mouse/focus, nessun codice nuovo nella fixture**: Task 60 la rotella sopra `option_combo`
+  cambia l'opzione SENZA aprire il popup; Task 61 un click centrale su un bottone non lo attiva
+  mai (`QPushButton.clicked` solo per il sinistro); Task 62 un secondo Tab dal campo di testo
+  SALTA `remove_button` (disabilitato) e arriva a "Reset" - un controllo disabilitato non riceve
+  mai il fuoco.
+
+  **Menu contestuale esteso** (Task 13/F3.6.6): Task 63 un SOTTOMENU ("Altro" -> "Maiuscolo") -
+  cliccarlo apre una NUOVA finestra win32 (lo stesso `wait_for_new_win32_window` di Task 13),
+  applicare la voce maiuscolizza DAVVERO l'elemento; Task 64 una voce DISABILITATA ("Elimina
+  tutto") riporta `enabled=False` via UI Automation, mai invocabile.
+
+  Prova: 26 test nuovi (`TransformPatternTests`/`CheckableListTests`/`PasswordFieldTests`/
+  `ValidatedNumericFieldTests`/`ToggleToolButtonTests`/`BusyIndicatorTests` a livello fixture/
+  executor + `CheckableListItemEndToEndTests`/`PasswordFieldEndToEndTests`/
+  `ValidatedNumericFieldEndToEndTests`/`ToggleToolButtonEndToEndTests`/
+  `BusyIndicatorEndToEndTests`/`GlobalShortcutEndToEndTests`/`MoreMouseAndFocusEndToEndTests`/
+  `ContextMenuSubmenuAndDisabledItemEndToEndTests` end-to-end). 3.302/3.302 test, ruff verde.
+  F3.1.2 e' ora a **64/100**.
+
+- `F3.1.2` (Task 65-69, terzo lotto) — 20/09/2026: Task 65 la freccia Giu' su un gruppo di radio
+  button SPOSTA sia il fuoco sia la selezione al prossimo bottone (mai provato da tastiera prima
+  d'ora, Task 18 usava solo SelectionItem/click); Task 66 proprieta' di accessibilita' mai lette
+  (`IsControlElement`/`IsContentElement`/`LocalizedControlType`, quest'ultima localizzata:
+  "Pulsante"); Task 67 il tasto Canc su `item_list` non rimuove mai nulla (nessuna scorciatoia
+  wired, solo il flusso di Task 2/10); Task 68 `IsPassword`, proprieta' UI Automation dedicata,
+  vera solo per `password_field`; Task 69 (**buco reale**, estende Task 54) ne' Toggle UIA ne' il
+  tasto Spazio (affidabile per `option_checkbox`, Task 37) hanno effetto su un `QListWidgetItem`
+  checkabile - solo il click pixel sul glifo funziona. 5 test nuovi.
+
+  **Task 70 (adozione/fix vero, non solo documentato) - buco reale trovato dalla suite piena, non
+  ipotizzato**: la corsa completa dopo Task 51-69 (fixture ora a 12 schede/70+ controlli) ha
+  mostrato 8 fallimenti sparsi (alcuni miei, alcuni test PRE-ESISTENTI mai toccati -
+  `RadioButtonMutualExclusivityTests`) - tutti passati puliti se rieseguiti isolati, il segnale di
+  un blip transitorio sotto carico, non una regressione. Causa vera trovata (non assunta):
+  `_retry_transient_com_error` (gia' esistente, F3.2, nato per un buco simile in CI) era applicato
+  SOLO a `_find_top_level_window` - `find_matching_elements` (F3.3.1, il metodo usato da OGNI
+  test end-to-end di questa sessione tramite `SelectorEngine`) non l'ha mai avuto, e solleva lo
+  STESSO genere di blip ma come `ValueError: NULL COM pointer access` su `results.GetElement(i)`
+  (lo stesso `ValueError` gia' trattato altrove, `describe_element`, come "elemento non davvero
+  leggibile" - non `comtypes.COMError`). Esteso `_retry_transient_com_error` a catturare anche
+  `ValueError` e avvolto il `FindAll`+`GetElement` di `find_matching_elements` con esso -
+  verificato PRIMA/DOPO: la stessa corsa completa, rieseguita senza altre modifiche, e' passata
+  6+ test in piu' (nessuno di quelli falliti prima e' fallito di nuovo). Prova: 1 test nuovo
+  (`RetryTransientComErrorTests::test_retries_and_recovers_from_a_transient_value_error`) + 1
+  test esistente rinominato/adattato (l'errore "non transitorio" di controllo ora usa
+  `RuntimeError`, non piu' `ValueError`, per restare un vero negativo dopo l'estensione).
+
+  3.308/3.308 test (corsa completa, nessun fallimento sparso residuo), ruff verde. F3.1.2 e' ora
+  a **70/100**.
+
 ### F3.2 — Windows UI Automation adapter
 
 Dipende da: F3.1.
