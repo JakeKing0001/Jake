@@ -49,6 +49,7 @@ class AutomationPropertiesTests(unittest.TestCase):
         self.assertEqual(window.radio_red.objectName(), "fixture_radio_red")
         self.assertEqual(window.radio_green.objectName(), "fixture_radio_green")
         self.assertEqual(window.radio_blue.objectName(), "fixture_radio_blue")
+        self.assertEqual(window.data_table.objectName(), "fixture_table")
 
     def test_every_control_has_a_non_empty_accessible_name(self):
         window = ComputerUseFixtureWindow()
@@ -57,7 +58,7 @@ class AutomationPropertiesTests(unittest.TestCase):
             window.tabs, window.option_checkbox, window.scroll_list, window.load_button, window.dynamic_button,
             window.action_button_a, window.action_button_b, window.option_combo, window.value_slider,
             window.value_spinbox, window.radio_red, window.radio_green, window.radio_blue,
-            window.progress_bar, window.start_progress_button, window.reorder_list,
+            window.progress_bar, window.start_progress_button, window.reorder_list, window.data_table,
         ):
             self.assertTrue(widget.accessibleName(), f"{widget.objectName()} non ha un accessibleName")
 
@@ -720,6 +721,35 @@ class RadioButtonTests(unittest.TestCase):
         window.reset_state()
 
         self.assertEqual(window.selected_radio_label(), "Rosso")
+
+
+class TableTests(unittest.TestCase):
+    """Task 19 di F3.1.2 (continua verso i 100, in "Tab 4" - MAI in Tab 3: vedi il commento sopra
+    `fourth_tab` nel modulo per il buco reale che ha motivato una scheda dedicata) - una griglia
+    (`QTableWidget`), il pattern "cella di una tabella" mai esercitato finora in questa fixture."""
+
+    def test_initial_cells_have_the_expected_text(self):
+        window = ComputerUseFixtureWindow()
+        self.assertEqual(window.table_cell_text(0, 0), "Riga 1")
+        self.assertEqual(window.table_cell_text(0, 1), "")
+        self.assertEqual(window.table_cell_text(1, 0), "Riga 2")
+        self.assertEqual(window.table_cell_text(1, 1), "")
+
+    def test_editing_a_cell_changes_its_text(self):
+        window = ComputerUseFixtureWindow()
+        window.data_table.item(0, 1).setText("modificato")
+        self.assertEqual(window.table_cell_text(0, 1), "modificato")
+
+    def test_reset_clears_edited_cells(self):
+        window = ComputerUseFixtureWindow()
+        window.data_table.item(0, 1).setText("modificato")
+        window.data_table.item(1, 1).setText("anche questo")
+
+        window.reset_state()
+
+        self.assertEqual(window.table_cell_text(0, 1), "")
+        self.assertEqual(window.table_cell_text(1, 1), "")
+        self.assertEqual(window.table_cell_text(0, 0), "Riga 1", "solo le celle modificabili vanno azzerate, non le etichette di riga")
 
 
 if __name__ == "__main__":

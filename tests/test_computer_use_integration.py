@@ -867,6 +867,105 @@ class DragReorderEndToEndTests(unittest.TestCase):
         self.assertTrue(outcome.succeeded, outcome.attempts)
 
 
+class TableCellEditEndToEndTests(unittest.TestCase):
+    """Task 19 (F3.1.2 continua verso i 100) - "seleziona una cella di una tabella e modificane il
+    valore": una griglia (`QTableWidget`, `data_table`), il pattern "cella" mai esercitato finora -
+    esposta da UI Automation con `control_type='DataItem'` (non 'ListItem'/'TreeItem') e con il
+    NOME della cella uguale al suo testo corrente (una cella vuota ha `name=''`).
+
+    **Buco reale trovato scrivendo questo task, non ipotizzato**: la tabella era stata messa
+    PRIMA dentro "Tab 3" insieme a spinbox/radio (Task 17/18) - ma "Tab 3" e' avvolta in un
+    `QScrollArea` alto solo 120px, e spinbox+3 radio da soli riempiono gia' quello spazio: la
+    tabella finiva SOTTO la porzione visibile, scorrimento mai eseguito. UI Automation pero'
+    continuava a riportare bounds PIENAMENTE validi per le sue celle come se fossero visibili
+    (confermato con uno screenshot reale: non c'erano affatto sullo schermo li') - un click su
+    quelle coordinate colpiva in realta' un widget COMPLETAMENTE diverso, piu' in basso nel layout
+    principale della finestra, con successo dichiarato dal sistema di input ma nessun effetto
+    sulla tabella. Un limite reale di UI Automation su Qt (bounds non ricalcolati per contenuto
+    scrollato fuori vista in un `QScrollArea`), non affrontato in generale qui - evitato per
+    questa fixture dando alla tabella una scheda propria ("Tab 4", `benchmarks/
+    computer_use_fixture.py`) dove entra per intero senza mai dover scorrere.
+
+    Selezione della cella con un SOLO click reale a coordinate pixel (mai un tentativo UIA
+    `SelectionItem`/`Invoke` precedente sullo stesso elemento) - stessa lezione gia' consolidata
+    in questa sessione per `QListWidgetItem` (F3.4/F3.5): verificato che un click pixel DA SOLO
+    seleziona la cella E le da il fuoco Qt per davvero (`selected`/`focused` diventano `True` via
+    UI Automation, non assunto), abilitando il trigger di modifica Qt di default
+    (`AnyKeyPressed`) - digitare subito dopo il click apre l'editor e il testo digitato sostituisce
+    il contenuto della cella."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.computer_agent = ComputerAgent()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_clicking_a_cell_and_typing_replaces_its_text(self):
+        import pyautogui
+
+        tab_four = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 4", control_type="TabItem"))
+        self.executor.select(tab_four)
+
+        header = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(name="Valore", control_type="Header"), timeout_seconds=3.0,
+        )
+        header_left, _header_top, header_width, _header_height = self.adapter.describe_element(header).bounds
+        target_x = header_left + header_width // 2
+
+        row_one_label = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(name="Riga 1", control_type="DataItem"), timeout_seconds=3.0,
+        )
+        row_top, row_height = self.adapter.describe_element(row_one_label).bounds[1::2]
+        target_y = row_top + row_height // 2
+
+        def _click_and_type():
+            self.computer_agent.click_point(target_x, target_y)
+            time.sleep(0.2)
+            pyautogui.write("modificato", interval=0.02)
+            pyautogui.press("enter")
+
+        def _cell_shows_the_new_text():
+            matches = self.engine.find_all(self.window, ElementSelector(name="modificato", control_type="DataItem"))
+            return len(matches) == 1
+
+        outcome = try_strategies_in_order([("pixel_click_then_type", _click_and_type)], verify=_cell_shows_the_new_text)
+
+        self.assertTrue(outcome.succeeded, outcome.attempts)
+
+    def test_a_single_pixel_click_selects_and_focuses_the_cell(self):
+        tab_four = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 4", control_type="TabItem"))
+        self.executor.select(tab_four)
+
+        row_one = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(name="Riga 1", control_type="DataItem"), timeout_seconds=3.0,
+        )
+        left, top, width, height = self.adapter.describe_element(row_one).bounds
+        self.computer_agent.click_point(left + width // 2, top + height // 2)
+
+        deadline = time.monotonic() + 2.0
+        info = self.adapter.describe_element(row_one)
+        while time.monotonic() < deadline and not info.selected:
+            time.sleep(0.1)
+            info = self.adapter.describe_element(row_one)
+
+        self.assertTrue(info.selected, "un click pixel deve selezionare davvero la cella")
+        self.assertTrue(info.focused, "un click pixel deve dare il fuoco Qt davvero alla cella")
+
+
 class DynamicControlEndToEndTests(unittest.TestCase):
     """Task 6/10 di F3.1.2 (F3.1.6, la parte DINAMICA mai affrontata finora - vedi
     `benchmarks/computer_use_fixture.py` per il perche' `remove_button`, gia' un "primo assaggio",

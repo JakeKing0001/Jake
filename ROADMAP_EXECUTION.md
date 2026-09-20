@@ -5049,6 +5049,55 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   all'intera suite `tests/test_computer_use_fixture.py`/`tests/test_computer_use_integration.py`/
   `tests/test_executor.py`/`tests/test_selector.py` (160 test). 3.209/3.209 test, ruff verde.
 
+- **Verifica preliminare, nessun fix** — 20/09/2026: prima di continuare oltre Task 18, rieseguito
+  a mano `tests/test_computer_use_integration.py::RemoveWithConfirmationEndToEndTests` (Task 2/10)
+  perche' una nota intermedia di questo stesso file (18/09/2026, sezione F3.4 sotto) lo dichiarava
+  "NON oggi completabile via SelectionItem.Select()+Invoke() puri". Il test passa GIA' per davvero
+  - quella nota era superata da una fetta successiva (mai esplicitamente etichettata come
+  "Task 2/10 chiude" in questo file, un gap di documentazione, non di codice): la selezione usa un
+  SOLO gradino di click pixel (mai un tentativo UIA precedente sullo stesso elemento, evitando la
+  "corruzione" gia' documentata) e il dialogo di conferma viene cercato come DISCENDENTE della
+  finestra fixture (`self.window`), non come figlio del desktop - una via DIVERSA e piu' semplice
+  di `wait_for_new_win32_window`/`element_from_handle` (Task 13), che UI Automation espone comunque
+  per un `QMessageBox` modale anche se non per un `QMenu`. Nessun codice toccato, la riga
+  riassuntiva "F3.1.2 [9/10..." piu' in alto in questo file resta uno snapshot intermedio stantio,
+  superato dalla voce datata 20/09/2026 sopra ("F3.1.2 dichiara COMPLETI tutti e 10 i task
+  iniziali").
+
+- `F3.1.2` (Task 19 - "seleziona una cella di una tabella e modificane il valore", in "Tab 4",
+  MAI in "Tab 3") — 20/09/2026: nuovo `data_table` (`QTableWidget`, 2x2) - il pattern "cella di
+  tabella" mai esercitato finora, esposto da UI Automation con `control_type='DataItem'` (non
+  'ListItem'/'TreeItem') e con il NOME della cella uguale al suo testo corrente.
+
+  **Buco reale trovato scrivendo questo task, non ipotizzato - una nuova classe di limite UI
+  Automation su Qt, mai vista prima in questa sessione**: la tabella era stata messa PRIMA dentro
+  "Tab 3" insieme a spinbox/radio (Task 17/18), ma spinbox+3 radio da soli riempiono gia' i 120px
+  visibili del `QScrollArea` di quella scheda - la tabella finiva SOTTO la porzione visibile,
+  MAI scorsa in vista. UI Automation pero' continuava a riportare bounds PIENAMENTE validi per le
+  sue celle come se fossero visibili (confermato con uno screenshot reale, non assunto: le celle
+  non erano affatto sullo schermo li') - un click a quelle coordinate colpiva in realta' un widget
+  COMPLETAMENTE diverso, piu' in basso nel layout principale della finestra (i bottoni "Azione"),
+  con successo dichiarato dal sistema di input ma nessun effetto sulla tabella. **Bounds non
+  ricalcolati da UI Automation per contenuto scrollato fuori vista dentro un `QScrollArea`** - un
+  limite reale, non affrontato in generale qui (nessun meccanismo esistente per "scrolla prima di
+  fidarti dei bounds"), evitato per questa fixture dando alla tabella una scheda propria ("Tab 4",
+  `benchmarks/computer_use_fixture.py`) dove entra per intero nei suoi 120px senza mai dover
+  scorrere - stesso principio "un incremento alla volta" gia' seguito altrove, non un fix generico
+  per il limite trovato.
+
+  Selezione della cella con un SOLO gradino di click pixel (mai un tentativo UIA precedente sullo
+  stesso elemento) - stessa lezione gia' consolidata per `QListWidgetItem` (F3.4/F3.5): verificato
+  che il click DA SOLO seleziona la cella E le da il fuoco Qt per davvero (`selected`/`focused`
+  diventano `True` via UI Automation, non assunto), abilitando il trigger di modifica Qt di
+  default (`AnyKeyPressed`) - digitare subito dopo apre l'editor e il testo sostituisce il
+  contenuto della cella, confermato rileggendo il `DataItem` via UI Automation dopo Invio.
+
+  Prova: 3 test nuovi in `tests/test_computer_use_fixture.py::TableTests` (celle iniziali corrette,
+  modifica diretta a livello Qt, reset azzera solo le celle modificabili non le etichette di riga)
+  + 2 test nuovi in `tests/test_computer_use_integration.py::TableCellEditEndToEndTests` (click
+  pixel seleziona/focalizza davvero la cella; click+digitazione+Invio sostituisce il testo,
+  verificato rileggendo il `DataItem`). 3.214/3.214 test, ruff verde.
+
 ### F3.2 — Windows UI Automation adapter
 
 Dipende da: F3.1.

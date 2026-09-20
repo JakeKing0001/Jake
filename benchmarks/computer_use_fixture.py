@@ -199,7 +199,8 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QMenu, QMessageBox, QProgressBar, QPushButton, QRadioButton, QScrollArea,
-    QSlider, QSpinBox, QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QSlider, QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget, QTreeWidget, QTreeWidgetItem,
+    QVBoxLayout, QWidget,
 )
 
 # Terza fetta (albero): due categorie, due figli ciascuna - nomi stabili anche per i dati, non
@@ -443,6 +444,40 @@ class ComputerUseFixtureWindow(QWidget):
         third_tab_scroll.setWidget(third_tab)
         self.tabs.addTab(third_tab_scroll, "Tab 3")
 
+        # Task 19 (F3.1.2 continua verso i 100): una griglia (`QTableWidget`) - MAI un bersaglio
+        # in questa fixture finora, il pattern "cella di una tabella" e' esposto da UI Automation
+        # con control type/pattern DIVERSI da una lista/un albero gia' esercitati. **Buco reale
+        # trovato scrivendo questo task, non ipotizzato**: messa PRIMA dentro "Tab 3" insieme a
+        # spinbox/radio (come suggerito dal commento di Task 17), la tabella finiva SOTTO la
+        # porzione visibile del `QScrollArea` (120px) - ma UI Automation continuava a riportare
+        # bounds PIENAMENTE validi per le sue celle come se fossero visibili (verificato con uno
+        # screenshot reale: le celle non erano affatto sullo schermo li'), cosi' un click a quelle
+        # coordinate colpiva in realta' TUTT'ALTRO widget sotto Tab 3 nel layout principale. Un
+        # limite reale di UI Automation su Qt (bounds non aggiornati per contenuto scrollato fuori
+        # vista in un QScrollArea), non affrontato qui in generale - evitato per questa fixture
+        # dando alla tabella una PROPRIA scheda ("Tab 4") dove entra per intero nei suoi 120px
+        # senza mai scorrere, invece di condividere quella di Task 17/18.
+        fourth_tab = QWidget()
+        fourth_tab.setObjectName("fixture_tab_four_content")
+        fourth_tab_layout = QVBoxLayout(fourth_tab)
+        self.data_table = QTableWidget(2, 2)
+        self.data_table.setObjectName("fixture_table")
+        self.data_table.setAccessibleName("Tabella dati")
+        self.data_table.setHorizontalHeaderLabels(["Nome", "Valore"])
+        self.data_table.setItem(0, 0, QTableWidgetItem("Riga 1"))
+        self.data_table.setItem(0, 1, QTableWidgetItem(""))
+        self.data_table.setItem(1, 0, QTableWidgetItem("Riga 2"))
+        self.data_table.setItem(1, 1, QTableWidgetItem(""))
+        self.data_table.setMaximumHeight(90)
+        fourth_tab_layout.addWidget(self.data_table)
+        fourth_tab_layout.addStretch()
+        fourth_tab_scroll = QScrollArea()
+        fourth_tab_scroll.setObjectName("fixture_tab_four_scroll")
+        fourth_tab_scroll.setWidgetResizable(True)
+        fourth_tab_scroll.setMaximumHeight(120)
+        fourth_tab_scroll.setWidget(fourth_tab)
+        self.tabs.addTab(fourth_tab_scroll, "Tab 4")
+
         self.scroll_list = QListWidget()
         self.scroll_list.setObjectName("fixture_scroll_list")
         self.scroll_list.setAccessibleName("Elenco con scorrimento")
@@ -645,6 +680,9 @@ class ComputerUseFixtureWindow(QWidget):
         self.reorder_list.addItems(_REORDER_LIST_ITEMS)
         self.value_spinbox.setValue(0)
         self.radio_red.setChecked(True)
+        self.data_table.item(0, 1).setText("")
+        self.data_table.item(1, 1).setText("")
+        self.data_table.clearSelection()
 
     def current_combo_option(self) -> str:
         """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`)."""
@@ -656,6 +694,11 @@ class ComputerUseFixtureWindow(QWidget):
             if radio.isChecked():
                 return radio.text()
         return None
+
+    def table_cell_text(self, row: int, column: int) -> str:
+        """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`)."""
+        item = self.data_table.item(row, column)
+        return item.text() if item is not None else ""
 
     def reorder_list_items(self) -> list[str]:
         """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`) - l'ORDINE
