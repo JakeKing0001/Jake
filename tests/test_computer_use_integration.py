@@ -72,7 +72,17 @@ problema in un solo passo affidabile). Trovato inoltre che, a differenza del cas
 'Riga 30' non era presente PRIMA e lo e' DOPO) diventa visibile E riporta `selected=True`
 correttamente - lo stesso limite di "contenuto virtualizzato" gia' documentato per lo Scroll
 (F3.4) riguardava solo l'assenza PRIMA di un vero scorrimento, non una desincronizzazione
-permanente come per SelectionItem su un `QListWidgetItem` gia' selezionato senza scorrimento."""
+permanente come per SelectionItem su un `QListWidgetItem` gia' selezionato senza scorrimento.
+
+`KeyboardOnlyNavigationEndToEndTests` completa Task 10/10 ("naviga e agisci solo con la
+tastiera") - CHIUDE i "10 task iniziali" dichiarati da F3.1.2 per intero. A differenza di ogni
+altro task (Invoke/Value/click + una scorciatoia per UN controllo), qui l'INTERO flusso e' senza
+mouse: `SetFocus()` via UI Automation, testo digitato con tasti veri, Tab per spostare il fuoco
+(verificato empiricamente essere il bottone "Aggiungi", non assunto dall'ordine del layout),
+Spazio per attivarlo - lo stesso schema CI-affidabile gia' provato da
+`ScrollAndSelectLastRowEndToEndTests` (`SetFocus()` esplicito, verifica a polling via UI
+Automation, mai OCR - vedi sopra il motivo, la stessa classe di fallimento CI gia' incontrata e
+risolta per Task 3)."""
 import subprocess
 import sys
 import time
@@ -364,6 +374,90 @@ class ScrollAndSelectLastRowEndToEndTests(unittest.TestCase):
         )
 
         self.assertTrue(outcome.succeeded, outcome.attempts)
+
+
+class KeyboardOnlyNavigationEndToEndTests(unittest.TestCase):
+    """Task 10/10 di F3.1.2 (CHIUDE i "10 task iniziali" dichiarati dalla roadmap per intero,
+    20/09/2026) - a differenza di ogni altro task in questo file (tutti guidati da UI Automation
+    Invoke/Value o da un click reale + UNA scorciatoia da tastiera specifica per un solo
+    controllo), qui l'INTERO flusso e' guidato dalla tastiera: `SetFocus()` via UI Automation sul
+    campo di testo (mai un click, per costruzione "senza mouse"), testo digitato con tasti VERI
+    (`pyautogui.write`, non il pattern Value), Tab per spostare il fuoco al bottone "Aggiungi"
+    (verificato empiricamente essere il PROSSIMO controllo nell'ordine di tabulazione con un probe
+    dedicato PRIMA di scrivere questo test, non assunto dall'ordine del layout), Spazio per
+    attivarlo (la convenzione standard Qt/Windows per un bottone con il fuoco). Dimostra un
+    percorso di automazione DIVERSO da Invoke/Value/click - "quale controllo ha il fuoco ora",
+    mai esercitato prima d'ora in questa sessione - stesso schema CI-affidabile gia' provato da
+    `ScrollAndSelectLastRowEndToEndTests` (`SetFocus()` esplicito PRIMA del tasto, verifica a
+    polling via UI Automation, mai OCR - vedi il docstring del modulo per il motivo)."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_typing_tabbing_and_pressing_space_adds_an_item_without_ever_clicking_the_button(self):
+        import pyautogui
+
+        input_field = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_input"),
+        )
+
+        def _type_tab_and_activate():
+            input_field.SetFocus()
+            pyautogui.write("task 10 da tastiera", interval=0.02)
+            pyautogui.press("tab")
+            pyautogui.press("space")
+
+        def _item_was_really_added():
+            deadline = time.monotonic() + 3.0
+            while True:
+                matches = self.engine.find_all(self.window, ElementSelector(name="task 10 da tastiera", control_type="ListItem"))
+                if matches:
+                    return True
+                if time.monotonic() >= deadline:
+                    return False
+                time.sleep(0.2)
+
+        outcome = try_strategies_in_order([("keyboard_only", _type_tab_and_activate)], verify=_item_was_really_added)
+
+        self.assertTrue(outcome.succeeded, outcome.attempts)
+
+    def test_a_single_tab_from_the_input_field_really_focuses_the_add_button_not_something_else(self):
+        """Verifica DIRETTA dell'ordine di tabulazione (non solo l'effetto finale sopra) - un
+        singolo Tab dal campo di testo deve mettere il fuoco DAVVERO sul bottone "Aggiungi",
+        letto via UI Automation, non assunto dall'ordine di inserimento nel layout."""
+        import pyautogui
+
+        input_field = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_input"),
+        )
+        add_button = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Aggiungi", control_type="Button"))
+
+        input_field.SetFocus()
+        pyautogui.press("tab")
+
+        deadline = time.monotonic() + 2.0
+        focused = False
+        while time.monotonic() < deadline:
+            focused = self.adapter.describe_element(add_button).focused
+            if focused:
+                break
+            time.sleep(0.1)
+        self.assertTrue(focused, "un Tab dal campo di testo deve spostare il fuoco sul bottone Aggiungi")
 
 
 class DynamicControlEndToEndTests(unittest.TestCase):

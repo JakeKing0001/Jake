@@ -56,6 +56,14 @@ Deliberatamente NON affrontati qui, passi successivi dichiarati:
   sopra);
 - l'intera F3.2 (`UIAutomationAdapter`, ancora da costruire).
 
+**Decima fetta (20/09/2026, un incremento successivo) - Task 10/10 di F3.1.2, CHIUDE i "10 task
+iniziali" dichiarati dalla roadmap per intero**: nessun codice nuovo necessario in QUESTO file -
+l'ordine di tabulazione gia' esistente (`input_field` -> `add_button`, il naturale ordine di
+inserimento nel layout Qt, verificato empiricamente con un probe dedicato PRIMA di scrivere il
+test, non assunto) basta a dimostrare un flusso guidato SOLO dalla tastiera (`SetFocus()` + testo
+digitato con tasti veri + Tab + Spazio), mai il mouse - vedi
+`tests/test_computer_use_integration.py::KeyboardOnlyNavigationEndToEndTests`.
+
 PySide6 invece di Win32/WinForms nativo: gia' una dipendenza del progetto
 (requirements/hud.txt, usata dall'HUD - vedi core/gui/hud/), ed espone i propri widget a UI
 Automation su Windows tramite il ponte di accessibilita' di Qt (QAccessible) - non perfettamente

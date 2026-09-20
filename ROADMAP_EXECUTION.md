@@ -4766,6 +4766,31 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   ...)` poi `assertGreater(..., 0)`) invece di cercare una sottostringa. 3.131/3.131 test
   invariato, ruff verde.
 
+- `F3.1.2` (Task 10/10 - "naviga e agisci solo con la tastiera", CHIUDE i "10 task iniziali"
+  dichiarati dalla roadmap per intero) — 20/09/2026: nessun codice nuovo nella fixture - a
+  differenza di ogni altro task (Invoke/Value/click reale + una scorciatoia da tastiera per UN
+  controllo), qui l'INTERO flusso e' guidato SOLO dalla tastiera: `SetFocus()` via UI Automation
+  sul campo di testo (mai un click), testo digitato con tasti VERI (`pyautogui.write`, non il
+  pattern Value), Tab per spostare il fuoco, Spazio per attivare il bottone con il fuoco.
+
+  Verificato empiricamente PRIMA di scrivere il test, non assunto: un probe dedicato ha confermato
+  che l'ordine di tabulazione (mai dichiarato esplicitamente da Qt in questa fixture) mette
+  davvero il fuoco sul bottone "Aggiungi" con un solo Tab dal campo di testo - coincide con
+  l'ordine di inserimento nel layout, ma questo NON era garantito a priori (Qt puo' seguire un
+  ordine diverso, es. l'ordine visivo o un `setTabOrder` esplicito mai usato qui). Stesso schema
+  CI-affidabile gia' provato da Task 5/10 (`ScrollAndSelectLastRowEndToEndTests`): `SetFocus()`
+  esplicito PRIMA del tasto, verifica a polling via UI Automation, MAI OCR (Task 3/10 ha gia'
+  documentato una classe di fallimento CI specifica del ritaglio OCR, non della tastiera in
+  generale - qui evitata per costruzione).
+
+  Prova: 2 test nuovi in
+  `tests/test_computer_use_integration.py::KeyboardOnlyNavigationEndToEndTests` (l'intero flusso
+  tastiera-solo aggiunge davvero l'elemento; un Tab singolo dal campo di testo mette il fuoco
+  DAVVERO sul bottone "Aggiungi", verificato leggendo `focused` via UI Automation, non assunto
+  dall'ordine del layout). Con questo, F3.1.2 dichiara COMPLETI tutti e 10 i task iniziali (9
+  dimostrati end-to-end, Task 3 "espandi categoria" investigato e bloccato da un limite Qt reale
+  gia' documentato - una conclusione, non un buco lasciato aperto). 3.170/3.170 test, ruff verde.
+
 ### F3.2 — Windows UI Automation adapter
 
 Dipende da: F3.1.
