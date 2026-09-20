@@ -276,6 +276,54 @@ class RangeValueOnSpinBoxTests(_ExecutorFixtureTestCase):
         self.assertEqual(self._current_spinbox_value(spinbox_after), 0.0)
 
 
+class RadioButtonMutualExclusivityTests(_ExecutorFixtureTestCase):
+    """F3.1.2 Task 18 (adozione) - un gruppo di `QRadioButton` (`Tab 3`) - il pattern "scegli
+    esattamente una tra piu' opzioni mutuamente esclusive", diverso da una `QCheckBox` singola
+    (F3.4.1, indipendente). Verificato con un probe dedicato PRIMA di scrivere questo test:
+    `SelectionItem.Select()` su un radio button deseleziona DAVVERO gli altri del gruppo (la
+    STESSA mutua esclusivita' affidabile gia' nota per un `TabItem`, non la trappola gia' nota per
+    un `QListWidgetItem`) - un radio button espone SIA SelectionItem SIA Toggle, ma solo
+    SelectionItem rispetta l'esclusivita' del gruppo."""
+
+    def tearDown(self):
+        self._reset_fixture()
+
+    def _radio_on_tab_three(self, name: str):
+        tab_three = self._element(name="Tab 3", control_type="TabItem")
+        self.executor.select(tab_three)
+        time.sleep(_SETTLE_SECONDS)
+        from core.computer_use.selector import ElementSelector, SelectorEngine
+        engine = SelectorEngine(self.adapter)
+        return engine.wait_for_unique_element(self.window, ElementSelector(name=name, control_type="RadioButton"), timeout_seconds=3.0)
+
+    def test_the_first_radio_is_checked_by_default(self):
+        red = self._radio_on_tab_three("Rosso")
+        green = self._radio_on_tab_three("Verde")
+        self.assertTrue(self.adapter.describe_element(red).selected)
+        self.assertFalse(self.adapter.describe_element(green).selected)
+
+    def test_selecting_a_different_radio_really_deselects_the_previous_one(self):
+        green = self._radio_on_tab_three("Verde")
+
+        self.executor.select(green)
+        time.sleep(_SETTLE_SECONDS)
+
+        red_after = self._radio_on_tab_three("Rosso")
+        green_after = self._radio_on_tab_three("Verde")
+        self.assertFalse(self.adapter.describe_element(red_after).selected, "l'altro radio button del gruppo deve risultare DAVVERO deselezionato")
+        self.assertTrue(self.adapter.describe_element(green_after).selected)
+
+    def test_reset_returns_to_the_first_radio_selected(self):
+        blue = self._radio_on_tab_three("Blu")
+        self.executor.select(blue)
+        time.sleep(_SETTLE_SECONDS)
+
+        self._reset_fixture()
+
+        red_after = self._radio_on_tab_three("Rosso")
+        self.assertTrue(self.adapter.describe_element(red_after).selected)
+
+
 class ExpandCollapseKnownLimitationTests(_ExecutorFixtureTestCase):
     """**Documenta un buco reale, non lo nasconde**: il pattern ExpandCollapse e' presente su un
     `QTreeWidgetItem` (GetCurrentPattern lo trova, Expand()/Collapse() non sollevano mai), ma il

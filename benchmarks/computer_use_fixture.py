@@ -152,6 +152,39 @@ nell'albero UI Automation finche' la tab non viene selezionata per davvero - ric
 all'albero di "svegliarsi", lo stesso genere di ritardo gia' incontrato per il `Document` di un
 browser (F3.6.1) e per il popup di una combobox (Task 12).
 
+**Diciottesima fetta (20/09/2026, un incremento successivo) - Task 18 di F3.1.2, in "Tab 3"**: un
+gruppo di `QRadioButton` (`radio_red`/`radio_green`/`radio_blue`) - il pattern "scegli
+esattamente una tra piu' opzioni mutuamente esclusive", diverso da una `QCheckBox` singola
+(indipendente). Verificato con un probe dedicato PRIMA di scrivere il test: `SelectionItem.
+Select()` su un radio button deseleziona DAVVERO gli altri del gruppo - la STESSA mutua
+esclusivita' affidabile gia' nota per un `TabItem` (Task 4/10), non la trappola gia' nota per un
+`QListWidgetItem` (Task 11). Un radio button espone SIA SelectionItem SIA Toggle, ma solo il
+primo rispetta l'esclusivita' del gruppo - vedi
+`tests/test_executor.py::RadioButtonMutualExclusivityTests`.
+
+**Terzo buco reale sulla crescita della finestra, DIVERSO dai primi due, trovato DOPO la
+pubblicazione - segnalato dall'utente stesso (un test falliva perche' l'elemento finiva sotto la
+barra delle applicazioni)**: il fix di Task 17 ("Tab 3" invece di allungare la colonna principale)
+NON bastava da solo - Qt dimensiona l'INTERO `QTabWidget` in base alla scheda con il contenuto PIU'
+grande tra tutte, non solo quella attiva, quindi ogni widget aggiunto a Tab 3 continuava comunque a
+far crescere l'intera finestra. Corretto avvolgendo il contenuto di Tab 3 in una `QScrollArea` con
+un'altezza MASSIMA esplicita (120px logici) - oltre quel limite scorre al suo interno, non fa piu'
+crescere la finestra.
+
+**Causa vera dietro il margine ancora troppo stretto dopo quel primo fix - una scoperta DIVERSA,
+non un'altra ipotesi di "espansione dei widget"**: confrontando i bounds letti via UI Automation
+(fisici, es. 175px) con l'altezza VERA a livello Qt (`widget.height()`, logica, es. 140px) e'
+emerso un fattore ~1.25 costante - la scala DPI di QUESTA macchina (`screen.devicePixelRatio()
+== 1.25`, verificato direttamente, non assunto), non un'espansione oltre il minimo dichiarato
+come inizialmente sospettato. `item_list`/`reorder_list` erano gia' esattamente al loro minimo
+dichiarato (140 logici) - il vero problema era che 140+140+88(tabs, gia' ridotta) e il resto della
+colonna sommavano a 774 pixel LOGICI, mentre lo spazio verticale DISPONIBILE (esclusa la barra
+delle applicazioni, `screen.availableGeometry()`) e' di soli 816 logici partendo da y=0 - con la
+finestra posizionata a y=88 logici dalla cima, il budget reale era 728, non 816. Ridotta l'altezza
+minima/massima di `item_list`/`reorder_list` da 140/150 a 110/120 (ancora sufficiente per 3 righe
+piene) per liberare margine reale, verificato leggendo sia l'altezza logica Qt sia i bounds fisici
+via UI Automation DOPO il fix, non assunto per analogia con il fix precedente.
+
 PySide6 invece di Win32/WinForms nativo: gia' una dipendenza del progetto
 (requirements/hud.txt, usata dall'HUD - vedi core/gui/hud/), ed espone i propri widget a UI
 Automation su Windows tramite il ponte di accessibilita' di Qt (QAccessible) - non perfettamente
@@ -165,8 +198,8 @@ import sys
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QMenu, QMessageBox, QProgressBar, QPushButton, QSlider, QSpinBox, QTabWidget,
-    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QListWidget, QMenu, QMessageBox, QProgressBar, QPushButton, QRadioButton, QScrollArea,
+    QSlider, QSpinBox, QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 # Terza fetta (albero): due categorie, due figli ciascuna - nomi stabili anche per i dati, non
@@ -307,7 +340,16 @@ class ComputerUseFixtureWindow(QWidget):
         # assume gia' visibili: un click su un terzo elemento aggiunto finiva SOTTO l'area
         # visibile della lista, colpendo per davvero il widget successivo nel layout (`tree`), non
         # l'elemento cercato - verificato leggendo i bounds reali via UI Automation, non assunto.
-        self.item_list.setMinimumHeight(140)
+        # Correzione successiva (Task 18, segnalata dall'utente: un test falliva perche'
+        # l'elemento finiva sotto la barra delle applicazioni) - IPOTESI INIZIALE SBAGLIATA, poi
+        # corretta: sembrava che `item_list` si espandesse oltre il minimo dichiarato (140 logici
+        # letti come 175 via UI Automation), ma la vera causa era la scala DPI di questa macchina
+        # (1.25x, `screen.devicePixelRatio()`, verificato) - a livello Qt l'altezza era gia'
+        # ESATTAMENTE 140, mai espansa. Il problema vero era il budget verticale TOTALE (vedi il
+        # docstring del modulo per i numeri esatti) - ridotto qui a 110/120 per liberare margine
+        # reale, verificato leggendo sia l'altezza logica Qt sia i bounds fisici via UI Automation.
+        self.item_list.setMinimumHeight(110)
+        self.item_list.setMaximumHeight(120)
         # Task 11/10 (F3.1.2 continua oltre i "10 iniziali" verso i 100 dichiarati dal criterio di
         # uscita di F3): ExtendedSelection (Ctrl+Click aggiunge alla selezione, Shift+Click
         # seleziona un intervallo) invece del default SingleSelection - retrocompatibile con Task
@@ -353,13 +395,53 @@ class ComputerUseFixtureWindow(QWidget):
         # layout principale.
         third_tab = QWidget()
         third_tab.setObjectName("fixture_tab_three_content")
+        third_tab_layout = QVBoxLayout(third_tab)
         self.value_spinbox = QSpinBox()
         self.value_spinbox.setObjectName("fixture_spinbox")
         self.value_spinbox.setAccessibleName("Selettore numerico")
         self.value_spinbox.setRange(0, 100)
         self.value_spinbox.setValue(0)
-        QVBoxLayout(third_tab).addWidget(self.value_spinbox)
-        self.tabs.addTab(third_tab, "Tab 3")
+        third_tab_layout.addWidget(self.value_spinbox)
+
+        # Task 18 (F3.1.2 continua verso i 100): un gruppo di radio button - MAI un bersaglio in
+        # questa fixture finora, il pattern "scegli esattamente una tra piu' opzioni mutuamente
+        # esclusive" (diverso da una singola QCheckBox, F3.4.1, che e' indipendente). Verificato
+        # con un probe dedicato PRIMA di scrivere il test: SelectionItem.Select() su un radio
+        # button deseleziona DAVVERO gli altri del gruppo (la stessa mutua esclusivita' gia' nota
+        # per un TreeItem, non la trappola gia' nota per un QListWidgetItem) - un radio button
+        # espone SIA SelectionItem SIA Toggle, ma solo il primo rispetta l'esclusivita' del
+        # gruppo (Toggle() cambierebbe SOLO il bottone cliccato, senza deselezionare gli altri).
+        self.radio_red = QRadioButton("Rosso")
+        self.radio_red.setObjectName("fixture_radio_red")
+        self.radio_red.setAccessibleName("Rosso")
+        self.radio_green = QRadioButton("Verde")
+        self.radio_green.setObjectName("fixture_radio_green")
+        self.radio_green.setAccessibleName("Verde")
+        self.radio_blue = QRadioButton("Blu")
+        self.radio_blue.setObjectName("fixture_radio_blue")
+        self.radio_blue.setAccessibleName("Blu")
+        self.radio_red.setChecked(True)
+        third_tab_layout.addWidget(self.radio_red)
+        third_tab_layout.addWidget(self.radio_green)
+        third_tab_layout.addWidget(self.radio_blue)
+        third_tab_layout.addStretch()
+
+        # Buco reale trovato scrivendo Task 18 (dopo l'utente stesso averlo osservato: un test
+        # falliva perche' l'elemento finiva sotto la barra delle applicazioni) - il fix di Task 17
+        # ("Tab 3" invece di allungare la colonna principale) NON bastava: Qt dimensiona l'INTERO
+        # `QTabWidget` in base alla scheda con il contenuto PIU' grande tra tutte, non solo quella
+        # attiva - ogni widget aggiunto a Tab 3 continuava quindi a far crescere l'intera finestra
+        # esattamente come prima. Corretto avvolgendo il contenuto di Tab 3 in una `QScrollArea`
+        # con un'altezza MASSIMA esplicita: oltre quel limite scorre al suo interno, non fa piu'
+        # crescere la finestra - lo stesso principio gia' usato per `scroll_list`
+        # (`setMaximumHeight`), qui applicato a un intero contenitore di widget futuri invece che
+        # a una singola lista.
+        third_tab_scroll = QScrollArea()
+        third_tab_scroll.setObjectName("fixture_tab_three_scroll")
+        third_tab_scroll.setWidgetResizable(True)
+        third_tab_scroll.setMaximumHeight(120)
+        third_tab_scroll.setWidget(third_tab)
+        self.tabs.addTab(third_tab_scroll, "Tab 3")
 
         self.scroll_list = QListWidget()
         self.scroll_list.setObjectName("fixture_scroll_list")
@@ -377,11 +459,12 @@ class ComputerUseFixtureWindow(QWidget):
         self.reorder_list.setAccessibleName("Elenco riordinabile")
         self.reorder_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         self.reorder_list.addItems(_REORDER_LIST_ITEMS)
-        # Stessa lezione appena imparata per `item_list` (vedi il suo commento) applicata qui fin
-        # dall'inizio: senza un'altezza minima esplicita, i suoi tre elementi non entrerebbero
-        # tutti nell'area visibile in fondo a una finestra ormai alta, con l'ultimo parzialmente
-        # tagliato fuori - verificato leggendo i bounds reali, non assunto per analogia.
-        self.reorder_list.setMinimumHeight(140)
+        # Stessa lezione di `item_list` (vedi il suo commento per la scala DPI, la vera causa
+        # dietro la correzione 140/150 -> 110/120) applicata qui fin dall'inizio: senza
+        # un'altezza minima esplicita, i suoi tre elementi non entrerebbero tutti nell'area
+        # visibile in fondo a una finestra ormai alta, con l'ultimo parzialmente tagliato fuori.
+        self.reorder_list.setMinimumHeight(110)
+        self.reorder_list.setMaximumHeight(120)
 
         # Dodicesima fetta (F3.1.2 Task 12, continua verso i 100): un menu a tendina, il pattern
         # ExpandCollapse+Selection di un QComboBox - MAI un bersaglio in questa fixture finora,
@@ -561,10 +644,18 @@ class ComputerUseFixtureWindow(QWidget):
         self.reorder_list.clear()
         self.reorder_list.addItems(_REORDER_LIST_ITEMS)
         self.value_spinbox.setValue(0)
+        self.radio_red.setChecked(True)
 
     def current_combo_option(self) -> str:
         """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`)."""
         return self.option_combo.currentText()
+
+    def selected_radio_label(self) -> str | None:
+        """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`)."""
+        for radio in (self.radio_red, self.radio_green, self.radio_blue):
+            if radio.isChecked():
+                return radio.text()
+        return None
 
     def reorder_list_items(self) -> list[str]:
         """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`) - l'ORDINE

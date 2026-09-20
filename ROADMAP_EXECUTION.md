@@ -5000,6 +5000,55 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   `value_spinbox` aggiunto ai controlli gia' verificati per object name/accessible name non
   vuoti. 3.203/3.203 test, ruff verde.
 
+- `F3.1.2` (Task 18 - "scegli un'opzione da un gruppo mutuamente esclusivo", in "Tab 3") —
+  20/09/2026: nuovo gruppo `radio_red`/`radio_green`/`radio_blue` (`QRadioButton`) - il pattern
+  "scegli esattamente una tra piu' opzioni mutuamente esclusive", diverso da una `QCheckBox`
+  singola (F3.4.1, indipendente).
+
+  Verificato con un probe dedicato PRIMA di scrivere il test: `SelectionItem.Select()` su un
+  radio button deseleziona DAVVERO gli altri del gruppo - la STESSA mutua esclusivita' affidabile
+  gia' nota per un `TabItem` (Task 4/10), non la trappola gia' nota per un `QListWidgetItem`
+  (Task 11). Un radio button espone SIA `SelectionItem` SIA `Toggle`, ma solo il primo rispetta
+  l'esclusivita' del gruppo (`Toggle()` cambierebbe solo il bottone cliccato, senza deselezionare
+  gli altri) - nessun nuovo metodo in `ActionExecutor`, `select()` gia' esistente basta.
+
+  Prova: 3 test nuovi in `tests/test_executor.py::RadioButtonMutualExclusivityTests` (rosso
+  selezionato di default; selezionarne un altro deseleziona DAVVERO il precedente, verificato via
+  UI Automation non assunto; reset torna al primo) + 3 test nuovi in
+  `tests/test_computer_use_fixture.py::RadioButtonTests` (stesso schema a livello Qt) +
+  `radio_red`/`radio_green`/`radio_blue` aggiunti ai controlli gia' verificati per object name/
+  accessible name non vuoti. 3.209/3.209 test, ruff verde.
+
+  **Correzione successiva (stesso 20/09/2026) - un terzo buco sulla crescita della finestra,
+  segnalato DALL'UTENTE STESSO dopo aver osservato il fallimento reale ("quel test va in
+  fallimento perche' finisce sotto la barra delle applicazioni")**: `tests/test_computer_use_
+  integration.py::DragReorderEndToEndTests` (Task 16) falliva in CI/locale dopo Task 18. Il fix
+  di Task 17 ("Tab 3" invece di allungare la colonna principale) NON bastava da solo: Qt
+  dimensiona l'INTERO `QTabWidget` in base alla scheda con il contenuto PIU' grande tra tutte,
+  non solo quella attiva - ogni widget aggiunto a Tab 3 continuava quindi a far crescere l'intera
+  finestra esattamente come prima. Corretto avvolgendo il contenuto di Tab 3 in una `QScrollArea`
+  con un'altezza MASSIMA esplicita (120px logici, `benchmarks/computer_use_fixture.py`) - oltre
+  quel limite scorre al suo interno, non fa piu' crescere la finestra.
+
+  **Causa vera dietro il margine ancora troppo stretto - un'IPOTESI INIZIALE SBAGLIATA, poi
+  corretta con una misura diretta, non un'altra congettura**: la prima diagnosi ("`item_list`/
+  `reorder_list` si espandono oltre il minimo dichiarato, 140 logici letti come 175 via UI
+  Automation") si e' rivelata SBAGLIATA - confrontando l'altezza VERA a livello Qt
+  (`widget.height()`) con i bounds fisici di UI Automation e' emerso un fattore costante ~1.25,
+  la scala DPI di questa macchina (`screen.devicePixelRatio() == 1.25`, verificato direttamente).
+  A livello Qt `item_list`/`reorder_list` erano gia' ESATTAMENTE al loro minimo dichiarato (140),
+  mai espansi - il problema vero era il budget verticale TOTALE: la colonna sommava a 774 pixel
+  LOGICI mentre lo spazio disponibile (esclusa la barra delle applicazioni,
+  `screen.availableGeometry()`) era di soli 816 logici da y=0, con la finestra posizionata a
+  y=88 logici dalla cima - un budget reale di 728, non 816. Ridotta l'altezza minima/massima di
+  `item_list`/`reorder_list` da 140/150 a 110/120 (ancora sufficiente per 3 righe piene) per
+  liberare margine reale - verificato leggendo sia l'altezza logica Qt sia i bounds fisici via UI
+  Automation DOPO il fix (finestra 892px fisici, contro un budget stimato di ~1020, un margine
+  reale di ~130px), non assunto per analogia con il fix precedente. `tests/test_computer_use_
+  integration.py::DragReorderEndToEndTests`/`MultiSelectEndToEndTests` riverificati verdi, insieme
+  all'intera suite `tests/test_computer_use_fixture.py`/`tests/test_computer_use_integration.py`/
+  `tests/test_executor.py`/`tests/test_selector.py` (160 test). 3.209/3.209 test, ruff verde.
+
 ### F3.2 — Windows UI Automation adapter
 
 Dipende da: F3.1.

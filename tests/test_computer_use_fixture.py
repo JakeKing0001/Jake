@@ -46,6 +46,9 @@ class AutomationPropertiesTests(unittest.TestCase):
         self.assertEqual(window.start_progress_button.objectName(), "fixture_start_progress_button")
         self.assertEqual(window.reorder_list.objectName(), "fixture_reorder_list")
         self.assertEqual(window.value_spinbox.objectName(), "fixture_spinbox")
+        self.assertEqual(window.radio_red.objectName(), "fixture_radio_red")
+        self.assertEqual(window.radio_green.objectName(), "fixture_radio_green")
+        self.assertEqual(window.radio_blue.objectName(), "fixture_radio_blue")
 
     def test_every_control_has_a_non_empty_accessible_name(self):
         window = ComputerUseFixtureWindow()
@@ -53,7 +56,7 @@ class AutomationPropertiesTests(unittest.TestCase):
             window.input_field, window.add_button, window.reset_button, window.item_list, window.tree,
             window.tabs, window.option_checkbox, window.scroll_list, window.load_button, window.dynamic_button,
             window.action_button_a, window.action_button_b, window.option_combo, window.value_slider,
-            window.value_spinbox,
+            window.value_spinbox, window.radio_red, window.radio_green, window.radio_blue,
             window.progress_bar, window.start_progress_button, window.reorder_list,
         ):
             self.assertTrue(widget.accessibleName(), f"{widget.objectName()} non ha un accessibleName")
@@ -689,6 +692,34 @@ class SpinBoxTests(unittest.TestCase):
         window.reset_state()
 
         self.assertEqual(window.value_spinbox.value(), 0)
+
+
+class RadioButtonTests(unittest.TestCase):
+    """Task 18 di F3.1.2 (continua verso i 100, in "Tab 3"): un gruppo di `QRadioButton`
+    mutuamente esclusivi - vedi
+    `tests/test_executor.py::RadioButtonMutualExclusivityTests` per la dimostrazione via UI
+    Automation che selezionarne uno deseleziona DAVVERO gli altri (il pattern SelectionItem,
+    affidabile qui come per un `TabItem`, a differenza della trappola gia' nota per
+    `QListWidgetItem`)."""
+
+    def test_red_is_checked_by_default(self):
+        window = ComputerUseFixtureWindow()
+        self.assertEqual(window.selected_radio_label(), "Rosso")
+
+    def test_checking_a_different_radio_unchecks_the_previous_one(self):
+        window = ComputerUseFixtureWindow()
+        window.radio_green.setChecked(True)
+        self.assertEqual(window.selected_radio_label(), "Verde")
+        self.assertFalse(window.radio_red.isChecked())
+
+    def test_reset_returns_to_red_selected(self):
+        window = ComputerUseFixtureWindow()
+        window.radio_blue.setChecked(True)
+        self.assertEqual(window.selected_radio_label(), "Blu")
+
+        window.reset_state()
+
+        self.assertEqual(window.selected_radio_label(), "Rosso")
 
 
 if __name__ == "__main__":
