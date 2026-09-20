@@ -592,6 +592,37 @@ class MultiSelectEndToEndTests(unittest.TestCase):
 
         self.assertTrue(outcome.succeeded, outcome.attempts)
 
+    def test_ctrl_a_selects_every_item_in_the_list(self):
+        """Task 31 (F3.1.2 continua verso i 100) - "Ctrl+A seleziona TUTTI gli elementi", un
+        contesto diverso da Task 25 (Ctrl+A in un CAMPO DI TESTO, seleziona il testo) - qui la
+        stessa scorciatoia, in `ExtendedSelection` (Task 11), seleziona ogni riga della lista.
+        Richiede il fuoco sulla lista (un click su un elemento, non `SetFocus()` sulla lista
+        stessa) prima di Ctrl+A, come per ogni altra scorciatoia di lista gia' provata."""
+        import pyautogui
+
+        item_a = self._add_item("ctrl-a A")
+        self._add_item("ctrl-a B")
+        self._add_item("ctrl-a C")
+
+        bounds_a = self.adapter.describe_element(item_a).bounds
+
+        def _click_then_ctrl_a():
+            pyautogui.click(bounds_a[0] + bounds_a[2] // 2, bounds_a[1] + bounds_a[3] // 2)
+            time.sleep(0.3)
+            pyautogui.hotkey("ctrl", "a")
+
+        def _all_three_selected():
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline:
+                if self._is_selected("ctrl-a A") and self._is_selected("ctrl-a B") and self._is_selected("ctrl-a C"):
+                    return True
+                time.sleep(0.1)
+            return False
+
+        outcome = try_strategies_in_order([("ctrl_a", _click_then_ctrl_a)], verify=_all_three_selected)
+
+        self.assertTrue(outcome.succeeded, outcome.attempts)
+
 
 class ComboBoxSelectionEndToEndTests(unittest.TestCase):
     """Task 12 (F3.1.2 continua verso i 100) - "apri un menu a tendina e scegli un'opzione":

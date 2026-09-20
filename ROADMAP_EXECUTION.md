@@ -5261,6 +5261,24 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   figlio Edit cambia davvero il valore del combo, verificato con `read_value`). 3.248/3.248 test,
   ruff verde.
 
+- `F3.1.2` (Task 31 - "Ctrl+A seleziona TUTTI gli elementi di una lista") — 20/09/2026: nessun
+  codice nuovo nella fixture - `item_list` (`ExtendedSelection`, Task 11/21) supporta gia' Ctrl+A
+  per selezionare ogni riga, un contesto DIVERSO da Task 25 (Ctrl+A in un campo di testo, seleziona
+  il TESTO, non righe di una lista).
+
+  **Buco reale trovato scrivendo il probe, non ipotizzato**: aggiungere tre elementi in rapida
+  successione (`set_value`+`invoke` senza attesa tra un'aggiunta e la successiva) lasciava l'albero
+  UI Automation "indietro" - solo l'ULTIMO elemento aggiunto risultava trovabile, gli altri due
+  sembravano scomparsi (in realta' erano gia' nella lista Qt, l'albero UI Automation doveva solo
+  "svegliarsi" - la stessa lezione gia' incontrata piu' volte in questa sessione per cambi di tab/
+  popup). Il test di produzione riusa `_add_item` (gia' esistente in `MultiSelectEndToEndTests`),
+  che gia' attende con polling (`wait_for_unique_element`) che ogni elemento compaia PRIMA di
+  aggiungere il successivo - nessun buco nel codice di produzione, solo nel probe scritto in
+  fretta.
+
+  Prova: 1 test nuovo in `tests/test_computer_use_integration.py::MultiSelectEndToEndTests`
+  (click su un elemento poi Ctrl+A seleziona davvero tutti e tre). 3.249/3.249 test, ruff verde.
+
 ### F3.2 — Windows UI Automation adapter
 
 Dipende da: F3.1.
