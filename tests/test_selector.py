@@ -40,6 +40,12 @@ class ElementSelectorTests(unittest.TestCase):
     def test_a_selector_with_only_an_automation_id_is_accepted(self):
         ElementSelector(automation_id="fixture_add_button")
 
+    def test_a_selector_with_only_a_process_id_is_rejected(self):
+        """Come `window_title_contains`: un PID da solo non identifica alcun ELEMENTO, solo il
+        processo in cui cercarlo - non conta per il "almeno uno" richiesto dal costruttore."""
+        with self.assertRaises(ValueError):
+            ElementSelector(process_id=1234)
+
 
 class ElementSelectorSerializationTests(unittest.TestCase):
     """F3.3.4 (resto - "salvare selector procedurali senza coordinate assolute"): `to_dict`/
@@ -82,6 +88,21 @@ class ElementSelectorSerializationTests(unittest.TestCase):
         restored = ElementSelector.from_dict(original.to_dict())
         self.assertEqual(original, restored)
         self.assertEqual(restored.window_title_contains, "Computer Use Fixture")
+
+    def test_to_dict_never_includes_process_id_even_when_set(self):
+        """F3.3.1 (resto - "app/process"): un PID e' effimero (valido solo finche' vive il
+        processo che lo ha ricevuto) - a differenza di ogni altro criterio, `to_dict` non lo
+        scrive MAI, vedi il docstring della classe/di `to_dict`."""
+        selector = ElementSelector(name="Aggiungi", process_id=1234)
+        self.assertEqual(selector.to_dict(), {"name": "Aggiungi"})
+
+    def test_from_dict_rejects_a_hand_written_process_id_key(self):
+        """`to_dict` non lo scrive mai (verificato sopra) - se compare comunque in un dict dato a
+        `from_dict` (scritto a mano da un chiamante che ignora perche' e' escluso), deve fallire
+        RUMOROSAMENTE come qualunque altra chiave sconosciuta, non essere silenziosamente accettato
+        o ignorato."""
+        with self.assertRaises(ValueError):
+            ElementSelector.from_dict({"name": "Aggiungi", "process_id": 1234})
 
 
 class LocateTests(_RealFixtureTestCase):
@@ -225,6 +246,40 @@ class FindUniqueAgainstTheRealFixtureTests(_RealFixtureTestCase):
 
         self.assertEqual(tab_item.control_type, "TabItem")
         self.assertTrue(tab_item.selected, "Tab 1 e' attiva per default")
+
+
+class ProcessIdCriterionAgainstTheRealFixtureTests(_RealFixtureTestCase):
+    """F3.3.1 (resto - "app/process", CHIUSO in questo incremento): verifica DAVVERO che
+    `process_id` filtri per il processo giusto, non solo che il parametro venga accettato senza
+    sollevare - il PID SBAGLIATO usato qui e' `os.getpid()` (questo stesso processo di test, Python
+    puro senza alcuna finestra), che non possiede MAI alcun elemento della fixture Qt: se il filtro
+    fosse silenziosamente ignorato, questo test lo rivelerebbe (troverebbe comunque il bottone).
+
+    **Riusa un buco GIA' noto** (vedi `tests/test_ui_automation_adapter.py::
+    FindWindowByProcessIdTests.test_finds_the_real_window_of_a_running_process`): `self.process.
+    pid` (il PID del `Popen`) NON e' il PID reale che possiede la finestra per questa fixture (la
+    venv rieseguisce se stessa in un processo figlio su Windows) - il PID VERO e'
+    `self.window.CurrentProcessId`."""
+
+    def setUp(self):
+        self.engine = SelectorEngine(self.adapter)
+
+    def test_the_real_process_id_of_the_fixture_matches(self):
+        real_pid = self.window.CurrentProcessId
+
+        info = self.engine.find_unique(
+            self.window, ElementSelector(name="Aggiungi", control_type="Button", process_id=real_pid),
+        )
+
+        self.assertEqual(info.name, "Aggiungi")
+
+    def test_a_different_process_id_matches_nothing(self):
+        import os
+
+        with self.assertRaises(NoMatchError):
+            self.engine.find_unique(
+                self.window, ElementSelector(name="Aggiungi", control_type="Button", process_id=os.getpid()),
+            )
 
 
 class WaitForUniqueElementTests(_RealFixtureTestCase):

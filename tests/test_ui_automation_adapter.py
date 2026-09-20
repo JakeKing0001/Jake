@@ -420,5 +420,48 @@ class DescribeRealFixtureTests(_RealFixtureTestCase):
         self.assertGreater(len(tree.children), 0)
 
 
+class FindMatchingElementsProcessIdTests(_RealFixtureTestCase):
+    """F3.3.1 (resto - "app/process", CHIUSO in questo incremento, 20/09/2026): `process_id` in
+    `find_matching_elements` - vedi il proprio docstring. Il PID SBAGLIATO usato qui e'
+    `os.getpid()` (questo stesso processo di test, Python puro, mai proprietario di alcun elemento
+    della fixture Qt) - se il filtro fosse silenziosamente ignorato, questo test lo rivelerebbe
+    (troverebbe comunque il bottone).
+
+    **Riusa un buco GIA' noto, non uno nuovo** (vedi `FindWindowByProcessIdTests.
+    test_finds_the_real_window_of_a_running_process`, scoperto in un incremento precedente):
+    `self.process.pid` (il PID del `Popen`) NON e' il PID reale che possiede la finestra per
+    QUESTA fixture - la venv rieseguisce se stessa in un processo figlio su Windows. Il PID VERO,
+    coerente con quel test gia' esistente, e' `self.window.CurrentProcessId`."""
+
+    def test_the_real_process_id_of_the_fixture_matches(self):
+        real_pid = self.window.CurrentProcessId
+
+        matches = self.adapter.find_matching_elements(self.window, name="Aggiungi", process_id=real_pid)
+
+        self.assertEqual(len(matches), 1)
+
+    def test_a_different_process_id_matches_nothing(self):
+        import os
+
+        matches = self.adapter.find_matching_elements(self.window, name="Aggiungi", process_id=os.getpid())
+
+        self.assertEqual(matches, [])
+
+    def test_process_id_alone_is_a_sufficient_criterion(self):
+        """A differenza di `window_title_contains` (mai un criterio da solo per `find_matching_
+        elements`), `process_id` e' una PROPRIETA' UI Automation vera e propria - cercare "ogni
+        elemento di questo processo" senza altri criteri e' una richiesta legittima, non deve
+        sollevare il `ValueError` per "nessun criterio dato"."""
+        real_pid = self.window.CurrentProcessId
+
+        matches = self.adapter.find_matching_elements(self.window, process_id=real_pid)
+
+        self.assertGreater(len(matches), 0)
+
+    def test_no_criteria_at_all_still_raises(self):
+        with self.assertRaises(ValueError):
+            self.adapter.find_matching_elements(self.window)
+
+
 if __name__ == "__main__":
     unittest.main()

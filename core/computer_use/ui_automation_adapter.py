@@ -410,7 +410,7 @@ class UIAutomationAdapter:
 
     def find_matching_elements(
         self, root, *, name: str | None = None, control_type: str | None = None,
-        automation_id: str | None = None,
+        automation_id: str | None = None, process_id: int | None = None,
     ) -> list:
         """F3.3.1 (fondamenta): elementi COM GREZZI (non `ElementInfo` - il chiamante decide se e
         come descriverli, vedi `core/computer_use/selector.py::SelectorEngine`) tra i discendenti
@@ -418,7 +418,14 @@ class UIAutomationAdapter:
         Automation (`FindAll` + `CreateAndCondition`) - una singola chiamata COM che filtra
         internamente a Windows, non una camminata Python + confronto manuale su ogni elemento
         (che per un albero grande costerebbe quanto l'intera `describe_tree`, gia' misurata a
-        circa 1ms per elemento su un'app reale - vedi ROADMAP_EXECUTION.md sezione F3.2)."""
+        circa 1ms per elemento su un'app reale - vedi ROADMAP_EXECUTION.md sezione F3.2).
+
+        `process_id` (F3.3.1, adozione - "app/process", il criterio dichiarato dalla roadmap e
+        mai affrontato finora): la STESSA `UIA_ProcessIdPropertyId` gia' usata da
+        `find_window_by_process_id` per trovare una FINESTRA per processo, qui applicata a
+        QUALUNQUE elemento - ogni elemento espone l'ID del processo che lo possiede (verificato
+        con la fixture reale, non assunto: ogni discendente del `Window` Qt riporta lo stesso
+        `CurrentProcessId` del processo Qt stesso)."""
         conditions = []
         if name is not None:
             conditions.append(self._uia.CreatePropertyCondition(UIA.UIA_NamePropertyId, name))
@@ -428,8 +435,10 @@ class UIAutomationAdapter:
             ))
         if automation_id is not None:
             conditions.append(self._uia.CreatePropertyCondition(UIA.UIA_AutomationIdPropertyId, automation_id))
+        if process_id is not None:
+            conditions.append(self._uia.CreatePropertyCondition(UIA.UIA_ProcessIdPropertyId, process_id))
         if not conditions:
-            raise ValueError("find_matching_elements richiede almeno un criterio (name/control_type/automation_id)")
+            raise ValueError("find_matching_elements richiede almeno un criterio (name/control_type/automation_id/process_id)")
         combined = conditions[0]
         for extra_condition in conditions[1:]:
             combined = self._uia.CreateAndCondition(combined, extra_condition)

@@ -5119,6 +5119,48 @@ Criterio di uscita: gli stessi task passano dopo resize, tema e spostamento fine
   entrambi contro l'ambiguita' reale gia' nota della fixture, "Categoria A"/"Categoria B" con lo
   stesso `control_type`). 3.058/3.058 test, ruff verde.
 
+- `F3.3.1` (resto - "app/process", CHIUDE il criterio "app/process") — 20/09/2026: nuovo parametro
+  `process_id` su `UIAutomationAdapter.find_matching_elements` (la STESSA `UIA_ProcessIdPropertyId`
+  gia' usata da `find_window_by_process_id`, F3.6, qui applicata a QUALUNQUE elemento non solo a
+  una finestra di primo livello) + nuovo campo `ElementSelector.process_id`, collegato in
+  `SelectorEngine.find_all`/`find_unique_element`/`wait_for_unique_element`/`_explain_no_match`.
+  Caso motivante: distinguere due finestre/processi diversi che espongono elementi con lo stesso
+  `name`/`control_type` (es. due istanze della stessa app), senza dover gia' avere in mano la
+  finestra giusta come `root`.
+
+  **Scelta deliberata, non un'omissione**: `process_id` e' ESCLUSO da `ElementSelector.to_dict()`/
+  `from_dict()` (l'unico dei cinque criteri mai serializzato) - un PID e' un valore EFFIMERO,
+  valido solo finche' vive il processo che lo ha ricevuto da Windows al lancio. Un selettore di
+  F3.8 (procedura salvata) con un `process_id` incluso non ritroverebbe MAI lo stesso processo al
+  ricaricamento in una sessione futura (rilanciato, avrebbe un PID diverso), o peggio potrebbe
+  far combaciare per puro caso un processo COMPLETAMENTE DIVERSO a cui Windows ha nel frattempo
+  riassegnato lo stesso numero - un rischio di corrispondenza SBAGLIATA, non solo di nessuna
+  corrispondenza. `from_dict` rifiuta quindi una chiave `process_id` scritta a mano come
+  qualunque altra chiave sconosciuta, per costruzione (non e' nell'insieme di chiavi riconosciute).
+
+  **Buco reale RITROVATO scrivendo i test di questo incremento, non nuovo** (gia' documentato in
+  un incremento precedente, vedi `tests/test_ui_automation_adapter.py::FindWindowByProcessIdTests.
+  test_finds_the_real_window_of_a_running_process`): una prima versione dei nuovi test usava
+  `self.process.pid` (il PID del `subprocess.Popen` che lancia la fixture) come "il PID vero" -
+  falliva SEMPRE (0 elementi trovati), perche' `python -m benchmarks.computer_use_fixture` in
+  questa venv rieseguisce se stessa in un processo FIGLIO su Windows (verificato con `psutil`: il
+  processo lanciato da `Popen` e' `.venv\Scripts\python.exe`, che spawna un figlio
+  `C:\Python312\python.exe` - quest'ultimo, non il primo, possiede davvero la finestra). Corretto
+  usando `self.window.CurrentProcessId` (il PID VERO, letto dalla finestra stessa) invece del PID
+  del `Popen`, coerente con la correzione gia' fatta per lo stesso identico motivo nel test
+  esistente citato sopra - non una scoperta nuova, ma la stessa lezione riapplicata qui perche'
+  questo era il primo incremento a usare `process_id` come criterio di RICERCA (non solo per
+  terminare il processo).
+
+  Prova: 3 test nuovi in `ElementSelectorTests`/`ElementSelectorSerializationTests` (un selettore
+  con solo `process_id` rifiutato; mai serializzato; una chiave scritta a mano rifiutata) + 2 test
+  end-to-end nuovi in `tests/test_selector.py::ProcessIdCriterionAgainstTheRealFixtureTests` (il
+  PID vero trova il bottone, un PID diverso - `os.getpid()` di questo stesso processo di test -
+  non trova nulla) + 4 test nuovi in `tests/test_ui_automation_adapter.py::
+  FindMatchingElementsProcessIdTests` (stesso schema alla fondamenta, incluso "process_id da solo
+  e' un criterio sufficiente", a differenza di `window_title_contains`). 3.150/3.150 test, ruff
+  verde.
+
 ### F3.4 — Executor semantico
 
 Dipende da: F3.3 e F1.3.

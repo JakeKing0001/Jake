@@ -21,6 +21,12 @@ alla volta" di questa sessione):
   window_title_contains` + `SelectorEngine.locate()` - vedi le loro docstring. Restano aperti
   "app/process" (nessun criterio per PID/nome eseguibile ancora) e "ancestor" (nessun modo di
   richiedere un antenato specifico oltre a scegliere manualmente il `root` giusto);
+- F3.3.1 (resto - "app/process" CHIUSO in un incremento successivo, 20/09/2026): `ElementSelector.
+  process_id` - vedi il proprio docstring. Resta aperto solo "ancestor" (nessun modo di richiedere
+  un antenato specifico oltre a scegliere manualmente il `root` giusto - un incremento a se',
+  dato che "un antenato" e' un ELEMENTO, non uno scalare come un PID, e richiederebbe decidere
+  COME quell'antenato viene identificato, lo stesso genere di domanda che questo stesso modulo
+  risolve per l'elemento finale);
 - F3.3.2 (CHIUSA in un incremento successivo, 19/09/2026): il caso NoMatchError spiega QUALE
   criterio sta escludendo tutto (`_explain_no_match`), il caso gemello AmbiguousSelectionError
   elenca invece OGNI candidato trovato (`_describe_ambiguous_matches`, automation_id/bounds) -
@@ -55,12 +61,27 @@ class ElementSelector:
     volo - senza questo campo, un selettore procedurale sarebbe "procedurale" solo per
     l'ELEMENTO, non per la finestra che lo contiene, lasciando comunque al chiamante il compito
     di ritrovare la finestra giusta con codice separato. Con questo campo, `SelectorEngine.locate`
-    puo' fare ENTRAMBI i passi da un solo `ElementSelector` auto-sufficiente."""
+    puo' fare ENTRAMBI i passi da un solo `ElementSelector` auto-sufficiente.
+
+    `process_id` (F3.3.1 resto - "selettori per... app/process"): un quinto criterio OPZIONALE,
+    NON conta per il "almeno uno" sopra (un PID da solo non identifica alcun elemento specifico,
+    solo il PROCESSO a cui deve appartenere) - ma a differenza di `window_title_contains`,
+    DELIBERATAMENTE ESCLUSO da `to_dict`/`from_dict` (vedi i loro docstring): un PID e' un valore
+    EFFIMERO, valido solo finche' vive il processo che lo ha ricevuto da Windows al lancio -
+    salvarlo su disco e ricaricarlo in una sessione futura non ritroverebbe mai lo stesso
+    processo (rilanciato, avrebbe un PID diverso), o peggio potrebbe far combaciare per puro caso
+    un processo COMPLETAMENTE DIVERSO a cui Windows ha nel frattempo riassegnato lo stesso numero
+    - un rischio di corrispondenza SBAGLIATA, non solo di nessuna corrispondenza. Il caso
+    motivante di questo campo e' quindi solo IN SESSIONE, con un PID appena risolto (es.
+    `subprocess.Popen(...).pid`, o `IsolatedBrowserProcess.process.pid` gia' usato da F3.6) per
+    distinguere due finestre/processi diversi che espongono elementi con lo stesso `name`/
+    `control_type` - mai attraverso un salvataggio/ricaricamento."""
 
     name: str | None = None
     control_type: str | None = None
     automation_id: str | None = None
     window_title_contains: str | None = None
+    process_id: int | None = None
 
     def __post_init__(self) -> None:
         if self.name is None and self.control_type is None and self.automation_id is None:
@@ -73,7 +94,12 @@ class ElementSelector:
         dict semplice) e poi ricaricato produce lo STESSO `ElementSelector`, non uno con campi
         `None` scritti esplicitamente che renderebbero il file piu' rumoroso senza aggiungere
         informazione (un criterio omesso e un criterio `None` significano gia' la stessa cosa in
-        questa classe)."""
+        questa classe).
+
+        `process_id` e' l'UNICO campo MAI incluso qui, anche quando non e' `None` - vedi il
+        docstring della classe: e' un valore effimero (un PID rilanciato non e' piu' lo stesso
+        processo), serializzarlo produrrebbe un selettore che al ricaricamento non trova mai piu'
+        nulla, o peggio trova per caso il processo sbagliato."""
         result: dict = {}
         if self.name is not None:
             result["name"] = self.name
@@ -94,7 +120,11 @@ class ElementSelector:
         non produrre silenziosamente un selettore PIU' AMPIO di quello inteso (un criterio perso
         per un typo aumenterebbe il rischio di un match ambiguo o, peggio, di un match SBAGLIATO
         su un elemento diverso da quello originariamente salvato - lo stesso principio "rifiuta
-        l'ambiguita'/l'incertezza invece di indovinare" gia' seguito da `find_unique`)."""
+        l'ambiguita'/l'incertezza invece di indovinare" gia' seguito da `find_unique`). `process_id`
+        e' RIFIUTATO qui come qualunque altra chiave sconosciuta, deliberatamente - `to_dict` non
+        lo scrive mai (vedi il proprio docstring), quindi comparirebbe qui solo scritto a mano da
+        un chiamante che ignora perche' e' effimero: lo stesso errore rumoroso, non un'eccezione
+        dedicata che implicherebbe un supporto parziale non voluto."""
         unknown_keys = set(data) - {"name", "control_type", "automation_id", "window_title_contains"}
         if unknown_keys:
             raise ValueError(f"ElementSelector.from_dict: chiavi sconosciute {sorted(unknown_keys)}")
@@ -141,6 +171,9 @@ class SelectorEngine:
         if selector.automation_id is not None:
             count = len(self._adapter.find_matching_elements(root, automation_id=selector.automation_id))
             parts.append(f"{count} con automation_id={selector.automation_id!r}")
+        if selector.process_id is not None:
+            count = len(self._adapter.find_matching_elements(root, process_id=selector.process_id))
+            parts.append(f"{count} con process_id={selector.process_id!r}")
         return "trovati singolarmente: " + "; ".join(parts)
 
     def _describe_ambiguous_matches(self, matches) -> str:
@@ -169,7 +202,7 @@ class SelectorEngine:
         viene semplicemente OMESSO dal risultato, non fa fallire l'intera ricerca."""
         raw_matches = self._adapter.find_matching_elements(
             root, name=selector.name, control_type=selector.control_type,
-            automation_id=selector.automation_id,
+            automation_id=selector.automation_id, process_id=selector.process_id,
         )
         described = (self._adapter.describe_element(element) for element in raw_matches)
         return [info for info in described if info is not None]
@@ -198,7 +231,7 @@ class SelectorEngine:
         while True:
             matches = self._adapter.find_matching_elements(
                 root, name=selector.name, control_type=selector.control_type,
-                automation_id=selector.automation_id,
+                automation_id=selector.automation_id, process_id=selector.process_id,
             )
             if len(matches) > 1:
                 raise AmbiguousSelectionError(
@@ -227,7 +260,7 @@ class SelectorEngine:
         ambiguita' - una scelta deliberatamente diversa, non un refactor silenzioso della prima)."""
         matches = self._adapter.find_matching_elements(
             root, name=selector.name, control_type=selector.control_type,
-            automation_id=selector.automation_id,
+            automation_id=selector.automation_id, process_id=selector.process_id,
         )
         if not matches:
             raise NoMatchError(f"nessun elemento corrisponde a {selector!r} ({self._explain_no_match(root, selector)})")
