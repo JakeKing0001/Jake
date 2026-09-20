@@ -6127,6 +6127,31 @@ Criterio di uscita: suite di siti fixture locale verde e zero injection dal cont
   verifica sia il nuovo URL nella barra degli indirizzi sia il nuovo `Document` caricato).
   3.019/3.019 test in locale, ruff verde.
 
+- `F3.6.3` (resto - "upload", INDAGATO ma NON completato - correzione di un'aspettativa iniziale,
+  stesso principio gia' seguito per Task 3/10 di F3.1.2) — 20/09/2026: un probe empirico dedicato
+  (nessun codice di produzione scritto, nessun test committato) ha rivelato un ostacolo reale
+  prima non noto: cliccare un `<input type="file">` reale (via `click_element`, F3.4.2) apre
+  DAVVERO il dialogo nativo "Apri" di Windows (verificato con `win32gui.EnumWindows`: una finestra
+  reale di classe `#32770`, il titolo "Apri", compare) - ma quel dialogo NON compare affatto tra i
+  figli diretti del desktop secondo UI Automation (`UIAutomationAdapter.
+  snapshot_top_level_window_handles`/`wait_for_new_top_level_window`, F3.4.7, entrambi gia' usati
+  con successo altrove in questa sessione per rilevare finestre/dialoghi nuovi) - un `wait_for_
+  new_top_level_window` con timeout fino a 20s non lo rileva MAI, nonostante la finestra esista
+  davvero e sia visibile secondo Win32.
+
+  Ipotesi plausibile, non ancora verificata: il dialogo comune di Windows (ospitato da un
+  processo/owner diverso dal browser, con una relazione di ownership diversa da una finestra
+  top-level "normale") potrebbe non essere raggiungibile tramite `GetRootElement().FindAll
+  (TreeScope_Children, ...)` cosi' come questo adapter lo usa oggi - risolverlo richiederebbe
+  probabilmente una via DIVERSA (es. `IUIAutomation::ElementFromHandle` sull'HWND gia' trovato con
+  Win32, mai usata finora in questo modulo) invece di estendere il meccanismo di rilevamento
+  esistente. Non affrontato in questo incremento: risolvere un HWND grezzo trovato con Win32 in un
+  elemento UI Automation e' una capacita' nuova, non una semplice adozione di codice gia' esistente
+  - dichiarato onestamente come lavoro futuro, invece di forzare una soluzione fragile sotto
+  pressione. F3.6.3 "download/upload" resta quindi ANCORA aperto, ora con un'indagine reale alle
+  spalle invece di zero informazioni. Nessun file/test committato per questo incremento - solo
+  questa voce di roadmap, coerente con "dichiarare un buco onestamente invece di forzarlo".
+
 - `F3.6.1` (resto - leggere il testo visibile della pagina) — 19/09/2026: nuovo
   `browser_adapter.py::read_page_text()` - cammina l'albero sotto un `Document` (F3.2,
   `describe_tree`) e raccoglie il nome di ogni nodo non vuoto, in ordine - lo stesso genere di
