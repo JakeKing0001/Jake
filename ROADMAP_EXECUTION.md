@@ -4941,6 +4941,41 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   `progress_bar`/`start_progress_button` aggiunti ai controlli gia' verificati per object name/
   accessible name non vuoti. 3.195/3.195 test, ruff verde.
 
+- `F3.1.2` (Task 16 - "trascina un elemento per riordinare una lista") — 20/09/2026: nuovo
+  `reorder_list` (`QListWidget` con `DragDropMode.InternalMove`) nella fixture - una modalita' di
+  interazione MAI esercitata finora, diversa da click/tastiera/RangeValue. Verificato con un probe
+  dedicato PRIMA di scrivere il test: un trascinamento SINTETICO (mouse down, piu' spostamenti
+  intermedi, mouse up - mai un singolo salto) viene onorato dal motore di drag-and-drop di Qt, il
+  riordino avviene per davvero.
+
+  **Buco reale trovato nello stesso probe**: l'automation_id del contenitore
+  (`fixture_reorder_list`) e' condiviso dai suoi `ListItem` figli - verificato che lo STESSO buco
+  esiste gia' per `fixture_list` (non specifico di questa lista nuova, un comportamento generale
+  di Qt/UI Automation) - un selettore per il solo automation_id del contenitore e' quindi ambiguo
+  appena la lista ha almeno un elemento, serve `automation_id` + `control_type="List"` insieme.
+
+  **Secondo buco reale, una vera REGRESSIONE causata da questo stesso incremento, trovata
+  eseguendo la suite COMPLETA - non nel test nuovo stesso, che passava isolato**: aggiungere
+  `reorder_list` (e i widget di Task 12-15 prima di lei) senza un'altezza MINIMA esplicita ha
+  fatto SI' che `item_list` (mai toccata direttamente) competesse per sempre meno spazio verticale
+  nel layout, fino a mostrare solo ~2 righe senza scorrimento invece delle 3 che
+  `MultiSelectEndToEndTests` (Task 11) assume gia' visibili - un click sul terzo elemento aggiunto
+  finiva SOTTO l'area visibile, colpendo per davvero il widget successivo nel layout (`tree`), non
+  l'elemento cercato. La STESSA classe di buco si e' poi ripresentata per `reorder_list` stessa
+  (il suo terzo elemento parzialmente tagliato fuori). Corretto dando a ENTRAMBE le liste un
+  `setMinimumHeight(140)` esplicito - verificato leggendo i bounds REALI via UI Automation dopo il
+  fix, non assunto per analogia. Lezione generale: ogni lista con contenuto potenzialmente
+  multi-riga in questa fixture merita un'altezza minima dichiarata fin dall'inizio.
+
+  Prova: 1 test nuovo in
+  `tests/test_computer_use_integration.py::DragReorderEndToEndTests` (trascina il primo elemento
+  oltre il secondo, verifica il nuovo ordine via UI Automation) + 2 test nuovi in
+  `tests/test_computer_use_fixture.py::ReorderListTests` (ordine iniziale, reset lo ripristina) +
+  `reorder_list` aggiunta ai controlli gia' verificati per object name/accessible name non vuoti +
+  l'intera suite `tests/test_computer_use_fixture.py`/`tests/test_computer_use_integration.py`/
+  `tests/test_executor.py`/`tests/test_selector.py` (149 test) riverificata verde dopo entrambi i
+  fix di altezza. 3.198/3.198 test, ruff verde.
+
 ### F3.2 — Windows UI Automation adapter
 
 Dipende da: F3.1.

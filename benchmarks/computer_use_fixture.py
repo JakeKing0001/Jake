@@ -107,6 +107,34 @@ uno stato finale. Stesso pattern `RangeValue` gia' verificato funzionante per Ta
 `tests/test_computer_use_integration.py::ProgressBarEndToEndTests` per la prova via UI Automation
 (polling del valore nel tempo, verifica che passi DAVVERO per valori intermedi reali).
 
+**Sedicesima fetta (20/09/2026, un incremento successivo) - Task 16 di F3.1.2**: una lista
+riordinabile via trascinamento reale del mouse (`reorder_list`, `DragDropMode.InternalMove`) - una
+modalita' di interazione MAI esercitata finora, diversa da click/tastiera/RangeValue. Verificato
+con un probe dedicato PRIMA di scrivere il test: un trascinamento SINTETICO (`pyautogui.moveTo`+
+`mouseDown`+piu' `moveTo` intermedi+`mouseUp`) viene onorato dal motore di drag-and-drop di Qt - il
+riordino avviene per davvero, non solo che la chiamata non sollevi.
+
+**Buco reale trovato nello STESSO probe, non ipotizzato**: l'automation_id del contenitore
+(`fixture_reorder_list`) e' CONDIVISO dai suoi `ListItem` figli - verificato che lo stesso buco
+esiste GIA' per `fixture_list` (non e' specifico di questa lista nuova, Qt deriva l'automation_id
+di un `QListWidgetItem` dallo stesso percorso qualificato del contenitore) - un selettore per il
+SOLO automation_id del contenitore e' quindi AMBIGUO appena la lista ha almeno un elemento.
+
+**Secondo buco reale, DIVERSO e piu' insidioso, trovato scrivendo il TEST end-to-end (non il
+probe) - una vera REGRESSIONE causata da questo stesso incremento**: aggiungere `reorder_list` (e
+prima ancora `progress_bar`/`value_slider`/`option_combo`, Task 12-15) senza un'altezza MINIMA
+esplicita per ciascuno ha fatto SI' che `item_list` (mai toccata direttamente da nessuno di questi
+incrementi) competesse per sempre meno spazio verticale disponibile nel layout, fino a mostrare
+solo ~2 righe senza scorrimento invece delle 3 che `MultiSelectEndToEndTests` (Task 11, scritto
+quando c'era ancora spazio a sufficienza) assume gia' visibili - un click sul terzo elemento
+aggiunto finiva SOTTO l'area visibile della lista, colpendo per davvero il widget successivo nel
+layout (`tree`), non l'elemento cercato. La STESSA identica classe di buco si e' poi ripresentata
+per `reorder_list` stessa (il suo terzo elemento, "Tre", parzialmente tagliato fuori). Corretto
+dando a ENTRAMBE le liste un `setMinimumHeight(140)` esplicito - verificato leggendo i bounds
+REALI via UI Automation dopo il fix, non assunto per analogia. Lezione generale per il resto di
+questa fixture: ogni lista con un contenuto potenzialmente multi-riga merita un'altezza minima
+dichiarata fin dall'inizio, non lasciata al caso di quanto spazio rimane libero nel layout.
+
 PySide6 invece di Win32/WinForms nativo: gia' una dipendenza del progetto
 (requirements/hud.txt, usata dall'HUD - vedi core/gui/hud/), ed espone i propri widget a UI
 Automation su Windows tramite il ponte di accessibilita' di Qt (QAccessible) - non perfettamente
@@ -135,6 +163,11 @@ _TREE_STRUCTURE = {
 # dell'area visibile (impostata sotto a poche righe con setMaximumHeight), cosi' l'ultima riga
 # e' garantita fuori vista finche' qualcuno non scorre davvero, non solo in teoria.
 _SCROLL_LIST_ROW_COUNT = 30
+
+# Task 16 (F3.1.2 continua verso i 100): ordine iniziale della lista riordinabile - tre nomi
+# distinti (mai "Riga 1"/"Riga 2" come la scroll_list, per non confondere le due liste in un
+# eventuale controllo per nome che cerchi nell'intera finestra).
+_REORDER_LIST_ITEMS = ["Uno", "Due", "Tre"]
 
 # Nona fetta (F3.3.7 resto - "traduzione"): SOLO il bottone "Aggiungi" e' tradotto, non l'intera
 # fixture - il punto da dimostrare (un selettore per automation_id sopravvive alla lingua, uno per
@@ -249,6 +282,15 @@ class ComputerUseFixtureWindow(QWidget):
         self.item_list.setObjectName("fixture_list")
         self.item_list.setAccessibleName("Elenco elementi")
         self.item_list.itemSelectionChanged.connect(self._update_remove_button_enabled)
+        # Buco reale trovato scrivendo Task 16, non ipotizzato: senza un'altezza MINIMA esplicita,
+        # `item_list` competeva per lo spazio verticale con ogni widget aggiunto DOPO di lei nel
+        # layout (Task 11-16) - abbastanza spazio e' rimasto per mostrare solo ~2 righe senza
+        # scorrimento, non le 3 che `tests/test_computer_use_integration.py::
+        # MultiSelectEndToEndTests` (Task 11, scritto quando c'era ancora spazio a sufficienza)
+        # assume gia' visibili: un click su un terzo elemento aggiunto finiva SOTTO l'area
+        # visibile della lista, colpendo per davvero il widget successivo nel layout (`tree`), non
+        # l'elemento cercato - verificato leggendo i bounds reali via UI Automation, non assunto.
+        self.item_list.setMinimumHeight(140)
         # Task 11/10 (F3.1.2 continua oltre i "10 iniziali" verso i 100 dichiarati dal criterio di
         # uscita di F3): ExtendedSelection (Ctrl+Click aggiunge alla selezione, Shift+Click
         # seleziona un intervallo) invece del default SingleSelection - retrocompatibile con Task
@@ -291,6 +333,22 @@ class ComputerUseFixtureWindow(QWidget):
         self.scroll_list.setAccessibleName("Elenco con scorrimento")
         self.scroll_list.setMaximumHeight(90)
         self.scroll_list.addItems([f"Riga {i}" for i in range(1, _SCROLL_LIST_ROW_COUNT + 1)])
+
+        # Task 16 (F3.1.2 continua verso i 100): una lista riordinabile via trascinamento reale
+        # del mouse (`DragDropMode.InternalMove`) - MAI un bersaglio in questa fixture finora,
+        # una modalita' di interazione DIVERSA da click/tastiera/RangeValue gia' esercitati - da
+        # verificare empiricamente se un trascinamento SINTETICO (mouseDown+moveTo+mouseUp via
+        # pyautogui, non un vero gesto utente) viene onorato dal motore di drag-and-drop di Qt.
+        self.reorder_list = QListWidget()
+        self.reorder_list.setObjectName("fixture_reorder_list")
+        self.reorder_list.setAccessibleName("Elenco riordinabile")
+        self.reorder_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.reorder_list.addItems(_REORDER_LIST_ITEMS)
+        # Stessa lezione appena imparata per `item_list` (vedi il suo commento) applicata qui fin
+        # dall'inizio: senza un'altezza minima esplicita, i suoi tre elementi non entrerebbero
+        # tutti nell'area visibile in fondo a una finestra ormai alta, con l'ultimo parzialmente
+        # tagliato fuori - verificato leggendo i bounds reali, non assunto per analogia.
+        self.reorder_list.setMinimumHeight(140)
 
         # Dodicesima fetta (F3.1.2 Task 12, continua verso i 100): un menu a tendina, il pattern
         # ExpandCollapse+Selection di un QComboBox - MAI un bersaglio in questa fixture finora,
@@ -360,6 +418,7 @@ class ComputerUseFixtureWindow(QWidget):
         layout.addWidget(self.value_slider)
         layout.addWidget(self.start_progress_button)
         layout.addWidget(self.progress_bar)
+        layout.addWidget(self.reorder_list)
 
     def _add_current_text(self) -> None:
         """Task 1/10 di F3.1.2 (gli altri 9 restano un passo successivo dichiarato): digitare un
@@ -466,10 +525,17 @@ class ComputerUseFixtureWindow(QWidget):
         # rialzi subito dopo.
         self._progress_timer.stop()
         self.progress_bar.setValue(0)
+        self.reorder_list.clear()
+        self.reorder_list.addItems(_REORDER_LIST_ITEMS)
 
     def current_combo_option(self) -> str:
         """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`)."""
         return self.option_combo.currentText()
+
+    def reorder_list_items(self) -> list[str]:
+        """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`) - l'ORDINE
+        conta qui, a differenza delle altre liste della fixture."""
+        return [self.reorder_list.item(i).text() for i in range(self.reorder_list.count())]
 
     def _start_progress(self) -> None:
         """Task 15 di F3.1.2: riavvia SEMPRE da zero (non riprende da dove si era fermata) - lo

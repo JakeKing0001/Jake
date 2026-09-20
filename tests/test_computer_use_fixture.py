@@ -44,6 +44,7 @@ class AutomationPropertiesTests(unittest.TestCase):
         self.assertEqual(window.value_slider.objectName(), "fixture_slider")
         self.assertEqual(window.progress_bar.objectName(), "fixture_progress")
         self.assertEqual(window.start_progress_button.objectName(), "fixture_start_progress_button")
+        self.assertEqual(window.reorder_list.objectName(), "fixture_reorder_list")
 
     def test_every_control_has_a_non_empty_accessible_name(self):
         window = ComputerUseFixtureWindow()
@@ -51,7 +52,7 @@ class AutomationPropertiesTests(unittest.TestCase):
             window.input_field, window.add_button, window.reset_button, window.item_list, window.tree,
             window.tabs, window.option_checkbox, window.scroll_list, window.load_button, window.dynamic_button,
             window.action_button_a, window.action_button_b, window.option_combo, window.value_slider,
-            window.progress_bar, window.start_progress_button,
+            window.progress_bar, window.start_progress_button, window.reorder_list,
         ):
             self.assertTrue(widget.accessibleName(), f"{widget.objectName()} non ha un accessibleName")
 
@@ -637,6 +638,28 @@ class ProgressBarTests(unittest.TestCase):
         QTest.qWait(1500)  # abbastanza per completare l'intero avanzamento, se il timer non fosse stato fermato davvero
 
         self.assertEqual(window.progress_bar.value(), 0, "il timer ricorrente deve essere fermato davvero, non solo il valore azzerato")
+
+
+class ReorderListTests(unittest.TestCase):
+    """Task 16 di F3.1.2 (continua verso i 100): `reorder_list`, riordinabile via drag-and-drop
+    (`DragDropMode.InternalMove`) - vedi
+    `tests/test_computer_use_integration.py::DragReorderEndToEndTests` per la dimostrazione via UI
+    Automation con un trascinamento sintetico reale (mouse down/move/up), inclusa la scoperta che
+    l'automation_id del contenitore e' condiviso dai suoi elementi figli."""
+
+    def test_the_initial_order_is_uno_due_tre(self):
+        window = ComputerUseFixtureWindow()
+        self.assertEqual(window.reorder_list_items(), ["Uno", "Due", "Tre"])
+
+    def test_reset_restores_the_original_order(self):
+        window = ComputerUseFixtureWindow()
+        window.reorder_list.clear()
+        window.reorder_list.addItems(["Due", "Uno", "Tre"])
+        self.assertEqual(window.reorder_list_items(), ["Due", "Uno", "Tre"])
+
+        window.reset_state()
+
+        self.assertEqual(window.reorder_list_items(), ["Uno", "Due", "Tre"])
 
 
 if __name__ == "__main__":

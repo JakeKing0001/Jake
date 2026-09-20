@@ -794,6 +794,79 @@ class ProgressBarEndToEndTests(unittest.TestCase):
         self.assertTrue(intermediate_values, f"deve passare per DEI valori intermedi reali, non saltare istantaneamente a 100: {observed_values}")
 
 
+class DragReorderEndToEndTests(unittest.TestCase):
+    """Task 16 (F3.1.2 continua verso i 100) - "trascina un elemento per riordinare una lista": un
+    `QListWidget` con `DragDropMode.InternalMove` (`reorder_list`), MAI un bersaglio in questa
+    fixture finora - una modalita' di interazione DIVERSA da click/tastiera/RangeValue gia'
+    esercitati. Verificato con un probe dedicato PRIMA di scrivere questo test: un trascinamento
+    SINTETICO (`pyautogui.moveTo`+`mouseDown`+piu' `moveTo` intermedi+`mouseUp`, mai un singolo
+    salto) VIENE onorato dal motore di drag-and-drop di Qt - il riordino avviene per davvero.
+
+    **Buco reale trovato nello stesso probe, non ipotizzato**: l'automation_id di
+    `reorder_list` (`fixture_reorder_list`) e' CONDIVISO dal contenitore E dai suoi `ListItem`
+    figli (verificato che lo STESSO buco esiste gia' per `fixture_list`, non e' specifico di
+    questa lista nuova - Qt deriva l'automation_id di un `QListWidgetItem` dallo stesso percorso
+    qualificato del contenitore) - un selettore per il SOLO automation_id del contenitore e'
+    quindi AMBIGUO appena la lista ha almeno un elemento. Servono `automation_id` +
+    `control_type="List"` insieme per isolare il contenitore, mai il solo automation_id."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_dragging_the_first_item_past_the_second_really_reorders_the_list(self):
+        import pyautogui
+        import win32gui
+
+        win32gui.SetForegroundWindow(self.window.CurrentNativeWindowHandle)
+        time.sleep(0.2)
+        reorder_list = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_reorder_list", control_type="List"),
+        )
+        item_uno = self.engine.wait_for_unique_element(reorder_list, ElementSelector(name="Uno"))
+        item_due = self.engine.wait_for_unique_element(reorder_list, ElementSelector(name="Due"))
+        bounds_uno = self.adapter.describe_element(item_uno).bounds
+        bounds_due = self.adapter.describe_element(item_due).bounds
+        x1, y1 = bounds_uno[0] + bounds_uno[2] // 2, bounds_uno[1] + bounds_uno[3] // 2
+        x2, y2 = bounds_due[0] + bounds_due[2] // 2, bounds_due[1] + bounds_due[3] // 2
+
+        def _drag_uno_past_due():
+            pyautogui.moveTo(x1, y1)
+            pyautogui.mouseDown()
+            for step in range(1, 6):
+                fraction = step / 5
+                pyautogui.moveTo(int(x1 + (x2 - x1) * fraction), int(y1 + (y2 - y1) * fraction), duration=0.05)
+            time.sleep(0.2)
+            pyautogui.mouseUp()
+
+        def _order_is_due_uno_tre():
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline:
+                items = self.engine.find_all(reorder_list, ElementSelector(control_type="ListItem"))
+                if [item.name for item in items] == ["Due", "Uno", "Tre"]:
+                    return True
+                time.sleep(0.1)
+            return False
+
+        outcome = try_strategies_in_order([("synthetic_mouse_drag", _drag_uno_past_due)], verify=_order_is_due_uno_tre)
+
+        self.assertTrue(outcome.succeeded, outcome.attempts)
+
+
 class DynamicControlEndToEndTests(unittest.TestCase):
     """Task 6/10 di F3.1.2 (F3.1.6, la parte DINAMICA mai affrontata finora - vedi
     `benchmarks/computer_use_fixture.py` per il perche' `remove_button`, gia' un "primo assaggio",
