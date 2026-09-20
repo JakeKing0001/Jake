@@ -76,8 +76,8 @@ import sys
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QHBoxLayout, QLabel, QLineEdit, QListWidget, QMessageBox, QPushButton,
-    QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QCheckBox, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+    QMessageBox, QPushButton, QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 # Terza fetta (albero): due categorie, due figli ciascuna - nomi stabili anche per i dati, non
@@ -205,6 +205,13 @@ class ComputerUseFixtureWindow(QWidget):
         self.item_list.setObjectName("fixture_list")
         self.item_list.setAccessibleName("Elenco elementi")
         self.item_list.itemSelectionChanged.connect(self._update_remove_button_enabled)
+        # Task 11/10 (F3.1.2 continua oltre i "10 iniziali" verso i 100 dichiarati dal criterio di
+        # uscita di F3): ExtendedSelection (Ctrl+Click aggiunge alla selezione, Shift+Click
+        # seleziona un intervallo) invece del default SingleSelection - retrocompatibile con Task
+        # 2/10 ("rimuovi con conferma", verificato: quella logica usa gia' solo `currentItem()`,
+        # che ExtendedSelection continua a tracciare esattamente come prima per un click singolo
+        # senza modificatori).
+        self.item_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
 
         self.tree = QTreeWidget()
         self.tree.setObjectName("fixture_tree")

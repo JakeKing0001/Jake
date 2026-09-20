@@ -460,6 +460,103 @@ class KeyboardOnlyNavigationEndToEndTests(unittest.TestCase):
         self.assertTrue(focused, "un Tab dal campo di testo deve spostare il fuoco sul bottone Aggiungi")
 
 
+class MultiSelectEndToEndTests(unittest.TestCase):
+    """Task 11 (F3.1.2 continua oltre i "10 task iniziali" verso i 100 dichiarati dal criterio di
+    uscita di F3 - "arrivare progressivamente", vedi ROADMAP_EXECUTION.md) - "seleziona piu'
+    elementi con Ctrl+Click": `item_list` e' passata a `ExtendedSelection`
+    (`benchmarks/computer_use_fixture.py`, vedi il proprio commento per la scelta di NON toccare
+    il comportamento a click singolo, retrocompatibile con Task 2/10). SelectionItem via UIA non
+    ha un effetto vero su un `QListWidgetItem` (F3.4, buco reale gia' documentato) - qui, come per
+    Task 2, un click reale a coordinate pixel (con Ctrl tenuto premuto tramite `pyautogui.keyDown`/
+    `keyUp`, non il pattern Toggle/SelectionItem) e' l'unica strategia verificata affidabile,
+    trovata con un probe empirico dedicato PRIMA di scrivere questo test."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def _add_item(self, text: str):
+        input_field = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_input"),
+        )
+        add_button = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Aggiungi", control_type="Button"))
+        self.executor.set_value(input_field, text)
+        self.executor.invoke(add_button)
+        return self.engine.wait_for_unique_element(self.window, ElementSelector(name=text, control_type="ListItem"), timeout_seconds=3.0)
+
+    def _is_selected(self, name: str) -> bool:
+        element = self.engine.wait_for_unique_element(self.window, ElementSelector(name=name, control_type="ListItem"), timeout_seconds=2.0)
+        return self.adapter.describe_element(element).selected
+
+    def test_ctrl_click_selects_two_non_adjacent_items_leaving_the_middle_one_unselected(self):
+        import pyautogui
+
+        item_a = self._add_item("multi A")
+        self._add_item("multi B")
+        item_c = self._add_item("multi C")
+
+        bounds_a = self.adapter.describe_element(item_a).bounds
+        bounds_c = self.adapter.describe_element(item_c).bounds
+
+        def _click_a_then_ctrl_click_c():
+            pyautogui.click(bounds_a[0] + bounds_a[2] // 2, bounds_a[1] + bounds_a[3] // 2)
+            time.sleep(0.3)
+            pyautogui.keyDown("ctrl")
+            try:
+                pyautogui.click(bounds_c[0] + bounds_c[2] // 2, bounds_c[1] + bounds_c[3] // 2)
+            finally:
+                pyautogui.keyUp("ctrl")
+
+        def _a_and_c_selected_b_not():
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline:
+                if self._is_selected("multi A") and self._is_selected("multi C") and not self._is_selected("multi B"):
+                    return True
+                time.sleep(0.1)
+            return False
+
+        outcome = try_strategies_in_order([("ctrl_click", _click_a_then_ctrl_click_c)], verify=_a_and_c_selected_b_not)
+
+        self.assertTrue(outcome.succeeded, outcome.attempts)
+
+    def test_task_2_single_click_selection_still_works_after_enabling_extended_selection(self):
+        """Controllo di NON-regressione, non un nuovo comportamento - Task 2/10 ("rimuovi con
+        conferma") dipende da un click singolo che seleziona ESATTAMENTE un elemento, il
+        comportamento gia' provato affidabile PRIMA di questo incremento. Passare a
+        `ExtendedSelection` non deve cambiarlo per un click senza modificatori."""
+        item_a = self._add_item("solo A")
+        self._add_item("solo B")
+
+        bounds_a = self.adapter.describe_element(item_a).bounds
+        import pyautogui
+        pyautogui.click(bounds_a[0] + bounds_a[2] // 2, bounds_a[1] + bounds_a[3] // 2)
+
+        deadline = time.monotonic() + 2.0
+        selected_a = selected_b = None
+        while time.monotonic() < deadline:
+            selected_a, selected_b = self._is_selected("solo A"), self._is_selected("solo B")
+            if selected_a and not selected_b:
+                break
+            time.sleep(0.1)
+        self.assertTrue(selected_a, "il click singolo deve ancora selezionare l'elemento cliccato")
+        self.assertFalse(selected_b, "un click SENZA Ctrl non deve mai aggiungere alla selezione esistente")
+
+
 class DynamicControlEndToEndTests(unittest.TestCase):
     """Task 6/10 di F3.1.2 (F3.1.6, la parte DINAMICA mai affrontata finora - vedi
     `benchmarks/computer_use_fixture.py` per il perche' `remove_button`, gia' un "primo assaggio",

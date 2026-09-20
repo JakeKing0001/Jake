@@ -4791,6 +4791,33 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   dimostrati end-to-end, Task 3 "espandi categoria" investigato e bloccato da un limite Qt reale
   gia' documentato - una conclusione, non un buco lasciato aperto). 3.170/3.170 test, ruff verde.
 
+- `F3.1.2` (Task 11 - "seleziona piu' elementi con Ctrl+Click", primo passo oltre i "10 task
+  iniziali" verso i 100 dichiarati dal criterio di uscita di F3 - "arrivare progressivamente") —
+  20/09/2026: `item_list` passata da `SingleSelection` (il default Qt) a `ExtendedSelection`
+  (`benchmarks/computer_use_fixture.py`) - Ctrl+Click aggiunge alla selezione, un click senza
+  modificatori la sostituisce come prima. Cambio deliberatamente MINIMO su un widget condiviso da
+  quasi ogni altro task in questa fixture: verificato PRIMA che fosse sicuro leggendo la logica
+  esistente di Task 2/10 (`_update_remove_button_enabled`/`_remove_selected_with_confirmation`),
+  che usa gia' solo `currentItem()` - un concetto che `ExtendedSelection` continua a tracciare
+  identicamente per un click singolo, mai rotto dal cambio.
+
+  SelectionItem via UIA non ha un effetto vero su un `QListWidgetItem` (F3.4, buco gia'
+  documentato) - qui, come per Task 2, un click reale a coordinate pixel con Ctrl tenuto premuto
+  (`pyautogui.keyDown`/`keyUp`, non un pattern UIA) e' l'unica strategia verificata affidabile,
+  trovata con un probe empirico dedicato PRIMA di scrivere il test (**buco reale trovato nel
+  probe stesso, non nel codice**: la prima versione del probe aggiungeva tre elementi con solo
+  0.1s tra un click "Aggiungi" e il successivo - un'attesa insufficiente, un elemento risultava
+  ancora assente al controllo successivo; corretto attendendo esplicitamente che ogni elemento
+  compaia via `wait_for_unique_element` prima di aggiungere il successivo, invece di uno sleep
+  fisso indovinato).
+
+  Prova: 2 test nuovi in `tests/test_computer_use_integration.py::MultiSelectEndToEndTests` (Ctrl+
+  Click seleziona due elementi non adiacenti lasciando quello centrale non selezionato; un click
+  singolo senza Ctrl continua a selezionare ESATTAMENTE un elemento come prima - controllo di NON
+  regressione esplicito per Task 2/10) + l'intera suite `tests/test_computer_use_fixture.py`/
+  `tests/test_computer_use_integration.py` (64 test) riverificata verde dopo il cambio di
+  `SelectionMode`. 3.172/3.172 test, ruff verde.
+
 ### F3.2 — Windows UI Automation adapter
 
 Dipende da: F3.1.
