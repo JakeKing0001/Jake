@@ -58,6 +58,9 @@ class AutomationPropertiesTests(unittest.TestCase):
         self.assertEqual(window.multiline_edit.objectName(), "fixture_multiline_edit")
         self.assertEqual(window.cancel_progress_button.objectName(), "fixture_cancel_progress_button")
         self.assertEqual(window.editable_combo.objectName(), "fixture_editable_combo")
+        self.assertEqual(window.readonly_field.objectName(), "fixture_readonly_field")
+        self.assertEqual(window.tristate_checkbox.objectName(), "fixture_tristate_checkbox")
+        self.assertEqual(window.no_selection_list.objectName(), "fixture_no_selection_list")
 
     def test_every_control_has_a_non_empty_accessible_name(self):
         window = ComputerUseFixtureWindow()
@@ -69,7 +72,7 @@ class AutomationPropertiesTests(unittest.TestCase):
             window.progress_bar, window.start_progress_button, window.reorder_list, window.data_table,
             window.transfer_source_list, window.transfer_target_list, window.date_edit,
             window.filter_input, window.filter_list, window.multiline_edit, window.cancel_progress_button,
-            window.editable_combo,
+            window.editable_combo, window.readonly_field, window.tristate_checkbox, window.no_selection_list,
         ):
             self.assertTrue(widget.accessibleName(), f"{widget.objectName()} non ha un accessibleName")
 
@@ -804,6 +807,71 @@ class TransferListTests(unittest.TestCase):
 
         self.assertEqual(window.transfer_source_items(), ["Alfa", "Beta"])
         self.assertEqual(window.transfer_target_items(), [])
+
+
+class ReadOnlyFieldTests(unittest.TestCase):
+    """Task 41 di F3.1.2 (continua verso i 100, in "Tab 9") - un campo DI SOLA LETTURA
+    (`setReadOnly(True)`), diverso da un campo disabilitato: resta enabled/con fuoco
+    raggiungibile, ma il testo non cambia mai."""
+
+    def test_the_field_starts_with_a_fixed_value(self):
+        window = ComputerUseFixtureWindow()
+        self.assertEqual(window.readonly_field.text(), "valore fisso")
+
+    def test_setting_text_programmatically_via_qt_still_works(self):
+        """`setReadOnly` blocca solo l'INPUT dell'utente (tastiera), non la scrittura
+        programmatica - un controllo di sanita', non il punto del task (vedi il test e2e per
+        quello)."""
+        window = ComputerUseFixtureWindow()
+        window.readonly_field.setText("cambiato dal codice")
+        self.assertEqual(window.readonly_field.text(), "cambiato dal codice")
+
+    def test_the_field_is_marked_read_only(self):
+        window = ComputerUseFixtureWindow()
+        self.assertTrue(window.readonly_field.isReadOnly())
+
+
+class TristateCheckboxTests(unittest.TestCase):
+    """Task 42 di F3.1.2 (continua verso i 100, in "Tab 9") - una `QCheckBox` a TRE stati
+    (`setTristate(True)`), diverso da `option_checkbox` (due stati). Vedi
+    `tests/test_computer_use_integration.py::TristateCheckboxEndToEndTests` per il limite REALE
+    trovato: il pattern Toggle di UI Automation cicla solo tra off/on, mai indeterminate."""
+
+    def test_starts_unchecked(self):
+        window = ComputerUseFixtureWindow()
+        self.assertEqual(window.tristate_checkbox.checkState(), Qt.CheckState.Unchecked)
+
+    def test_can_be_set_to_the_indeterminate_state_at_the_qt_level(self):
+        """A LIVELLO QT il terzo stato esiste davvero - il limite trovato per Task 42 e' solo
+        nel pattern UIA, non nel widget stesso."""
+        window = ComputerUseFixtureWindow()
+        window.tristate_checkbox.setCheckState(Qt.CheckState.PartiallyChecked)
+        self.assertEqual(window.tristate_checkbox.checkState(), Qt.CheckState.PartiallyChecked)
+
+    def test_reset_returns_to_unchecked(self):
+        window = ComputerUseFixtureWindow()
+        window.tristate_checkbox.setCheckState(Qt.CheckState.PartiallyChecked)
+
+        window.reset_state()
+
+        self.assertEqual(window.tristate_checkbox.checkState(), Qt.CheckState.Unchecked)
+
+
+class NoSelectionListTests(unittest.TestCase):
+    """Task 43 di F3.1.2 (continua verso i 100, in "Tab 10") - una lista con
+    `SelectionMode.NoSelection`, diverso da `item_list` (`ExtendedSelection`): un click non deve
+    MAI selezionare nulla, per costruzione Qt."""
+
+    def test_the_list_has_three_items(self):
+        window = ComputerUseFixtureWindow()
+        self.assertEqual(
+            [window.no_selection_list.item(i).text() for i in range(window.no_selection_list.count())],
+            ["Voce 1", "Voce 2", "Voce 3"],
+        )
+
+    def test_nothing_is_selected_by_default(self):
+        window = ComputerUseFixtureWindow()
+        self.assertEqual(window.no_selection_list.selectedItems(), [])
 
 
 class EditableComboTests(unittest.TestCase):

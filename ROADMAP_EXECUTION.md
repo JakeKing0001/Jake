@@ -5279,6 +5279,53 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   Prova: 1 test nuovo in `tests/test_computer_use_integration.py::MultiSelectEndToEndTests`
   (click su un elemento poi Ctrl+A seleziona davvero tutti e tre). 3.249/3.249 test, ruff verde.
 
+- `F3.1.2` (Task 32-50, lotto esteso su richiesta esplicita dell'utente di "andare piu' veloce" -
+  ogni task probato empiricamente PRIMA del codice/test, ma documentato piu' compattamente qui,
+  raggruppato per area) — 20/09/2026:
+
+  **Tastiera/focus generici** (nessun codice nuovo nella fixture): Task 32 Shift+Tab riporta il
+  fuoco al controllo precedente; Task 33 Home/End portano `value_slider` a minimo/massimo; Task 34
+  PageUp avanza lo slider di un passo intero (10); Task 37 Spazio attiva `option_checkbox` con il
+  fuoco (mai provato da tastiera, solo Toggle UIA/click); Task 38 right-click FUORI da ogni
+  elemento di `item_list` non apre alcun menu (nessuna nuova finestra, il primo caso negativo per
+  il menu contestuale).
+
+  **Contrasto slider vs spinbox** (buco reale trovato con un probe dedicato, non ipotizzato):
+  Task 35 Home/End su `value_spinbox` muovono solo il CURSORE nel testo, mai il valore (diverso da
+  `value_slider`, dove Home/End SALTANO a minimo/massimo); Task 36 le frecce Su/Giu incrementano/
+  decrementano davvero il valore dello spinbox di 1.
+
+  **Navigazione da tastiera in `item_list`** (mai esercitata oltre click/Ctrl+Click/Shift+Click/
+  Ctrl+A): Task 44 Giu SPOSTA la selezione al prossimo elemento (non la estende); Task 45 Fine
+  salta all'ultimo; Task 46 Inizio salta al primo; Task 47 Su torna indietro; Task 49 Esc NON
+  deseleziona mai (contrasto con Task 26, dove Esc annulla un POPUP - `QListWidget` non lega
+  affatto Esc alla selezione); Task 50 Ctrl+Click su un elemento GIA' selezionato lo TOGLIE dalla
+  selezione (il percorso inverso di Task 11).
+
+  **Campo multiriga** (`multiline_edit`, Task 27/40): Task 40 Ctrl+A+Canc seleziona/cancella TUTTE
+  le righe, non solo quella col cursore; Task 48 (**buco reale**) Tab dentro il campo NON sposta
+  mai il fuoco (diverso da `input_field`, Task 10) - Qt lascia `tabChangesFocus` disattivato di
+  default per un `QPlainTextEdit`, inserisce un carattere tab LETTERALE nel testo.
+
+  **Tre nuovi controlli, mai bersaglio finora**: Task 39 un tooltip vero su `add_button`
+  (**buco reale**: `CurrentHelpText` via UI Automation resta VUOTO nonostante il tooltip Qt sia
+  impostato - il bridge di accessibilita' di Qt non lo mappa); Task 41 `readonly_field`
+  (`QLineEdit.setReadOnly(True)`, in "Tab 9") - digitare non ha mai effetto, diverso da un campo
+  disabilitato; Task 42 `tristate_checkbox` (`QCheckBox.setTristate(True)`, "Tab 9") - **buco
+  reale**: a livello Qt il terzo stato "indeterminate" esiste davvero (verificato impostandolo
+  programmaticamente), ma il pattern Toggle di UI Automation cicla SOLO tra off/on, non lo
+  raggiunge mai; Task 43 `no_selection_list` (`SelectionMode.NoSelection`, "Tab 10") - un click
+  reale non seleziona mai nulla, per costruzione Qt.
+
+  Prova: 27 test nuovi in `tests/test_computer_use_fixture.py` (`ReadOnlyFieldTests`,
+  `TristateCheckboxTests`, `NoSelectionListTests`) e `tests/test_computer_use_integration.py`
+  (`MoreKeyboardAndFocusEndToEndTests`, `ToolTipKnownLimitationEndToEndTests`,
+  `ReadOnlyFieldEndToEndTests`, `TristateCheckboxEndToEndTests`, `NoSelectionListEndToEndTests`,
+  `ListKeyboardNavigationEndToEndTests`, `TabDoesNotChangeFocusInsideMultilineEditEndToEndTests`,
+  piu' un test aggiunto a `MultilineEditEndToEndTests` gia' esistente). 3.276/3.276 test, ruff
+  verde. Con questo F3.1.2 raggiunge **50/100** task dichiarati dal criterio di uscita di F3
+  ("arrivare progressivamente a 100").
+
 ### F3.2 — Windows UI Automation adapter
 
 Dipende da: F3.1.

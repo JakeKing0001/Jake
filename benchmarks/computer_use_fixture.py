@@ -268,6 +268,10 @@ class ComputerUseFixtureWindow(QWidget):
         self.add_button = QPushButton(add_button_label)
         self.add_button.setObjectName("fixture_add_button")
         self.add_button.setAccessibleName(add_button_label)
+        # Task 39 (F3.1.2 continua verso i 100): un tooltip VERO (`CurrentHelpText` via UI
+        # Automation, mai letto finora in questa fixture) - diverso da `accessibleName`/
+        # `objectName` (le uniche proprieta' gia' esercitate).
+        self.add_button.setToolTip("Aggiunge il testo del campo alla lista")
         self.add_button.clicked.connect(self._add_current_text)
 
         self.reset_button = QPushButton("Reset")
@@ -601,6 +605,24 @@ class ComputerUseFixtureWindow(QWidget):
         self.editable_combo.addItems(["Predefinito 1", "Predefinito 2"])
         self.editable_combo.setCurrentIndex(0)
         ninth_tab_layout.addWidget(self.editable_combo)
+
+        # Task 41 (F3.1.2 continua verso i 100): un campo DI SOLA LETTURA (`setReadOnly(True)`) -
+        # diverso da un campo disabilitato (F3.4.4, gia' esercitato altrove): qui il campo resta
+        # enabled/con fuoco raggiungibile, ma digitare non ha alcun effetto sul testo.
+        self.readonly_field = QLineEdit("valore fisso")
+        self.readonly_field.setObjectName("fixture_readonly_field")
+        self.readonly_field.setAccessibleName("Campo di sola lettura")
+        self.readonly_field.setReadOnly(True)
+        ninth_tab_layout.addWidget(self.readonly_field)
+
+        # Task 42 (F3.1.2 continua verso i 100): una `QCheckBox` A TRE STATI (`setTristate(True)`)
+        # - diverso da `option_checkbox` (Task 4/10, solo due stati): un click ciclico attraversa
+        # anche lo stato "indeterminate" del pattern Toggle, mai esercitato finora.
+        self.tristate_checkbox = QCheckBox("Tre stati")
+        self.tristate_checkbox.setObjectName("fixture_tristate_checkbox")
+        self.tristate_checkbox.setAccessibleName("Casella a tre stati")
+        self.tristate_checkbox.setTristate(True)
+        ninth_tab_layout.addWidget(self.tristate_checkbox)
         ninth_tab_layout.addStretch()
         ninth_tab_scroll = QScrollArea()
         ninth_tab_scroll.setObjectName("fixture_tab_nine_scroll")
@@ -608,6 +630,28 @@ class ComputerUseFixtureWindow(QWidget):
         ninth_tab_scroll.setMaximumHeight(120)
         ninth_tab_scroll.setWidget(ninth_tab)
         self.tabs.addTab(ninth_tab_scroll, "Tab 9")
+
+        # Task 43 (F3.1.2 continua verso i 100): una lista con `SelectionMode.NoSelection` -
+        # diverso da `item_list` (`ExtendedSelection`, Task 11/21/31): qui un click NON deve MAI
+        # selezionare nulla, per costruzione Qt (non un bottone disabilitato o un limite trovato,
+        # una scelta deliberata del widget).
+        tenth_tab = QWidget()
+        tenth_tab.setObjectName("fixture_tab_ten_content")
+        tenth_tab_layout = QVBoxLayout(tenth_tab)
+        self.no_selection_list = QListWidget()
+        self.no_selection_list.setObjectName("fixture_no_selection_list")
+        self.no_selection_list.setAccessibleName("Elenco non selezionabile")
+        self.no_selection_list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.no_selection_list.addItems(["Voce 1", "Voce 2", "Voce 3"])
+        self.no_selection_list.setMaximumHeight(90)
+        tenth_tab_layout.addWidget(self.no_selection_list)
+        tenth_tab_layout.addStretch()
+        tenth_tab_scroll = QScrollArea()
+        tenth_tab_scroll.setObjectName("fixture_tab_ten_scroll")
+        tenth_tab_scroll.setWidgetResizable(True)
+        tenth_tab_scroll.setMaximumHeight(120)
+        tenth_tab_scroll.setWidget(tenth_tab)
+        self.tabs.addTab(tenth_tab_scroll, "Tab 10")
 
         self.scroll_list = QListWidget()
         self.scroll_list.setObjectName("fixture_scroll_list")
@@ -836,6 +880,7 @@ class ComputerUseFixtureWindow(QWidget):
         self._apply_filter("")
         self.multiline_edit.clear()
         self.editable_combo.setCurrentIndex(0)
+        self.tristate_checkbox.setCheckState(Qt.CheckState.Unchecked)
 
     def current_combo_option(self) -> str:
         """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`)."""
