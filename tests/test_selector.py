@@ -454,5 +454,95 @@ class LocalizationAfterResizeAndMoveTests(unittest.TestCase):
         self.assertEqual(item.CurrentName, "dopo il resize")
 
 
+class LocalizationAfterReorderTests(unittest.TestCase):
+    """F3.3.7 (resto - "reorder": z-order tra piu' finestre, SECONDA fetta) - due istanze REALI
+    della fixture (stesso titolo, quindi mai distinguibili per titolo: la finestra A e' risolta
+    PRIMA che B esista, poi ritenuta per il suo HWND reale - lo stesso `CurrentNativeWindowHandle`
+    gia' usato da `snapshot_top_level_window_handles`/`wait_for_new_top_level_window`, F3.4.7, mai
+    una ricerca per titolo che sarebbe ambigua tra le due). La finestra B viene lanciata SOPRA la
+    finestra A (verificato empiricamente con `win32gui.GetForegroundWindow`, non assunto dal solo
+    ordine di lancio - vedi il primo test). Un selettore per nome scoped a A deve continuare a
+    colpire A anche quando e' COMPLETAMENTE COPERTA da B, non in primo piano - la stessa proprieta'
+    di UI Automation (`Invoke` non richiede che la finestra sia in primo piano/visibile, a
+    differenza di un click a coordinate pixel) che gia' motiva l'intero approccio semantico di
+    questo progetto, qui verificata per la prima volta con DUE finestre reali invece di una sola."""
+
+    def setUp(self):
+        self.process_a = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_a)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.window_a = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+        self.handle_a = self.window_a.CurrentNativeWindowHandle
+
+        baseline = self.adapter.snapshot_top_level_window_handles()
+        self.process_b = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_b)
+        self.window_b = self.adapter.wait_for_new_top_level_window(baseline, timeout_seconds=15.0)
+
+    def _terminate_a(self):
+        self.process_a.terminate()
+        try:
+            self.process_a.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process_a.kill()
+
+    def _terminate_b(self):
+        self.process_b.terminate()
+        try:
+            self.process_b.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process_b.kill()
+
+    def test_the_second_window_really_covers_the_first_in_z_order(self):
+        """Verificato empiricamente, non assunto: senza questo, il resto della classe non
+        proverebbe affatto lo z-order dichiarato dal proprio nome - solo che due finestre esistono
+        entrambe."""
+        import win32gui
+
+        deadline = time.monotonic() + 3.0
+        foreground = None
+        while time.monotonic() < deadline:
+            foreground = win32gui.GetForegroundWindow()
+            if foreground == self.window_b.CurrentNativeWindowHandle:
+                break
+            time.sleep(0.1)
+
+        self.assertEqual(foreground, self.window_b.CurrentNativeWindowHandle, "B deve essere in primo piano, sopra A")
+        self.assertNotEqual(foreground, self.handle_a)
+
+    def test_a_click_on_the_covered_window_still_reaches_it_not_the_one_on_top(self):
+        executor = ActionExecutor()
+        input_field = self.engine.find_unique_element(
+            self.window_a, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_input"),
+        )
+        executor.set_value(input_field, "nella finestra coperta")
+        add_button = self.engine.find_unique_element(
+            self.window_a, ElementSelector(name="Aggiungi", control_type="Button"),
+        )
+        executor.invoke(add_button)
+
+        item = self.engine.wait_for_unique_element(
+            self.window_a, ElementSelector(name="nella finestra coperta", control_type="ListItem"), timeout_seconds=3.0,
+        )
+        self.assertEqual(item.CurrentName, "nella finestra coperta")
+
+        # Prova indipendente: la finestra B (quella IN VISTA, in primo piano) non deve aver
+        # ricevuto nulla - un bug che indirizzasse per errore l'azione alla finestra sbagliata
+        # (es. un find_window_by_title ambiguo che sceglie a caso tra le due) fallirebbe
+        # silenziosamente qui.
+        items_in_b = self.engine.find_all(self.window_b, ElementSelector(control_type="ListItem"))
+        self.assertEqual(
+            [i.name for i in items_in_b if i.name == "nella finestra coperta"], [],
+            "l'azione non deve MAI raggiungere la finestra sbagliata",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

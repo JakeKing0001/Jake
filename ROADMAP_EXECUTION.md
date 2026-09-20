@@ -5044,6 +5044,29 @@ Criterio di uscita: gli stessi task passano dopo resize, tema e spostamento fine
   tema testata) - solo resize/move reali in questo incremento. Prova: 2 test nuovi. 3.046/3.046
   test, ruff verde.
 
+- `F3.3.7` (resto - "reorder": z-order tra piu' finestre) — 20/09/2026: nuovo
+  `tests/test_selector.py::LocalizationAfterReorderTests`, DUE istanze reali della fixture (stesso
+  titolo, quindi mai distinguibili per titolo - la finestra A viene risolta PRIMA che B esista,
+  poi ritenuta per il proprio `CurrentNativeWindowHandle` reale, lo stesso HWND gia' usato da
+  `snapshot_top_level_window_handles`/`wait_for_new_top_level_window`, F3.4.7 - riusati qui per la
+  prima volta per orchestrare DUE finestre nello stesso test, non solo per rilevare un dialogo
+  imprevisto).
+
+  Verificato empiricamente PRIMA di asserire il resto, non assunto: un test dedicato conferma con
+  `win32gui.GetForegroundWindow()` che B e' DAVVERO in primo piano sopra A subito dopo il lancio
+  (a polling, non un singolo controllo) - senza questa prova, il resto della classe proverebbe solo
+  "due finestre esistono", non lo z-order dichiarato dal nome. Il test motivante clicca "Aggiungi"
+  su A (COMPLETAMENTE COPERTA da B, mai portata in primo piano) e verifica sia che l'elemento
+  compaia DAVVERO nella lista di A, sia - prova indipendente, non solo l'assenza di eccezioni - che
+  NON compaia nella lista di B: la stessa proprieta' di UI Automation (`Invoke` non richiede che la
+  finestra sia in primo piano/visibile, a differenza di un click a coordinate pixel) che gia'
+  motiva l'intero approccio semantico di questo progetto, qui verificata per la prima volta con DUE
+  finestre reali invece di una sola.
+
+  Restano aperti "traduzione" (nessuna build multilingua della fixture) e "tema" (nessuna
+  variazione di tema testata) - F3.3.7 non e' ancora chiuso per intero. Prova: 2 test nuovi.
+  3.152/3.152 test, ruff verde.
+
 - `F3.3.2` (prima fetta - "spiegare perche'", il caso NoMatchError) — 19/09/2026: nuovo
   `SelectorEngine._explain_no_match()` (`core/computer_use/selector.py`), collegato ai tre punti
   che sollevano `NoMatchError` (`find_unique`, `wait_for_unique_element` dopo il timeout,

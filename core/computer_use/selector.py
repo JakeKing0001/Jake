@@ -38,9 +38,9 @@ alla volta" di questa sessione):
 - F3.3.5 (invalidare selettori quando la struttura/versione dell'app cambia - non c'e' ancora
   nessuna cache di selettori da invalidare);
 - F3.3.6 (inspector nell'HUD);
-- F3.3.7 (testare la localizzazione dopo resize/reorder/traduzione/tema - non ancora testato
-  esplicitamente, anche se l'uso di NOME invece di coordinate lo rende plausibile per
-  costruzione)."""
+- F3.3.7 (resto - "reorder", CHIUSO in un incremento successivo, 20/09/2026): vedi
+  `tests/test_selector.py::LocalizationAfterReorderTests`. Restano aperti "traduzione" (nessuna
+  build multilingua della fixture) e "tema" (nessuna variazione di tema testata)."""
 import time
 from dataclasses import dataclass
 
