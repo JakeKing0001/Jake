@@ -42,6 +42,8 @@ class AutomationPropertiesTests(unittest.TestCase):
         self.assertEqual(window.action_button_b.objectName(), "fixture_action_b")
         self.assertEqual(window.option_combo.objectName(), "fixture_combo")
         self.assertEqual(window.value_slider.objectName(), "fixture_slider")
+        self.assertEqual(window.progress_bar.objectName(), "fixture_progress")
+        self.assertEqual(window.start_progress_button.objectName(), "fixture_start_progress_button")
 
     def test_every_control_has_a_non_empty_accessible_name(self):
         window = ComputerUseFixtureWindow()
@@ -49,6 +51,7 @@ class AutomationPropertiesTests(unittest.TestCase):
             window.input_field, window.add_button, window.reset_button, window.item_list, window.tree,
             window.tabs, window.option_checkbox, window.scroll_list, window.load_button, window.dynamic_button,
             window.action_button_a, window.action_button_b, window.option_combo, window.value_slider,
+            window.progress_bar, window.start_progress_button,
         ):
             self.assertTrue(widget.accessibleName(), f"{widget.objectName()} non ha un accessibleName")
 
@@ -584,6 +587,56 @@ class SliderTests(unittest.TestCase):
         window.reset_state()
 
         self.assertEqual(window.value_slider.value(), 0)
+
+
+class ProgressBarTests(unittest.TestCase):
+    """Task 15 di F3.1.2 (continua verso i 100): `progress_bar`, riempita da un `QTimer`
+    ricorrente REALE (non un salto istantaneo) - lo scenario motivante e' "aspetta che
+    un'operazione lunga raggiunga il 100%", dove il VALORE intermedio stesso e' il segnale da
+    osservare. Vedi `tests/test_computer_use_integration.py::ProgressBarEndToEndTests` per la
+    dimostrazione via UI Automation (RangeValue, gia' verificato funzionante per Task 14)."""
+
+    def test_the_value_starts_at_zero(self):
+        window = ComputerUseFixtureWindow()
+        self.assertEqual(window.progress_bar.value(), 0)
+
+    def test_clicking_start_does_not_jump_to_completion_immediately(self):
+        window = ComputerUseFixtureWindow()
+
+        QTest.mouseClick(window.start_progress_button, Qt.LeftButton)
+
+        self.assertEqual(window.progress_bar.value(), 0, "non deve gia' essere avanzata subito dopo il click, prima che il timer scatti")
+
+    def test_the_bar_reaches_one_hundred_after_enough_real_time_passes(self):
+        window = ComputerUseFixtureWindow()
+
+        QTest.mouseClick(window.start_progress_button, Qt.LeftButton)
+        QTest.qWait(1500)  # oltre i 5 tick da 150ms dichiarati (750ms), non un'attesa arbitraria
+
+        self.assertEqual(window.progress_bar.value(), 100)
+
+    def test_clicking_start_twice_restarts_from_zero_not_from_where_it_was(self):
+        window = ComputerUseFixtureWindow()
+        QTest.mouseClick(window.start_progress_button, Qt.LeftButton)
+        QTest.qWait(1500)
+        self.assertEqual(window.progress_bar.value(), 100)
+
+        QTest.mouseClick(window.start_progress_button, Qt.LeftButton)
+
+        self.assertEqual(window.progress_bar.value(), 0, "un secondo avvio deve ripartire da zero, come gia' scelto per Task 6/10")
+
+    def test_reset_mid_progress_stops_the_timer_for_real(self):
+        """Stessa insidia gia' trovata per `_load_timer` (Task 6/10): un reset a meta' che si
+        limitasse ad azzerare il valore visibile, senza fermare il `QTimer` ricorrente, verrebbe
+        vanificato dal prossimo tick gia' schedulato."""
+        window = ComputerUseFixtureWindow()
+        QTest.mouseClick(window.start_progress_button, Qt.LeftButton)
+        QTest.qWait(200)  # un solo tick, ancora ben lontano da 100
+
+        window.reset_state()
+        QTest.qWait(1500)  # abbastanza per completare l'intero avanzamento, se il timer non fosse stato fermato davvero
+
+        self.assertEqual(window.progress_bar.value(), 0, "il timer ricorrente deve essere fermato davvero, non solo il valore azzerato")
 
 
 if __name__ == "__main__":

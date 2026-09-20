@@ -740,6 +740,60 @@ class ContextMenuEndToEndTests(unittest.TestCase):
         self.assertEqual(len(matches), 1, "Invoke() su una voce del menu non deve mai duplicare l'elemento davvero")
 
 
+class ProgressBarEndToEndTests(unittest.TestCase):
+    """Task 15 (F3.1.2 continua verso i 100) - "aspetta che un'operazione lunga raggiunga il
+    100%": a differenza di Task 6/10 (un controllo booleano abilitato dopo un ritardo), qui il
+    VALORE intermedio stesso e' il segnale da osservare - il pattern RangeValue, gia' verificato
+    funzionante via UI Automation pura per Task 14 (`value_slider`), letto qui in un ciclo di
+    polling mentre una `QProgressBar` reale avanza DAVVERO nel tempo (un `QTimer` ricorrente, non
+    un salto istantaneo)."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def _current_progress_value(self, element) -> float:
+        from comtypes.gen import UIAutomationClient as UIA
+        pattern = element.GetCurrentPattern(UIA.UIA_RangeValuePatternId).QueryInterface(UIA.IUIAutomationRangeValuePattern)
+        return pattern.CurrentValue
+
+    def test_the_progress_value_climbs_through_real_intermediate_values_to_one_hundred(self):
+        progress_bar = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_progress"),
+        )
+        start_button = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Avvia progresso", control_type="Button"))
+        self.assertEqual(self._current_progress_value(progress_bar), 0.0, "stato iniziale atteso, altrimenti il test non proverebbe un vero avanzamento")
+
+        self.executor.invoke(start_button)
+
+        observed_values = []
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            observed_values.append(self._current_progress_value(progress_bar))
+            if observed_values[-1] >= 100.0:
+                break
+            time.sleep(0.1)
+
+        self.assertEqual(observed_values[-1], 100.0, f"deve raggiungere davvero 100 entro il timeout: {observed_values}")
+        intermediate_values = {v for v in observed_values if 0.0 < v < 100.0}
+        self.assertTrue(intermediate_values, f"deve passare per DEI valori intermedi reali, non saltare istantaneamente a 100: {observed_values}")
+
+
 class DynamicControlEndToEndTests(unittest.TestCase):
     """Task 6/10 di F3.1.2 (F3.1.6, la parte DINAMICA mai affrontata finora - vedi
     `benchmarks/computer_use_fixture.py` per il perche' `remove_button`, gia' un "primo assaggio",

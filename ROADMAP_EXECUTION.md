@@ -4919,6 +4919,28 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   `value_slider` aggiunto ai controlli gia' verificati per object name/accessible name non vuoti.
   3.189/3.189 test, ruff verde.
 
+- `F3.1.2` (Task 15 - "aspetta che una barra di avanzamento raggiunga il 100%") — 20/09/2026:
+  nuovo `progress_bar`/`start_progress_button` nella fixture - una `QProgressBar` riempita DAVVERO
+  nel tempo da un `QTimer` ricorrente (cinque passi da 20, non un salto istantaneo a 100). Diverso
+  da Task 6/10 (un controllo booleano abilitato dopo un ritardo, gia' coperto): qui il VALORE
+  intermedio stesso e' il segnale da osservare, non solo uno stato finale - lo stesso pattern
+  `RangeValue` gia' verificato funzionante per Task 14, qui letto in un ciclo di polling REALE
+  mentre il valore avanza, non un singolo controllo dopo un'attesa fissa.
+
+  Stessa insidia gia' trovata per `_load_timer` (Task 6/10), evitata per costruzione questa volta
+  (non un buco nuovo): `reset_state()` chiama `_progress_timer.stop()` PRIMA di azzerare il
+  valore - un test dedicato lo verifica esplicitamente (reset a meta' avanzamento, poi attesa
+  abbastanza lunga da completare l'intero ciclo se il timer non fosse stato fermato davvero).
+
+  Prova: 5 test nuovi in `tests/test_computer_use_fixture.py::ProgressBarTests` (valore iniziale,
+  nessun salto immediato al click, raggiunge 100 dopo abbastanza tempo reale, un secondo avvio
+  riparte da zero, reset a meta' ferma davvero il timer) + 1 test nuovo in
+  `tests/test_computer_use_integration.py::ProgressBarEndToEndTests` (polling del pattern
+  RangeValue via UI Automation mentre il valore avanza per davvero, verifica che passi per DEI
+  valori intermedi reali prima di raggiungere 100, non un salto istantaneo) +
+  `progress_bar`/`start_progress_button` aggiunti ai controlli gia' verificati per object name/
+  accessible name non vuoti. 3.195/3.195 test, ruff verde.
+
 ### F3.2 — Windows UI Automation adapter
 
 Dipende da: F3.1.

@@ -98,6 +98,15 @@ differenza di lista/combobox/menu (tutti richiedono un click pixel reale per sel
 probe dedicato PRIMA di scrivere `ActionExecutor.set_range_value()` - vedi
 `tests/test_executor.py::RangeValueTests`.
 
+**Quindicesima fetta (20/09/2026, un incremento successivo) - Task 15 di F3.1.2**: una barra di
+avanzamento REALE (`progress_bar`/`start_progress_button`, un `QTimer` ricorrente che la riempie
+in cinque passi da 20, non un salto istantaneo a 100) - lo scenario motivante e' "aspetta che
+un'operazione lunga raggiunga il 100%", diverso da Task 6/10 (un controllo booleano abilitato
+dopo un ritardo) perche' qui il VALORE intermedio stesso e' il segnale da osservare, non solo
+uno stato finale. Stesso pattern `RangeValue` gia' verificato funzionante per Task 14 - vedi
+`tests/test_computer_use_integration.py::ProgressBarEndToEndTests` per la prova via UI Automation
+(polling del valore nel tempo, verifica che passi DAVVERO per valori intermedi reali).
+
 PySide6 invece di Win32/WinForms nativo: gia' una dipendenza del progetto
 (requirements/hud.txt, usata dall'HUD - vedi core/gui/hud/), ed espone i propri widget a UI
 Automation su Windows tramite il ponte di accessibilita' di Qt (QAccessible) - non perfettamente
@@ -111,8 +120,8 @@ import sys
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QMenu, QMessageBox, QPushButton, QSlider, QTabWidget, QTreeWidget, QTreeWidgetItem,
-    QVBoxLayout, QWidget,
+    QListWidget, QMenu, QMessageBox, QProgressBar, QPushButton, QSlider, QTabWidget, QTreeWidget,
+    QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 # Terza fetta (albero): due categorie, due figli ciascuna - nomi stabili anche per i dati, non
@@ -304,6 +313,26 @@ class ComputerUseFixtureWindow(QWidget):
         self.value_slider.setMaximum(100)
         self.value_slider.setValue(0)
 
+        # Task 15 (F3.1.2 continua verso i 100): una barra di avanzamento REALE che si riempie nel
+        # tempo (un `QTimer` ricorrente, non un salto istantaneo a 100) - lo scenario motivante e'
+        # "aspetta che un'operazione lunga raggiunga il 100%", diverso da "attendi che un controllo
+        # diventi abilitato" (Task 6/10, gia' coperto) perche' qui il VALORE intermedio stesso e'
+        # il segnale da osservare, non solo uno stato booleano finale.
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setObjectName("fixture_progress")
+        self.progress_bar.setAccessibleName("Barra di avanzamento")
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+
+        self.start_progress_button = QPushButton("Avvia progresso")
+        self.start_progress_button.setObjectName("fixture_start_progress_button")
+        self.start_progress_button.setAccessibleName("Avvia progresso")
+        self.start_progress_button.clicked.connect(self._start_progress)
+
+        self._progress_timer = QTimer(self)
+        self._progress_timer.setInterval(150)
+        self._progress_timer.timeout.connect(self._advance_progress)
+
         buttons_row = QHBoxLayout()
         buttons_row.addWidget(self.add_button)
         buttons_row.addWidget(self.reset_button)
@@ -329,6 +358,8 @@ class ComputerUseFixtureWindow(QWidget):
         layout.addLayout(ambiguous_row)
         layout.addWidget(self.option_combo)
         layout.addWidget(self.value_slider)
+        layout.addWidget(self.start_progress_button)
+        layout.addWidget(self.progress_bar)
 
     def _add_current_text(self) -> None:
         """Task 1/10 di F3.1.2 (gli altri 9 restano un passo successivo dichiarato): digitare un
@@ -429,10 +460,29 @@ class ComputerUseFixtureWindow(QWidget):
         self._update_action_counts_label()
         self.option_combo.setCurrentIndex(0)
         self.value_slider.setValue(0)
+        # .stop() PRIMA di azzerare il valore - stesso principio gia' applicato a `_load_timer`
+        # sopra: un reset chiamato A META' di un avanzamento deve fermare DAVVERO il timer
+        # ricorrente, non solo azzerare lo stato visibile lasciando che il prossimo tick lo
+        # rialzi subito dopo.
+        self._progress_timer.stop()
+        self.progress_bar.setValue(0)
 
     def current_combo_option(self) -> str:
         """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`)."""
         return self.option_combo.currentText()
+
+    def _start_progress(self) -> None:
+        """Task 15 di F3.1.2: riavvia SEMPRE da zero (non riprende da dove si era fermata) - lo
+        stesso comportamento gia' scelto per `_start_loading` (Task 6/10, il secondo click
+        riavvia il conto alla rovescia da capo, non lo estende)."""
+        self.progress_bar.setValue(0)
+        self._progress_timer.start()
+
+    def _advance_progress(self) -> None:
+        new_value = min(100, self.progress_bar.value() + 20)
+        self.progress_bar.setValue(new_value)
+        if new_value >= 100:
+            self._progress_timer.stop()
 
     def _show_item_context_menu(self, pos) -> None:
         """Task 13 di F3.1.2: tasto destro su un elemento della lista mostra un menu con
