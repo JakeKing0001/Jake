@@ -277,12 +277,19 @@ class RealBrowserFixtureTests(unittest.TestCase):
         (F3.1.2 Task 13, adozione) - il dialogo NON compare nell'enumerazione dei figli del
         desktop secondo UI Automation (lo stesso buco gia' noto), ma la nuova coppia di metodi lo
         risolve passando dall'enumerazione WIN32. Gli automation_id usati per l'edit del nome file
-        (`1148`) e il bottone "Apri" (`1`, disambiguato con `control_type="SplitButton"` - lo
-        stesso ID numerico e' condiviso da una riga della lista file, verificato scrivendo questo
-        test, non assunto) sono una convenzione NUMERICA stabile del dialogo comune di Windows
-        (indipendente dalla lingua, a differenza di un nome localizzato come "Apri") - verificati
-        empiricamente con un probe dedicato PRIMA di scrivere questo test, non presi dalla
-        documentazione."""
+        (`1148`) e il bottone "Apri" (`1`) sono una convenzione NUMERICA stabile del dialogo
+        comune di Windows (indipendente dalla lingua, a differenza di un nome localizzato come
+        "Apri") - verificati empiricamente con un probe dedicato PRIMA di scrivere questo test,
+        non presi dalla documentazione.
+
+        **Buco reale trovato in CI, non ipotizzato**: l'automation_id `1` e' condiviso da una
+        riga della lista file (control_type `ListItem`) - una prima versione disambiguava con
+        `control_type="SplitButton"` (il control_type osservato in locale), ma su un runner CI
+        con un build/tema diverso di Explorer il bottone "Apri" si e' rivelato un `Button`
+        semplice, non uno `SplitButton` - lo stesso ID, un control_type diverso a seconda
+        dell'ambiente. Corretto cercando SOLO per automation_id, poi scartando programmaticamente
+        il candidato `ListItem` (l'unico control_type che il bottone "Apri" non potra' MAI avere),
+        invece di indovinare un control_type specifico."""
         import tempfile
 
         document = find_page_document(self.adapter, self.window)
@@ -299,7 +306,11 @@ class RealBrowserFixtureTests(unittest.TestCase):
             dialog = self.adapter.wait_for_new_win32_window(baseline, timeout_seconds=10.0)
             engine = SelectorEngine(self.adapter)
             filename_edit = engine.wait_for_unique_element(dialog, ElementSelector(automation_id="1148", control_type="Edit"), timeout_seconds=5.0)
-            open_button = engine.wait_for_unique_element(dialog, ElementSelector(automation_id="1", control_type="SplitButton"), timeout_seconds=5.0)
+
+            candidates = engine.find_all(dialog, ElementSelector(automation_id="1"))
+            not_a_list_row = [c for c in candidates if c.control_type != "ListItem"]
+            self.assertEqual(len(not_a_list_row), 1, f"atteso un solo candidato non-ListItem per automation_id='1': {candidates}")
+            open_button = engine.find_unique_element(dialog, ElementSelector(automation_id="1", control_type=not_a_list_row[0].control_type))
 
             from core.computer_use.executor import ActionExecutor
             executor = ActionExecutor()

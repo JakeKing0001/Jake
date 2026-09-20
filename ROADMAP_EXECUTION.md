@@ -4886,6 +4886,17 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   end attraverso il dialogo nativo, verificato che il nome del file arrivi davvero alla pagina).
   3.183/3.183 test, ruff verde.
 
+  **Correzione successiva (stesso 20/09/2026, trovata SUL RUNNER CI dopo la pubblicazione, non in
+  locale)**: il test di upload disambiguava l'automation_id `1` (condiviso da una riga della
+  lista file) con `control_type="SplitButton"` - il control_type osservato in locale per il
+  bottone "Apri". Sul runner CI (build/tema di Explorer diverso) lo stesso bottone e' risultato
+  un `Button` semplice, non uno `SplitButton` - stesso ID, control_type diverso a seconda
+  dell'ambiente, un dettaglio di rendering mai dichiarato stabile da Microsoft. Corretto cercando
+  SOLO per automation_id, poi scartando programmaticamente l'unico candidato `ListItem` (l'unico
+  control_type che il bottone "Apri" non potra' mai avere), invece di indovinare un control_type
+  specifico da un solo ambiente osservato - lo stesso principio "non assumere da una sola
+  osservazione" gia' seguito piu' volte in questa sessione per bug trovati in CI.
+
 ### F3.2 — Windows UI Automation adapter
 
 Dipende da: F3.1.
