@@ -198,9 +198,9 @@ import sys
 from PySide6.QtCore import QDate, Qt, QTimer
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDateEdit, QHBoxLayout, QLabel,
-    QLineEdit, QListWidget, QMenu, QMessageBox, QProgressBar, QPushButton, QRadioButton,
-    QScrollArea, QSlider, QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget, QTreeWidget, QTreeWidgetItem,
-    QVBoxLayout, QWidget,
+    QLineEdit, QListWidget, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
+    QRadioButton, QScrollArea, QSlider, QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget,
+    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 # Terza fetta (albero): due categorie, due figli ciascuna - nomi stabili anche per i dati, non
@@ -566,6 +566,26 @@ class ComputerUseFixtureWindow(QWidget):
         seventh_tab_scroll.setWidget(seventh_tab)
         self.tabs.addTab(seventh_tab_scroll, "Tab 7")
 
+        # Task 27 (F3.1.2 continua verso i 100): un campo di testo MULTIRIGA (`QPlainTextEdit`,
+        # `control_type` gia' noto essere "Edit" come `QLineEdit`, ma il VALORE puo' contenere
+        # newline - MAI un bersaglio in questa fixture finora, ogni campo gia' esercitato era a
+        # riga singola). Scheda propria ("Tab 8"), stesso motivo dichiarato per Task 19/20/22/23.
+        eighth_tab = QWidget()
+        eighth_tab.setObjectName("fixture_tab_eight_content")
+        eighth_tab_layout = QVBoxLayout(eighth_tab)
+        self.multiline_edit = QPlainTextEdit()
+        self.multiline_edit.setObjectName("fixture_multiline_edit")
+        self.multiline_edit.setAccessibleName("Campo multiriga")
+        self.multiline_edit.setMaximumHeight(90)
+        eighth_tab_layout.addWidget(self.multiline_edit)
+        eighth_tab_layout.addStretch()
+        eighth_tab_scroll = QScrollArea()
+        eighth_tab_scroll.setObjectName("fixture_tab_eight_scroll")
+        eighth_tab_scroll.setWidgetResizable(True)
+        eighth_tab_scroll.setMaximumHeight(120)
+        eighth_tab_scroll.setWidget(eighth_tab)
+        self.tabs.addTab(eighth_tab_scroll, "Tab 8")
+
         self.scroll_list = QListWidget()
         self.scroll_list.setObjectName("fixture_scroll_list")
         self.scroll_list.setAccessibleName("Elenco con scorrimento")
@@ -777,6 +797,7 @@ class ComputerUseFixtureWindow(QWidget):
         self.date_edit.setDate(QDate(2026, 1, 15))
         self.filter_input.clear()
         self._apply_filter("")
+        self.multiline_edit.clear()
 
     def current_combo_option(self) -> str:
         """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`)."""

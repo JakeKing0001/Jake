@@ -55,6 +55,7 @@ class AutomationPropertiesTests(unittest.TestCase):
         self.assertEqual(window.date_edit.objectName(), "fixture_date_edit")
         self.assertEqual(window.filter_input.objectName(), "fixture_filter_input")
         self.assertEqual(window.filter_list.objectName(), "fixture_filter_list")
+        self.assertEqual(window.multiline_edit.objectName(), "fixture_multiline_edit")
 
     def test_every_control_has_a_non_empty_accessible_name(self):
         window = ComputerUseFixtureWindow()
@@ -65,7 +66,7 @@ class AutomationPropertiesTests(unittest.TestCase):
             window.value_spinbox, window.radio_red, window.radio_green, window.radio_blue,
             window.progress_bar, window.start_progress_button, window.reorder_list, window.data_table,
             window.transfer_source_list, window.transfer_target_list, window.date_edit,
-            window.filter_input, window.filter_list,
+            window.filter_input, window.filter_list, window.multiline_edit,
         ):
             self.assertTrue(widget.accessibleName(), f"{widget.objectName()} non ha un accessibleName")
 
@@ -778,6 +779,29 @@ class TransferListTests(unittest.TestCase):
 
         self.assertEqual(window.transfer_source_items(), ["Alfa", "Beta"])
         self.assertEqual(window.transfer_target_items(), [])
+
+
+class MultilineEditTests(unittest.TestCase):
+    """Task 27 di F3.1.2 (continua verso i 100, in "Tab 8") - un campo di testo multiriga
+    (`QPlainTextEdit`), mai un bersaglio in questa fixture finora - ogni campo gia' esercitato era
+    a riga singola."""
+
+    def test_the_field_starts_empty(self):
+        window = ComputerUseFixtureWindow()
+        self.assertEqual(window.multiline_edit.toPlainText(), "")
+
+    def test_setting_multiline_text_preserves_the_newline(self):
+        window = ComputerUseFixtureWindow()
+        window.multiline_edit.setPlainText("riga uno\nriga due")
+        self.assertEqual(window.multiline_edit.toPlainText(), "riga uno\nriga due")
+
+    def test_reset_clears_the_field(self):
+        window = ComputerUseFixtureWindow()
+        window.multiline_edit.setPlainText("qualcosa")
+
+        window.reset_state()
+
+        self.assertEqual(window.multiline_edit.toPlainText(), "")
 
 
 class DateEditTests(unittest.TestCase):

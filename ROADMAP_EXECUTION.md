@@ -5193,6 +5193,48 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   (digitare "an" lascia raggiungibili solo "Banana"/"Mango", non "Mela"; svuotare il filtro
   rirende raggiungibile "Mela"). 3.232/3.232 test, ruff verde.
 
+- `F3.1.2` (Task 24/25 - "Ctrl+Z annulla il testo digitato"/"Ctrl+A+Canc svuota il campo") —
+  20/09/2026: nessun codice nuovo nella fixture - scorciatoie di editing testo VERE, mai
+  esercitate finora: ogni campo di testo gia' provato in questa sessione usava o il pattern Value
+  (`set_value`, che NON popola lo stack di undo di Qt - una scrittura programmatica, non una
+  digitazione dell'utente) o la sola tastiera per la NAVIGAZIONE (Task 10), mai per l'EDITING
+  dentro un campo.
+
+  Verificato con un probe dedicato PRIMA di scrivere i test, non assunto: `pyautogui.write`
+  (digitazione carattere per carattere, non `set_value`) raggruppa l'intera stringa digitata in UN
+  SOLO passo di undo - Ctrl+Z riporta subito a stringa vuota, non toglie un carattere alla volta -
+  un dettaglio reale di Qt, non ovvio a priori. Lettura del testo corrente con
+  `UIAutomationAdapter.read_value` (Task 22, adozione). Prova: 2 test nuovi in
+  `tests/test_computer_use_integration.py::TextEditingShortcutsEndToEndTests`. 3.234/3.234 test,
+  ruff verde.
+
+- `F3.1.2` (Task 26 - "Esc chiude un popup SENZA applicare la selezione evidenziata") —
+  20/09/2026: il primo caso NEGATIVO di questa sessione per un popup (Task 12 aveva gia'
+  dimostrato solo il percorso positivo - Invio/click conferma). `option_combo` (Task 12): due
+  frecce giu' poi Esc lascia l'opzione REALMENTE selezionata invariata (letta con `read_value`,
+  non solo che il popup si sia chiuso). Prova: 1 test nuovo in `tests/test_computer_use_
+  integration.py::EscapeCancelsThePopupEndToEndTests`. 3.235/3.235 test, ruff verde.
+
+- `F3.1.2` (Task 27 - "digita testo su piu' righe in un campo multiriga", in "Tab 8") —
+  20/09/2026: nuovo `multiline_edit` (`QPlainTextEdit`) - ogni campo gia' esercitato era a riga
+  singola. Verificato con un probe dedicato: `control_type='Edit'`, lo STESSO di `input_field` -
+  la differenza e' solo nel VALORE, che puo' contenere `\n` (a differenza di `input_field`, qui
+  Invio NON invia/attiva nulla, inserisce una riga nuova). Prova: 3 test nuovi in `tests/
+  test_computer_use_fixture.py::MultilineEditTests` + 1 test nuovo in `tests/
+  test_computer_use_integration.py::MultilineEditEndToEndTests` (digitare due righe con Invio
+  preserva il newline, verificato rileggendo con `read_value`). 3.239/3.239 test, ruff verde.
+
+- `F3.1.2` (Task 28 - "minimizza e ripristina la finestra") — 20/09/2026: resto del pattern
+  Window (F3.4.1) mai esercitato - solo `close_window` era coperto finora. Nuovi
+  `ActionExecutor.minimize_window`/`restore_window` (`SetWindowVisualState` verso minimizzata/
+  normale) + `UIAutomationAdapter.window_visual_state` (lettura di `CurrentWindowVisualState`,
+  stesso principio onesto di `_toggle_state_of` - `None` per un elemento senza il pattern Window).
+  Verificato con un probe dedicato PRIMA di scrivere il codice: `SetWindowVisualState` funziona
+  DAVVERO contro un vero processo Qt (lo stato cambia da 0 a 1 e ritorno, non solo che la chiamata
+  non sollevi). Prova: 2 test nuovi in `tests/test_executor.py::WindowPatternTests` (minimizza poi
+  ripristina cambia davvero lo stato visivo, verificato leggendolo via UI Automation dopo ognuna;
+  le ricevute nominano correttamente azione/pattern). 3.241/3.241 test, ruff verde.
+
 ### F3.2 — Windows UI Automation adapter
 
 Dipende da: F3.1.

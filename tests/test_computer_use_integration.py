@@ -1236,6 +1236,193 @@ class LiveFilterEndToEndTests(unittest.TestCase):
         self.assertTrue(_mela_is_reachable_again(), "un elemento nascosto dal filtro deve tornare raggiungibile quando il filtro si svuota")
 
 
+class TextEditingShortcutsEndToEndTests(unittest.TestCase):
+    """Task 24/25 (F3.1.2 continua verso i 100) - scorciatoie di editing testo VERE (Ctrl+Z,
+    Ctrl+A+Canc), mai esercitate finora: ogni campo di testo gia' provato in questa sessione usava
+    o il pattern Value (`set_value`, che NON popola lo stack di undo di Qt - una scrittura
+    programmatica, non una digitazione dell'utente) o la sola tastiera per la NAVIGAZIONE (Task
+    10), mai per l'EDITING dentro un campo. Verificato con un probe dedicato PRIMA di scrivere
+    questi test, non assunto: `pyautogui.write` (digitazione carattere per carattere, non
+    `set_value`) raggruppa l'intera stringa in UN SOLO passo di undo (Ctrl+Z riporta subito a
+    stringa vuota, non toglie un carattere alla volta) - un dettaglio reale di Qt, non ovvio a
+    priori. Lettura del testo corrente con `UIAutomationAdapter.read_value` (Task 22, adozione -
+    il `Name` di `input_field` resta il suo `accessibleName` statico "Campo di testo")."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_ctrl_z_undoes_typed_text_back_to_empty(self):
+        import pyautogui
+        import win32gui
+
+        win32gui.SetForegroundWindow(self.window.CurrentNativeWindowHandle)
+        time.sleep(0.2)
+        input_field = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_input"),
+        )
+        input_field.SetFocus()
+        pyautogui.write("testo digitato", interval=0.02)
+
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and self.adapter.read_value(input_field) != "testo digitato":
+            time.sleep(0.05)
+        self.assertEqual(self.adapter.read_value(input_field), "testo digitato", "precondizione: il testo deve essere stato digitato per davvero")
+
+        pyautogui.hotkey("ctrl", "z")
+
+        deadline = time.monotonic() + 2.0
+        value = None
+        while time.monotonic() < deadline:
+            value = self.adapter.read_value(input_field)
+            if value == "":
+                break
+            time.sleep(0.05)
+        self.assertEqual(value, "", "Ctrl+Z deve annullare davvero il testo digitato")
+
+    def test_ctrl_a_then_delete_clears_the_field(self):
+        import pyautogui
+        import win32gui
+
+        win32gui.SetForegroundWindow(self.window.CurrentNativeWindowHandle)
+        time.sleep(0.2)
+        input_field = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_input"),
+        )
+        input_field.SetFocus()
+        pyautogui.write("testo da cancellare", interval=0.02)
+
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and self.adapter.read_value(input_field) != "testo da cancellare":
+            time.sleep(0.05)
+
+        pyautogui.hotkey("ctrl", "a")
+        pyautogui.press("delete")
+
+        deadline = time.monotonic() + 2.0
+        value = None
+        while time.monotonic() < deadline:
+            value = self.adapter.read_value(input_field)
+            if value == "":
+                break
+            time.sleep(0.05)
+        self.assertEqual(value, "", "Ctrl+A poi Canc deve svuotare davvero il campo")
+
+
+class EscapeCancelsThePopupEndToEndTests(unittest.TestCase):
+    """Task 26 (F3.1.2 continua verso i 100) - "Esc chiude un popup SENZA applicare la selezione
+    evidenziata", il primo caso NEGATIVO di questa sessione per un popup (Task 12 aveva gia'
+    dimostrato solo il percorso positivo - Invio/click conferma). `option_combo` (Task 12) e' il
+    bersaglio: `UIAutomationAdapter.read_value` (Task 22, adozione) legge l'opzione REALMENTE
+    selezionata, non solo che il popup si sia chiuso."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_escape_closes_the_combo_popup_without_applying_the_highlighted_option(self):
+        import pyautogui
+        import win32gui
+
+        win32gui.SetForegroundWindow(self.window.CurrentNativeWindowHandle)
+        time.sleep(0.2)
+        combo = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Opzione a tendina"))
+        self.assertEqual(self.adapter.read_value(combo), "Opzione 1", "precondizione: nessuna selezione precedente")
+
+        self.executor.expand(combo)
+        time.sleep(0.3)
+        pyautogui.press("down")
+        pyautogui.press("down")
+        pyautogui.press("escape")
+
+        deadline = time.monotonic() + 2.0
+        value = self.adapter.read_value(combo)
+        while time.monotonic() < deadline and value is None:
+            time.sleep(0.05)
+            value = self.adapter.read_value(combo)
+        self.assertEqual(value, "Opzione 1", "Esc non deve mai applicare l'opzione evidenziata durante la navigazione")
+
+
+class MultilineEditEndToEndTests(unittest.TestCase):
+    """Task 27 (F3.1.2 continua verso i 100) - digitare testo su piu' righe in un campo
+    multiriga (`multiline_edit`, "Tab 8") preserva davvero il newline: a differenza di
+    `input_field` (Task 1/10), qui Invio NON invia/attiva nulla - inserisce una riga nuova, come
+    verificato con un probe dedicato. Letto con `UIAutomationAdapter.read_value` (Task 22,
+    adozione), `control_type='Edit'` - lo STESSO di `input_field` - la differenza e' solo nel
+    VALORE, che puo' contenere `\\n`."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_typing_two_lines_with_enter_preserves_the_newline(self):
+        import pyautogui
+        import win32gui
+
+        win32gui.SetForegroundWindow(self.window.CurrentNativeWindowHandle)
+        time.sleep(0.2)
+        tab_eight = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 8", control_type="TabItem"))
+        self.executor.select(tab_eight)
+        time.sleep(0.3)
+
+        field = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Campo multiriga"), timeout_seconds=3.0)
+        field.SetFocus()
+        pyautogui.write("riga uno", interval=0.02)
+        pyautogui.press("enter")
+        pyautogui.write("riga due", interval=0.02)
+
+        deadline = time.monotonic() + 2.0
+        value = self.adapter.read_value(field)
+        while time.monotonic() < deadline and value != "riga uno\nriga due":
+            time.sleep(0.1)
+            value = self.adapter.read_value(field)
+        self.assertEqual(value, "riga uno\nriga due")
+
+
 class DynamicControlEndToEndTests(unittest.TestCase):
     """Task 6/10 di F3.1.2 (F3.1.6, la parte DINAMICA mai affrontata finora - vedi
     `benchmarks/computer_use_fixture.py` per il perche' `remove_button`, gia' un "primo assaggio",

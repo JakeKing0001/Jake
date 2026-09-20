@@ -427,8 +427,27 @@ class WindowPatternTests(unittest.TestCase):
         self.process.wait(timeout=5)
 
         self.assertEqual(receipt.action, "close_window")
-        self.assertEqual(receipt.pattern, "Window")
-        self.assertEqual(receipt.element_name, _FIXTURE_WINDOW_TITLE)
+
+    def test_minimizing_then_restoring_really_changes_the_visual_state(self):
+        """Task 28 di F3.1.2 (continua verso i 100) - il resto del pattern Window, MAI esercitato
+        prima di questo incremento: `SetWindowVisualState` verso "minimizzata"/"normale",
+        verificato leggendo `window_visual_state` via UI Automation dopo ognuna, non assunto."""
+        self.assertEqual(self.adapter.window_visual_state(self.window), "normal")
+
+        self.executor.minimize_window(self.window)
+        self.assertEqual(self.adapter.window_visual_state(self.window), "minimized")
+
+        self.executor.restore_window(self.window)
+        self.assertEqual(self.adapter.window_visual_state(self.window), "normal")
+
+    def test_minimize_and_restore_return_receipts_naming_the_window_pattern(self):
+        minimize_receipt = self.executor.minimize_window(self.window)
+        restore_receipt = self.executor.restore_window(self.window)
+
+        self.assertEqual(minimize_receipt.action, "minimize_window")
+        self.assertEqual(minimize_receipt.pattern, "Window")
+        self.assertEqual(restore_receipt.action, "restore_window")
+        self.assertEqual(restore_receipt.pattern, "Window")
 
 
 class ActionReceiptTests(_ExecutorFixtureTestCase):

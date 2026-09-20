@@ -420,6 +420,26 @@ class UIAutomationAdapter:
         except (ValueError, comtypes.COMError):
             return None
 
+    def window_visual_state(self, element) -> str | None:
+        """F3.1.2 Task 28 (adozione): lo stato visivo di una finestra ("normal"/"minimized"/
+        "maximized", mai l'intero opaco `UIA_WindowVisualState_*`) - il modo di VERIFICARE che
+        `ActionExecutor.minimize_window`/`restore_window` abbiano avuto un effetto reale, non solo
+        che `SetWindowVisualState` non abbia sollevato. `None` per un elemento che non supporta
+        affatto il pattern Window, stesso principio onesto di `_toggle_state_of`."""
+        try:
+            pattern = element.GetCurrentPattern(UIA.UIA_WindowPatternId)
+            if not pattern:
+                return None
+            window_pattern = pattern.QueryInterface(UIA.IUIAutomationWindowPattern)
+            state = window_pattern.CurrentWindowVisualState
+        except (ValueError, comtypes.COMError):
+            return None
+        return {
+            UIA.WindowVisualState_Normal: "normal",
+            UIA.WindowVisualState_Minimized: "minimized",
+            UIA.WindowVisualState_Maximized: "maximized",
+        }.get(state, str(state))
+
     def _toggle_state_of(self, element) -> str | None:
         """None (non una stringa a caso) per un elemento che non supporta affatto il pattern
         Toggle - stesso principio di `_selection_state_of` sotto. "on"/"off"/"indeterminate"

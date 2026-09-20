@@ -293,6 +293,26 @@ class ActionExecutor:
         pattern.Close()
         return receipt
 
+    def minimize_window(self, element) -> ElementActionReceipt:
+        """F3.1.2 Task 28 (adozione - resto del pattern Window, F3.4.1): `SetWindowVisualState`
+        verso "minimizzata" - verificato funzionante contro un vero processo Qt con un probe
+        dedicato PRIMA di aggiungere questo metodo (`CurrentWindowVisualState` cambia davvero da
+        0 a 1), stesso principio di `close_window`."""
+        self._require_enabled(element)
+        pattern = self._require_pattern(element, UIA.UIA_WindowPatternId, UIA.IUIAutomationWindowPattern, "Window")
+        receipt = self._receipt("minimize_window", "Window", element)
+        pattern.SetWindowVisualState(UIA.WindowVisualState_Minimized)
+        return receipt
+
+    def restore_window(self, element) -> ElementActionReceipt:
+        """F3.1.2 Task 28 (adozione - resto del pattern Window): `SetWindowVisualState` verso
+        "normale" - il percorso inverso di `minimize_window`, stessa verifica empirica."""
+        self._require_enabled(element)
+        pattern = self._require_pattern(element, UIA.UIA_WindowPatternId, UIA.IUIAutomationWindowPattern, "Window")
+        receipt = self._receipt("restore_window", "Window", element)
+        pattern.SetWindowVisualState(UIA.WindowVisualState_Normal)
+        return receipt
+
     def _receipt(self, action: str, pattern_name: str, element) -> ElementActionReceipt:
         name, automation_id, control_type = _element_identity(element)
         return ElementActionReceipt(
