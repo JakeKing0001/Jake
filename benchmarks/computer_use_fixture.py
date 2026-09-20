@@ -586,6 +586,29 @@ class ComputerUseFixtureWindow(QWidget):
         eighth_tab_scroll.setWidget(eighth_tab)
         self.tabs.addTab(eighth_tab_scroll, "Tab 8")
 
+        # Task 30 (F3.1.2 continua verso i 100): un `QComboBox` EDITABILE (`setEditable(True)`) -
+        # diverso da `option_combo` (Task 12, solo selezione tra opzioni fisse): qui l'utente puo'
+        # digitare un testo LIBERO non presente nell'elenco - un secondo combo DEDICATO (mai reso
+        # editabile `option_combo` stesso) per non rischiare una regressione sui test gia' verdi
+        # di Task 12, che assumono il comportamento di sola selezione.
+        ninth_tab = QWidget()
+        ninth_tab.setObjectName("fixture_tab_nine_content")
+        ninth_tab_layout = QVBoxLayout(ninth_tab)
+        self.editable_combo = QComboBox()
+        self.editable_combo.setObjectName("fixture_editable_combo")
+        self.editable_combo.setAccessibleName("Combo editabile")
+        self.editable_combo.setEditable(True)
+        self.editable_combo.addItems(["Predefinito 1", "Predefinito 2"])
+        self.editable_combo.setCurrentIndex(0)
+        ninth_tab_layout.addWidget(self.editable_combo)
+        ninth_tab_layout.addStretch()
+        ninth_tab_scroll = QScrollArea()
+        ninth_tab_scroll.setObjectName("fixture_tab_nine_scroll")
+        ninth_tab_scroll.setWidgetResizable(True)
+        ninth_tab_scroll.setMaximumHeight(120)
+        ninth_tab_scroll.setWidget(ninth_tab)
+        self.tabs.addTab(ninth_tab_scroll, "Tab 9")
+
         self.scroll_list = QListWidget()
         self.scroll_list.setObjectName("fixture_scroll_list")
         self.scroll_list.setAccessibleName("Elenco con scorrimento")
@@ -646,6 +669,17 @@ class ComputerUseFixtureWindow(QWidget):
         self.start_progress_button.setAccessibleName("Avvia progresso")
         self.start_progress_button.clicked.connect(self._start_progress)
 
+        # Task 29 (F3.1.2 continua verso i 100): un bottone "Annulla" che ferma il progresso A
+        # META' STRADA - diverso da `reset_state()` (che azzera sempre a 0): qui il valore resta
+        # DOVE si trovava, il pattern reale "interrompi un'operazione lunga senza scartare cio' che
+        # ha gia' fatto". Nella STESSA riga di `start_progress_button` (non una nuova riga) per non
+        # riaprire la lezione gia' imparata sulla crescita verticale della colonna principale
+        # (Task 16-18): un bottone in piu' nella stessa riga non cambia l'altezza totale.
+        self.cancel_progress_button = QPushButton("Annulla progresso")
+        self.cancel_progress_button.setObjectName("fixture_cancel_progress_button")
+        self.cancel_progress_button.setAccessibleName("Annulla progresso")
+        self.cancel_progress_button.clicked.connect(self._cancel_progress)
+
         self._progress_timer = QTimer(self)
         self._progress_timer.setInterval(150)
         self._progress_timer.timeout.connect(self._advance_progress)
@@ -675,7 +709,10 @@ class ComputerUseFixtureWindow(QWidget):
         layout.addLayout(ambiguous_row)
         layout.addWidget(self.option_combo)
         layout.addWidget(self.value_slider)
-        layout.addWidget(self.start_progress_button)
+        progress_buttons_row = QHBoxLayout()
+        progress_buttons_row.addWidget(self.start_progress_button)
+        progress_buttons_row.addWidget(self.cancel_progress_button)
+        layout.addLayout(progress_buttons_row)
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.reorder_list)
 
@@ -798,6 +835,7 @@ class ComputerUseFixtureWindow(QWidget):
         self.filter_input.clear()
         self._apply_filter("")
         self.multiline_edit.clear()
+        self.editable_combo.setCurrentIndex(0)
 
     def current_combo_option(self) -> str:
         """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`)."""
@@ -852,6 +890,13 @@ class ComputerUseFixtureWindow(QWidget):
         self.progress_bar.setValue(new_value)
         if new_value >= 100:
             self._progress_timer.stop()
+
+    def _cancel_progress(self) -> None:
+        """Task 29 di F3.1.2: ferma il timer SENZA azzerare il valore - il progresso resta
+        esattamente dove si trovava, diverso da `reset_state()` (che azzera sempre a 0). Fermare
+        il timer PRIMA di uscire (non dopo) e' innocuo anche se il progresso e' gia' completo o
+        non era mai stato avviato - `.stop()` su un `QTimer` non attivo non fa nulla."""
+        self._progress_timer.stop()
 
     def _show_item_context_menu(self, pos) -> None:
         """Task 13 di F3.1.2: tasto destro su un elemento della lista mostra un menu con

@@ -829,6 +829,32 @@ class ProgressBarEndToEndTests(unittest.TestCase):
         intermediate_values = {v for v in observed_values if 0.0 < v < 100.0}
         self.assertTrue(intermediate_values, f"deve passare per DEI valori intermedi reali, non saltare istantaneamente a 100: {observed_values}")
 
+    def test_cancel_mid_progress_stops_it_at_the_current_value(self):
+        """Task 29 (F3.1.2 continua verso i 100) - "Annulla" ferma il progresso a META' STRADA,
+        diverso da un reset (che azzera sempre a 0): il valore resta DOVE si trovava, verificato
+        che NON avanzi piu' anche aspettando abbastanza da completare l'intero avanzamento se il
+        timer non fosse stato fermato davvero."""
+        progress_bar = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_progress"),
+        )
+        start_button = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Avvia progresso", control_type="Button"))
+        cancel_button = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Annulla progresso", control_type="Button"))
+
+        self.executor.invoke(start_button)
+        deadline = time.monotonic() + 3.0
+        value_at_cancel = 0.0
+        while time.monotonic() < deadline:
+            value_at_cancel = self._current_progress_value(progress_bar)
+            if value_at_cancel > 0.0:
+                break
+            time.sleep(0.05)
+        self.assertGreater(value_at_cancel, 0.0, "precondizione: il progresso deve essere gia' avanzato prima di annullare")
+
+        self.executor.invoke(cancel_button)
+        time.sleep(1.5)  # abbastanza per completare l'intero avanzamento, se il timer non fosse stato fermato davvero
+
+        self.assertEqual(self._current_progress_value(progress_bar), value_at_cancel, "il valore deve restare fermo al punto dell'annullamento")
+
 
 class DragReorderEndToEndTests(unittest.TestCase):
     """Task 16 (F3.1.2 continua verso i 100) - "trascina un elemento per riordinare una lista": un
@@ -1421,6 +1447,60 @@ class MultilineEditEndToEndTests(unittest.TestCase):
             time.sleep(0.1)
             value = self.adapter.read_value(field)
         self.assertEqual(value, "riga uno\nriga due")
+
+
+class EditableComboEndToEndTests(unittest.TestCase):
+    """Task 30 (F3.1.2 continua verso i 100) - digitare testo LIBERO in un `QComboBox` editabile
+    (`editable_combo`, "Tab 9"), diverso da `option_combo` (Task 12, solo selezione tra opzioni
+    fisse). **Buco reale trovato con un probe dedicato PRIMA di scrivere questo test, non
+    ipotizzato**: `SetFocus()` sul `ComboBox` stesso NON da' il fuoco alla sua casella di testo
+    interna (digitare dopo non ha alcun effetto, verificato) - serve `SetFocus()` sul suo FIGLIO
+    `control_type='Edit'` (esposto solo quando il combo e' editabile, MAI presente per
+    `option_combo`)."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_typing_into_the_inner_edit_child_changes_the_combo_value(self):
+        import pyautogui
+        import win32gui
+
+        win32gui.SetForegroundWindow(self.window.CurrentNativeWindowHandle)
+        time.sleep(0.2)
+        tab_nine = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 9", control_type="TabItem"))
+        self.executor.select(tab_nine)
+        time.sleep(0.3)
+
+        combo = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Combo editabile"), timeout_seconds=3.0)
+        self.assertEqual(self.adapter.read_value(combo), "Predefinito 1", "precondizione: valore iniziale atteso")
+
+        edit_child = self.engine.wait_for_unique_element(combo, ElementSelector(control_type="Edit"), timeout_seconds=3.0)
+        edit_child.SetFocus()
+        pyautogui.hotkey("ctrl", "a")
+        pyautogui.write("testo libero", interval=0.02)
+
+        deadline = time.monotonic() + 2.0
+        value = self.adapter.read_value(combo)
+        while time.monotonic() < deadline and value != "testo libero":
+            time.sleep(0.1)
+            value = self.adapter.read_value(combo)
+        self.assertEqual(value, "testo libero")
 
 
 class DynamicControlEndToEndTests(unittest.TestCase):

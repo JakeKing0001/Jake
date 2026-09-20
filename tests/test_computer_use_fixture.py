@@ -56,6 +56,8 @@ class AutomationPropertiesTests(unittest.TestCase):
         self.assertEqual(window.filter_input.objectName(), "fixture_filter_input")
         self.assertEqual(window.filter_list.objectName(), "fixture_filter_list")
         self.assertEqual(window.multiline_edit.objectName(), "fixture_multiline_edit")
+        self.assertEqual(window.cancel_progress_button.objectName(), "fixture_cancel_progress_button")
+        self.assertEqual(window.editable_combo.objectName(), "fixture_editable_combo")
 
     def test_every_control_has_a_non_empty_accessible_name(self):
         window = ComputerUseFixtureWindow()
@@ -66,7 +68,8 @@ class AutomationPropertiesTests(unittest.TestCase):
             window.value_spinbox, window.radio_red, window.radio_green, window.radio_blue,
             window.progress_bar, window.start_progress_button, window.reorder_list, window.data_table,
             window.transfer_source_list, window.transfer_target_list, window.date_edit,
-            window.filter_input, window.filter_list, window.multiline_edit,
+            window.filter_input, window.filter_list, window.multiline_edit, window.cancel_progress_button,
+            window.editable_combo,
         ):
             self.assertTrue(widget.accessibleName(), f"{widget.objectName()} non ha un accessibleName")
 
@@ -653,6 +656,28 @@ class ProgressBarTests(unittest.TestCase):
 
         self.assertEqual(window.progress_bar.value(), 0, "il timer ricorrente deve essere fermato davvero, non solo il valore azzerato")
 
+    def test_cancel_stops_the_timer_without_resetting_the_value(self):
+        """Task 29 di F3.1.2 (continua verso i 100): "Annulla progresso" - diverso da
+        `reset_state()` (che azzera SEMPRE a 0): qui il valore resta esattamente dove si trovava,
+        solo il timer si ferma."""
+        window = ComputerUseFixtureWindow()
+        QTest.mouseClick(window.start_progress_button, Qt.LeftButton)
+        QTest.qWait(200)  # un solo tick (20), ancora ben lontano da 100
+        value_before_cancel = window.progress_bar.value()
+        self.assertGreater(value_before_cancel, 0, "precondizione: il progresso deve essere gia' avanzato")
+
+        QTest.mouseClick(window.cancel_progress_button, Qt.LeftButton)
+        QTest.qWait(1500)  # abbastanza per completare l'intero avanzamento, se il timer non fosse stato fermato davvero
+
+        self.assertEqual(window.progress_bar.value(), value_before_cancel, "il valore deve restare DOVE si trovava, non tornare a 0 ne' continuare")
+
+    def test_cancel_before_ever_starting_is_harmless(self):
+        window = ComputerUseFixtureWindow()
+
+        QTest.mouseClick(window.cancel_progress_button, Qt.LeftButton)
+
+        self.assertEqual(window.progress_bar.value(), 0)
+
 
 class ReorderListTests(unittest.TestCase):
     """Task 16 di F3.1.2 (continua verso i 100): `reorder_list`, riordinabile via drag-and-drop
@@ -779,6 +804,29 @@ class TransferListTests(unittest.TestCase):
 
         self.assertEqual(window.transfer_source_items(), ["Alfa", "Beta"])
         self.assertEqual(window.transfer_target_items(), [])
+
+
+class EditableComboTests(unittest.TestCase):
+    """Task 30 di F3.1.2 (continua verso i 100, in "Tab 9") - un `QComboBox` EDITABILE
+    (`setEditable(True)`), diverso da `option_combo` (Task 12, solo selezione tra opzioni fisse):
+    qui l'utente puo' digitare un testo LIBERO non presente nell'elenco."""
+
+    def test_the_initial_value_is_the_first_predefined_option(self):
+        window = ComputerUseFixtureWindow()
+        self.assertEqual(window.editable_combo.currentText(), "Predefinito 1")
+
+    def test_typing_free_text_replaces_the_current_value(self):
+        window = ComputerUseFixtureWindow()
+        window.editable_combo.setCurrentText("testo libero")
+        self.assertEqual(window.editable_combo.currentText(), "testo libero")
+
+    def test_reset_returns_to_the_first_predefined_option(self):
+        window = ComputerUseFixtureWindow()
+        window.editable_combo.setCurrentText("testo libero")
+
+        window.reset_state()
+
+        self.assertEqual(window.editable_combo.currentText(), "Predefinito 1")
 
 
 class MultilineEditTests(unittest.TestCase):

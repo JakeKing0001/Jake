@@ -5235,6 +5235,32 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   ripristina cambia davvero lo stato visivo, verificato leggendolo via UI Automation dopo ognuna;
   le ricevute nominano correttamente azione/pattern). 3.241/3.241 test, ruff verde.
 
+- `F3.1.2` (Task 29 - "annulla un'operazione lunga a meta' strada") — 20/09/2026: nuovo
+  `cancel_progress_button`, nella STESSA riga di `start_progress_button` (non una nuova riga, per
+  non riaprire la lezione sulla crescita verticale della colonna principale di Task 16-18). Ferma
+  il `QTimer` SENZA azzerare il valore - diverso da `reset_state()` (che azzera SEMPRE a 0), il
+  pattern reale "interrompi un'operazione lunga senza scartare cio' che ha gia' fatto". Prova: 2
+  test nuovi in `tests/test_computer_use_fixture.py::ProgressBarTests` (annulla ferma il timer
+  senza azzerare; annullare prima di aver mai avviato e' innocuo) + 1 test nuovo in `tests/
+  test_computer_use_integration.py::ProgressBarEndToEndTests` (annullare a meta' strada ferma
+  DAVVERO il valore li', verificato via RangeValue). 3.244/3.244 test, ruff verde.
+
+- `F3.1.2` (Task 30 - "digita testo libero in un combo editabile", in "Tab 9") — 20/09/2026:
+  nuovo `editable_combo` (`QComboBox`, `setEditable(True)`) - diverso da `option_combo` (Task 12,
+  solo selezione tra opzioni fisse); un SECONDO combo dedicato (mai reso editabile `option_combo`
+  stesso) per non rischiare una regressione sui test gia' verdi di Task 12.
+
+  **Buco reale trovato con un probe dedicato PRIMA di scrivere il test, non ipotizzato**:
+  `SetFocus()` sul `ComboBox` stesso non da' il fuoco alla sua casella di testo interna (digitare
+  dopo non ha alcun effetto) - un combo editabile espone un figlio `control_type='Edit'` (assente
+  per un combo NON editabile come `option_combo`) su cui serve `SetFocus()` esplicito.
+
+  Prova: 3 test nuovi in `tests/test_computer_use_fixture.py::EditableComboTests` (valore iniziale
+  atteso; digitare testo libero lo sostituisce; reset ripristina il valore iniziale) + 1 test
+  nuovo in `tests/test_computer_use_integration.py::EditableComboEndToEndTests` (digitare nel
+  figlio Edit cambia davvero il valore del combo, verificato con `read_value`). 3.248/3.248 test,
+  ruff verde.
+
 ### F3.2 — Windows UI Automation adapter
 
 Dipende da: F3.1.
