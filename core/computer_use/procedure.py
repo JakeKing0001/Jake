@@ -41,8 +41,10 @@ alla volta" di questa sessione):
   costruita, mai un file per nome su disco). Restano aperti "versione"/"app target"/"undo" -
   solo il nome e la lista di passi sono persistiti oggi, nessun versionamento ne' un modo di
   annullare una procedura gia' eseguita;
-- F3.8.6 (rilevare drift e sospendersi - `replay_steps` si ferma al primo fallimento, F3.5, ma non
-  distingue "l'app e' cambiata struttura" da un qualunque altro fallimento transitorio);
+- F3.8.6 (prima fetta - "rilevare drift" - CHIUSA in un incremento successivo, 20/09/2026):
+  `is_likely_drift()` - vedi il proprio docstring. Resta aperta la seconda meta' ("sospendere la
+  routine" - nessun chiamante ancora usa questo segnale per disabilitare/segnalare una procedura
+  che continua a driftare, ne' esiste un conteggio di drift consecutivi);
 - F3.8.7 (richiedere nuova approvazione se capability/impatto CAMBIANO nel tempo - `core/
   policy_engine.py` E' gia' collegato per la decisione INIZIALE, F3.4.3, ma nessun meccanismo
   rileva se il rischio di una procedura gia' approvata una volta e' aumentato da quando).
@@ -257,6 +259,31 @@ def replay_steps(
         if not result.success:
             break
     return results
+
+
+DRIFT_ERROR_CODES = frozenset({"WINDOW_NOT_FOUND", "NOT_FOUND", "AMBIGUOUS_MATCH"})
+
+
+def is_likely_drift(result: ComputerActionResult) -> bool:
+    """F3.8.6 (prima fetta - "rilevare drift"): `True` se il fallimento di `result` ha la FORMA di
+    un cambiamento strutturale dell'app (il selettore che risolveva prima non risolve piu' a
+    esattamente un elemento: finestra sparita, elemento sparito, o diventato ambiguo) - `False`
+    per qualunque altro genere di fallimento (bloccato da policy, parametro mancante, l'elemento
+    e' stato TROVATO ma l'azione e' fallita comunque a livello di esecuzione, `OPERATION_FAILED`)
+    o per un successo. Nessuna euristica su QUANTE volte il selettore ha fallito ne' un confronto
+    con un'esecuzione precedente - solo la FORMA di questo SINGOLO risultato, la stessa
+    distinzione gia' esposta da `dry_run_step` tramite `DRY_RUN_NOT_FOUND`/`DRY_RUN_AMBIGUOUS`/
+    `DRY_RUN_WINDOW_NOT_FOUND` per il percorso di verifica, qui applicata al risultato REALE di un
+    replay (`ComputerActionResult`, non `DryRunStepResult`).
+
+    Deliberatamente NON affrontata qui, la seconda meta' di F3.8.6 ("sospendere la routine invece
+    di improvvisare"): questa funzione classifica un SINGOLO risultato, non decide ne' applica
+    alcuna sospensione - un chiamante (es. una futura versione di `RunComputerProcedureSkill` che
+    disabiliti/segnali una procedura dopo N drift consecutivi) resta libero di decidere cosa fare
+    con questo segnale."""
+    if result.success or result.error is None:
+        return False
+    return result.error in DRIFT_ERROR_CODES
 
 
 DRY_RUN_WINDOW_NOT_FOUND = "WINDOW_NOT_FOUND"

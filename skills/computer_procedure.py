@@ -57,7 +57,7 @@ class RunComputerProcedureSkill:
         self.policy_engine = policy_engine
 
     def execute(self, parameters: dict = None):
-        from core.computer_use.procedure import dry_run_steps, replay_steps
+        from core.computer_use.procedure import dry_run_steps, is_likely_drift, replay_steps
         from core.computer_use.ui_automation_adapter import UIAutomationAdapter
 
         parameters = parameters or {}
@@ -90,7 +90,15 @@ class RunComputerProcedureSkill:
 
         results = replay_steps(self.computer_agent, adapter, steps, parameters=substitution_parameters)
         completed_steps = sum(1 for result in results if result.success)
+        last_result = results[-1] if results else None
+        last_failed = last_result is not None and not last_result.success
         return SkillResult(success=completed_steps == len(steps), data={
             "name": name, "completed_steps": completed_steps, "total_steps": len(steps),
-            "last_error": results[-1].error if results and not results[-1].success else None,
+            "last_error": last_result.error if last_failed else None,
+            # F3.8.6 (prima fetta - "rilevare drift"): un chiamante (es. la HUD, F4, non ancora
+            # collegata) puo' usare questo segnale per distinguere "l'app e' probabilmente
+            # cambiata struttura" (suggerisce ri-registrare la procedura) da un fallimento di
+            # altro genere (bloccato da policy, parametro mancante) - vedi core/computer_use/
+            # procedure.py::is_likely_drift.
+            "likely_drift": is_likely_drift(last_result) if last_failed else False,
         })

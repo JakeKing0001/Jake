@@ -170,12 +170,30 @@ class RunAgainstTheRealFixtureTests(unittest.TestCase):
 
         self.assertFalse(result.success)
         self.assertEqual(result.data["last_error"], "POLICY_BLOCKED")
+        self.assertFalse(result.data["likely_drift"], "un blocco di policy non e' un cambiamento strutturale dell'app")
         window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=5.0)
         engine = SelectorEngine(self.adapter)
         item_list = engine.find_unique_element(
             window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_list"),
         )
         self.assertEqual(engine.find_all(item_list, ElementSelector(control_type="ListItem")), [], "il click bloccato non deve mai raggiungere l'app")
+
+    def test_a_selector_that_no_longer_resolves_is_reported_as_likely_drift(self):
+        """F3.8.6 (adozione): una procedura registrata contro un nome di bottone che NON esiste
+        (mai esistito, non solo "cambiato") si comporta come l'app fosse cambiata struttura da
+        quando la procedura e' stata salvata - il caso motivante di `is_likely_drift`."""
+        self.procedure_manager.save("bottone_fantasma", [
+            RecordedStep(
+                action=ACTION_CLICK,
+                selector=ElementSelector(name="Questo bottone non esiste XYZ", window_title_contains="Computer Use Fixture"),
+            ),
+        ])
+
+        result = self.skill.execute({"name": "bottone_fantasma"})
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.data["last_error"], "NOT_FOUND")
+        self.assertTrue(result.data["likely_drift"])
 
 
 if __name__ == "__main__":

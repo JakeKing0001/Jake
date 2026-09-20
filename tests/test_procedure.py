@@ -10,7 +10,7 @@ import sys
 import unittest
 from pathlib import Path
 
-from core.computer_agent import ComputerAgent
+from core.computer_agent import ComputerActionResult, ComputerAgent
 from core.computer_use.browser_adapter import (
     BrowserNotFoundError,
     find_edge_executable,
@@ -29,6 +29,7 @@ from core.computer_use.procedure import (
     UnknownActionError,
     dry_run_step,
     dry_run_steps,
+    is_likely_drift,
     replay_step,
     replay_steps,
     substitute_parameters,
@@ -130,6 +131,41 @@ class SubstituteParametersTests(unittest.TestCase):
     def test_a_missing_parameter_with_no_parameters_at_all_still_raises(self):
         with self.assertRaises(MissingParameterError):
             substitute_parameters("Ciao ${nome}!", None)
+
+
+class IsLikelyDriftTests(unittest.TestCase):
+    """F3.8.6 (prima fetta - "rilevare drift"): una funzione pura su un `ComputerActionResult` gia'
+    costruito - nessuna app reale necessaria, stesso principio di `SubstituteParametersTests`."""
+
+    def test_a_successful_result_is_never_drift(self):
+        self.assertFalse(is_likely_drift(ComputerActionResult(success=True)))
+
+    def test_a_window_not_found_result_is_drift(self):
+        self.assertTrue(is_likely_drift(ComputerActionResult(success=False, error="WINDOW_NOT_FOUND")))
+
+    def test_a_not_found_result_is_drift(self):
+        self.assertTrue(is_likely_drift(ComputerActionResult(success=False, error="NOT_FOUND")))
+
+    def test_an_ambiguous_match_result_is_drift(self):
+        self.assertTrue(is_likely_drift(ComputerActionResult(success=False, error="AMBIGUOUS_MATCH")))
+
+    def test_a_policy_blocked_result_is_not_drift(self):
+        """La policy ha bloccato un click sull'elemento GIUSTO - nessun cambiamento strutturale
+        dell'app, un ri-registrare la procedura non risolverebbe nulla."""
+        self.assertFalse(is_likely_drift(ComputerActionResult(success=False, error="POLICY_BLOCKED")))
+
+    def test_an_operation_failed_result_is_not_drift(self):
+        """L'elemento e' stato TROVATO ma l'azione e' fallita a livello di esecuzione - un
+        fallimento diverso da "il selettore non risolve piu'"."""
+        self.assertFalse(is_likely_drift(ComputerActionResult(success=False, error="OPERATION_FAILED")))
+
+    def test_a_missing_parameter_result_is_not_drift(self):
+        self.assertFalse(is_likely_drift(ComputerActionResult(success=False, error="MISSING_PARAMETER")))
+
+    def test_a_failed_result_without_an_error_code_is_not_drift(self):
+        """Caso limite difensivo - non dovrebbe accadere per un `ComputerActionResult` reale, ma
+        `error=None` non deve mai essere interpretato come un codice di drift per coincidenza."""
+        self.assertFalse(is_likely_drift(ComputerActionResult(success=False, error=None)))
 
 
 class ReplayAgainstTheRealFixtureTests(unittest.TestCase):

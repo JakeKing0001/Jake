@@ -6620,6 +6620,33 @@ Criterio di uscita: una procedura dimostrata sopravvive a riavvio, resize e dati
   il replay, non solo l'assenza di eccezioni) + `core/computer_use/procedure.py` documenta la
   scoperta nel proprio docstring di modulo. 3.132/3.132 test, ruff verde.
 
+- `F3.8.6` (prima fetta - "rilevare drift") — 20/09/2026: nuovo
+  `core/computer_use/procedure.py::is_likely_drift()`. `ComputerActionResult.error` gia' distingue
+  per codice un fallimento "il selettore non risolve piu'" (`WINDOW_NOT_FOUND`/`NOT_FOUND`/
+  `AMBIGUOUS_MATCH`, gia' emessi da `ComputerAgent.click_element`/`type_into_element`, F3.4.2) da
+  un fallimento di altro genere (`POLICY_BLOCKED`/`CONFIRMATION_REQUIRED`/`AUTH_REQUIRED`,
+  `MISSING_PARAMETER`, o l'elemento e' stato TROVATO ma l'azione e' fallita comunque a livello di
+  esecuzione, `OPERATION_FAILED`) - `is_likely_drift()` rende questa distinzione GIA' presente
+  esplicita e riusabile, invece di lasciare a ogni chiamante la propria lista di codici a memoria.
+
+  Collegata in `skills/computer_procedure.py::RunComputerProcedureSkill.execute()`: un fallimento
+  del replay ora porta anche `data["likely_drift"]` (`bool`), cosi' un chiamante futuro (es. la
+  HUD, F4, non ancora collegata) puo' distinguere "questa procedura probabilmente non funziona
+  piu' perche' l'app e' cambiata" da un blocco di policy o un parametro mancante, senza dover
+  reimplementare la stessa classificazione.
+
+  Deliberatamente NON affrontata qui, la seconda meta' di F3.8.6 ("sospendere la routine invece di
+  improvvisare"): nessun contatore di drift consecutivi ne' alcuna disabilitazione automatica di
+  una procedura - `is_likely_drift()` classifica un SINGOLO risultato, la decisione su COSA fare
+  con quel segnale resta interamente del chiamante, dichiarata onesta come lavoro futuro invece di
+  una scelta implicita nascosta in questo incremento.
+
+  Prova: 8 test unitari nuovi in `tests/test_procedure.py::IsLikelyDriftTests` (ogni codice
+  d'errore reale gia' emesso da `ComputerAgent`, un successo, e un caso limite `error=None`) + 1
+  test end-to-end nuovo in `tests/test_computer_procedure_skill.py` (un bottone mai esistito
+  attraverso la skill vera produce `likely_drift=True`) + il test gia' esistente per un blocco di
+  policy esteso con `likely_drift=False`. 3.141/3.141 test, ruff verde.
+
 ### Gate F3
 
 - ≥ 90% su 100 task fixture;
