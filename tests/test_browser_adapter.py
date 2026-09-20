@@ -174,6 +174,98 @@ class RealBrowserFixtureTests(unittest.TestCase):
         self.assertIn("Password", text, "l'ETICHETTA del campo password e' testo pubblico, deve comparire")
         self.assertNotIn("segreto123", text, "il VALORE vero del campo password non deve mai comparire nel testo estratto")
 
+    def test_copying_from_a_real_password_field_never_reaches_the_clipboard(self):
+        """F3.6.7 (resto - "redigere... via clipboard", CHIUDE la meta' clipboard): verificato
+        DAVVERO con un click+Ctrl+A+Ctrl+C reali su un campo password vero, non assunto dalla
+        documentazione - un controllo POSITIVO sullo stesso meccanismo contro il campo NORMALE
+        (che DEVE funzionare) prova che il fallimento sul campo password non e' un bug del test
+        stesso (mouse/focus che non arrivano affatto), lo stesso principio "controllo positivo
+        indipendente" gia' seguito da `tests/test_ui_automation_adapter.py::
+        ScopeLimitedToTargetWindowTests`.
+
+        **Muta la clipboard REALE del sistema, deliberatamente** (nessun altro modo onesto di
+        verificare questo - la clipboard e' uno stato globale del desktop, non isolato per
+        processo come la finestra del browser) - il contenuto originale e' salvato e RIPRISTINATO
+        in un blocco `finally`, stesso principio "chi muta uno stato condiviso lo ripristina" gia'
+        seguito per i processi/profili lanciati in questa sessione."""
+        import time
+
+        import pyautogui
+        import pyperclip
+        import win32api
+        import win32con
+        import win32gui
+
+        document = find_page_document(self.adapter, self.window)
+        engine = SelectorEngine(self.adapter)
+
+        def _select_all_and_copy(automation_id: str, marker: str) -> str:
+            element = engine.find_unique_element(document, ElementSelector(automation_id=automation_id))
+            rect = element.CurrentBoundingRectangle
+            win32gui.SetForegroundWindow(self.window.CurrentNativeWindowHandle)
+            time.sleep(0.3)
+            win32api.SetCursorPos(((rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2))
+            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+            time.sleep(0.3)
+            pyperclip.copy(marker)
+            pyautogui.hotkey("ctrl", "a")
+            time.sleep(0.2)
+            pyautogui.hotkey("ctrl", "c")
+            time.sleep(0.3)
+            return pyperclip.paste()
+
+        original_clipboard = pyperclip.paste()
+        try:
+            self.agent = ComputerAgent()
+            self.agent.type_into_element("testo copiabile", root=document, automation_id="fixture-input")
+
+            control_result = _select_all_and_copy("fixture-input", "MARCATORE_CONTROLLO")
+            self.assertEqual(control_result, "testo copiabile", "il controllo positivo deve dimostrare che click+Ctrl+A+Ctrl+C funzionano davvero")
+
+            password_result = _select_all_and_copy("fixture-password", "MARCATORE_PASSWORD")
+            self.assertEqual(
+                password_result, "MARCATORE_PASSWORD",
+                "Ctrl+C su un campo password non deve MAI cambiare la clipboard - Chromium blocca la copia, non solo maschera il valore",
+            )
+            self.assertNotIn("segreto123", password_result)
+        finally:
+            pyperclip.copy(original_clipboard)
+
+    def test_ocr_of_a_real_screenshot_never_exposes_the_password_value(self):
+        """F3.6.7 (resto - "redigere... via OCR", CHIUDE F3.6.7 per intero): verificato con uno
+        screenshot REALE dello schermo intero (mai un ritaglio piccolo - buco reale trovato
+        investigando: l'API OCR di Windows usata da `core/vision/screen.py::read_screen_text` non
+        restituisce nulla su un ritaglio di poche decine di pixel, un limite dell'API stessa non
+        di questo modulo - verificato con un probe dedicato, non ipotizzato) - un controllo
+        POSITIVO (il testo del campo NORMALE, digitato apposta, DEVE comparire nell'OCR) prova che
+        l'OCR sta leggendo davvero lo schermo, non fallendo silenziosamente per un altro motivo."""
+        import tempfile
+
+        from core.vision.screen import capture_screenshot_image, read_screen_text
+
+        if not self._ocr_available():
+            self.skipTest("nessun motore OCR disponibile in questo ambiente")
+
+        document = find_page_document(self.adapter, self.window)
+        self.agent = ComputerAgent()
+        self.agent.type_into_element("TESTOCONTROLLOOCR", root=document, automation_id="fixture-input")
+
+        image = capture_screenshot_image()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "screen.png"
+            image.save(path)
+            text = read_screen_text(path)
+
+        self.assertIsNotNone(text)
+        self.assertIn("TESTOCONTROLLOOCR", text, "il controllo positivo deve dimostrare che l'OCR sta leggendo davvero lo schermo")
+        self.assertNotIn("segreto123", text, "il valore vero del campo password non deve mai comparire nel testo OCR")
+
+    @staticmethod
+    def _ocr_available() -> bool:
+        from core.vision.screen import ocr_available
+        return ocr_available()
+
 
 if __name__ == "__main__":
     unittest.main()

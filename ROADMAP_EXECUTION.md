@@ -4541,9 +4541,11 @@ Criterio di uscita: nessuna contaminazione di memoria o permesso tra profili nei
   (inspector HUD, fuori scope per lavoro backend)]; F3.4 chiusa per intero (F3.4.1-F3.4.7 tutti
   affrontati, F3.4.3 collegato a policy_engine con risk_intent esplicito - 19/09/2026); F3.5 chiusa
   per intero (F3.5.1-F3.5.7 tutti affrontati); F3.6
-  avviata (F3.6.1/F3.6.2 resto/F3.6.3 prima fetta/F3.6.4/F3.6.5/F3.6.7 prima fetta fatti, resta
-  F3.6.3 resto (form/tab/download-upload, upload INDAGATO ma bloccato da un limite UI Automation
-  reale)/F3.6.6/F3.6.7 resto, solo Edge - F3.8 ha inoltre verificato empiricamente che le
+  avviata (F3.6.1/F3.6.2 resto/F3.6.3 prima fetta/F3.6.4/F3.6.5/F3.6.7 CHIUSI per intero, resta
+  solo F3.6.3 resto (form/tab/download-upload, upload INDAGATO ma bloccato da un limite UI
+  Automation reale)/F3.6.6 (deliberatamente non collegata a policy - inferire rischio dal
+  contenuto violerebbe il principio "rischio dichiarato dal chiamante, mai indovinato" gia'
+  stabilito per questo progetto), solo Edge - F3.8 ha inoltre verificato empiricamente che le
   procedure funzionano gia' contro una pagina browser); F3.7 avviata (Esplora File/browser/VS
   Code/terminale fatti,
   Impostazioni/Office/media rimandati per un rischio verificato o una privacy non autorizzata,
@@ -6208,6 +6210,36 @@ Criterio di uscita: suite di siti fixture locale verde e zero injection dal cont
   - verifica il testo REALE della pagina (titolo, bottone "Aggiungi") e che il valore vero del
   campo password ("segreto123") non compaia mai, coerente con F3.6.7. `tests/test_taint.py`
   aggiornato (14 intent censiti, non piu' 13). 3.166/3.166 test, ruff verde.
+
+- `F3.6.7` (resto - "redigere... via OCR/clipboard", CHIUDE F3.6.7 per intero) — 20/09/2026:
+  indagine empirica sui due percorsi dichiarati "non verificati" (OCR/clipboard) - entrambi
+  confermati RASSICURAZIONI reali, non buchi, verificato non assunto.
+
+  **OCR**: uno screenshot REALE dello schermo intero, letto con l'API OCR gia' usata da
+  `core/vision/screen.py::read_screen_text`, non mostra MAI il testo del campo password (ne'
+  "segreto123" ne' alcun testo al posto dei puntini mascherati) - un controllo positivo su un
+  campo NORMALE (testo digitato apposta) prova che l'OCR funzionava davvero, non falliva in
+  silenzio. **Buco reale trovato investigando, non nel codice di produzione**: una prima versione
+  del test usava un RITAGLIO piccolo (solo i bounds del campo, poche decine di pixel) - l'API OCR
+  di Windows restituisce silenziosamente una stringa VUOTA su un'immagine cosi' piccola, un
+  limite reale dell'API stessa (riprodotto anche sul campo NORMALE con testo visibile, non solo
+  su quello password - la prova che non era una scoperta di sicurezza ma un test rotto). Corretto
+  passando allo screenshot INTERO.
+
+  **Clipboard**: Ctrl+C su un campo password reale non cambia AFFATTO la clipboard (verificato con
+  un click+Ctrl+A+Ctrl+C reali via `pyautogui`/`win32api`, non un mock) - Chromium BLOCCA
+  interamente la copia, non si limita a mascherare il valore copiato. Un controllo positivo sullo
+  stesso meccanismo su un campo NORMALE (che copia correttamente il testo digitato) prova che il
+  fallimento sul campo password non era un bug del test (mouse/focus mai arrivati). Questo test
+  muta la clipboard REALE del sistema, deliberatamente - il contenuto originale e' salvato e
+  ripristinato in un blocco `finally`, nessun altro modo onesto di verificare questa proprieta'
+  (la clipboard e' stato globale del desktop, non isolato per processo).
+
+  `core/computer_use/browser_adapter.py` documenta entrambe le scoperte nel proprio docstring di
+  modulo, rimuovendo la dichiarazione di gap. Prova: 2 test nuovi in
+  `tests/test_browser_adapter.py::RealBrowserFixtureTests`. Con questo, F3.6.7 e' CHIUSO per
+  intero (segnale strutturale + mascheramento del pattern Value + OCR + clipboard, tre
+  incrementi in questa sessione). 3.168/3.168 test, ruff verde.
 
 ### F3.7 — Adapter applicativi
 

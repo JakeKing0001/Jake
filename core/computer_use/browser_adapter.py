@@ -48,10 +48,22 @@ livello di UI Automation, prima che questo modulo debba fare qualunque cosa - ve
 il valore per davvero, non assunto dalla documentazione. `is_password_field()` espone il segnale
 strutturale per un chiamante che debba SAPERE se un campo e' sensibile PRIMA di interagirci (es.
 per richiedere una policy, F3.6.6/F3.4.3, non ancora collegata) - non una funzione di redazione,
-che non serve per il pattern Value (gia' mascherato dal browser). Resta NON verificato se un
-percorso diverso (OCR sullo schermo, F3.5.1 - i puntini mascherati SONO comunque testo visibile,
-solo non il valore vero) o il clipboard (se l'utente copia da un campo password) espongano il
-valore vero - entrambi fuori dallo scope di questo modulo, dichiarati non affrontati.
+che non serve per il pattern Value (gia' mascherato dal browser).
+
+**F3.6.7 (resto - OCR/clipboard, CHIUSO in un incremento successivo, 20/09/2026 - vedi
+`tests/test_browser_adapter.py::RealBrowserFixtureTests.
+test_ocr_of_a_real_screenshot_never_exposes_the_password_value`/
+`test_copying_from_a_real_password_field_never_reaches_the_clipboard`)**: entrambi i percorsi
+dichiarati "non verificati" restano RASSICURAZIONI reali, non buchi - verificato con uno
+screenshot vero e un click+Ctrl+A+Ctrl+C reali, non assunto. OCR: l'API OCR di Windows non legge
+alcun testo dai puntini mascherati del campo password (uno screenshot INTERO dello schermo,
+letto per davvero, non mostra mai "segreto123" ne' alcun testo al loro posto - un controllo
+positivo su un campo NORMALE prova che l'OCR funzionava davvero, non falliva in silenzio, e un
+ritaglio piccolo si e' rivelato un LIMITE REALE dell'API OCR stessa, non affidabile sotto una
+certa dimensione - trovato investigando, corretto usando lo screenshot intero). Clipboard:
+Chromium BLOCCA interamente la copia da un campo password (Ctrl+C non cambia affatto la
+clipboard, verificato contro un controllo positivo sullo stesso meccanismo su un campo normale,
+che copia correttamente) - non solo maschera il valore copiato, impedisce la copia stessa.
 
 **Quinta osservazione - F3.6.3, "supportare navigazione" (prima fetta, nessun codice nuovo
 necessario)**: la composizione GIA' esistente di `click_element` (F3.4.2, Invoke su un
@@ -80,7 +92,6 @@ alla volta" di questa sessione):
 - F3.6.6 (rispettare CAPTCHA/login/protezioni anti-automazione - `launch_isolated_browser` non
   tenta mai login automatico, ma non c'e' ancora una policy esplicita che lo vieti - ne'
   `is_password_field()` e' ancora collegata a nessuna decisione di policy);
-- F3.6.7 (resto - redazione per OCR/clipboard, non affrontata: vedi sopra);
 - trovare l'eseguibile del browser SOLO su Edge, un percorso fisso (`_CANDIDATE_EDGE_PATHS`) -
   Chrome/Firefox non ancora supportati, ne' un rilevamento piu' robusto del browser predefinito
   dell'utente."""
