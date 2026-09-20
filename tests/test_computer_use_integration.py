@@ -1376,6 +1376,348 @@ class CheckableListSpaceKeyKnownLimitationEndToEndTests(unittest.TestCase):
         self.assertEqual(self.adapter.describe_element(item_again).toggle_state, "off", "documenta il buco: Spazio non ha effetto reale qui, diverso da option_checkbox (Task 37)")
 
 
+class MoreKeyboardShortcutsAcrossFieldsEndToEndTests(unittest.TestCase):
+    """Task 71-78 (F3.1.2 continua verso i 100) - un ultimo lotto di scorciatoie da tastiera su
+    campi gia' esistenti, tutte verificate con un probe combinato PRIMA di questi test."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.computer_agent = ComputerAgent()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def test_page_up_and_up_on_a_fresh_date_edit_change_the_year_section(self):
+        """Task 71: **buco reale trovato con un probe dedicato, non ipotizzato** - con
+        `setDisplayFormat("yyyy-MM-dd")`, la sezione ANNO e' la prima da sinistra: il fuoco da
+        tastiera atterra li' per default (mai sul giorno), quindi PageUp/Su cambiano l'ANNO
+        (rispettivamente di un decennio e di un anno), non il giorno come nel popup calendario
+        (Task 22)."""
+        import pyautogui
+
+        tab_six = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 6", control_type="TabItem"))
+        self.executor.select(tab_six)
+        date_edit = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Selettore data"), timeout_seconds=3.0)
+        self.assertEqual(self.adapter.read_value(date_edit), "2026-01-15")
+        date_edit.SetFocus()
+
+        pyautogui.press("pageup")
+        deadline = time.monotonic() + 2.0
+        value = self.adapter.read_value(date_edit)
+        while time.monotonic() < deadline and value != "2036-01-15":
+            time.sleep(0.1)
+            value = self.adapter.read_value(date_edit)
+        self.assertEqual(value, "2036-01-15", "PageUp sulla sezione anno deve avanzare di un decennio")
+
+        pyautogui.press("up")
+        deadline = time.monotonic() + 2.0
+        value = self.adapter.read_value(date_edit)
+        while time.monotonic() < deadline and value != "2037-01-15":
+            time.sleep(0.1)
+            value = self.adapter.read_value(date_edit)
+        self.assertEqual(value, "2037-01-15", "Su sulla sezione anno deve avanzare di un anno")
+
+    def test_ctrl_a_then_delete_clears_the_numeric_field(self):
+        """Task 72."""
+        import pyautogui
+
+        tab_eleven = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 11", control_type="TabItem"))
+        self.executor.select(tab_eleven)
+        field = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Campo numerico"), timeout_seconds=3.0)
+        field.SetFocus()
+        pyautogui.write("42", interval=0.02)
+
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and self.adapter.read_value(field) != "42":
+            time.sleep(0.1)
+
+        pyautogui.hotkey("ctrl", "a")
+        pyautogui.press("delete")
+
+        deadline = time.monotonic() + 2.0
+        value = self.adapter.read_value(field)
+        while time.monotonic() < deadline and value != "":
+            time.sleep(0.1)
+            value = self.adapter.read_value(field)
+        self.assertEqual(value, "")
+
+    def test_escape_does_not_revert_freshly_typed_text_in_the_editable_combo(self):
+        """Task 73: il primo caso NEGATIVO per `editable_combo` (Task 30) - diverso da Task 26
+        (Esc annulla un'opzione evidenziata in un popup APERTO): qui nessun popup e' mai aperto,
+        si digita direttamente - Esc non ha nulla da "annullare", il testo resta."""
+        import pyautogui
+
+        tab_nine = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 9", control_type="TabItem"))
+        self.executor.select(tab_nine)
+        combo = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Combo editabile"), timeout_seconds=3.0)
+        edit_child = self.engine.wait_for_unique_element(combo, ElementSelector(control_type="Edit"), timeout_seconds=3.0)
+        edit_child.SetFocus()
+        pyautogui.hotkey("ctrl", "a")
+        pyautogui.write("cambiato", interval=0.02)
+
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and self.adapter.read_value(combo) != "cambiato":
+            time.sleep(0.1)
+
+        pyautogui.press("escape")
+        time.sleep(0.4)
+
+        self.assertEqual(self.adapter.read_value(combo), "cambiato", "senza un popup aperto, Esc non deve mai annullare il testo digitato")
+
+    def test_typing_digits_directly_sets_the_spinbox_value(self):
+        """Task 74: un'alternativa da tastiera alle frecce (Task 36) - selezionare tutto (Ctrl+A)
+        poi digitare un numero imposta il valore direttamente, senza incrementi ad uno ad uno."""
+        import pyautogui
+
+        tab_three = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 3", control_type="TabItem"))
+        self.executor.select(tab_three)
+        spinbox = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Selettore numerico"), timeout_seconds=3.0)
+        spinbox.SetFocus()
+        pyautogui.hotkey("ctrl", "a")
+        pyautogui.write("50", interval=0.02)
+
+        deadline = time.monotonic() + 2.0
+        value = self.adapter.read_value(spinbox)
+        while time.monotonic() < deadline and value != "50":
+            time.sleep(0.1)
+            value = self.adapter.read_value(spinbox)
+        self.assertEqual(value, "50")
+
+    def test_ctrl_a_then_delete_clears_the_password_field(self):
+        """Task 75: le scorciatoie di editing standard funzionano anche sotto `EchoMode.Password`
+        (Task 55/68) - la mascheratura riguarda solo la RAPPRESENTAZIONE, non l'editing."""
+        import pyautogui
+
+        tab_eleven = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 11", control_type="TabItem"))
+        self.executor.select(tab_eleven)
+        field = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Campo password"), timeout_seconds=3.0)
+        field.SetFocus()
+        pyautogui.write("segreto", interval=0.02)
+
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and self.adapter.read_value(field) != "●" * 7:
+            time.sleep(0.1)
+
+        pyautogui.hotkey("ctrl", "a")
+        pyautogui.press("delete")
+
+        deadline = time.monotonic() + 2.0
+        value = self.adapter.read_value(field)
+        while time.monotonic() < deadline and value != "":
+            time.sleep(0.1)
+            value = self.adapter.read_value(field)
+        self.assertEqual(value, "")
+
+    def test_ctrl_y_redoes_what_ctrl_z_just_undid(self):
+        """Task 76: la META' "redo" della catena di undo (Task 24 provava solo Ctrl+Z una volta) -
+        MAI provata finora: digita, cancella tutto, Ctrl+Z ripristina, Ctrl+Y rifa' la
+        cancellazione."""
+        import pyautogui
+
+        input_field = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_input"),
+        )
+        input_field.SetFocus()
+        pyautogui.write("testo originale", interval=0.02)
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and self.adapter.read_value(input_field) != "testo originale":
+            time.sleep(0.1)
+
+        pyautogui.hotkey("ctrl", "a")
+        pyautogui.press("delete")
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and self.adapter.read_value(input_field) != "":
+            time.sleep(0.1)
+
+        pyautogui.hotkey("ctrl", "z")
+        deadline = time.monotonic() + 2.0
+        value = self.adapter.read_value(input_field)
+        while time.monotonic() < deadline and value != "testo originale":
+            time.sleep(0.1)
+            value = self.adapter.read_value(input_field)
+        self.assertEqual(value, "testo originale", "Ctrl+Z deve ripristinare il testo cancellato")
+
+        pyautogui.hotkey("ctrl", "y")
+        deadline = time.monotonic() + 2.0
+        value = self.adapter.read_value(input_field)
+        while time.monotonic() < deadline and value != "":
+            time.sleep(0.1)
+            value = self.adapter.read_value(input_field)
+        self.assertEqual(value, "", "Ctrl+Y deve rifare davvero la cancellazione appena annullata")
+
+    def test_the_framework_id_is_qt_for_a_real_control(self):
+        """Task 77: `FrameworkId`, mai letta finora - una proprieta' UI Automation che identifica
+        il TOOLKIT di provenienza, utile per un chiamante che debba adattare la propria strategia
+        (es. i buchi Qt-specifici gia' documentati in questa sessione) senza indovinare dal
+        contesto."""
+        input_field = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_input"),
+        )
+        self.assertEqual(input_field.CurrentFrameworkId, "Qt")
+
+    def test_right_clicking_the_transfer_source_list_opens_no_context_menu(self):
+        """Task 78: il secondo caso NEGATIVO per un menu contestuale (dopo Task 38 su `item_list`)
+        - `transfer_source_list` (Task 20) non ha MAI avuto un menu collegato, diverso da
+        `item_list` (che ce l'ha, Task 13/63/64)."""
+        tab_five = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 5", control_type="TabItem"))
+        self.executor.select(tab_five)
+        src_list = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Elenco origine", control_type="List"), timeout_seconds=3.0)
+        bounds = self.adapter.describe_element(src_list).bounds
+        baseline = self.adapter.snapshot_win32_top_level_window_handles()
+
+        self.computer_agent.click_point(bounds[0] + bounds[2] // 2, bounds[1] + bounds[3] // 2, button="right")
+        time.sleep(0.4)
+
+        new_handles = self.adapter.snapshot_win32_top_level_window_handles() - baseline
+        self.assertEqual(len(new_handles), 0)
+
+    def test_text_pattern_confirms_ctrl_a_really_selects_everything(self):
+        """Task 79: il pattern Text, un NONO pattern MAI dichiarato/esercitato finora in questo
+        progetto (oltre a Transform, l'ottavo, Task 51-53) - una TERZA via indipendente per
+        verificare Ctrl+A (dopo `read_value`/Task 25 e la verifica visiva implicita), che legge
+        la SELEZIONE corrente come intervallo di testo, non solo il valore finale."""
+        import pyautogui
+        from comtypes.gen import UIAutomationClient as UIA
+
+        input_field = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_input"),
+        )
+        input_field.SetFocus()
+        pyautogui.write("hello world", interval=0.02)
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and self.adapter.read_value(input_field) != "hello world":
+            time.sleep(0.1)
+
+        pyautogui.hotkey("ctrl", "a")
+        time.sleep(0.3)
+
+        text_pattern = input_field.GetCurrentPattern(UIA.UIA_TextPatternId).QueryInterface(UIA.IUIAutomationTextPattern)
+        selection = text_pattern.GetSelection()
+        self.assertEqual(selection.Length, 1)
+        self.assertEqual(selection.GetElement(0).GetText(-1), "hello world")
+
+    def test_escape_does_not_clear_the_search_field(self):
+        """Task 80: il terzo caso NEGATIVO per Escape (dopo Task 26/popup e Task 49/lista) -
+        `filter_input` (Task 23) non lega affatto Escape a "svuota il filtro", solo `filter_input.
+        clear()` (via reset o cancellazione manuale) lo fa."""
+        import pyautogui
+
+        tab_seven = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 7", control_type="TabItem"))
+        self.executor.select(tab_seven)
+        field = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Campo di ricerca"), timeout_seconds=3.0)
+        field.SetFocus()
+        pyautogui.write("an", interval=0.02)
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and self.adapter.read_value(field) != "an":
+            time.sleep(0.1)
+
+        pyautogui.press("escape")
+        time.sleep(0.4)
+
+        self.assertEqual(self.adapter.read_value(field), "an", "Escape non deve mai svuotare il campo di ricerca")
+
+    def test_escape_in_the_calendar_popup_does_not_revert_the_navigated_date(self):
+        """Task 81: **buco reale trovato con un probe dedicato PRIMA di scrivere questo test - la
+        mia stessa prima ipotesi era SBAGLIATA, corretta con una misura diretta, non un'altra
+        congettura**: a differenza del popup di `option_combo` (Task 26, dove Esc annulla
+        l'opzione EVIDENZIATA senza mai applicarla), il popup calendario di `date_edit` applica la
+        data DAL VIVO man mano che si naviga con le frecce (verificato leggendo il valore MENTRE
+        il popup e' ancora aperto, gia' cambiato) - Esc chiude solo il popup, senza annullare
+        nulla."""
+        import pyautogui
+        import win32gui
+
+        win32gui.SetForegroundWindow(self.window.CurrentNativeWindowHandle)
+        time.sleep(0.2)
+        tab_six = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 6", control_type="TabItem"))
+        self.executor.select(tab_six)
+        date_edit = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Selettore data"), timeout_seconds=3.0)
+        self.assertEqual(self.adapter.read_value(date_edit), "2026-01-15")
+        left, top, width, height = self.adapter.describe_element(date_edit).bounds
+        baseline = self.adapter.snapshot_top_level_window_handles()
+
+        self.computer_agent.click_point(left + width - 12, top + height // 2)
+        self.adapter.wait_for_new_top_level_window(baseline, timeout_seconds=3.0)
+        pyautogui.press("right")
+        pyautogui.press("right")
+
+        deadline = time.monotonic() + 2.0
+        value = self.adapter.read_value(date_edit)
+        while time.monotonic() < deadline and value != "2026-01-17":
+            time.sleep(0.1)
+            value = self.adapter.read_value(date_edit)
+        self.assertEqual(value, "2026-01-17", "precondizione: la navigazione deve gia' aver applicato la data dal vivo, prima di Esc")
+
+        pyautogui.press("escape")
+        time.sleep(0.4)
+
+        self.assertEqual(self.adapter.read_value(date_edit), "2026-01-17", "Esc chiude solo il popup - la data gia' applicata dal vivo durante la navigazione NON viene annullata")
+
+    def test_the_filter_updates_incrementally_as_each_character_is_typed(self):
+        """Task 82: dimostra la natura DAL VIVO del filtro (Task 23) carattere per carattere, non
+        solo lo stato finale - digitare "m" lascia "Mela"/"Mango", digitare "ma" restringe a solo
+        "Mango"."""
+        import pyautogui
+
+        tab_seven = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 7", control_type="TabItem"))
+        self.executor.select(tab_seven)
+        field = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Campo di ricerca"), timeout_seconds=3.0)
+        filter_list = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Elenco filtrabile", control_type="List"), timeout_seconds=3.0)
+        field.SetFocus()
+
+        pyautogui.write("m", interval=0.02)
+        deadline = time.monotonic() + 2.0
+        names = {i.name for i in self.engine.find_all(filter_list, ElementSelector(control_type="ListItem"))}
+        while time.monotonic() < deadline and names != {"Mela", "Mango"}:
+            time.sleep(0.1)
+            names = {i.name for i in self.engine.find_all(filter_list, ElementSelector(control_type="ListItem"))}
+        self.assertEqual(names, {"Mela", "Mango"})
+
+        pyautogui.write("a", interval=0.02)
+        deadline = time.monotonic() + 2.0
+        names = {i.name for i in self.engine.find_all(filter_list, ElementSelector(control_type="ListItem"))}
+        while time.monotonic() < deadline and names != {"Mango"}:
+            time.sleep(0.1)
+            names = {i.name for i in self.engine.find_all(filter_list, ElementSelector(control_type="ListItem"))}
+        self.assertEqual(names, {"Mango"}, "un secondo carattere deve restringere ULTERIORMENTE, non solo confermare il primo filtro")
+
+    def test_ctrl_backspace_deletes_the_previous_word(self):
+        """Task 83: una scorciatoia OS standard mai provata finora - Ctrl+Backspace cancella
+        l'intera parola precedente, non un solo carattere come Backspace semplice."""
+        import pyautogui
+
+        input_field = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_input"),
+        )
+        input_field.SetFocus()
+        pyautogui.write("hello world", interval=0.02)
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and self.adapter.read_value(input_field) != "hello world":
+            time.sleep(0.1)
+
+        pyautogui.hotkey("ctrl", "backspace")
+
+        deadline = time.monotonic() + 2.0
+        value = self.adapter.read_value(input_field)
+        while time.monotonic() < deadline and value != "hello ":
+            time.sleep(0.1)
+            value = self.adapter.read_value(input_field)
+        self.assertEqual(value, "hello ", "Ctrl+Backspace deve cancellare l'intera parola precedente")
+
+
 class ComboBoxSelectionEndToEndTests(unittest.TestCase):
     """Task 12 (F3.1.2 continua verso i 100) - "apri un menu a tendina e scegli un'opzione":
     `QComboBox`, MAI un bersaglio in questa fixture finora - un terzo genere di controllo a

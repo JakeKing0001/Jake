@@ -5399,6 +5399,40 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   3.308/3.308 test (corsa completa, nessun fallimento sparso residuo), ruff verde. F3.1.2 e' ora
   a **70/100**.
 
+- `F3.1.2` (Task 71-80, quarto lotto) — 20/09/2026: Task 71 (**buco reale**) con
+  `displayFormat="yyyy-MM-dd")` il fuoco da tastiera su `date_edit` atterra di default sulla
+  sezione ANNO (la prima da sinistra) - PageUp/Su cambiano l'anno (decennio/anno), non il giorno
+  come nel popup calendario (Task 22); Task 72/75 Ctrl+A+Canc svuota `numeric_field`/
+  `password_field` (le scorciatoie standard funzionano anche sotto `EchoMode.Password` - la
+  mascheratura riguarda solo la rappresentazione); Task 73 (negativo) Esc NON annulla testo
+  digitato in `editable_combo` quando nessun popup e' aperto (diverso da Task 26); Task 74
+  digitare cifre dopo Ctrl+A imposta `value_spinbox` direttamente, un'alternativa alle frecce
+  (Task 36); Task 76 Ctrl+Y rifa' davvero cio' che Ctrl+Z ha appena annullato (mai provato,
+  Task 24 fermava la catena al primo Ctrl+Z); Task 77 `FrameworkId` legge "Qt" per un controllo
+  reale; Task 78 (negativo) nessun menu contestuale su `transfer_source_list` (mai collegato,
+  diverso da `item_list`); Task 79 il pattern Text, un NONO pattern mai dichiarato/esercitato
+  (oltre a Transform, l'ottavo) - `GetSelection()` conferma che Ctrl+A seleziona DAVVERO tutto il
+  testo, una terza via indipendente oltre a `read_value`; Task 80 (negativo) Esc non svuota mai
+  `filter_input` (Task 23).
+
+  10 test nuovi in `tests/test_computer_use_integration.py::MoreKeyboardShortcutsAcrossFieldsEndToEndTests`.
+  F3.1.2 e' ora a **80/100**.
+
+- `F3.1.2` (Task 81-83, resto del quarto lotto) — 20/09/2026: Task 82 il filtro (Task 23) si
+  restringe DAL VIVO carattere per carattere ("m" -> Mela/Mango, "ma" -> solo Mango, non solo lo
+  stato finale); Task 83 Ctrl+Backspace cancella l'intera parola precedente, mai provato finora.
+
+  **Task 81 - buco reale trovato con un probe dedicato, la MIA STESSA prima ipotesi era SBAGLIATA,
+  corretta con una misura diretta invece di un'altra congettura**: avevo previsto che Esc nel
+  popup calendario di `date_edit` (Task 22) si comportasse come Esc nel popup di `option_combo`
+  (Task 26, annulla l'opzione evidenziata). Verificato invece che il calendario applica la data
+  DAL VIVO man mano che si naviga con le frecce (letto il valore MENTRE il popup e' ancora
+  aperto, gia' cambiato prima di Esc) - Esc chiude solo il popup, non annulla nulla. Un contrasto
+  reale tra i due popup, non un'estensione ottimistica del comportamento gia' noto.
+
+  3 test nuovi in `MoreKeyboardShortcutsAcrossFieldsEndToEndTests` (13 in totale per Task 71-83).
+  F3.1.2 e' ora a **83/100**.
+
 ### F3.2 — Windows UI Automation adapter
 
 Dipende da: F3.1.
