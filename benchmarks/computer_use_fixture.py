@@ -91,11 +91,11 @@ esplicitamente app non-Qt reali (Esplora file, VS Code, browser, Office...)."""
 import argparse
 import sys
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QMessageBox, QPushButton, QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
-    QWidget,
+    QListWidget, QMenu, QMessageBox, QPushButton, QTabWidget, QTreeWidget, QTreeWidgetItem,
+    QVBoxLayout, QWidget,
 )
 
 # Terza fetta (albero): due categorie, due figli ciascuna - nomi stabili anche per i dati, non
@@ -230,6 +230,12 @@ class ComputerUseFixtureWindow(QWidget):
         # che ExtendedSelection continua a tracciare esattamente come prima per un click singolo
         # senza modificatori).
         self.item_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        # Task 13 (F3.1.2 continua verso i 100): un menu contestuale reale (tasto destro), mai un
+        # bersaglio in questa fixture finora - da verificare empiricamente se si comporta come il
+        # popup gia' noto di QComboBox (un discendente della finestra, Task 12) o come il dialogo
+        # nativo di Windows gia' trovato NON raggiungibile via UI Automation (F3.6.3, upload).
+        self.item_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.item_list.customContextMenuRequested.connect(self._show_item_context_menu)
 
         self.tree = QTreeWidget()
         self.tree.setObjectName("fixture_tree")
@@ -396,6 +402,19 @@ class ComputerUseFixtureWindow(QWidget):
     def current_combo_option(self) -> str:
         """Stato osservabile IN PROCESSO (stesso ripiego onesto di `list_items()`)."""
         return self.option_combo.currentText()
+
+    def _show_item_context_menu(self, pos) -> None:
+        """Task 13 di F3.1.2: tasto destro su un elemento della lista mostra un menu con
+        "Duplica" - duplicarlo aggiunge una SECONDA copia identica, l'effetto osservabile che
+        prova che l'azione del menu e' arrivata DAVVERO, non solo che il menu si sia aperto."""
+        item = self.item_list.itemAt(pos)
+        if item is None:
+            return
+        menu = QMenu(self.item_list)
+        duplicate_action = menu.addAction("Duplica")
+        chosen = menu.exec(self.item_list.mapToGlobal(pos))
+        if chosen is duplicate_action:
+            self.item_list.addItem(item.text())
 
     def _click_action_a(self) -> None:
         self.action_a_clicks += 1

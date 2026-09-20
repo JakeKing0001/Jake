@@ -639,6 +639,107 @@ class ComboBoxSelectionEndToEndTests(unittest.TestCase):
         self.assertEqual(self._current_combo_value(combo), "Opzione 1", "Invoke() su un'opzione del popup non deve mai cambiare la selezione davvero")
 
 
+class ContextMenuEndToEndTests(unittest.TestCase):
+    """Task 13 (F3.1.2 continua verso i 100) - "tasto destro, scegli una voce dal menu
+    contestuale": un `QMenu` reale (`benchmarks/computer_use_fixture.py::
+    _show_item_context_menu`, azione "Duplica" su un elemento della lista).
+
+    **Buco reale trovato investigando, non ipotizzato - lo stesso della fixture** (vedi il
+    docstring di `UIAutomationAdapter.snapshot_win32_top_level_window_handles`): un `QMenu`
+    contestuale NON compare nell'enumerazione dei figli del desktop secondo UI Automation
+    (`snapshot_top_level_window_handles`/`wait_for_new_top_level_window` non lo trovano MAI),
+    nonostante sia una finestra Win32 vera e visibile - la stessa classe di buco gia' documentata
+    per il dialogo nativo "Apri" di Windows (F3.6.3, upload), qui pero' RISOLTA: il nuovo
+    `wait_for_new_win32_window`/`element_from_handle` (F3.1.2 Task 13, adozione) trova il menu
+    passando dall'enumerazione WIN32 invece che da UI Automation, poi lo risolve in un vero
+    elemento UI Automation su cui cercare "Duplica" normalmente.
+
+    Selezionare la voce resta pero' come per Task 12 (combobox)/Task 11 (lista): un `Invoke()`
+    UIA sul `MenuItem` non ha alcun effetto reale, verificato con un probe dedicato PRIMA di
+    scrivere questo test - serve un click reale a coordinate pixel."""
+
+    def setUp(self):
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        self.addCleanup(self._terminate_process)
+        self.adapter = UIAutomationAdapter()
+        self.engine = SelectorEngine(self.adapter)
+        self.executor = ActionExecutor()
+        self.window = self.adapter.find_window_by_title(_FIXTURE_WINDOW_TITLE, timeout_seconds=15.0)
+
+    def _terminate_process(self):
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    def _add_item(self, text: str):
+        input_field = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(automation_id="QApplication.jake_fixture_window.fixture_input"),
+        )
+        add_button = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Aggiungi", control_type="Button"))
+        self.executor.set_value(input_field, text)
+        self.executor.invoke(add_button)
+        return self.engine.wait_for_unique_element(self.window, ElementSelector(name=text, control_type="ListItem"), timeout_seconds=3.0)
+
+    def test_right_click_then_pixel_click_on_duplicate_adds_a_real_second_copy(self):
+        import pyautogui
+        import win32gui
+
+        item = self._add_item("contesto A")
+        bounds = self.adapter.describe_element(item).bounds
+        win32gui.SetForegroundWindow(self.window.CurrentNativeWindowHandle)
+        time.sleep(0.2)
+
+        def _open_menu_and_click_duplicate():
+            baseline = self.adapter.snapshot_win32_top_level_window_handles()
+            pyautogui.click(bounds[0] + bounds[2] // 2, bounds[1] + bounds[3] // 2, button="right")
+            menu_window = self.adapter.wait_for_new_win32_window(baseline, timeout_seconds=3.0, process_id=self.window.CurrentProcessId)
+            duplicate = self.engine.wait_for_unique_element(menu_window, ElementSelector(name="Duplica"), timeout_seconds=2.0)
+            dbounds = self.adapter.describe_element(duplicate).bounds
+            pyautogui.click(dbounds[0] + dbounds[2] // 2, dbounds[1] + dbounds[3] // 2)
+
+        def _two_copies_exist():
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline:
+                matches = self.engine.find_all(self.window, ElementSelector(name="contesto A", control_type="ListItem"))
+                if len(matches) == 2:
+                    return True
+                time.sleep(0.1)
+            return False
+
+        outcome = try_strategies_in_order([("right_click_then_pixel_click", _open_menu_and_click_duplicate)], verify=_two_copies_exist)
+
+        self.assertTrue(outcome.succeeded, outcome.attempts)
+
+    def test_invoke_on_the_menu_item_has_no_real_effect(self):
+        """Documenta il buco esplicitamente - un `Invoke()` UIA sulla voce del menu non deve MAI
+        sembrare riuscito quando non lo e'."""
+        import pyautogui
+        import win32gui
+
+        item = self._add_item("contesto B")
+        bounds = self.adapter.describe_element(item).bounds
+        win32gui.SetForegroundWindow(self.window.CurrentNativeWindowHandle)
+        time.sleep(0.2)
+
+        baseline = self.adapter.snapshot_win32_top_level_window_handles()
+        pyautogui.click(bounds[0] + bounds[2] // 2, bounds[1] + bounds[3] // 2, button="right")
+        menu_window = self.adapter.wait_for_new_win32_window(baseline, timeout_seconds=3.0, process_id=self.window.CurrentProcessId)
+        duplicate = self.engine.wait_for_unique_element(menu_window, ElementSelector(name="Duplica"), timeout_seconds=2.0)
+
+        self.executor.invoke(duplicate)
+        time.sleep(0.3)
+        pyautogui.press("escape")
+
+        matches = self.engine.find_all(self.window, ElementSelector(name="contesto B", control_type="ListItem"))
+        self.assertEqual(len(matches), 1, "Invoke() su una voce del menu non deve mai duplicare l'elemento davvero")
+
+
 class DynamicControlEndToEndTests(unittest.TestCase):
     """Task 6/10 di F3.1.2 (F3.1.6, la parte DINAMICA mai affrontata finora - vedi
     `benchmarks/computer_use_fixture.py` per il perche' `remove_button`, gia' un "primo assaggio",

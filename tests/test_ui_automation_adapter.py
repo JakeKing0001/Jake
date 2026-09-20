@@ -266,6 +266,76 @@ class WaitForNewTopLevelWindowTests(unittest.TestCase):
                     process.kill()
 
 
+class WaitForNewWin32WindowTests(unittest.TestCase):
+    """F3.1.2 Task 13 (adozione) - il gemello WIN32 di `WaitForNewTopLevelWindowTests` sopra, vedi
+    `UIAutomationAdapter.snapshot_win32_top_level_window_handles` per il buco reale che lo motiva
+    (un `QMenu` contestuale non compare nell'enumerazione di UI Automation, ma esiste per davvero
+    secondo Win32). Stesso schema della fixture Qt gia' esistente per il caso generico "nuova
+    finestra"; il caso MOTIVANTE (un menu contestuale reale) e' dimostrato end-to-end in
+    `tests/test_computer_use_integration.py::ContextMenuEndToEndTests`, non qui - questi test
+    verificano solo il meccanismo generico di rilevamento, riusando la fixture gia' nota."""
+
+    def test_no_new_window_raises_within_the_timeout(self):
+        adapter = UIAutomationAdapter()
+        baseline = adapter.snapshot_win32_top_level_window_handles()
+        started = time.monotonic()
+
+        with self.assertRaises(WindowNotFoundError):
+            adapter.wait_for_new_win32_window(baseline, timeout_seconds=1.0)
+
+        elapsed = time.monotonic() - started
+        self.assertGreaterEqual(elapsed, 1.0, "deve rispettare davvero il timeout dato, non arrendersi prima")
+
+    def test_detects_a_real_new_window_and_resolves_it_via_element_from_handle(self):
+        adapter = UIAutomationAdapter()
+        baseline = adapter.snapshot_win32_top_level_window_handles()
+
+        process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        try:
+            window = adapter.wait_for_new_win32_window(baseline, timeout_seconds=15.0)
+            info = adapter.describe_element(window)
+            self.assertEqual(info.name, _FIXTURE_WINDOW_TITLE, "deve trovare la finestra nuova per davvero, non una qualunque")
+        finally:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+
+    def test_a_process_id_filter_ignores_a_new_window_from_a_different_process(self):
+        """A differenza del gemello UI Automation (system-wide senza alcun filtro), qui un
+        `process_id` puo' restringere la ricerca - una finestra nuova che appartiene a un
+        processo DIVERSO da quello atteso non deve mai essere restituita, deve continuare ad
+        aspettare fino al timeout."""
+        adapter = UIAutomationAdapter()
+        baseline = adapter.snapshot_win32_top_level_window_handles()
+
+        process = subprocess.Popen(
+            [sys.executable, "-m", "benchmarks.computer_use_fixture", "--auto-close-after", "30"],
+            cwd=str(_REPO_ROOT),
+        )
+        try:
+            adapter.wait_for_new_win32_window(baseline, timeout_seconds=15.0)
+            import os
+
+            started = time.monotonic()
+            with self.assertRaises(WindowNotFoundError):
+                # Il PID di QUESTO processo di test - mai il proprietario della finestra della
+                # fixture, stesso principio gia' usato per FindMatchingElementsProcessIdTests.
+                adapter.wait_for_new_win32_window(baseline, timeout_seconds=1.0, process_id=os.getpid())
+            elapsed = time.monotonic() - started
+            self.assertGreaterEqual(elapsed, 1.0)
+        finally:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+
+
 class RetryTransientComErrorTests(unittest.TestCase):
     """`_retry_transient_com_error` (adozione, motivata da un buco reale trovato in CI - vedi il
     suo docstring): a differenza del resto di questo file (dove mockare comtypes/IUIAutomation

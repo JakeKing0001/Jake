@@ -71,20 +71,26 @@ necessario)**: la composizione GIA' esistente di `click_element` (F3.4.2, Invoke
 completare e verificare una navigazione VERA (non ipotizzata - vedi
 `tests/test_browser_adapter.py::test_clicking_a_real_link_navigates_to_a_second_local_page`, che
 clicca un link verso una seconda pagina locale reale, non un'ancora "#" sulla stessa pagina, e
-verifica sia il cambio di URL sia il nuovo `Document` caricato). Form/tab/download/upload
+verifica sia il cambio di URL sia il nuovo `Document` caricato). Form/tab/download
 restano invece NON affrontati (vedi sotto) - la navigazione tramite un link e' il caso piu'
-semplice tra quelli dichiarati da F3.6.3, non l'intero sotto-punto.
+semplice tra quelli dichiarati da F3.6.3, non l'intero sotto-punto. **"Upload" (resto di F3.6.3)
+e' stato CHIUSO in un incremento successivo** (F3.1.2 Task 13, adozione - vedi il docstring di
+`UIAutomationAdapter.snapshot_win32_top_level_window_handles`/`element_from_handle`): il dialogo
+NATIVO "Apri" di Windows, prima non raggiungibile da UI Automation (buco documentato dopo
+un'indagine, mai risolto), e' ora guidabile dall'inizio alla fine (digitare il percorso, cliccare
+"Apri") tramite quella nuova coppia di metodi - verificato con un upload reale in
+`tests/test_browser_adapter.py::test_uploading_a_real_local_file_through_the_native_open_dialog`.
 
 Deliberatamente NON affrontati qui, passi successivi dichiarati (stesso principio "un incremento
 alla volta" di questa sessione):
 - F3.6.2 (resto): un vocabolario/euristica per "istruzioni dell'utente" dentro la pagina (oggi
   distingue solo chrome del browser da contenuto pagina, non contenuto pagina genuino da testo
   che TENTA di sembrare un'istruzione per l'agente);
-- F3.6.3 (resto - form/tab/download/upload con policy specifica, e navigazione diretta per URL
-  invece che tramite un link esistente sulla pagina);
-- F3.6.4 (collegamento a `core/taint.py::EXTERNAL_CONTENT_INTENTS` - nessun intent/skill ancora
-  legge testo di pagina, quindi non c'e' ancora un punto di produzione a cui collegarsi, lo stesso
-  principio gia' seguito da F1.5.1 per introdurre un pezzo alla volta);
+- F3.6.3 (resto - form/tab/download con policy specifica, e navigazione diretta per URL invece
+  che tramite un link esistente sulla pagina - "upload" e' CHIUSO, vedi sopra);
+- F3.6.4 (CHIUSO in un incremento successivo - `skills/read_web_page.py::ReadWebPageSkill`, la
+  prima skill reale a leggere testo di pagina, collegata a
+  `core/taint.py::EXTERNAL_CONTENT_INTENTS`);
 - F3.6.5 (resto - "stato controllo"/"risposta del sito": nessun codice di stato HTTP o segnale di
   caricamento ancora letto, solo il testo della barra degli indirizzi. Un vero stato HTTP
   richiederebbe Chrome DevTools Protocol, escluso per decisione esplicita con l'utente - resta

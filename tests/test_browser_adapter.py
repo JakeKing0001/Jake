@@ -266,6 +266,49 @@ class RealBrowserFixtureTests(unittest.TestCase):
         from core.vision.screen import ocr_available
         return ocr_available()
 
+    def test_uploading_a_real_local_file_through_the_native_open_dialog(self):
+        """F3.6.3 (resto - "upload", CHIUDE per intero - correzione di un'indagine precedente,
+        vedi ROADMAP_EXECUTION.md): un `<input type="file">` reale, guidato attraverso il dialogo
+        NATIVO "Apri" di Windows dall'inizio alla fine - click sul campo, digitare il percorso,
+        cliccare "Apri" - verificato che il file scelto arrivi DAVVERO alla pagina (il nome
+        compare nell'elemento osservabile), non solo che il dialogo si sia aperto e chiuso.
+
+        Reso possibile da `UIAutomationAdapter.wait_for_new_win32_window`/`element_from_handle`
+        (F3.1.2 Task 13, adozione) - il dialogo NON compare nell'enumerazione dei figli del
+        desktop secondo UI Automation (lo stesso buco gia' noto), ma la nuova coppia di metodi lo
+        risolve passando dall'enumerazione WIN32. Gli automation_id usati per l'edit del nome file
+        (`1148`) e il bottone "Apri" (`1`, disambiguato con `control_type="SplitButton"` - lo
+        stesso ID numerico e' condiviso da una riga della lista file, verificato scrivendo questo
+        test, non assunto) sono una convenzione NUMERICA stabile del dialogo comune di Windows
+        (indipendente dalla lingua, a differenza di un nome localizzato come "Apri") - verificati
+        empiricamente con un probe dedicato PRIMA di scrivere questo test, non presi dalla
+        documentazione."""
+        import tempfile
+
+        document = find_page_document(self.adapter, self.window)
+        agent = ComputerAgent()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            target_file = Path(tmp_dir) / "jake_upload_probe.txt"
+            target_file.write_text("contenuto di prova", encoding="utf-8")
+
+            baseline = self.adapter.snapshot_win32_top_level_window_handles()
+            click_result = agent.click_element(root=document, automation_id="fixture-file-input")
+            self.assertTrue(click_result.success, click_result)
+
+            dialog = self.adapter.wait_for_new_win32_window(baseline, timeout_seconds=10.0)
+            engine = SelectorEngine(self.adapter)
+            filename_edit = engine.wait_for_unique_element(dialog, ElementSelector(automation_id="1148", control_type="Edit"), timeout_seconds=5.0)
+            open_button = engine.wait_for_unique_element(dialog, ElementSelector(automation_id="1", control_type="SplitButton"), timeout_seconds=5.0)
+
+            from core.computer_use.executor import ActionExecutor
+            executor = ActionExecutor()
+            executor.set_value(filename_edit, str(target_file.resolve()))
+            executor.invoke(open_button)
+
+            matches = engine.wait_for_unique_element(document, ElementSelector(name="jake_upload_probe.txt"), timeout_seconds=5.0)
+            self.assertEqual(matches.CurrentName, "jake_upload_probe.txt")
+
 
 if __name__ == "__main__":
     unittest.main()

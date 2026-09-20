@@ -19,6 +19,13 @@ non proverebbe nulla.
 Il link (F3.6.3, "supportare navigazione") punta a `browser_fixture_page2.html` - una seconda
 pagina locale reale, non un'ancora "#" sulla stessa pagina, cosi' un test puo' verificare una
 navigazione VERA (cambio di URL/pagina), non solo che il click non abbia sollevato.
+
+Il campo file (F3.6.3 resto - "upload", CHIUSO in un incremento successivo - vedi
+core/computer_use/ui_automation_adapter.py::snapshot_win32_top_level_window_handles per il buco
+reale che ha sbloccato questa fetta, prima INDAGATA ma non completata): il gestore `change`
+mostra il nome del file scelto, la prova osservabile che il dialogo nativo "Apri" di Windows e'
+stato guidato davvero fino in fondo (percorso digitato + bottone "Apri" cliccato), non solo che
+si sia aperto.
 -->
 <html lang="it">
 <head>
@@ -32,5 +39,12 @@ navigazione VERA (cambio di URL/pagina), non solo che il click non abbia solleva
 <p id="fixture-output"></p>
 <a href="browser_fixture_page2.html" id="fixture-link">Un link di prova</a>
 <input type="password" id="fixture-password" aria-label="Password" value="segreto123">
+<input type="file" id="fixture-file-input" aria-label="Carica file">
+<p id="fixture-file-name"></p>
+<script>
+document.getElementById('fixture-file-input').addEventListener('change', function () {
+  document.getElementById('fixture-file-name').textContent = this.files.length ? this.files[0].name : '';
+});
+</script>
 </body>
 </html>

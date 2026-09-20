@@ -298,6 +298,72 @@ class UIAutomationAdapter:
                 raise WindowNotFoundError(f"nessuna nuova finestra di primo livello comparsa entro {timeout_seconds}s")
             time.sleep(0.1)
 
+    def snapshot_win32_top_level_window_handles(self) -> set[int]:
+        """F3.1.2 Task 13 (adozione) - **buco reale trovato investigando un menu contestuale Qt,
+        non ipotizzato**: `snapshot_top_level_window_handles`/`wait_for_new_top_level_window`
+        (sopra) usano `GetRootElement().FindAll(TreeScope_Children, ...)` - l'enumerazione dei
+        figli diretti del desktop secondo UI AUTOMATION stessa. Verificato che un `QMenu` (tasto
+        destro reale su un elemento della fixture) NON compare in quell'enumerazione, nonostante
+        sia una finestra Win32 VERA e visibile (confermato con `win32gui.EnumWindows`, che LA
+        trova) - la stessa identica classe di buco gia' documentata per il dialogo nativo "Apri"
+        di Windows (F3.6.3, upload, mai risolto finora). Questo metodo usa l'enumerazione WIN32
+        (mai UI Automation) proprio per raggiungere le finestre che l'altra non vede."""
+        import win32gui
+
+        handles: set[int] = set()
+
+        def _collect(hwnd, _extra):
+            if win32gui.IsWindowVisible(hwnd):
+                handles.add(hwnd)
+
+        win32gui.EnumWindows(_collect, None)
+        return handles
+
+    def wait_for_new_win32_window(
+        self, baseline_handles: set[int], timeout_seconds: float = 5.0, process_id: int | None = None,
+    ):
+        """Il gemello WIN32 di `wait_for_new_top_level_window` - vedi
+        `snapshot_win32_top_level_window_handles` per il motivo. Restituisce l'elemento UI
+        Automation gia' risolto via `element_from_handle` (F3.1.2 Task 13), non il solo HWND grezzo
+        - lo stesso contratto di `wait_for_new_top_level_window`, cosi' un chiamante non deve
+        gestire due forme diverse di "nuova finestra risolta".
+
+        `process_id` (opzionale): l'enumerazione WIN32 e' system-wide (ogni finestra visibile sul
+        desktop, non solo quelle della nostra app) - PIU' rumorosa della sola UI Automation, che in
+        pratica ha gia' mostrato riportare un insieme piu' stabile durante l'indagine che ha
+        motivato questo metodo. Filtrare per PID (F3.3.1, gia' un criterio noto altrove in questo
+        progetto) riduce il rischio di un `AmbiguousWindowError` per una finestra di un'app
+        DIVERSA comparsa per puro caso nella stessa finestra di polling."""
+        import win32process
+
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            current = self.snapshot_win32_top_level_window_handles()
+            new_handles = current - baseline_handles
+            if process_id is not None:
+                new_handles = {
+                    handle for handle in new_handles
+                    if win32process.GetWindowThreadProcessId(handle)[1] == process_id
+                }
+            if len(new_handles) > 1:
+                raise AmbiguousWindowError(
+                    f"{len(new_handles)} nuove finestre WIN32 sono comparse insieme: servono criteri piu' precisi"
+                )
+            if len(new_handles) == 1:
+                return self.element_from_handle(next(iter(new_handles)))
+            if time.monotonic() >= deadline:
+                raise WindowNotFoundError(f"nessuna nuova finestra WIN32 comparsa entro {timeout_seconds}s")
+            time.sleep(0.1)
+
+    def element_from_handle(self, hwnd: int):
+        """Risolve un HWND WIN32 grezzo (da `win32gui`, mai da UI Automation) in un vero elemento
+        UI Automation (`IUIAutomation.ElementFromHandle`) - il pezzo mancante che collega le due
+        API quando UI Automation stessa non elenca una finestra (vedi
+        `snapshot_win32_top_level_window_handles`). Verificato empiricamente con un probe dedicato
+        contro un `QMenu` reale PRIMA di scrivere questo metodo: risolve davvero l'elemento
+        `Window`/`MenuItem` corretto, non solo un puntatore vuoto."""
+        return self._uia.ElementFromHandle(hwnd)
+
     def describe_element(self, element) -> ElementInfo | None:
         """Solo l'elemento dato, senza figli (`children` resta vuoto) - vedi `describe_tree` per
         una copia ricorsiva. Proprieta' lette dal vivo (`Current*`), non da una cache (F3.2.2,

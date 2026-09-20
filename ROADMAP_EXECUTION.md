@@ -4541,12 +4541,12 @@ Criterio di uscita: nessuna contaminazione di memoria o permesso tra profili nei
   (inspector HUD, fuori scope per lavoro backend)]; F3.4 chiusa per intero (F3.4.1-F3.4.7 tutti
   affrontati, F3.4.3 collegato a policy_engine con risk_intent esplicito - 19/09/2026); F3.5 chiusa
   per intero (F3.5.1-F3.5.7 tutti affrontati); F3.6
-  avviata (F3.6.1/F3.6.2 resto/F3.6.3 prima fetta/F3.6.4/F3.6.5/F3.6.7 CHIUSI per intero, resta
-  solo F3.6.3 resto (form/tab/download-upload, upload INDAGATO ma bloccato da un limite UI
-  Automation reale)/F3.6.6 (deliberatamente non collegata a policy - inferire rischio dal
-  contenuto violerebbe il principio "rischio dichiarato dal chiamante, mai indovinato" gia'
-  stabilito per questo progetto), solo Edge - F3.8 ha inoltre verificato empiricamente che le
-  procedure funzionano gia' contro una pagina browser); F3.7 avviata (Esplora File/browser/VS
+  avviata (F3.6.1/F3.6.2 resto/F3.6.3 prima fetta e "upload"/F3.6.4/F3.6.5/F3.6.7 CHIUSI per
+  intero, resta solo F3.6.3 resto (form/tab/download - "upload" risolto via `element_from_handle`,
+  F3.1.2 Task 13)/F3.6.6 (deliberatamente non collegata a policy - inferire rischio dal contenuto
+  violerebbe il principio "rischio dichiarato dal chiamante, mai indovinato" gia' stabilito per
+  questo progetto), solo Edge - F3.8 ha inoltre verificato empiricamente che le procedure
+  funzionano gia' contro una pagina browser); F3.7 avviata (Esplora File/browser/VS
   Code/terminale fatti,
   Impostazioni/Office/media rimandati per un rischio verificato o una privacy non autorizzata,
   messaggistica non affrontata); F3.8 CHIUDE IL CERCHIO (RecordedStep/replay/dry-run/parametri/
@@ -4840,6 +4840,51 @@ Criterio di uscita: benchmark deterministico eseguibile senza toccare dati o app
   `tests/test_computer_use_fixture.py::ComboBoxTests` (opzione iniziale, elenco opzioni in
   ordine, reset torna alla prima) + `option_combo` aggiunto ai controlli gia' verificati per
   object name/accessible name non vuoti. 3.177/3.177 test, ruff verde.
+
+- `F3.1.2` (Task 13 - "tasto destro, scegli una voce dal menu contestuale") — 20/09/2026: nuovo
+  menu contestuale reale (`item_list.customContextMenuRequested`, azione "Duplica") nella fixture.
+
+  **Buco reale trovato investigando, RISOLTO in questo stesso incremento - non solo documentato**:
+  un `QMenu` contestuale (tasto destro reale) NON compare nell'enumerazione dei figli del desktop
+  secondo UI Automation (`snapshot_top_level_window_handles`/`wait_for_new_top_level_window`,
+  F3.4.7, non lo trovano MAI) - la STESSA identica classe di buco gia' documentata per il dialogo
+  nativo "Apri" di Windows (F3.6.3, upload, "mai risolto" fino a questo incremento). Verificato
+  con `win32gui.EnumWindows` che il menu esiste DAVVERO come finestra Win32 visibile - il
+  problema e' nell'enumerazione di UI Automation stessa (`GetRootElement().FindAll(TreeScope_
+  Children)`), non nel menu.
+
+  Nuovi `UIAutomationAdapter.snapshot_win32_top_level_window_handles()`/`wait_for_new_win32_
+  window()`/`element_from_handle()` (`core/computer_use/ui_automation_adapter.py`) - il gemello
+  WIN32 della coppia gia' esistente: enumera con `win32gui.EnumWindows` (mai UI Automation) per
+  trovare la finestra nuova, poi la risolve in un vero elemento UI Automation con
+  `IUIAutomation.ElementFromHandle` (mai usato prima in questo modulo) - verificato con un probe
+  dedicato PRIMA di scrivere qualunque codice: risolve DAVVERO l'elemento `Window`/`MenuItem`
+  corretto del menu, non un puntatore vuoto. `process_id` opzionale (F3.3.1, gia' un criterio noto
+  altrove) riduce il rumore di un'enumerazione system-wide, piu' ampia della sola UI Automation.
+
+  Selezionare la voce dal menu resta pero' come per Task 11/12: un `Invoke()` UIA sul `MenuItem`
+  non ha alcun effetto reale (stessa classe di buco gia' nota per `QListWidgetItem`/popup di
+  `QComboBox`) - serve un click reale a coordinate pixel, verificato con lo stesso probe.
+
+  **Conseguenza diretta - F3.6.3 "upload" CHIUSO per intero, correzione di un'indagine
+  precedente** (vedi la voce sopra "INDAGATO ma NON completato"): la nuova coppia `wait_for_new_
+  win32_window`/`element_from_handle` risolve ANCHE il dialogo nativo "Apri" di Windows, la stessa
+  identica classe di finestra invisibile a UI Automation - verificato con un upload REALE end-to-
+  end (click sul campo file, digitare il percorso nell'Edit di automation_id `1148`, cliccare il
+  bottone "Apri" di automation_id `1` - entrambi ID NUMERICI stabili del dialogo comune di
+  Windows, indipendenti dalla lingua a differenza di un nome localizzato, verificati empiricamente
+  non presi dalla documentazione - **buco reale trovato scrivendo il probe**: l'ID `1` e'
+  CONDIVISO da una riga della lista file, servito `control_type="SplitButton"` per disambiguare).
+  Nuovo campo `<input type="file">` in `benchmarks/browser_fixture.html`.
+
+  Prova: 3 test nuovi in `tests/test_ui_automation_adapter.py::WaitForNewWin32WindowTests`
+  (timeout rispettato, rileva una finestra nuova reale e la risolve, un filtro per PID ignora una
+  finestra di un processo diverso) + 2 test nuovi in
+  `tests/test_computer_use_integration.py::ContextMenuEndToEndTests` (tasto destro + click pixel
+  duplica davvero l'elemento; un `Invoke()` sulla voce del menu documenta esplicitamente il buco)
+  + 1 test nuovo in `tests/test_browser_adapter.py::RealBrowserFixtureTests` (upload reale end-to-
+  end attraverso il dialogo nativo, verificato che il nome del file arrivi davvero alla pagina).
+  3.183/3.183 test, ruff verde.
 
 ### F3.2 — Windows UI Automation adapter
 
@@ -6230,6 +6275,12 @@ Criterio di uscita: suite di siti fixture locale verde e zero injection dal cont
   pressione. F3.6.3 "download/upload" resta quindi ANCORA aperto, ora con un'indagine reale alle
   spalle invece di zero informazioni. Nessun file/test committato per questo incremento - solo
   questa voce di roadmap, coerente con "dichiarare un buco onestamente invece di forzarlo".
+
+  **Aggiornamento (stesso 20/09/2026, un incremento successivo) - l'ipotesi sopra si e' rivelata
+  CORRETTA**: `IUIAutomation::ElementFromHandle` sull'HWND trovato con Win32, esattamente come
+  ipotizzato qui, risolve davvero il dialogo - vedi la voce "F3.1.2 (Task 13...)" piu' sotto per i
+  dettagli completi (nuovi `wait_for_new_win32_window`/`element_from_handle`, un upload REALE
+  end-to-end ora funzionante e testato). "upload" e' CHIUSO per intero.
 
 - `F3.6.1` (resto - leggere il testo visibile della pagina) — 19/09/2026: nuovo
   `browser_adapter.py::read_page_text()` - cammina l'albero sotto un `Document` (F3.2,
