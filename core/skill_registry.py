@@ -18,6 +18,7 @@ from core.vision_provider import VisionProvider
 from core.planner_provider import PlannerProvider
 from core.plan_executor import PlanExecutor
 from core.workflow_manager import WorkflowManager
+from core.procedure_manager import ProcedureManager
 from core.trigger_manager import TriggerManager
 from core.reminder_manager import ReminderManager
 from core.todo_manager import TodoManager
@@ -64,6 +65,10 @@ class SkillRegistry:
         self.plan_executor = PlanExecutor(self)
         self.workflow_manager = WorkflowManager(self.memory_manager)
         self.trigger_manager = TriggerManager(self.memory_manager, self.workflow_manager)
+        # F3.8.5 (adozione): stesso principio di self.workflow_manager sopra - una procedura di
+        # computer use (F3.8) e' concettualmente "una sequenza di passi salvata con nome", solo
+        # di passi UI Automation invece che di intent/skill.
+        self.procedure_manager = ProcedureManager(self.memory_manager)
         self.reminder_manager = reminder_manager or ReminderManager()
         self.todo_manager = TodoManager()
         # F1.8.1 (ultimo pezzo, "una coda per azioni concorrenti"): vedi _resource_lock_keys() più
@@ -94,7 +99,7 @@ class SkillRegistry:
         self.skills.update(build_memory_notes_todo_skills(self.memory_manager, self.embedding_provider, self.todo_manager))
         self.skills.update(build_automation_skills(
             self.reminder_manager, self.planner_provider, self.workflow_manager,
-            self.trigger_manager, self.plan_executor,
+            self.trigger_manager, self.plan_executor, self.procedure_manager,
         ))
         self.skills.update(build_screen_input_skills(self.vision_provider))
         self.skills.update(build_media_skills())

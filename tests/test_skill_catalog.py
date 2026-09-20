@@ -32,7 +32,7 @@ def _build_all_domains() -> dict:
         "build_filesystem_skills": (fake, fake, search_files_skill),
         "build_web_skills": (fake_config, web_search_skill),
         "build_memory_notes_todo_skills": (fake, fake, fake),
-        "build_automation_skills": (fake, fake, fake, fake, fake),
+        "build_automation_skills": (fake, fake, fake, fake, fake, fake),
         "build_screen_input_skills": (fake,),
         "build_smart_home_skills": (fake_config,),
         "build_text_and_math_skills": (fake_config, fake),

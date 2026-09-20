@@ -6500,6 +6500,49 @@ Criterio di uscita: una procedura dimostrata sopravvive a riavvio, resize e dati
   procedura vuota restituisce `[]`; salvare due volte sostituisce; elenco dei nomi; nessun limite
   piu' basso nascosto per questa categoria). 3.117/3.117 test, ruff verde.
 
+- `F3.8` (CHIUDE IL CERCHIO - una vera skill Jake, `RUN_COMPUTER_PROCEDURE`, QUINTO incremento di
+  F3.8) — 20/09/2026: nuovo `skills/computer_procedure.py::RunComputerProcedureSkill`, l'esatto
+  analogo di `RunWorkflowSkill` (`skills/workflow.py`) per una procedura di F3.8 (`RecordedStep`)
+  invece che per un'automazione di skill (`PlanStep`). Motivazione: `click_element`/
+  `type_into_element`/`procedure.py` erano dichiarati "additivi, non ancora usati da nessuna
+  skill" fin dal loro stesso docstring (F3.4.2) - senza una skill reale, un utente non aveva
+  ALCUN modo di far eseguire una procedura registrata, solo di costruirla in codice Python.
+
+  Registrata in `core/skill_catalog.py::build_automation_skills` (accanto a `RUN_WORKFLOW`, lo
+  stesso dominio "esegui una sequenza salvata con nome"), con un nuovo `SkillRegistry.
+  procedure_manager` costruito in `__init__` (stesso principio di `self.workflow_manager`).
+  Classificata `RiskLevel.EXTERNAL_ACTION`/`EFFECT_CLASS_EXTERNAL` (`core/risk.py`/`core/
+  action_contracts.py`) con lo STESSO commento gia' usato per `RUN_WORKFLOW` - "esegue passi
+  salvati in precedenza, non ispezionati qui": la skill in se' non ispeziona i rischi dei singoli
+  passi, ma OGNI passo con un `risk_intent` proprio resta comunque gated singolarmente da
+  `PolicyEngine` dentro `ComputerAgent` (F3.4.3) - "eredita il rischio dei passi", non un
+  controllo doppio.
+
+  `policy_engine` iniettato DOPO la costruzione in `core/jake_core.py` (stesso identico schema
+  gia' usato per `RUN_WORKFLOW`, la stessa riga di codice copiata e adattata, non uno schema
+  nuovo) - riassegnato al `ComputerAgent` interno a OGNI `execute()` (non solo salvato come
+  attributo inerte sulla skill), cosi' un collegamento successivo di JakeCore raggiunge davvero
+  il componente che lo usa per decidere. Verificato con un test dedicato che imita esattamente
+  questo schema (`skill.policy_engine = PolicyEngine(...)` assegnato DOPO la costruzione, come
+  farebbe JakeCore) e conferma che un intent bloccato non raggiunge MAI l'app - osservato
+  direttamente sulla lista della fixture, non solo dal codice di errore restituito.
+
+  **Due censimenti da aggiornare, trovati SOLO eseguendo la suite completa, non ipotizzati**: (1)
+  `tests/test_skill_catalog.py` chiamava `build_automation_skills` con la vecchia firma a 5
+  argomenti (ora 6, per `procedure_manager`) - corretto aggiungendo il sesto argomento finto. (2)
+  `core/action_contracts.py::INTENT_EFFECT_CLASS`, un censimento SEPARATO da `core/risk.py`
+  (classifica l'EFFETTO di un intent - read/create/modify/delete/external - non il suo livello
+  di RISCHIO) con un proprio test che verifica ogni intent registrato sia censito tranne
+  un'unica eccezione dichiarata: `RUN_COMPUTER_PROCEDURE` mancava, corretto con la stessa
+  classificazione `EFFECT_CLASS_EXTERNAL` e lo stesso commento di `RUN_WORKFLOW`.
+
+  Prova: 7 test nuovi in `tests/test_computer_procedure_skill.py` (parametri mancanti; nome
+  sconosciuto; procedura vuota; una procedura salvata rigiocata per davvero attraverso la skill,
+  verificata nella lista; parametri `${nome}` sostituiti attraverso la skill; un dry-run non
+  tocca mai l'app; un `policy_engine` assegnato dopo la costruzione blocca davvero, verificato
+  osservando la lista) + verificato manualmente che `SkillRegistry()`/`list_capabilities()`
+  espongono la nuova skill correttamente. 3.124/3.124 test, ruff verde.
+
 ### Gate F3
 
 - ≥ 90% su 100 task fixture;

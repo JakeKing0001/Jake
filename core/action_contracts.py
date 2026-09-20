@@ -238,6 +238,7 @@ INTENT_EFFECT_CLASS: dict[str, str] = {
     "ROCK_PAPER_SCISSORS": EFFECT_CLASS_READ,
     "ROLL_DICE": EFFECT_CLASS_READ,
     "RUN_COMMAND": EFFECT_CLASS_EXTERNAL,
+    "RUN_COMPUTER_PROCEDURE": EFFECT_CLASS_EXTERNAL,  # esegue passi salvati in precedenza, non ispezionati qui
     "RUN_PYTHON_SCRIPT": EFFECT_CLASS_EXTERNAL,
     "RUN_WORKFLOW": EFFECT_CLASS_EXTERNAL,  # esegue passi salvati in precedenza, non ispezionati qui
     "SAVE_CONTACT": EFFECT_CLASS_CREATE,

@@ -442,6 +442,17 @@ class JakeCore:
         if run_workflow_skill is not None:
             run_workflow_skill.policy_engine = self.policy_engine
 
+        # F3.4.3/F3.8.5 (adozione, stesso identico schema di RUN_WORKFLOW appena sopra - vedi il
+        # suo commento per il perche' dell'iniezione post-costruzione): senza questo,
+        # RUN_COMPUTER_PROCEDURE eseguirebbe ogni passo con `self.policy_engine = None`
+        # (il default dichiarato in RunComputerProcedureSkill.__init__) - `ComputerAgent.
+        # _check_policy` tratta gia' onestamente un motore assente come "nessun controllo
+        # possibile" (F3.4.3, comportamento invariato per chi non lo collega), ma qui il motore
+        # ESISTE e va collegato, non lasciato assente per una dimenticanza.
+        run_computer_procedure_skill = self.skill_registry.get_skill("RUN_COMPUTER_PROCEDURE")
+        if run_computer_procedure_skill is not None:
+            run_computer_procedure_skill.policy_engine = self.policy_engine
+
         # Indici del recupero semantico: costruiti dopo che TUTTE le skill sono registrate.
         self.retriever.refresh()
         self.logger.info(
