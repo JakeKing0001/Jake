@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from core.logger import get_logger
 from core.network import is_online
-from core.voice.tts_provider import TtsProvider
+from core.voice.tts_provider import TtsProvider, scale_pcm
 
 DEFAULT_VOICE = "it-IT-DiegoNeural"
 SAMPLE_RATE = 24000
@@ -41,6 +41,8 @@ class EdgeTtsProvider(TtsProvider):
 
         self.voice = voice
         self.rate = rate
+        self._base_rate_percent = self._parse_percent(rate)
+        self.volume = 1.0
         self.pitch = pitch
         self.fallback = fallback
         self.timeout = timeout
@@ -51,6 +53,22 @@ class EdgeTtsProvider(TtsProvider):
         self._executor = ThreadPoolExecutor(max_workers=1)
         self._logger = get_logger()
         self._consecutive_failures = 0
+
+    @staticmethod
+    def _parse_percent(value: str) -> int:
+        try:
+            return int(value.strip().rstrip("%"))
+        except ValueError:
+            return 0
+
+    def set_speech_params(self, volume: float = 1.0, rate_delta_percent: int = 0) -> bool:
+        """F2.5.7. Il ritmo va al servizio (parametro rate), il volume e' un guadagno sul PCM gia'
+        decodificato; gli stessi valori passano alla voce offline di ripiego, se li supporta."""
+        self.volume = min(1.0, max(0.0, volume))
+        self.rate = f"{self._base_rate_percent + rate_delta_percent:+d}%"
+        if self.fallback is not None:
+            self.fallback.set_speech_params(volume, rate_delta_percent)
+        return True
 
     # ---- sintesi ---------------------------------------------------------------------
 
@@ -100,7 +118,7 @@ class EdgeTtsProvider(TtsProvider):
             return
         self._playing = True
         try:
-            sd.play(pcm, samplerate=SAMPLE_RATE)
+            sd.play(scale_pcm(pcm, self.volume), samplerate=SAMPLE_RATE)
             sd.wait()
         finally:
             self._playing = False

@@ -107,6 +107,10 @@ files = [
     "core/vision/screen_diff.py",
     "core/voice/utterance_segmenter.py",
     "core/voice/streaming_stt.py",
+    "core/voice/speech_text.py",
+    "core/voice/chunked_speaker.py",
+    "core/voice/voice_consent.py",
+    "core/voice/audio_profile.py",
 ]
 ignore_missing_imports = true
 no_implicit_optional = true
