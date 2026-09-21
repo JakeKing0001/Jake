@@ -285,7 +285,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F7.3` | Voice Devices | `BACKLOG` |
 | `F7.4` | Presence Runtime | `DOING` |
 | `F7.5` | Home Integration | `DOING` |
-| `F7.6` | Sync and Crypto | `BACKLOG` |
+| `F7.6` | Sync and Crypto (motore cifrato con conflitti deterministici, revoca, wipe e coda limitata il 21/09/2026; senza trasporto ne' collegamento a memoria/pairing) | `DOING` |
 | `F7.7` | Edge Devices | `BACKLOG` |
 | `F8.1` | Skill Platform | `DOING` |
 | `F8.2` | Supply-chain Security | `BACKLOG` |
@@ -9029,6 +9029,41 @@ Dipende da: F1.4 e F5.1.
 7. `F7.6.7` Limitare dimensione e retention della coda offline.
 
 Criterio di uscita: device revocato non legge nuovi dati e conflitti non perdono modifiche.
+
+- `F7.6.1`-`F7.6.7` (motore di sincronizzazione senza trasporto) — 21/09/2026: `core/sync_crypto.py`, `core/sync_engine.py`. Provato con
+  crittografia VERA (`cryptography`) e tre dispositivi che si scambiano le buste a mano; nessuna rete, nessun collegamento a
+  `MemoryManager`/companion server (le "modifiche" sono record generici entity/key/campi).
+  * `F7.6.2` — ogni dispositivo ha DUE coppie di chiavi: Ed25519 per firmare e X25519 per cifrare, mai scambiate tra loro. Una busta e'
+    cifrata per UN destinatario: chiave X25519 effimera + HKDF-SHA256 (con mittente e destinatario nel contesto) + ChaCha20-Poly1305;
+    intestazione (mittente, destinatario, profilo, numero di sequenza) autenticata E firmata: cambiare il profilo, il seq, la firma o
+    un byte del testo cifrato e' rilevato (test per ciascuno). Il relay vede solo intestazione e byte cifrati (test: nessun testo in
+    chiaro nella busta serializzata). Le chiavi private si salvano protette da DPAPI (`SecretsVault`): provato con il vault vero,
+    il file inizia con `dpapi:` e non contiene alcun campo in chiaro.
+  * `F7.6.1` — si sincronizzano configurazione (SOLO una lista di chiavi ammesse), conversazione, memoria e task; `check_syncable`
+    rifiuta PRIMA di cifrare (e di nuovo alla ricezione, contro un mittente difettoso) i ricordi `secret`, i campi con nome da segreto
+    (password, token, api_key...) e le credenziali di configurazione: un segreto non entra nemmeno nel log locale.
+  * `F7.6.3` — timestamp logico ibrido (ora, contatore, id dispositivo: un ordine TOTALE) e stato "l'ultimo scrittore vince PER CAMPO" con
+    lapidi: **tutte le 720 permutazioni di 6 modifiche in conflitto danno lo stesso stato**, ripetere una modifica non cambia nulla, due
+    dispositivi che toccano campi diversi dello stesso ricordo li conservano entrambi, e sullo stesso campo il valore PERDENTE finisce
+    in un elenco di conflitti consultabile - una modifica non sparisce senza traccia. Una cancellazione nasconde i campi scritti prima
+    e una scrittura piu' recente ricrea l'entita'.
+  * `F7.6.4` — ogni modifica dichiara un profilo; un nodo scrive solo per i suoi profili, un dispositivo riceve (e puo' scrivere) solo
+    quelli per cui il portachiavi lo autorizza: un dispositivo del figlio autorizzato per "anna" non riceve nemmeno cifrate le modifiche
+    di "davide", e un peer che prova a iniettare modifiche per un profilo non suo viene rifiutato.
+  * `F7.6.5`/`F7.6.6` — la revoca toglie il dispositivo dai destinatari: **non riceve NIENTE di nuovo** (nemmeno cifrato per lui: test
+    sulla coda), i suoi messaggi sono rifiutati e gli altri dispositivi vengono avvisati con un messaggio di revoca (poi rifiutano anche
+    loro); un id revocato non si riattiva riaggiungendolo. Il wipe remoto si accoda PRIMA della revoca e, quando il dispositivo perso
+    torna online, cancella SOLO le chiavi di Jake (file compreso), il portachiavi, lo stato replicato e la coda: un file estraneo nella
+    stessa cartella resta (test); un dispositivo cancellato non accetta piu' nulla; un wipe da un mittente sconosciuto non fa nulla.
+    **Limite dichiarato**: cio' che il dispositivo aveva gia' ricevuto prima della revoca non si puo' "ritirare"; per questo esiste il
+    wipe. Modello di fiducia: qualunque dispositivo ATTIVO puo' revocarne un altro (sono tutti del proprietario).
+  * `F7.6.7` — coda per destinatario limitata per numero, byte ed eta'; ogni scarto segna il destinatario `needs_full_resync` e al ritorno
+    `snapshot_for` manda lo STATO completo (campi vivi e lapidi, a blocchi di 100, solo dei profili autorizzati) invece di una storia con
+    dei buchi: provato con un dispositivo tardivo che ricostruisce esattamente lo stato di A, cancellazioni comprese.
+  Non affrontato: trasporto reale (companion/relay), scambio delle chiavi pubbliche dentro il pairing (`core/pairing_service.py` oggi non le
+    porta), mappatura modifiche <-> righe di `MemoryManager`/todo, persistenza di `_seen` (dopo un riavvio una busta ripetuta si
+    riapplica: innocuo per l'idempotenza ma riappare tra i conflitti), rotazione delle chiavi del dispositivo. Prova: 56 test in
+    `tests/test_sync.py`; due moduli nel mypy selettivo.
 
 ### F7.7 — Wearable e auto
 
