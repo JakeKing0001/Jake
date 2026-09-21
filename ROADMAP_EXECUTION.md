@@ -275,7 +275,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F5.7` | Privacy Engineering (libreria completa il 21/09/2026: ricerca/spiegazione, modifica, cancellazione con ricevuta e residui, purge, export, backup cifrato, retention per profilo; non ancora esposta come skill/HUD) | `DOING` |
 | `F6.1` | Proactivity Platform | `DOING` |
 | `F6.2` | Proactivity Quality | `DOING` |
-| `F6.3` | Notification UX | `BACKLOG` |
+| `F6.3` | Notification UX (F6.3.1-F6.3.9 il 21/09/2026 come libreria di decisione con test; nessun collegamento a NotificationCenter/JakeCore, nessuna consegna reale) | `DOING` |
 | `F6.4` | Goal Runtime | `DOING` |
 | `F6.5` | Automation Runtime | `DOING` |
 | `F6.6` | Meeting Experience | `BACKLOG` |
@@ -8778,6 +8778,41 @@ Dipende da: F6.2 e F4.
 Criterio di uscita: < 1 interruzione irrilevante al giorno nel pilot e nessun leak cross-device;
 quiet mode, scelta del device, mancata risposta e fallback sono verificati. La decisione di
 contatto si testa in F6; notifica/call reali richiedono F7.2/F7.3 e scenario S8.
+
+- `F6.3.1`-`F6.3.9` (decisione e misura; nessuna consegna reale) — 21/09/2026, `core/notification_policy.py` (SOPRA la matrice
+  di `NotificationCenter`, che non e' toccata):
+  * `F6.3.1` — priorita' 0-100: base per tipo (promemoria 70, automazione 50, avviso 30), +25 per un contatto VIP, moltiplicatore
+    del feedback, fino a +30 per l'anzianita' in coda; ogni modalita' ha una SOGLIA per interrompere (normale 0, gioco 60, studio 65,
+    non disturbare 80, sonno 90, riunione 101 = nulla salvo critico). Una decisione e' sempre `deliver_now`/`queue` con la RAGIONE
+    in chiaro ("priorita' 30 sotto la soglia 65 della modalita' study"). Un promemoria vale 70: passa in studio, non in sonno.
+  * `F6.3.2` — quiet hours a cavallo di mezzanotte (la piu' severa tra modalita' e quiet hours vince); un evento CRITICO passa
+    ovunque ma in riunione/sonno/quiet hours va sullo SCHERMO, in silenzio, mai a voce. **La criticita' la dichiara il produttore**
+    (`critical=True`) o un contatto in `critical_contacts`: non si indovina dal testo (stesso principio "rischio dichiarato, non
+    inferito" del resto del progetto). Device target: il dispositivo attivo, poi il telefono, poi uno qualunque online; un target
+    dichiarato offline NON viene sostituito di nascosto (la notifica resta in coda invece di finire su un altro dispositivo);
+    contenuto non pubblico mai su un dispositivo senza schermo privato; l'orologio e' sempre schermo.
+  * `F6.3.3`/`F6.3.7` — coda -> UN digest raggruppato per tipo, ordinato per priorita', con i doppioni contati ("3 ripetute non
+    contate") e solo le prime tre nominate; uscendo da una modalita' restrittiva esce cio' che ora supera la soglia. Contro la
+    starvation: l'anzianita' alza la priorita', `due_for_release` fa uscire dopo `max_wait_s` anche in modalita' restrittiva
+    (tranne in riunione, dove escono alla fine), la coda ha un limite e l'eccedenza NON si perde (finisce nel digest); anche
+    l'eccedenza ha un tetto (500) e il digest dice quante notifiche non ha conservato invece di tacerlo. Bug trovato dal test:
+    la prima versione riscriveva l'eccedenza a ogni inserimento (4 su 8 notifiche perse).
+  * `F6.3.4` — `FeedbackStore` ("meno notifiche come questa"): dimezza il moltiplicatore di tipo+fonte a ogni richiesta (mai sotto
+    0,15), decade verso 1 con emivita di 30 giorni, e' reversibile (`undo`), persistente su file, non tocca le altre fonti e **non
+    puo' silenziare un evento critico** (test con 10 richieste in riunione).
+  * `F6.3.5` — contenuto NON dichiarato pubblico su uno speaker condiviso: a voce solo "Hai una notifica privata: i dettagli sono
+    sullo schermo", i dettagli restano nel testo per lo schermo; `unknown` (default) si tratta come privato su speaker condiviso e
+    come normale su un dispositivo personale; vale anche per un allarme critico non pubblico.
+  * `F6.3.6` — `RelevanceTracker`: interruzioni, irrilevanti (l'utente non ha agito), tasso di rilevanza, irrilevanti al giorno e le
+    fonti peggiori - il criterio di uscita "< 1 irrilevante al giorno" e' ora esprimibile e misurabile; il dato vero richiede il pilot.
+  * `F6.3.8`/`F6.3.9` — `ProactiveContact.plan`: briefing con task, situazione, azioni GIA' verificate e decisione richiesta; urgenza
+    bassa o nessun dispositivo online -> digest; urgente e chiamata consentita -> `call` con cooldown; altrimenti notifica, con
+    cooldown anti-insistenza sullo stesso task; `record_call_outcome` (rifiutata / nessuna risposta / dispositivo offline) ricade
+    SEMPRE su notifica con cooldown, non richiama nemmeno dopo il cooldown (limite di tentativi) e `PSTN_ESCALATION_ALLOWED` e'
+    `False`: nessuna escalation automatica alla rete telefonica (test). Le chiamate sono spente di default (`allow_calls=False`).
+  Non affrontato: collegamento a `JakeCore.notify`/`NotificationCenter` (oggi la policy e' una libreria: chi produce notifiche
+  non dichiara ancora `critical`/`sensitivity`), rilevamento reale di dispositivo attivo/speaker condiviso (dipende da F7), consegna
+  di notifica/call (F7.2/F7.3), misura nel pilot. Prova: 63 test in `tests/test_notification_policy.py`; modulo nel mypy selettivo.
 
 ### F6.4 — Commitment e goal manager
 
