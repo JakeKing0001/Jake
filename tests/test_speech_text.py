@@ -2,7 +2,7 @@
 import unittest
 
 from core.voice.speech_text import (
-    CODE_OMITTED, STYLES, apply_style, clean_for_speech, split_prosodic, split_sentences,
+    CODE_OMITTED, STYLES, apply_style, clean_for_speech, prepare_for_speech, split_prosodic, split_sentences,
 )
 
 
@@ -154,6 +154,30 @@ class StyleTests(unittest.TestCase):
         units = list(self.UNITS)
         apply_style(units, STYLES["brief"])
         self.assertEqual(units, self.UNITS)
+
+
+class PrepareForSpeechTests(unittest.TestCase):
+    LONG = "Prima frase abbastanza lunga qui. Seconda frase altrettanto lunga qui. Terza frase ancora piu' lunga qui."
+
+    def test_plain_text_passes_through_unchanged(self):
+        self.assertEqual(prepare_for_speech("Sono le dieci e mezza."), "Sono le dieci e mezza.")
+
+    def test_markdown_is_cleaned_and_the_result_is_one_single_text(self):
+        self.assertEqual(prepare_for_speech("Questo e' **molto** importante, davvero."), "Questo e' molto importante, davvero.")
+
+    def test_a_style_limits_the_units_and_adds_the_note(self):
+        result = prepare_for_speech(self.LONG, STYLES["brief"])
+        self.assertTrue(result.startswith("Prima frase"))
+        self.assertNotIn("Terza", result)
+        self.assertTrue(result.endswith("Il resto e' a schermo."))
+
+    def test_empty_or_markup_only_text_gives_an_empty_string(self):
+        self.assertEqual(prepare_for_speech(""), "")
+        self.assertEqual(prepare_for_speech("   \n  "), "")
+        self.assertEqual(prepare_for_speech("---"), "")
+
+    def test_a_code_only_answer_becomes_the_single_notice(self):
+        self.assertEqual(prepare_for_speech("```python\nprint(1)\n```"), CODE_OMITTED)
 
 
 if __name__ == "__main__":

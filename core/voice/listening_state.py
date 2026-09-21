@@ -50,10 +50,10 @@ class ListeningStateMachine:
         self.command_wait_s = self.COMMAND_WAIT_SECONDS if command_wait_s is None else command_wait_s
         self.follow_up_s = self.FOLLOW_UP_SECONDS if follow_up_s is None else follow_up_s
         self.confirmation_wait_s = self.CONFIRMATION_WAIT_SECONDS if confirmation_wait_s is None else confirmation_wait_s
-        self._dictating = False
-        self._sleep_until = 0.0
-        self._command_until = 0.0
-        self._follow_up_until = 0.0
+        self.dictating = False
+        self.sleep_until = 0.0
+        self.command_until = 0.0
+        self.follow_up_until = 0.0
         self._pending_action = False
         self._last_state = ListeningState.WAKE
 
@@ -67,15 +67,15 @@ class ListeningStateMachine:
     def state(self) -> ListeningState:
         """Priorita': SLEEP > DICTATION > COMMAND > FOLLOW_UP > CONFIRMATION > WAKE."""
         now = self._clock()
-        if now < self._sleep_until:
+        if now < self.sleep_until:
             return ListeningState.SLEEP
-        if self._dictating:
+        if self.dictating:
             return ListeningState.DICTATION
-        if now < self._command_until:
+        if now < self.command_until:
             return ListeningState.COMMAND
-        if now < self._follow_up_until:
+        if now < self.follow_up_until:
             return ListeningState.FOLLOW_UP
-        if self._pending_action and now < self._follow_up_until + self.confirmation_wait_s:
+        if self._pending_action and now < self.follow_up_until + self.confirmation_wait_s:
             return ListeningState.CONFIRMATION
         return ListeningState.WAKE
 
@@ -95,35 +95,35 @@ class ListeningStateMachine:
 
     def arm_command(self) -> None:
         """Ha sentito "Jake" (o click sull'orb): la prossima frase e' un comando."""
-        self._command_until = self._clock() + self.command_wait_s
+        self.command_until = self._clock() + self.command_wait_s
         self._notify()
 
     def command_consumed(self) -> None:
         """Un comando e' stato preso in carico: chiude le finestre di comando e follow-up."""
-        self._command_until = 0.0
-        self._follow_up_until = 0.0
+        self.command_until = 0.0
+        self.follow_up_until = 0.0
         self._notify()
 
     def open_follow_up(self) -> None:
         """Dopo una risposta: per `follow_up_s` si puo' continuare senza dire "Jake". Con 0 non
         apre nulla (follow-up disattivato)."""
-        self._follow_up_until = self._clock() + self.follow_up_s if self.follow_up_s > 0 else 0.0
+        self.follow_up_until = self._clock() + self.follow_up_s if self.follow_up_s > 0 else 0.0
         self._notify()
 
     def start_dictation(self) -> None:
-        self._dictating = True
+        self.dictating = True
         self._notify()
 
     def stop_dictation(self) -> None:
-        self._dictating = False
+        self.dictating = False
         self._notify()
 
     def sleep(self, minutes: float) -> None:
-        self._sleep_until = self._clock() + max(1.0, minutes) * 60
+        self.sleep_until = self._clock() + max(1.0, minutes) * 60
         self._notify()
 
     def wake_up(self) -> None:
-        self._sleep_until = 0.0
+        self.sleep_until = 0.0
         self._notify()
 
     def tick(self) -> ListeningState:

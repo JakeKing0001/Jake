@@ -2,6 +2,7 @@ import threading
 
 from core.logger import get_logger
 from core.voice.microphone import Microphone, MicrophoneError
+from core.voice.speech_text import prepare_for_speech
 
 
 class PushToTalkSession:
@@ -21,6 +22,9 @@ class PushToTalkSession:
         self._tts_thread = None
 
     def _speak_async(self, text: str) -> None:
+        text = prepare_for_speech(text)  # F2.5.1: niente Markdown/codice letti a voce
+        if not text:
+            return
         self._interrupt_speech()
         self._tts_thread = threading.Thread(target=self.tts_provider.speak, args=(text,), daemon=True)
         self._tts_thread.start()

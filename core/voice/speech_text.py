@@ -175,3 +175,12 @@ def apply_style(units: list[str], style: SpeechStyle) -> list[str]:
     if style.trailing_note:
         kept.append(style.trailing_note)
     return kept
+
+
+def prepare_for_speech(text: str, style: SpeechStyle = STYLES["normal"]) -> str:
+    """Testo finale da dare a un provider TTS: Markdown/codice tolti (`clean_for_speech`), unita'
+    limitate dallo stile (`apply_style`), poi riunite in un unico testo. Il provider riceve UNA sola
+    chiamata: quelli che gia' preparano la frase successiva mentre suona la precedente (Edge TTS)
+    mantengono la loro fluidita', che una chiamata per unita' interromperebbe."""
+    units = apply_style(split_prosodic(clean_for_speech(text)), style)
+    return " ".join(units) if units else ""

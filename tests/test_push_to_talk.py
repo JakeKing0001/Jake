@@ -55,6 +55,33 @@ class SpeakAsyncTests(unittest.TestCase):
         tts.stop.assert_called_once()
 
 
+class SpeechPreparationTests(unittest.TestCase):
+    """F2.5.1: il push-to-talk non legge piu' Markdown ne' codice a voce."""
+
+    def test_markdown_markers_are_not_pronounced(self):
+        tts = mock.MagicMock()
+        session = _session(tts_provider=tts)
+        session._speak_async("Ho **aperto** [Spotify](https://spotify.com) per te.")
+        session._tts_thread.join(timeout=2)
+        tts.speak.assert_called_once_with("Ho aperto Spotify per te.")
+
+    def test_a_code_block_is_announced_not_read(self):
+        tts = mock.MagicMock()
+        session = _session(tts_provider=tts)
+        session._speak_async("Ecco lo script:\n```python\nprint(1)\n```")
+        session._tts_thread.join(timeout=2)
+        spoken = tts.speak.call_args.args[0]
+        self.assertNotIn("print", spoken)
+        self.assertIn("codice", spoken)
+
+    def test_text_that_is_only_markup_says_nothing(self):
+        tts = mock.MagicMock()
+        session = _session(tts_provider=tts)
+        session._speak_async("   ")
+        self.assertIsNone(session._tts_thread)
+        tts.speak.assert_not_called()
+
+
 class InterruptSpeechTests(unittest.TestCase):
     def test_no_active_thread_does_nothing(self):
         tts = mock.MagicMock()
