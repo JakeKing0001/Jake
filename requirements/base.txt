@@ -7,3 +7,6 @@ psutil==7.2.2
 pywin32==312
 pyautogui==0.9.54
 tzdata==2026.3
+# F5.7.5/F7.6: cifratura autenticata (AES-GCM) e derivazione della chiave (scrypt) per backup e sincronizzazione.
+# Libreria matura e verificata invece di crittografia scritta a mano (vedi "Decisioni tecniche" nella roadmap).
+cryptography==50.0.1

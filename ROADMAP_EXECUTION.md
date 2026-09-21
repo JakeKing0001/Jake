@@ -266,13 +266,13 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F4.6` | Trust UX (G1 superato, mai iniziato) | `READY` |
 | `F4.7` | Accessibility (G1 superato, mai iniziato) | `READY` |
 | `F4.8` | Release Engineering (G1 superato, mai iniziato) | `READY` |
-| `F5.1` | Memory Platform | `DOING` |
+| `F5.1` | Memory Platform (F5.1.1/F5.1.3-F5.1.6 il 21/09/2026: schema versionato, migrazioni transazionali con backup, metadati, recupero; resta F5.1.2 separare entita'/episodi/procedure e la prova su una copia del database reale) | `DOING` |
 | `F5.2` | Memory Platform | `DOING` |
 | `F5.3` | Knowledge Model | `DOING` |
 | `F5.4` | Memory Reliability | `DOING` |
 | `F5.5` | Retrieval Quality | `DOING` |
 | `F5.6` | Context Runtime | `DOING` |
-| `F5.7` | Privacy Engineering | `BACKLOG` |
+| `F5.7` | Privacy Engineering (libreria completa il 21/09/2026: ricerca/spiegazione, modifica, cancellazione con ricevuta e residui, purge, export, backup cifrato, retention per profilo; non ancora esposta come skill/HUD) | `DOING` |
 | `F6.1` | Proactivity Platform | `DOING` |
 | `F6.2` | Proactivity Quality | `DOING` |
 | `F6.3` | Notification UX | `BACKLOG` |
@@ -8550,6 +8550,31 @@ Dipende da: G1.
 
 Criterio di uscita: migrazione su copia del database reale verificata e ripristinabile.
 
+- `F5.1.1`, `F5.1.3`-`F5.1.6` — 21/09/2026 (`core/memory_schema.py`, integrato in `MemoryManager`):
+  * `F5.1.1` — tabella `schema_version`; migrazioni (`v1` schema di base idempotente, `v2` metadati) ciascuna in UNA
+    transazione con `BEGIN IMMEDIATE`: se solleva a meta', SQLite annulla anche il DDL (un test aggiunge una colonna e poi
+    fa fallire la migrazione: la colonna sparisce e la versione non avanza). Un database nato prima del versionamento
+    (tabella `memories` senza `schema_version`) e' trattato come versione 0 e portato avanti; provato su file costruiti
+    con lo schema VECCHIO, con e senza le colonne di Memory 2.0. PRIMA di toccare dati esistenti si crea un backup
+    consistente con l'API di backup di SQLite (mai una copia del file aperto), tenuto in `backups/` con potatura a 5.
+  * `F5.1.3` — colonne `sensitivity`, `owner`, `created_by` con default esplicito `'unknown'` (non NULL), `confidence`,
+    `valid_from`, `valid_until` nullable, `pinned`, `last_used_at`, `use_count`, piu' la tabella `memory_audit`. Il
+    "recorded time" e' `created_at`. `remember()` accetta i metadati (validati: sensibilita' in un insieme chiuso, confidenza
+    0-1, `valid_from <= valid_until`, rifiutati PRIMA di scrivere); un aggiornamento del testo NON azzera quelli scelti
+    prima; il primo autore resta l'autore; un ricordo nuovo senza autore esplicito riceve la sua fonte (user/inferred/
+    agent:x). `recall()` restituisce le stesse colonne di prima (test: stesso insieme di chiavi).
+  * `F5.1.4` — compatibilita': i vecchi ricordi ereditano `unknown`, non un valore inventato.
+  * `F5.1.5` — testati: upgrade (due generazioni di schema), **downgrade rifiutato** (`SchemaTooNewError`, il file resta
+    identico byte per byte e non si crea nessun backup), migrazione fallita, processo ucciso prima del COMMIT (il file
+    riparte dalla versione 0 con i dati intatti), database corrotto. Bug trovato scrivendo i test: un `MemoryManager` la cui
+    apertura falliva lasciava la connessione aperta, che su Windows blocca il file e impedirebbe persino il ripristino
+    da backup; ora la connessione si chiude prima di rilanciare.
+  * `F5.1.6` — `integrity_check` (PRAGMA integrity_check + foreign_key_check), `file_is_healthy`, `recover_from_backup`: un
+    file rotto e' messo da parte (`.corrupt-<ts>`, MAI cancellato), si ripristina il backup piu' recente che passa il
+    controllo (uno corrotto viene saltato per uno piu' vecchio); senza backup validi solleva `MemoryCorruptError` e il file
+    resta dov'e'. Non affrontato: "migrazione su copia del database REALE" (`data/jake_memory.db` non e' stato toccato
+    da questa sessione), collegamento del recupero all'avvio di `JakeCore`.
+
 ### F5.2 — Quattro livelli di memoria
 
 Dipende da: F5.1.
@@ -8635,6 +8660,42 @@ Dipende da: F5.1 e F4.5.
 7. `F5.7.7` Applicare retention diversa per profilo e categoria.
 
 Criterio di uscita: un ricordo può essere trovato e cancellato da tutti gli indici con prova.
+
+- `F5.7.1`-`F5.7.7` — 21/09/2026 (`core/memory_privacy.py`, `core/memory_backup.py`; libreria, non ancora esposta come
+  skill o schermata):
+  * `F5.7.1` — `MemoryPrivacyDashboard.search` (testo, categoria, fonte, sensibilita', owner, progetto, fissato, scaduti) con
+    il PERCHE' di ogni corrispondenza; `explain` racconta in italiano chi l'ha creato, da dove viene ("detto dall'utente" /
+    "dedotto da Jake" / agente), quanto e' sensibile, se scade, se e' fissato, quante volte e' stato usato, se ha un embedding.
+  * `F5.7.2`/`F5.7.3` — `edit` (cambiare il TESTO svuota l'embedding: l'indice semantico descriverebbe un testo che non c'e' piu';
+    il registro annota QUALI campi sono cambiati, mai i valori), `pin`/`unpin`, `expire` (sparisce da `recall()` ma resta
+    recuperabile), `unlink` (relazioni in entrambe le direzioni, anche per singolo predicato), `record_use` e `audit_trail`
+    (creato/aggiornato/modificato/fissato/scaduto/usato/scollegato/ripristinato, limitato a 200 eventi per ricordo).
+  * `F5.7.6` — `delete` = ricordo + relazioni + registro eventi + ogni indice DERIVATO registrato (`register_index`), con
+    ricevuta che riporta, indice per indice, se il ricordo e' ancora presente (un indice che lo tiene ancora, o che solleva,
+    rende la ricevuta `verified=False`) e un controllo dei RESIDUI: **`PRAGMA secure_delete` ora e' attivo sulla connessione**,
+    perche' senza SQLite lascia il testo di una riga cancellata nelle pagine libere del file - un test cerca i byte del valore
+    nel file prima (ci sono) e dopo (non ci sono piu'). La ricevuta contiene solo un hash della chiave. `purge_everything` richiede
+    la frase esatta "ELIMINA TUTTO", cancella ricordi/relazioni/cronologia/registro, svuota gli indici (uno senza `clear_all`
+    rende la ricevuta non verificata), esegue `VACUUM`, toglie i backup locali e verifica i byte; la ricevuta dice cosa NON puo'
+    raggiungere (export salvati altrove, promemoria/todo/workflow che non sono memoria).
+  * `F5.7.4` — export JSON (machine-readable, versionato) e Markdown (leggibile); i ricordi `secret` e gli embedding sono ESCLUSI
+    di default (un export si legge e si condivide) e la relazione che tocca un segreto esce con lui.
+  * `F5.7.5` — backup cifrato: AES-256-GCM + scrypt (n=2^15) con l'header come dati autenticati, hash SHA-256 dentro la parte
+    cifrata, scrittura atomica, nessun testo in chiaro nel file (test), passphrase >= 10 caratteri, sale e nonce casuali (due
+    backup degli stessi dati differiscono). Passphrase errata e file manomesso sono indistinguibili di proposito
+    (`BackupAuthError`); file troncato o estraneo = `BackupCorruptError`; un header ostile che chiede n=2^28 e' rifiutato prima di
+    allocare memoria. Restore SELETTIVO per categorie e/o chiavi, relazioni ripristinate solo se entrambi i capi lo sono,
+    conflitti `skip` (default, mai sovrascrive in silenzio) / `overwrite` / `newer`. **Nuova dipendenza dichiarata**:
+    `cryptography==50.0.1` in `requirements/base.txt` e `requirements/all.lock.txt` rigenerato con pip-compile e hash
+    (diff: solo `cryptography` piu' l'annotazione "via" di `cffi`) - libreria matura invece di crittografia scritta a mano, come
+    chiede la roadmap.
+  * `F5.7.7` — `RetentionPolicy` per categoria e per sensibilita' (vince la regola piu' BREVE), `default_days`, `history_days`;
+    `apply_retention` e' un'ANTEPRIMA per default (`dry_run=True`), esclude i ricordi fissati, cancella con ricevuta;
+    `policy_for_profile` legge `namespace.preferences["retention"]` (profili diversi, regole diverse) e un ospite non ne ha.
+  Non affrontato: skill/HUD per usare la dashboard, registrazione automatica degli indici reali (NEST, esempi imparati) in
+  `register_index`, `record_use` chiamato dal percorso di risposta (oggi nessuno lo chiama: `use_count` resta 0 finche' non lo
+  si collega), "restore selettivo" da HUD. Prova: 25 test in `tests/test_memory_schema.py` (+ i 76 esistenti su memoria/trigger/
+  workflow/privacy invariati) e 53 in `tests/test_memory_privacy_backup.py`; tre moduli nel mypy selettivo.
 
 ### Gate G3 — Contesto affidabile
 
