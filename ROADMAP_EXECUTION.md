@@ -244,7 +244,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F1.7` | Observability | `DONE` |
 | `F1.8` | Runtime Reliability | `DONE` |
 | `F2.1` | Voice Quality (F2.1.1-F2.1.6 affrontati il 21/09/2026: harness sintetico + VAD/WER offline + documento privacy; mancano solo registrazioni consensuali vere, gap dichiarato) | `DOING` |
-| `F2.2` | Speech Runtime (F2.2.1/F2.2.5 chiusi il 21/09/2026 lato segmentazione) | `DOING` |
+| `F2.2` | Speech Runtime (F2.2.1-F2.2.7 affrontati e collegati a WakeWordSession il 21/09/2026: partial su thread proprio, privacy dei sottotitoli, evento TRANSCRIPT; "partial p95 < 1 s" non misurabile senza GPU/hardware vero) | `DOING` |
 | `F2.3` | Voice Quality (F2.3.1-F2.3.7 affrontati il 21/09/2026 a livello libreria; manca il collegamento a WakeWordSession e la misura "falso wake <= 1/24 h", che richiede ascolto vero) | `DOING` |
 | `F2.4` | Audio Systems (F2.4.1-F2.4.7 affrontati il 21/09/2026 su segnali simulati; mancano il collegamento a WakeWordSession/TTS reali e le prove su cuffie/altoparlanti/Bluetooth/TV VERI) | `DOING` |
 | `F2.5` | Speech Runtime (F2.5.1-F2.5.7 affrontati il 21/09/2026 a livello libreria/provider; manca il collegamento a WakeWordSession e la misura dal vivo di "prima emissione < 2 s") | `DOING` |
@@ -4838,9 +4838,27 @@ I moduli F2.1-F2.7 nascono come librerie testate con finti. Il collegamento al p
   segmentatore, sessione); i 55 test storici di `WakeWordSession` e tutti gli altri restano invariati. **Non verificato
   su hardware vero**: tutto e' su finti e su segnali simulati; il criterio di uscita di F2.4 (95% delle interruzioni del
   corpus, tre profili hardware) resta aperto, e per questo il default e' `off`.
-- **Da fare (gradino 4)**: partial in streaming verso HUD/sottotitoli (`VadListener` consegna solo frasi complete, non
-  audio in corso: serve un thread di decodifica "l'ultimo vince") e collegamento di `dialogue`/`language_normalizer`/
-  `speaker_profile`/`profiles` a `JakeCore`.
+- **Fatto (gradino 4) — partial in streaming**: `core/voice/live_transcriber.py::LiveTranscriber` riceve i frame di
+  una frase in corso dal thread di ascolto senza bloccarlo (`feed` prende un lock breve e accoda), li decodifica su un
+  thread proprio con politica "l'ultimo vince" (l'audio arrivato durante una decodifica lenta e' UN blocco per la
+  successiva, non una decodifica per ogni 0,6 s accumulati) e scarta un partial che finisce dopo la fine della frase.
+  Sostituisce (non azzera) il `StreamingTranscriber` a ogni frase, cosi' un thread ancora dentro il modello non
+  condivide stato mutabile con quello nuovo. Un lock (`_stt_lock`) serializza partial e trascrizione finale sullo
+  stesso modello (due decodifiche insieme non sono garantite dal runtime): un partial in corso puo' ritardare la
+  finale, quindi `voice_partials` e' `auto` = solo con provider su GPU (`device == "cuda"`), `on` forza, `off` spegne;
+  su CPU (medium int8, 4,2 s a frase misurati) i partial si degraderebbero comunque da soli (F2.2.6).
+  `VadListener` espone `on_utterance_frame`/`on_utterance_end`; `WakeWordSession` pubblica `EventType.TRANSCRIPT`
+  (F2.2.7) e chiama `on_transcript`. **Privacy, decisa e testata**: si pubblica SOLO cio' che e' rivolto a Jake (finestra
+  di comando/follow-up/conferma, o testo che comincia con la wake word); il parlato ambientale (TV, conversazione in
+  stanza) senza "Jake" viene scartato come prima e NON finisce sul bus che il companion trasmette, e la dettatura non
+  si pubblica mai. Un partial non arriva mai a `_process_command`. L'evento FINALE ha lo stesso `utterance_id` dei
+  partial e la revisione successiva, e porta la confidenza VERA di Whisper (`transcribe_detailed`, guardando la CLASSE
+  del provider: un finto senza il metodo riporta `None`, mai un valore inventato). Un barge-in semina anche i partial
+  con il pre-roll. Prova: 15 test in `tests/test_live_transcriber.py` (thread veri, 12 esecuzioni consecutive verdi) e 21 in
+  `tests/test_partials_integration.py`.
+- **Da fare**: collegare `dialogue`, `language_normalizer`, `speaker_profile` e `profiles` a `JakeCore` (oggi sono
+  librerie: `JakeCore` ha una sola memoria e un solo `ConversationStateManager`, e gestisce da se' azioni in sospeso e
+  `CORRECT_LAST`), sottotitoli/indicatore nell'HUD (l'evento c'e', il rendering no), e le prove su hardware vero.
 
 ### Gate F2
 
@@ -4849,6 +4867,19 @@ I moduli F2.1-F2.7 nascono come librerie testate con finti. Il collegamento al p
 - buffer audio volatile verificato;
 - fallback push-to-talk/offline funzionante;
 - accessibilità via sottotitoli e testo equivalente.
+
+Stato al 21/09/2026 (onesto, criterio per criterio):
+
+| Criterio | Stato |
+|---|---|
+| benchmark audio pubblicato localmente | **fatto in parte**: harness, corpus sintetico deterministico, VAD/WER/barge-in offline con report locali e baseline CPU/GPU separate; mancano registrazioni consensuali vere |
+| full-duplex e barge-in stabili su almeno tre profili hardware | **NON soddisfatto**: algoritmi e integrazione ci sono, provati solo su segnali simulati (cuffie/portatile/Bluetooth 4/4 senza falsi; TV in sottofondo = falso barge-in anche con AEC, limite fissato da test). Default `voice_barge_in=off` finche' non si prova su hardware vero |
+| buffer audio volatile verificato | **fatto** per le parti in codice del progetto (segmentatore, buffer dei partial, pre-roll, calibrazione del rumore: solo RAM, svuotati dopo l'uso, con test); il buffer interno di Whisper/ctranslate2 non e' verificabile da qui |
+| fallback push-to-talk/offline funzionante | **fatto**: push-to-talk indipendente da wake word/VAD (test in processo pulito), voce offline con lo stesso contenuto (test) |
+| accessibilita' via sottotitoli e testo equivalente | **in parte**: eventi `TRANSCRIPT` e `MIC_STATE` sul bus, callback `on_transcript`; nessun rendering nell'HUD |
+
+Il gate NON e' superato: restano le prove su hardware, il rendering HUD dei sottotitoli e il collegamento di
+dialogo/profili a `JakeCore`.
 
 ## 9. F3 — Computer Use Engine 3.0
 

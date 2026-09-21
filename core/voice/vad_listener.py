@@ -35,6 +35,11 @@ class VadListener:
         # frame viene offerto a questo callback(frame_int16, is_speech, livello 0..1), che decide se
         # l'utente sta interrompendo (barge-in). Gira sul thread di ascolto: deve restare leggero.
         self.on_speaking_frame = None
+        # F2.2.1/F2.2.2: audio di una frase IN CORSO, per i partial. callback(frame_int16) per ogni frame che
+        # entra nella frase (parlato e coda di silenzio); on_utterance_end() quando la frase e' consegnata.
+        # Devono restare leggerissimi (mettono il frame in una coda): la decodifica sta su un altro thread.
+        self.on_utterance_frame = None
+        self.on_utterance_end = None
         self._segmenter: UtteranceSegmenter | None = None
 
     def is_speech_pcm(self, pcm16: bytes) -> bool:
@@ -109,7 +114,17 @@ class VadListener:
                         continue
 
                 utterance = segmenter.feed(frame, bool(is_speech))
+                if self.on_utterance_frame is not None and (segmenter.in_speech or utterance is not None):
+                    try:
+                        self.on_utterance_frame(frame.reshape(-1))
+                    except Exception:
+                        pass
                 if utterance is not None:
+                    if self.on_utterance_end is not None:
+                        try:
+                            self.on_utterance_end()
+                        except Exception:
+                            pass
                     yield utterance
 
     @staticmethod
