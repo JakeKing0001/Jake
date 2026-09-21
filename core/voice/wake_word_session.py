@@ -7,11 +7,13 @@ import numpy as np
 from core.logger import get_logger
 from core.voice.audio_profile import apply_to_provider, classify_output_device
 from core.voice.barge_in import BargeInController, classify_interruption
+from core.voice.live_transcriber import LiveTranscriber
 from core.voice.listening_state import (
     EchoGuard, ListeningState, ListeningStateMachine, MicIndicator, RepeatGuard, WakeCooldown,
 )
 from core.voice.playback_aec import PlaybackAec
 from core.voice.speech_text import STYLES, prepare_for_speech
+from core.voice.streaming_stt import TranscriptEvent, to_hud_event
 from core.voice.vad_listener import VadListener
 
 # Varianti di riferimento: Whisper a volte trascrive male "Jake" (nome poco comune in italiano).
@@ -76,7 +78,8 @@ class WakeWordSession:
     def __init__(self, jake_core, stt_provider, tts_provider, vad_listener: VadListener = None,
                  wake_words=None, on_state=None, on_level=None, follow_up_seconds: float = None,
                  replay_window_seconds: float = 0.0, speech_style: str = "normal",
-                 output_device_name: str | None = None, barge_in: str = "off"):
+                 output_device_name: str | None = None, barge_in: str = "off", partials: str = "off",
+                 on_transcript=None):
         self.jake_core = jake_core
         self.stt_provider = stt_provider
         self.tts_provider = tts_provider
@@ -120,6 +123,20 @@ class WakeWordSession:
         self._interrupted_deadline = 0.0
         self._attach_reference_sink()
         self.vad_listener.on_speaking_frame = self._on_speaking_frame
+        # F2.2.2: trascrizione parziale (sottotitoli, HUD nativo, companion). Un solo modello non regge due
+        # decodifiche insieme, quindi le serializza `_stt_lock` (condiviso con la trascrizione finale): un
+        # partial in corso puo' ritardare la finale. Per questo "auto" li abilita solo su GPU, dove una
+        # decodifica dura frazioni di secondo (su CPU medium int8 misurato: 4,2 s per una frase intera).
+        self._stt_lock = threading.Lock()
+        self.on_transcript = on_transcript  # callable(TranscriptEvent): partial E final, per un HUD che vuole i sottotitoli
+        self.live_transcriber = None
+        self._live_active = False
+        self._live_ids = None
+        if partials == "on" or (partials == "auto" and getattr(stt_provider, "device", None) == "cuda"):
+            self.live_transcriber = LiveTranscriber(stt_provider, self._deliver_transcript, model_lock=self._stt_lock)
+            self.vad_listener.on_utterance_frame = self._on_utterance_frame
+            self.vad_listener.on_utterance_end = self._on_utterance_end
+        self.last_confidence = None
         self._lock = threading.Lock()
         self._attach_hooks()
 
@@ -211,8 +228,78 @@ class WakeWordSession:
         self._interrupted_deadline = time.time() + 12.0
         self.listening.arm_command()  # la frase che segue e' per Jake: niente wake word
         self._set_state("listening", "")
+        if self.live_transcriber is not None:
+            self.live_transcriber.start_utterance()
+            self._live_active = True
+            for seeded in frames:
+                self.live_transcriber.feed(seeded)
         self.vad_listener.begin_utterance(frames)
         self._logger.info("Barge-in: parlato interrotto (turno %s)", turn.turn_id)
+
+    # ---- trascrizione in tempo reale (F2.2.2, F2.2.7) ----------------------------------------
+
+    def _deliver_transcript(self, event: TranscriptEvent) -> None:
+        """Un evento di trascrizione (partial o final) verso il bus e verso l'eventuale callback dell'HUD.
+        Un partial non e' MAI un comando: qui non arriva mai a `_process_command`.
+
+        Privacy: si pubblica SOLO cio' che e' rivolto a Jake. Il parlato ambientale (una TV, una conversazione in
+        stanza) senza la parola di attivazione viene scartato dopo la trascrizione e non deve finire sul bus, che il
+        companion server trasmette ai client; la dettatura non si pubblica (puo' contenere qualunque cosa)."""
+        if not self._transcript_is_addressed(event.text):
+            return
+        bus = getattr(self.jake_core, "event_bus", None)
+        publish = getattr(bus, "publish", None)
+        if callable(publish):
+            try:
+                publish(to_hud_event(event))
+            except Exception:
+                self._logger.exception("Errore pubblicando la trascrizione")
+        if self.on_transcript is not None:
+            try:
+                self.on_transcript(event)
+            except Exception:
+                self._logger.exception("Errore nel callback della trascrizione")
+
+    def _transcript_is_addressed(self, text: str) -> bool:
+        if not text.strip():
+            return False
+        state = self.listening.state
+        if state == ListeningState.DICTATION:
+            return False
+        if state in (ListeningState.COMMAND, ListeningState.FOLLOW_UP, ListeningState.CONFIRMATION):
+            return True
+        if self._interrupted_turn is not None:
+            return True
+        return self._match_wake_word(text) is not None
+
+    def _on_utterance_frame(self, frame) -> None:
+        live = self.live_transcriber
+        if live is None:
+            return
+        if not self._live_active:
+            live.start_utterance()
+            self._live_active = True
+        live.feed(frame)
+
+    def _on_utterance_end(self) -> None:
+        live = self.live_transcriber
+        if live is None or not self._live_active:
+            return
+        self._live_ids = live.end_utterance()
+        self._live_active = False
+
+    def _publish_final_transcript(self, text: str) -> None:
+        """L'evento FINALE della frase appena trascritta, con lo stesso utterance_id degli eventuali partial."""
+        import uuid
+
+        live = self.live_transcriber
+        if live is not None and self._live_ids is not None:
+            utterance_id, revision = self._live_ids
+            self._live_ids = None
+            event = live.final_event(text, self.last_confidence, utterance_id, revision)
+        else:
+            event = TranscriptEvent(uuid.uuid4().hex[:12], 1, "final", text, text, self.last_confidence)
+        self._deliver_transcript(event)
 
     # ---- indicatore del microfono (F2.3.5) --------------------------------------------
 
@@ -430,8 +517,15 @@ class WakeWordSession:
 
     def _transcribe(self, utterance) -> str:
         self._set_state("transcribing", "")
+        self.last_confidence = None
         try:
-            return self.stt_provider.transcribe(utterance, self.vad_listener.SAMPLE_RATE).strip()
+            with self._stt_lock:
+                # confidenza vera solo da un provider che la riporta (WhisperSttProvider): si guarda la CLASSE, cosi'
+                # un finto/mock senza il metodo non produce un valore inventato
+                if getattr(type(self.stt_provider), "transcribe_detailed", None) is not None:
+                    text, self.last_confidence = self.stt_provider.transcribe_detailed(utterance, self.vad_listener.SAMPLE_RATE)
+                    return text.strip()
+                return self.stt_provider.transcribe(utterance, self.vad_listener.SAMPLE_RATE).strip()
         except Exception:
             self._logger.exception("Errore nella trascrizione vocale")
             return ""
@@ -442,11 +536,13 @@ class WakeWordSession:
 
         text = self._transcribe(utterance)
         if not text:
+            self._live_ids = None
             self._interrupted_turn = None
             if self.state == "transcribing":
                 self._set_state("listening" if now < self._awaiting_command_until else "idle", "")
             return
         self._logger.info("Sentito: %s", text)
+        self._publish_final_transcript(text)
 
         # F2.3.4: una frase che e' (quasi) tutta cio' che Jake ha appena detto e' il suo stesso eco; una frase
         # identica ripetuta a ridosso (se il controllo e' attivo) e' un loop, non una persona.
@@ -569,3 +665,5 @@ class WakeWordSession:
     def stop(self) -> None:
         self._running = False
         self._interrupt_speech()
+        if self.live_transcriber is not None:
+            self.live_transcriber.close()
