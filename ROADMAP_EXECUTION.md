@@ -247,7 +247,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F2.2` | Speech Runtime (F2.2.1/F2.2.5 chiusi il 21/09/2026 lato segmentazione) | `DOING` |
 | `F2.3` | Voice Quality (G1 superato, mai iniziato) | `READY` |
 | `F2.4` | Audio Systems (G1 superato, mai iniziato) | `READY` |
-| `F2.5` | Speech Runtime (G1 superato, mai iniziato) | `READY` |
+| `F2.5` | Speech Runtime (F2.5.1-F2.5.7 affrontati il 21/09/2026 a livello libreria/provider; manca il collegamento a WakeWordSession e la misura dal vivo di "prima emissione < 2 s") | `DOING` |
 | `F2.6` | Conversation Runtime (G1 superato, mai iniziato) | `READY` |
 | `F2.7` | Identity and Voice (G1 superato, mai iniziato) | `READY` |
 | `F3.1` | Computer Use Quality (G1 superato, mai iniziato) | `READY` |
@@ -4556,6 +4556,55 @@ Dipende da: F2.2.
 7. `F2.5.7` Adattare volume/prosodia al dispositivo senza inferire emozioni sensibili.
 
 Criterio di uscita: prima emissione percepita < 2 s per risposta semplice e stop entro 300 ms.
+
+- `F2.5.1`-`F2.5.7` — 21/09/2026 (livello libreria e provider; il collegamento al ciclo vocale
+  dal vivo e' un passo di integrazione separato, dichiarato in fondo a F2):
+  * `F2.5.1` — `core/voice/speech_text.py`: `clean_for_speech` toglie Markdown (enfasi, titoli,
+    elenchi, citazioni, tabelle, link -> etichetta, URL nudi -> "un link", tag HTML, emoji); un
+    blocco di codice - anche non chiuso, come in una risposta troncata - non viene mai letto e
+    diventa UNA frase ("Ti ho lasciato il codice a schermo."). Il trattino basso e' enfasi solo ai
+    bordi di parola: un test ha preso subito il bug per cui `mio_file_di_test` diventava
+    `miofiledi_test`. `split_prosodic` spezza a fine frase senza tagliare "3.5", "10.000",
+    "file.txt", abbreviazioni (dott., ecc., es.), iniziali o puntini di sospensione, taglia le frasi
+    oltre 220 caratteri alla virgola/congiunzione piu' vicina (mai a meta' parola: test "nessuna
+    parola persa") e fonde i frammenti sotto 25 caratteri.
+  * `F2.5.2`/`F2.5.3` — `core/voice/chunked_speaker.py::ChunkedSpeaker`: riceve i delta di un LLM in
+    streaming e parla appena la PRIMA frase e' completa; un blocco di codice che arriva a pezzi non
+    viene letto e viene annunciato una sola volta; ogni unita' e' una chiamata separata al
+    provider, quindi `cancel()` ferma quella in corso E scarta tutte le accodate (test con thread
+    veri e un provider che resta "in riproduzione" finche' non riceve `stop()`; `cancel()` ritorna in
+    < 300 ms, il testo alimentato dopo il cancel e' ignorato, doppio cancel innocuo, 25 esecuzioni
+    consecutive verdi). `first_speech_latency_s` misura il criterio "< 2 s". Un errore del provider
+    o di un callback non ferma le unita' successive.
+  * `F2.5.4` — `SpeechStyle`: normal / brief / detailed / whisper / night. brief, whisper e night
+    limitano le unita' e dicono "Il resto e' a schermo." solo se hanno davvero scartato qualcosa,
+    cosi' chi ascolta non crede che la risposta sia finita.
+  * `F2.5.5` — la voce offline non cambia il contenuto: test che `EdgeTtsProvider` senza rete passa
+    al ripiego il testo identico, e che un guasto a meta' risposta continua con le frasi restanti
+    parola per parola (il comportamento esisteva gia' ma nessun test lo fissava).
+  * `F2.5.6` — `core/voice/voice_consent.py`: registro di consenso alla clonazione vocale (soggetto,
+    base - self / consenting-person / fictional-character / synthetic-original - dichiarazione a
+    parole proprie, data, revoca con storia). Si concede SOLO da terminale
+    (`python -m core.voice.voice_consent grant ...`); un test scansiona core/skills/plugins/main.py e
+    fallisce se un percorso dell'assistente chiama `.grant(` (Jake non puo' darsi il consenso da
+    solo). `CharacterTtsProvider` riceve `consent_check` e lo valuta a OGNI frase: revocare vale
+    dalla frase successiva, senza riavviare; senza consenso non parte nemmeno il server RVC.
+    File corrotto -> si nega (fail closed) e lo si sposta in `.corrupt` invece di sovrascriverlo.
+    **Cambio di comportamento dichiarato**: `main.py --character jake` ora richiede un
+    consenso registrato una tantum (il messaggio a schermo dice il comando esatto).
+  * `F2.5.7` — `core/voice/audio_profile.py`: profilo per dispositivo di uscita (cuffie piu'
+    piano, Bluetooth un filo piu' lento, TV piu' lenta) combinato con lo stile scelto; gli unici
+    ingressi sono il NOME del dispositivo e lo stile - un test fissa la firma delle funzioni -
+    quindi non c'e' alcuna inferenza su voce o stato d'animo di chi parla. `set_speech_params()` su
+    tutti i provider (pyttsx3: proprieta' rate/volume; Edge: parametro rate + guadagno PCM, inoltrato
+    al ripiego offline; OneCore: guadagno PCM, ritmo non regolato; Character: guadagno + base) o
+    `False` se non supportato.
+  Non affrontato: collegamento a `WakeWordSession` (oggi `_speak_async` chiama ancora
+  `tts_provider.speak(testo intero)`), rilevamento del nome del dispositivo di uscita reale su Windows,
+  ritmo per OneCore, "prima emissione < 2 s" misurata con un vero motore. Prova: 34 test in
+  `tests/test_speech_text.py`, 20 in `tests/test_chunked_speaker.py`, 23 in
+  `tests/test_voice_consent_and_profile.py`, 21 in `tests/test_tts_speech_params.py`; quattro moduli
+  nuovi nel mypy selettivo.
 
 ### F2.6 — Dialogo naturale e correzione live
 

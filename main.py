@@ -151,8 +151,23 @@ def _build_character_tts_provider(base_tts_provider, character_name: str):
         )
         return base_tts_provider, None
 
+    # F2.5.6: clonare un timbro richiede un consenso scritto e revocabile, registrato da un umano
+    # da terminale (mai da Jake). Senza, si parla con la voce normale e si dice come sbloccarla.
+    from core.voice.voice_consent import VoiceConsentRegistry
+
+    consent = VoiceConsentRegistry()
+    if not consent.is_allowed(character_name):
+        print(
+            f"Nota: manca il consenso alla clonazione vocale per '{character_name}', uso la voce normale. "
+            f"Per registrarlo: python -m core.voice.voice_consent grant {character_name} --subject \"CHI\" "
+            "--basis fictional-character --statement \"...\""
+        )
+        return base_tts_provider, None
+
     print(f"Avvio la conversione vocale per '{character_name}' (puo' richiedere qualche secondo)...")
-    provider = CharacterTtsProvider(base_tts_provider, manager)
+    provider = CharacterTtsProvider(
+        base_tts_provider, manager, consent_check=lambda: consent.is_allowed(character_name),
+    )
     return provider, manager
 
 

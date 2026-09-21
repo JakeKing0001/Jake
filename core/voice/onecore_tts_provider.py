@@ -2,7 +2,7 @@ import asyncio
 import io
 import wave
 
-from core.voice.tts_provider import TtsProvider
+from core.voice.tts_provider import TtsProvider, scale_pcm
 
 
 class OneCoreTtsProvider(TtsProvider):
@@ -21,6 +21,12 @@ class OneCoreTtsProvider(TtsProvider):
         self.matched_preferred_gender = False
         self.voice = self._select_voice(voice_name_contains, preferred_gender)
         self._playing = False
+        self.volume = 1.0
+
+    def set_speech_params(self, volume: float = 1.0, rate_delta_percent: int = 0) -> bool:
+        """Solo il volume (guadagno sul PCM): il ritmo della voce OneCore non e' regolato qui."""
+        self.volume = min(1.0, max(0.0, volume))
+        return True
 
     def _select_voice(self, voice_name_contains, preferred_gender):
         voices = list(self._SpeechSynthesizer.all_voices)
@@ -78,7 +84,7 @@ class OneCoreTtsProvider(TtsProvider):
 
         self._playing = True
         try:
-            sd.play(samples, samplerate=sample_rate)
+            sd.play(scale_pcm(samples, self.volume), samplerate=sample_rate)
             sd.wait()
         finally:
             self._playing = False

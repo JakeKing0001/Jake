@@ -16,6 +16,24 @@ class TtsProvider(ABC):
         """Interrompe immediatamente la riproduzione in corso, se presente."""
         raise NotImplementedError
 
+    def set_speech_params(self, volume: float = 1.0, rate_delta_percent: int = 0) -> bool:
+        """Volume (0-1) e variazione di ritmo (%) per le prossime frasi (F2.5.7). Ritorna True se il
+        provider li applica; questo default non li supporta e lo dichiara invece di ignorarli."""
+        return False
+
+
+def scale_pcm(samples, gain: float):
+    """Applica un guadagno lineare 0-1 a campioni interi senza far traboccare il tipo."""
+    import numpy as np
+
+    if gain >= 1.0:
+        return samples
+    info = np.iinfo(samples.dtype) if np.issubdtype(samples.dtype, np.integer) else None
+    scaled = samples.astype(np.float32) * max(0.0, gain)
+    if info is not None:
+        scaled = np.clip(scaled, info.min, info.max)
+    return scaled.astype(samples.dtype)
+
 
 class Pyttsx3TtsProvider(TtsProvider):
     """Sintesi vocale offline via SAPI5 (Windows), attraverso pyttsx3."""
@@ -25,6 +43,8 @@ class Pyttsx3TtsProvider(TtsProvider):
 
         self._pyttsx3 = pyttsx3
         self.rate = rate
+        self.base_rate = rate
+        self.volume = 1.0
         self.preferred_gender = preferred_gender
         self.matched_preferred_gender = False
         self.voice_id = voice_id or self._select_voice_id(preferred_gender)
@@ -71,9 +91,15 @@ class Pyttsx3TtsProvider(TtsProvider):
     def _build_engine(self):
         engine = self._pyttsx3.init()
         engine.setProperty("rate", self.rate)
+        engine.setProperty("volume", self.volume)
         if self.voice_id:
             engine.setProperty("voice", self.voice_id)
         return engine
+
+    def set_speech_params(self, volume: float = 1.0, rate_delta_percent: int = 0) -> bool:
+        self.volume = min(1.0, max(0.0, volume))
+        self.rate = max(60, round(self.base_rate * (1 + rate_delta_percent / 100)))
+        return True
 
     def speak(self, text: str) -> None:
         with self._lock:
