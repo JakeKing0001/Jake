@@ -106,6 +106,7 @@ files = [
     "core/vision/screen.py",
     "core/vision/screen_diff.py",
     "core/voice/utterance_segmenter.py",
+    "core/voice/streaming_stt.py",
 ]
 ignore_missing_imports = true
 no_implicit_optional = true

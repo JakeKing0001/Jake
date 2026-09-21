@@ -1,3 +1,4 @@
+import math
 import os
 import site
 import sys
@@ -105,6 +106,14 @@ class WhisperSttProvider(SttProvider):
         return prompt[: self.MAX_PROMPT_CHARS].rsplit(",", 1)[0] + "." if len(prompt) > self.MAX_PROMPT_CHARS else prompt + "."
 
     def transcribe(self, audio, sample_rate: int = 16000) -> str:
+        return self.transcribe_detailed(audio, sample_rate)[0]
+
+    def transcribe_detailed(self, audio, sample_rate: int = 16000) -> tuple[str, float | None]:
+        """Come transcribe(), piu' la confidenza (F2.2.2): exp della media di avg_logprob dei
+        segmenti pesata sulla durata, in [0, 1]. None se il modello non la riporta (o se le
+        allucinazioni note hanno azzerato il testo: una confidenza su un testo scartato non ha
+        senso). E' la probabilita' media per token secondo Whisper, non una probabilita' che il
+        testo sia corretto: serve a confrontare frasi tra loro, non come garanzia."""
         segments, _info = self._model.transcribe(
             audio,
             language=self.language,
@@ -119,8 +128,24 @@ class WhisperSttProvider(SttProvider):
             vad_filter=True,
             no_speech_threshold=0.6,
         )
-        text = " ".join(segment.text.strip() for segment in segments).strip()
-        return self._drop_hallucinations(text)
+        segments = list(segments)
+        text = self._drop_hallucinations(" ".join(segment.text.strip() for segment in segments).strip())
+        return text, (self._confidence(segments) if text else None)
+
+    @staticmethod
+    def _confidence(segments) -> float | None:
+        weighted, total = 0.0, 0.0
+        for segment in segments:
+            logprob = getattr(segment, "avg_logprob", None)
+            if isinstance(logprob, bool) or not isinstance(logprob, (int, float)):
+                continue
+            duration = getattr(segment, "end", 0.0) - getattr(segment, "start", 0.0)
+            weight = duration if isinstance(duration, (int, float)) and duration > 0 else 1.0
+            weighted += logprob * weight
+            total += weight
+        if total == 0:
+            return None
+        return round(min(1.0, max(0.0, math.exp(weighted / total))), 4)
 
     _HALLUCINATIONS = (
         "sottotitoli e revisione a cura di", "sottotitoli creati dalla comunita'", "sottotitoli creati dalla comunità",
