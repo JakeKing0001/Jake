@@ -2,11 +2,15 @@ import re
 import threading
 import time
 
+import numpy as np
+
 from core.logger import get_logger
-from core.voice.audio_profile import apply_to_provider
+from core.voice.audio_profile import apply_to_provider, classify_output_device
+from core.voice.barge_in import BargeInController, classify_interruption
 from core.voice.listening_state import (
     EchoGuard, ListeningState, ListeningStateMachine, MicIndicator, RepeatGuard, WakeCooldown,
 )
+from core.voice.playback_aec import PlaybackAec
 from core.voice.speech_text import STYLES, prepare_for_speech
 from core.voice.vad_listener import VadListener
 
@@ -36,6 +40,22 @@ def _edit_distance(a: str, b: str) -> int:
     return previous_row[-1]
 
 
+class _SessionSpeaker:
+    """Vista della sessione come "parlato interrompibile" per `BargeInController`: `cancel()` ferma il
+    motore TTS e sblocca il microfono; i contatori delle unita' non ci sono (il provider riceve il
+    testo intero, non unita' singole: vedi il gradino 2 di integrazione F2 in ROADMAP_EXECUTION.md)."""
+
+    units_spoken: list = []
+    units_dropped = 0
+
+    def __init__(self, session) -> None:
+        self._session = session
+
+    def cancel(self) -> int:
+        self._session._interrupt_speech()
+        return 0
+
+
 class WakeWordSession:
     """Ascolto continuo con parola di attivazione "Jake" (v2.0), esteso nella v3.0 con:
     - stati osservabili (on_state) e livello del microfono (on_level) per l'HUD;
@@ -56,7 +76,7 @@ class WakeWordSession:
     def __init__(self, jake_core, stt_provider, tts_provider, vad_listener: VadListener = None,
                  wake_words=None, on_state=None, on_level=None, follow_up_seconds: float = None,
                  replay_window_seconds: float = 0.0, speech_style: str = "normal",
-                 output_device_name: str | None = None):
+                 output_device_name: str | None = None, barge_in: str = "off"):
         self.jake_core = jake_core
         self.stt_provider = stt_provider
         self.tts_provider = tts_provider
@@ -89,6 +109,17 @@ class WakeWordSession:
         self.wake_cooldown = WakeCooldown()
         self.repeat_guard = RepeatGuard(window_s=replay_window_seconds) if replay_window_seconds > 0 else None
         self.mic_indicator = self._build_mic_indicator()
+        # F2.4.3: barge-in. "off" (default): nessuna interruzione a voce, come prima. "auto": solo con cuffie
+        # (l'eco e' trascurabile: nel benchmark simulato 4/4 interruzioni e nessun falso senza AEC). "on":
+        # sempre, con l'AEC se il provider pubblica il riferimento audio; con altoparlanti e senza AEC
+        # Jake si interromperebbe da solo (benchmark: 4/4 falsi barge-in), quindi "on" e' una scelta esplicita.
+        self.barge_in_mode = barge_in if barge_in in ("off", "auto", "on") else "off"
+        self.playback_aec = PlaybackAec()
+        self.barge_in = BargeInController(_SessionSpeaker(self))
+        self._interrupted_turn = None
+        self._interrupted_deadline = 0.0
+        self._attach_reference_sink()
+        self.vad_listener.on_speaking_frame = self._on_speaking_frame
         self._lock = threading.Lock()
         self._attach_hooks()
 
@@ -129,6 +160,59 @@ class WakeWordSession:
     def _open_follow_up(self) -> None:
         self.listening.follow_up_s = self.follow_up_seconds  # rispecchia un eventuale cambio a sessione avviata
         self.listening.open_follow_up()
+
+    # ---- barge-in (F2.4.3-F2.4.5) ------------------------------------------------------
+
+    def _attach_reference_sink(self) -> None:
+        """Il provider TTS, se riproduce da se', pubblica cio' che manda agli altoparlanti (AEC)."""
+        try:
+            self.tts_provider.reference_sink = self.playback_aec.push_reference
+        except Exception:
+            self._logger.debug("Il provider TTS non accetta un reference_sink: nessuna AEC")
+
+    def _barge_in_enabled(self) -> bool:
+        if self.barge_in_mode == "on":
+            return True
+        if self.barge_in_mode == "auto":
+            return classify_output_device(self.output_device_name) == "headphones"
+        return False
+
+    def _speaking(self) -> bool:
+        return self._tts_thread is not None and self._tts_thread.is_alive()
+
+    def _on_speaking_frame(self, frame, is_speech: bool, level: float) -> None:
+        """Un frame di microfono arrivato MENTRE Jake parla (gira sul thread di ascolto)."""
+        if not self._barge_in_enabled() or not self._speaking():
+            return
+        audio = np.asarray(frame, dtype=np.float32).reshape(-1) / 32768.0
+        residual, ready = self.playback_aec.process(audio)  # conta sempre i frame: la linea del tempo dell'AEC
+        if self.playback_aec.has_reference:
+            if not ready:
+                self.barge_in.preroll.push(audio)
+                return  # periodo di calibrazione: senza il ritardo l'eco non e' cancellato
+            position = self.playback_aec.position - len(audio)
+            reference_level = self.playback_aec.reference_level(position, len(audio))
+            pcm = np.clip(residual * 32768.0, -32768, 32767).astype(np.int16).tobytes()
+            speech = self.vad_listener.is_speech_pcm(pcm)
+            residual_level = float(np.sqrt(np.mean(residual.astype(np.float64) ** 2)))
+        else:
+            residual, speech, residual_level, reference_level = audio, is_speech, level, 0.0
+        turn = self.barge_in.on_frame(residual, speech, residual_level, reference_level, speaking=True)
+        if turn is not None:
+            self._start_interruption(turn)
+
+    def _start_interruption(self, turn) -> None:
+        """Il barge-in ha gia' fermato la voce: si raccoglie cio' che l'utente sta dicendo, pre-roll compreso."""
+        preroll = self.barge_in.take_preroll()
+        frame_size = VadListener.FRAME_SAMPLES
+        pcm = np.clip(preroll * 32768.0, -32768, 32767).astype(np.int16)
+        frames = [pcm[i:i + frame_size].reshape(-1, 1) for i in range(0, len(pcm) - frame_size + 1, frame_size)]
+        self._interrupted_turn = turn
+        self._interrupted_deadline = time.time() + 12.0
+        self.listening.arm_command()  # la frase che segue e' per Jake: niente wake word
+        self._set_state("listening", "")
+        self.vad_listener.begin_utterance(frames)
+        self._logger.info("Barge-in: parlato interrotto (turno %s)", turn.turn_id)
 
     # ---- indicatore del microfono (F2.3.5) --------------------------------------------
 
@@ -224,6 +308,8 @@ class WakeWordSession:
 
         def run():
             self.vad_listener.muted = True
+            self.playback_aec.reset()  # nuova riproduzione: riferimento e calibrazione ripartono
+            self.barge_in.begin_response()
             # F2.3.4: la voce di Jake ripresa dal microfono non deve diventare un comando.
             self.echo_guard.note_spoken(text)
             # F2.3.5: lo stream resta aperto mentre Jake parla, i frame si scartano soltanto.
@@ -356,6 +442,7 @@ class WakeWordSession:
 
         text = self._transcribe(utterance)
         if not text:
+            self._interrupted_turn = None
             if self.state == "transcribing":
                 self._set_state("listening" if now < self._awaiting_command_until else "idle", "")
             return
@@ -371,6 +458,20 @@ class WakeWordSession:
         if self.repeat_guard is not None and self.repeat_guard.is_replay(text):
             self._logger.info("Ignorata: ripetizione identica ravvicinata")
             return
+
+        # F2.4.5: la frase arriva da un barge-in. "basta"/"no" da soli = fermati e basta; "no, intendevo X" e una
+        # nuova richiesta = si esegue il testo utile (senza wake word: l'utente parlava gia' con Jake).
+        if self._interrupted_turn is not None:
+            self._interrupted_turn = None
+            if time.time() <= self._interrupted_deadline:
+                outcome = classify_interruption(text)
+                if outcome.kind == "stop":
+                    self.listening.command_consumed()
+                    self._set_state("idle", "")
+                    return
+                if outcome.kind in ("correction", "new_request") and outcome.remainder:
+                    self._process_command(outcome.remainder)
+                    return
 
         # In pausa: si sveglia solo con "Jake, svegliati" (o simili). La wake word puo' stare
         # ovunque nella frase (v4.1, Voice Natural 2.0: "scusa se ti disturbo, Jake, svegliati"
