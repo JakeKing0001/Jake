@@ -115,6 +115,7 @@ files = [
     "core/voice/listening_state.py",
     "core/voice/wake_election.py",
     "core/voice/audio_frontend.py",
+    "core/voice/playback_aec.py",
     "core/voice/barge_in.py",
     "core/voice/language_normalizer.py",
     "core/voice/dialogue.py",

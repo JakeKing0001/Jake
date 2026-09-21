@@ -201,6 +201,11 @@ class StreamingTranscriber:
         self._finished = False
 
     @property
+    def revision(self) -> int:
+        """Ultima revisione emessa per la frase in corso (0 se nessun evento)."""
+        return self._revision
+
+    @property
     def dropped_samples(self) -> int:
         return self._buffer.dropped_samples
 

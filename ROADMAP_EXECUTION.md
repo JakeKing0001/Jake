@@ -4809,10 +4809,35 @@ I moduli F2.1-F2.7 nascono come librerie testate con finti. Il collegamento al p
   suona la precedente, e una chiamata per unita' introdurrebbe uno stacco (~0,4 s di rete) tra le frasi. `ChunkedSpeaker`
   serve quando JakeCore produrra' testo in streaming (oggi `answer()` ritorna la risposta intera), e per il
   barge-in con coda da scartare. L'echo-guard registra il testo REALMENTE pronunciato, non l'originale.
-- **Da fare (gradino 3)**: riferimento audio dai provider (Edge/OneCore/Character riproducono con `sd.play` e non lo
-  espongono) + AEC nel percorso del microfono mentre Jake parla + barge-in in produzione. Finche' il riferimento non e'
-  verificato su hardware, il barge-in si abiliterebbe solo con profilo cuffie (il benchmark simulato: 4/4 e nessun falso
-  senza AEC) e mai con altoparlanti.
+- **Fatto (gradino 3) — riferimento audio, AEC in riproduzione e barge-in, spento di default**:
+  * i provider che riproducono da se' (Edge, OneCore, Character) pubblicano cio' che mandano agli altoparlanti
+    (`TtsProvider.reference_sink`, chiamato subito prima di `sd.play`, DOPO il volume: e' il segnale che esce davvero;
+    un sink che solleva non ferma la voce). SAPI/pyttsx3 suona dentro il motore di sistema e non ha i campioni: per
+    lui l'AEC non c'e', e il codice lo sa (`has_reference` falso).
+  * `core/voice/playback_aec.py::PlaybackAec`: il riferimento e' piazzato sulla linea del TEMPO (non accodato: tra due
+    frasi di Edge c'e' il vuoto della rete, e accodando la seconda sarebbe sfasata), il ritardo altoparlante->microfono
+    si stima da OGNI riproduzione nel primo secondo dopo l'inizio dell'audio (correlazione incrociata), e il filtro
+    riparte pulito ma ADDESTRATO sul microfono gia' ascoltato. Non e' "pronta" durante la calibrazione (~1,3 s): il
+    barge-in la ignora, altrimenti l'eco non cancellato sembrerebbe una voce. **Due bug trovati misurando, non
+    ipotizzati**: (1) sottrarre solo 24 campioni al ritardo stimato lasciava l'AEC a ~7 dB su una seconda frase
+    piazzata 10 ms in ritardo (la prima "presa" dell'eco usciva dalla finestra del filtro; le latenze tra il momento
+    di `push_reference` e quello in cui l'audio esce cambiano da una frase all'altra) - con 320 campioni (20 ms) si
+    resta a 28-36 dB e un test fissa il caso; (2) riavviare il filtro da zero a calibrazione finita lo faceva
+    ripartire quando doveva gia' lavorare.
+  * `VadListener`: mentre Jake parla (`muted`) i frame NON si accumulano ma vengono offerti a `on_speaking_frame(frame,
+    is_speech, livello)`; `begin_utterance(preroll)` semina il segmentatore (`UtteranceSegmenter.seed`) cosi' l'inizio
+    delle parole dell'utente non va perso; `is_speech_pcm` applica il VAD al residuo dopo l'AEC.
+  * `WakeWordSession(barge_in=...)`, config `voice_barge_in`: `off` (default, comportamento di prima), `auto` (solo con
+    dispositivo di uscita "cuffie": il benchmark simulato dice 4/4 interruzioni e nessun falso senza AEC), `on`
+    (sempre; con altoparlanti e senza riferimento Jake si interromperebbe da solo, 4/4 falsi nel benchmark: scelta
+    esplicita). Al barge-in: la voce si ferma, `listening.arm_command()` (la frase seguente non vuole "Jake") e la
+    frase raccolta, pre-roll compreso, passa da `classify_interruption`: "basta"/"no"/"aspetta" da soli = fermati e
+    non si esegue nulla; "no, intendevo X" / nuova richiesta = si esegue solo il testo utile; una interruzione
+    scaduta (12 s) o una trascrizione vuota si trattano come una frase qualunque.
+  Prova: 15 test in `tests/test_playback_aec.py`, 33 in `tests/test_barge_in_integration.py` (provider, ascolto,
+  segmentatore, sessione); i 55 test storici di `WakeWordSession` e tutti gli altri restano invariati. **Non verificato
+  su hardware vero**: tutto e' su finti e su segnali simulati; il criterio di uscita di F2.4 (95% delle interruzioni del
+  corpus, tre profili hardware) resta aperto, e per questo il default e' `off`.
 - **Da fare (gradino 4)**: partial in streaming verso HUD/sottotitoli (`VadListener` consegna solo frasi complete, non
   audio in corso: serve un thread di decodifica "l'ultimo vince") e collegamento di `dialogue`/`language_normalizer`/
   `speaker_profile`/`profiles` a `JakeCore`.

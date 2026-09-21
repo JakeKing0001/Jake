@@ -84,7 +84,9 @@ class OneCoreTtsProvider(TtsProvider):
 
         self._playing = True
         try:
-            sd.play(scale_pcm(samples, self.volume), samplerate=sample_rate)
+            audible = scale_pcm(samples, self.volume)
+            self._emit_reference(audible, sample_rate)
+            sd.play(audible, samplerate=sample_rate)
             sd.wait()
         finally:
             self._playing = False

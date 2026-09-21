@@ -56,6 +56,13 @@ class UtteranceSegmenter:
             return self._finalize()
         return None
 
+    def seed(self, frames: list[np.ndarray]) -> None:
+        """Comincia una frase GIA' in corso, con questi frame come parlato iniziale (pre-roll di un
+        barge-in: l'utente parla da qualche istante e quell'inizio non deve andare perso)."""
+        self._frames = [np.asarray(frame).copy() for frame in frames]
+        self._silence_run = 0
+        self._in_speech = bool(self._frames)
+
     def flush(self) -> np.ndarray | None:
         """Chiude a forza la frase in corso (fine del flusso). None se non c'era parlato."""
         if not self._in_speech:

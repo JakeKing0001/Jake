@@ -31,6 +31,22 @@ class VadListener:
         # forma d'onda. Deve essere leggerissimo: gira sul thread di ascolto.
         self.on_level = on_level
         self.muted = False  # True mentre Jake parla, per non trascrivere la propria voce
+        # F2.4.3: mentre Jake parla i frame NON si accumulano (muted), ma lo stream resta aperto e ogni
+        # frame viene offerto a questo callback(frame_int16, is_speech, livello 0..1), che decide se
+        # l'utente sta interrompendo (barge-in). Gira sul thread di ascolto: deve restare leggero.
+        self.on_speaking_frame = None
+        self._segmenter: UtteranceSegmenter | None = None
+
+    def is_speech_pcm(self, pcm16: bytes) -> bool:
+        """Il VAD sul PCM int16 di un frame da 30 ms (usato sul residuo dopo la cancellazione d'eco)."""
+        return bool(self.vad.is_speech(pcm16, self.SAMPLE_RATE))
+
+    def begin_utterance(self, frames: list) -> None:
+        """Barge-in riconosciuto: si smette di scartare i frame e si parte con `frames` (pre-roll) come
+        inizio di una frase in corso. Va chiamato dal thread di ascolto (dentro `on_speaking_frame`)."""
+        self.muted = False
+        if self._segmenter is not None:
+            self._segmenter.seed(frames)
 
     def is_available(self) -> bool:
         try:
@@ -59,6 +75,7 @@ class VadListener:
             callback=callback,
         ):
             segmenter = UtteranceSegmenter(self.silence_frames_needed, self.max_frames)
+            self._segmenter = segmenter
 
             while should_continue():
                 try:
@@ -78,7 +95,18 @@ class VadListener:
 
                 if self.muted:
                     segmenter.reset()
-                    continue
+                    if self.on_speaking_frame is not None:
+                        try:
+                            rms_level = float(np.sqrt(np.mean(frame.astype(np.float32) ** 2))) / 32768.0
+                            self.on_speaking_frame(frame.reshape(-1), bool(is_speech), min(1.0, rms_level))
+                        except Exception:
+                            pass
+                        if self.muted:
+                            continue
+                        # il callback ha riconosciuto un'interruzione (begin_utterance): il frame corrente
+                        # e' gia' parlato dell'utente e va accumulato come tutti i seguenti
+                    else:
+                        continue
 
                 utterance = segmenter.feed(frame, bool(is_speech))
                 if utterance is not None:

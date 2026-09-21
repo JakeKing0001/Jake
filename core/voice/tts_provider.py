@@ -21,6 +21,22 @@ class TtsProvider(ABC):
         provider li applica; questo default non li supporta e lo dichiara invece di ignorarli."""
         return False
 
+    # F2.4.1: chi vuole cancellare l'eco della voce di Jake nel microfono deve sapere COSA esce dagli
+    # altoparlanti. Un provider che riproduce da se' (Edge, OneCore, Character) chiama
+    # `_emit_reference(pcm, rate)` un istante prima di `sd.play`; chi ascolta imposta `reference_sink`
+    # a un callable(samples, rate). Provider come SAPI/pyttsx3, che suonano dentro il motore di
+    # sistema, non hanno i campioni e non la chiamano mai: per loro l'AEC semplicemente non c'e'.
+    reference_sink = None
+
+    def _emit_reference(self, samples, rate: int) -> None:
+        sink = self.reference_sink
+        if sink is None:
+            return
+        try:
+            sink(samples, rate)
+        except Exception:
+            pass  # un guasto dell'osservatore non deve mai fermare la voce
+
 
 def scale_pcm(samples, gain: float):
     """Applica un guadagno lineare 0-1 a campioni interi senza far traboccare il tipo."""

@@ -69,6 +69,11 @@ class EchoCanceller:
         self._adapted = 0  # campioni di riferimento usati per adattarsi
         self._weights = np.zeros(self.taps, dtype=np.float64)
 
+    def seek(self, position: int) -> None:
+        """Il microfono e' gia' a `position` campioni dall'inizio della riproduzione (serve a chi riparte
+        con un filtro pulito a riproduzione in corso, vedi core/voice/playback_aec.py)."""
+        self._pos = max(0, int(position))
+
     def push_reference(self, samples: np.ndarray) -> None:
         """Audio mandato agli altoparlanti (float32 mono a 16 kHz), nell'ordine in cui esce."""
         samples = np.asarray(samples, dtype=np.float32).reshape(-1)

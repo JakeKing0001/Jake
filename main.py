@@ -238,6 +238,7 @@ def run_wake_word_mode():
         replay_window_seconds=float(core.config.get("voice_replay_guard_seconds", 0)),
         speech_style=str(core.config.get("voice_style", "normal") or "normal"),
         output_device_name=core.config.get("voice_output_device") or None,
+        barge_in=str(core.config.get("voice_barge_in", "off") or "off"),
     )
     try:
         session.run()
@@ -285,6 +286,7 @@ def run_jarvis_mode(with_voice: bool = True):
                 replay_window_seconds=float(core.config.get("voice_replay_guard_seconds", 0)),
                 speech_style=str(core.config.get("voice_style", "normal") or "normal"),
                 output_device_name=core.config.get("voice_output_device") or None,
+                barge_in=str(core.config.get("voice_barge_in", "off") or "off"),
             )
             if not session.vad_listener.is_available():
                 print("Nessun microfono: HUD in modalita' solo testo.")

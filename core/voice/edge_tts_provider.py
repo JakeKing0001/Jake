@@ -118,7 +118,9 @@ class EdgeTtsProvider(TtsProvider):
             return
         self._playing = True
         try:
-            sd.play(scale_pcm(pcm, self.volume), samplerate=SAMPLE_RATE)
+            audible = scale_pcm(pcm, self.volume)
+            self._emit_reference(audible, SAMPLE_RATE)
+            sd.play(audible, samplerate=SAMPLE_RATE)
             sd.wait()
         finally:
             self._playing = False
