@@ -48,7 +48,7 @@ def run_corpus(provider, entries: list[CorpusEntry], repeats: int = 1) -> dict:
     """WER e latenza di `provider` (qualunque oggetto con transcribe(audio, sample_rate)) sulle clip
     che hanno un testo di riferimento (F2.1.3/F2.1.5). L'audio arriva dal corpus, mai da file
     personali; nel report finiscono solo testi, WER, latenze e hash (F2.1.4)."""
-    per_clip, latencies_ms, errors = [], [], []
+    per_clip, latencies_ms, errors, errors_numbers = [], [], [], []
     for entry in entries:
         if entry.ground_truth_text is None:
             continue
@@ -60,16 +60,20 @@ def run_corpus(provider, entries: list[CorpusEntry], repeats: int = 1) -> dict:
             hypothesis = provider.transcribe(audio, SAMPLE_RATE)
             clip_latencies.append((time.perf_counter() - started) * 1000)
         wer = word_error_rate(entry.ground_truth_text, hypothesis)
+        wer_numbers = word_error_rate(entry.ground_truth_text, hypothesis, normalize_numbers=True)
         latencies_ms.extend(clip_latencies)
         if wer is not None:
             errors.append(wer)
+        if wer_numbers is not None:
+            errors_numbers.append(wer_numbers)
         per_clip.append({
-            "id": entry.id, "reference": entry.ground_truth_text, "hypothesis": hypothesis, "wer": wer,
+            "id": entry.id, "reference": entry.ground_truth_text, "hypothesis": hypothesis, "wer": wer, "wer_numbers_normalized": wer_numbers,
             "latency": latency_stats(clip_latencies),
         })
     return {
         "corpus": {"hash": corpus_hash(entries), "clips": len(per_clip)},
         "mean_wer": round(sum(errors) / len(errors), 4) if errors else None,
+        "mean_wer_numbers_normalized": round(sum(errors_numbers) / len(errors_numbers), 4) if errors_numbers else None,
         "latency": latency_stats(latencies_ms),
         "per_clip": per_clip,
     }
@@ -95,7 +99,7 @@ def main():
         report = run_corpus(provider, entries, args.repeats)
         report.update({"model_size": provider.model_size, "device": provider.device, "hardware": hardware_profile(provider.device == "cuda")})
         report["manifest"] = manifest(entries)
-        print(f"WER medio: {report['mean_wer']}  latenza p50={report['latency'].get('p50_ms')} ms  p95={report['latency'].get('p95_ms')} ms")
+        print(f"WER medio: {report['mean_wer']} (con numeri normalizzati: {report['mean_wer_numbers_normalized']})  latenza p50={report['latency'].get('p50_ms')} ms  p95={report['latency'].get('p95_ms')} ms")
         for clip in report["per_clip"]:
             print(f"  {clip['id']}: WER={clip['wer']}  {clip['reference']!r} -> {clip['hypothesis']!r}")
         print(f"\nReport salvato in {save_report('stt_corpus_' + report['hardware']['profile'], report)}")
