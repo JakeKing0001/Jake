@@ -4489,6 +4489,31 @@ Criterio di uscita: partial p95 < 1 s sul profilo consigliato; testo finale non 
   Resta di F2.2.1 la separazione trascrizione dal thread di ascolto (oggi `_handle_utterance` la
   chiama in linea). 11 test in `tests/test_utterance_segmenter.py`; modulo aggiunto al mypy
   selettivo.
+- `F2.2.2`, `F2.2.3`, `F2.2.4`, `F2.2.6`, `F2.2.7` (livello libreria) — 21/09/2026:
+  `core/voice/streaming_stt.py`. Whisper non e' incrementale, quindi lo streaming e' "accordo
+  locale" (LocalAgreement-2): ogni ~0,6 s si ritrascrive l'audio accumulato e resta *stabile* solo
+  il prefisso di parole su cui due ipotesi consecutive concordano; il confermato non arretra mai.
+  `TranscriptEvent` (utterance_id, revision crescente, kind partial|final, text, stable_text,
+  confidence) con payload versionato (`transcript_version`) e validazione della forma in
+  `from_payload`; nuovo `EventType.TRANSCRIPT` sul bus e `to_hud_event()` (F2.2.7). Un partial
+  non e' MAI un comando: `TranscriptRouter` manda i partial solo a `on_partial` (HUD/sottotitoli),
+  scarta una revisione fuori ordine, e consegna a `on_final` un solo final non vuoto per frase
+  (F2.2.3 + "testo finale non duplicato"). Backpressure (F2.2.4): `BoundedAudioBuffer` in RAM
+  scarta i campioni piu' VECCHI oltre il limite e li conta in `dropped_samples`. Degrado
+  (F2.2.6): `streaming=False`, oppure una decodifica parziale piu' lenta del budget (1 s) o che
+  solleva, spegne i partial per il resto della frase e resta la sola trascrizione finale; `finish()`
+  produce UN final, svuota il buffer (F2.2.5) e un secondo `finish()` ritorna None.
+  `WhisperSttProvider.transcribe_detailed()` riporta la confidenza vera (exp della media di
+  `avg_logprob` pesata sulla durata; None se assente o se un'allucinazione nota ha azzerato il
+  testo - e' la probabilita' media per token secondo Whisper, non la probabilita' che il testo
+  sia giusto, e il docstring lo dice); un provider senza quel metodo produce `confidence=None`,
+  mai un numero inventato. **Non affrontato, dichiarato**: il collegamento al ciclo di ascolto
+  dal vivo (`VadListener` consegna solo frasi complete, non audio in corso; servira un thread di
+  decodifica "l'ultimo vince" - vedi il passo di integrazione F2 piu' avanti) e la misura del
+  vincolo "partial p95 < 1 s", che richiede audio vero: la prima misura reale su CPU
+  (medium int8) e' 4,2 s per una frase intera, quindi su CPU i partial si spegneranno da soli
+  (F2.2.6) finche' non si usa la GPU o un modello piu' piccolo per i partial. 37 test in
+  `tests/test_streaming_stt.py` + 5 in `tests/test_stt_provider.py`; modulo nel mypy selettivo.
 
 ### F2.3 — Wake word e VAD adattivi
 

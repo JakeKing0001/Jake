@@ -134,5 +134,49 @@ class CudaAvailableTests(unittest.TestCase):
                 self.assertFalse(cuda_available())
 
 
+class TranscribeDetailedTests(unittest.TestCase):
+    """F2.2.2: confidenza per frase = exp(media pesata sulla durata di avg_logprob)."""
+
+    @staticmethod
+    def _segment(text, avg_logprob, start=0.0, end=1.0):
+        segment = _fake_segment(text)
+        segment.avg_logprob, segment.start, segment.end = avg_logprob, start, end
+        return segment
+
+    def test_confidence_is_exp_of_the_mean_logprob(self):
+        import math
+
+        provider, _ = _provider()
+        provider._model.transcribe.return_value = ([self._segment("ciao", -0.5)], None)
+        text, confidence = provider.transcribe_detailed([0.0])
+        self.assertEqual(text, "ciao")
+        self.assertAlmostEqual(confidence, math.exp(-0.5), places=3)
+
+    def test_longer_segments_weigh_more(self):
+        import math
+
+        provider, _ = _provider()
+        provider._model.transcribe.return_value = (
+            [self._segment("a", -1.0, 0.0, 3.0), self._segment("b", -0.1, 3.0, 4.0)], None,
+        )
+        _, confidence = provider.transcribe_detailed([0.0])
+        self.assertAlmostEqual(confidence, math.exp((-1.0 * 3 + -0.1 * 1) / 4), places=3)
+
+    def test_confidence_is_none_when_the_model_reports_nothing(self):
+        provider, _ = _provider()
+        provider._model.transcribe.return_value = ([_fake_segment("ciao")], None)  # MagicMock: niente logprob numerico
+        self.assertEqual(provider.transcribe_detailed([0.0]), ("ciao", None))
+
+    def test_confidence_is_none_when_a_hallucination_wiped_the_text(self):
+        provider, _ = _provider()
+        provider._model.transcribe.return_value = ([self._segment("Sottotitoli e revisione a cura di QTSS", -0.2)], None)
+        self.assertEqual(provider.transcribe_detailed([0.0]), ("", None))
+
+    def test_transcribe_is_the_text_of_transcribe_detailed(self):
+        provider, _ = _provider()
+        provider._model.transcribe.return_value = ([self._segment("ciao", -0.3)], None)
+        self.assertEqual(provider.transcribe([0.0]), "ciao")
+
+
 if __name__ == "__main__":
     unittest.main()

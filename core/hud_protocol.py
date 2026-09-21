@@ -44,6 +44,11 @@ class EventType(str, Enum):
     # str} (uno dei tre valori di core/action_ledger.py::VERIFICATION_VERIFIED/UNVERIFIED/FAILED).
     UNDO = "UNDO"
     VERIFICATION = "VERIFICATION"
+    # F2.2.7: trascrizione in tempo reale per HUD/sottotitoli/companion. Payload versionato a
+    # parte (`transcript_version`, vedi core/voice/streaming_stt.py::TranscriptEvent.to_payload):
+    # utterance_id, revision, kind ("partial"|"final"), text, stable_text, confidence. Un client
+    # deve trattare `partial` come provvisorio e mai come comando: solo `final` lo e'.
+    TRANSCRIPT = "TRANSCRIPT"
 
 
 # Traduce gli stati gia' in uso da WakeWordSession/SessionHooks.set_state (stringhe libere,
