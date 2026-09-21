@@ -114,6 +114,8 @@ files = [
     "core/voice/wake_settings.py",
     "core/voice/listening_state.py",
     "core/voice/wake_election.py",
+    "core/voice/audio_frontend.py",
+    "core/voice/barge_in.py",
 ]
 ignore_missing_imports = true
 no_implicit_optional = true
