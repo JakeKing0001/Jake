@@ -243,8 +243,8 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F1.6` | Sandbox Runtime | `DONE` |
 | `F1.7` | Observability | `DONE` |
 | `F1.8` | Runtime Reliability | `DONE` |
-| `F2.1` | Voice Quality (G1 superato, mai iniziato) | `READY` |
-| `F2.2` | Speech Runtime (G1 superato, mai iniziato) | `READY` |
+| `F2.1` | Voice Quality (F2.1.1-F2.1.6 affrontati il 21/09/2026: harness sintetico + VAD/WER offline + documento privacy; mancano solo registrazioni consensuali vere, gap dichiarato) | `DOING` |
+| `F2.2` | Speech Runtime (F2.2.1/F2.2.5 chiusi il 21/09/2026 lato segmentazione) | `DOING` |
 | `F2.3` | Voice Quality (G1 superato, mai iniziato) | `READY` |
 | `F2.4` | Audio Systems (G1 superato, mai iniziato) | `READY` |
 | `F2.5` | Speech Runtime (G1 superato, mai iniziato) | `READY` |
@@ -4412,7 +4412,7 @@ non una conseguenza meccanica del gate - riportata all'utente.
 
 ## 8. F2 — Voice Natural 3.0
 
-- Stato: `READY` (G1 superato il 16/09/2026, vedi Gate G1 sopra), mai iniziato
+- Stato: `DOING` (avviato il 21/09/2026 - vedi le voci datate sotto F2.1/F2.2; G1 superato il 16/09/2026)
 - Priorità: `P1`
 - Output: conversazione vocale full-duplex, rapida, correggibile e misurata.
 
@@ -4430,6 +4430,39 @@ Dipende da: G0.
 
 Criterio di uscita: report ripetibile con WER, false accept/reject, latenza e hardware.
 
+- `F2.1.1`-`F2.1.6` — 21/09/2026: primo incremento di F2, scelto perche' F2 era l'unica fase di
+  G1 mai iniziata e F3 era ormai quasi tutta chiusa. Costruito senza microfono ne' registrazioni di
+  persone: `benchmarks/voice_corpus.py` genera con numpy (seed fisso, identico bit per bit su ogni
+  macchina) nove clip annotate - silenzio, fruscio di stanza, rumore bianco forte e tono (i due
+  "hard negative" che un VAD a energia sbaglia per costruzione), un enunciato, due enunciati con
+  pausa lunga, due raffiche con pausa breve (devono restare UNA frase), parlato a 3 m e a 6 m -
+  con segmenti etichettati, parlante, distanza, rumore e dispositivo (F2.1.2). `corpus_hash` e
+  `manifest()` contengono solo etichette, metriche e SHA-256, mai campioni (F2.1.4, test dedicato);
+  le clip non sono mai scritte nel repository (F2.1.1). Il parlato sintetico NON e' parlato vero:
+  quello sta nelle clip TTS (`render_tts_entries`, voce SAPI italiana locale, con testo di
+  riferimento; WAV temporanei cancellati subito, fuori dall'hash stabile perche' dipendono dalle
+  voci del PC). Runner offline (F2.1.3): `benchmarks/bench_vad.py` fa passare il corpus dal VAD
+  vero e dal nuovo segmentatore (vedi F2.2.1) e misura falsi accettati/rifiutati per frame, frasi
+  trovate contro attese, latenza per frame; `benchmarks/bench_stt.py --tts-corpus` misura WER e
+  latenza di Whisper. Baseline separate CPU/GPU (F2.1.5): ogni report porta `hardware.profile` e
+  il nome del file lo contiene. `docs/voice-corpus.md` (F2.1.6) fissa licenza, consenso,
+  retention e la procedura di cancellazione (`python -m benchmarks.voice_corpus purge DIR`, che
+  rifiuta un file singolo, la radice di un disco e la home). **Trovato misurando, non ipotizzato**:
+  (1) webrtcvad e' STATEFUL - riusando la stessa istanza tra clip, il fruscio di stanza dopo un
+  rumore forte veniva dichiarato tutto parlato; il runner crea un VAD nuovo per clip; (2) il
+  webrtcvad reale dichiara parlato il 100% del rumore bianco forte e del tono e perde tutto il
+  parlato sintetico a 6 m (FR=1.0) - un VAD a energia non distingue voce da rumore forte, quindi
+  il Silero VAD gia' dentro Whisper (`vad_filter=True`) e' oggi l'unica difesa reale, e una
+  baseline di miglioramento esiste finalmente; (3) `pyttsx3` (SAPI5) si blocca per sempre al
+  secondo `runAndWait()` sullo stesso engine (cache): serve `pyttsx3._activeEngines.clear()` +
+  `init()` per frase; (4) prima misura reale di STT su CPU (medium int8, 5 frasi TTS): WER medio
+  0,062 ma p50 4,2 s - lontanissimo dal traguardo "partial p95 < 1 s" di F2.2, sono numeri di
+  partenza. Il WER puro conta "10" contro "dieci" come errore (limite documentato, F2.6.5).
+  Non affrontato: registrazioni consensuali vere (gap dichiarato), wake word e barge-in (nessun
+  runner: dipendono da F2.3/F2.4). Prova: 31 test in `tests/test_voice_benchmarks.py` (metriche
+  con numeri a mano, corpus deterministico, oracolo che trova esattamente le frasi attese,
+  runner WER con provider finto, purge).
+
 ### F2.2 — Streaming STT
 
 Dipende da: F2.1 e G1.
@@ -4443,6 +4476,19 @@ Dipende da: F2.1 e G1.
 7. `F2.2.7` Pubblicare eventi transcript versionati per HUD e companion.
 
 Criterio di uscita: partial p95 < 1 s sul profilo consigliato; testo finale non duplicato.
+
+- `F2.2.1` (segmentazione) e `F2.2.5` — 21/09/2026: la macchina a stati "parlato/silenzio -> frase
+  finita" viveva dentro `VadListener.listen_for_utterances`, incollata al flusso `sounddevice`.
+  Estratta in `core/voice/utterance_segmenter.py::UtteranceSegmenter` (pura: un frame e un giudizio
+  "e' parlato?" gia' calcolato, in cambio la frase completa o None); `VadListener` la usa senza
+  cambiare comportamento (i 5 test storici passano intatti) e il runner offline di F2.1 usa lo
+  STESSO codice di produzione. Buffer solo in RAM svuotato appena la frase e' consegnata o
+  annullata (`reset()`, chiamato anche quando il microfono e' in mute per non tenere la voce di Jake
+  stessa), `flush()` chiude la frase a fine flusso: `buffered_frames == 0` dopo ogni consegna e' un
+  test (F2.2.5, lato segmentatore; il buffer dentro Whisper/ctranslate2 non e' verificabile da qui).
+  Resta di F2.2.1 la separazione trascrizione dal thread di ascolto (oggi `_handle_utterance` la
+  chiama in linea). 11 test in `tests/test_utterance_segmenter.py`; modulo aggiunto al mypy
+  selettivo.
 
 ### F2.3 — Wake word e VAD adattivi
 

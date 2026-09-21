@@ -13,13 +13,16 @@ p50/p95) e due esecuzioni in momenti diversi si possono confrontare senza legger
 | `bench_nlu.py` | Accuratezza e latenza del classificatore di intent (`core/router.py`) su un campione di `training/intents.jsonl`, con leave-one-out sulla corsia a corrispondenza esatta | Ollama in esecuzione |
 | `bench_agent.py` | Passi, latenza ed esito dell'agente (`core/agent.py`) su 3 compiti composti sicuri (nessun effetto fuori da una cartella temporanea) | Ollama in esecuzione |
 | `bench_computer_use.py` | Latenza di screenshot, OCR e query finestre (solo lettura, nessun click) | niente (OCR locale) |
-| `bench_stt.py` | Latenza di trascrizione di Whisper (`core/voice/stt_provider.py`) | un file `.wav` reale passato con `--audio` |
+| `bench_stt.py` | Latenza di trascrizione di Whisper (`core/voice/stt_provider.py`); con `--tts-corpus` anche il WER su frasi pronunciate da una voce SAPI locale | un file `.wav` reale (`--audio`), oppure una voce italiana SAPI (`--tts-corpus`) |
+| `bench_vad.py` | Falsi accettati/rifiutati e frasi trovate di webrtcvad + segmentatore su un corpus sintetico deterministico (F2.1, vedi [docs/voice-corpus.md](../docs/voice-corpus.md)) | niente |
 
 ```powershell
 python -m benchmarks.bench_nlu --sample 80 --seed 42
 python -m benchmarks.bench_agent
 python -m benchmarks.bench_computer_use --iterations 5
 python -m benchmarks.bench_stt --audio percorso\a\una\registrazione.wav
+python -m benchmarks.bench_stt --tts-corpus --device cpu
+python -m benchmarks.bench_vad --aggressiveness 2 --with-tts
 ```
 
 ## Cosa manca e perché non è stato inventato

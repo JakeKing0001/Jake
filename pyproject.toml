@@ -105,6 +105,7 @@ files = [
     "core/nlu/retriever.py",
     "core/vision/screen.py",
     "core/vision/screen_diff.py",
+    "core/voice/utterance_segmenter.py",
 ]
 ignore_missing_imports = true
 no_implicit_optional = true
