@@ -2,6 +2,8 @@ import queue
 
 import numpy as np
 
+from core.voice.utterance_segmenter import UtteranceSegmenter, to_float32
+
 
 class VadListener:
     """Ascolta il microfono in continuo e segmenta l'audio in singole frasi via rilevamento
@@ -56,9 +58,7 @@ class VadListener:
             device=self.device,
             callback=callback,
         ):
-            speech_frames = []
-            silence_run = 0
-            in_speech = False
+            segmenter = UtteranceSegmenter(self.silence_frames_needed, self.max_frames)
 
             while should_continue():
                 try:
@@ -77,25 +77,13 @@ class VadListener:
                         pass
 
                 if self.muted:
-                    speech_frames = []
-                    silence_run = 0
-                    in_speech = False
+                    segmenter.reset()
                     continue
 
-                if is_speech:
-                    speech_frames.append(frame)
-                    silence_run = 0
-                    in_speech = True
-                elif in_speech:
-                    speech_frames.append(frame)  # include un po' di coda dopo il parlato
-                    silence_run += 1
-                    if silence_run >= self.silence_frames_needed or len(speech_frames) >= self.max_frames:
-                        yield self._to_float32(speech_frames)
-                        speech_frames = []
-                        silence_run = 0
-                        in_speech = False
+                utterance = segmenter.feed(frame, bool(is_speech))
+                if utterance is not None:
+                    yield utterance
 
     @staticmethod
     def _to_float32(frames: list) -> "np.ndarray":
-        pcm16 = np.concatenate(frames, axis=0).reshape(-1)
-        return (pcm16.astype(np.float32)) / 32768.0
+        return to_float32(frames)
