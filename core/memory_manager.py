@@ -4,6 +4,8 @@ import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from core.memory_schema import SENSITIVITY_LEVELS, ensure_schema
+
 
 class MemoryManager:
     """Gestisce la memoria a lungo termine di Jake su SQLite (ricordi, preferenze, cronologia).
@@ -38,64 +40,18 @@ class MemoryManager:
         # background - stesso accorgimento gia' usato in ReminderManager per lo stesso motivo.
         self._connection = sqlite3.connect(self.db_path, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
-        self._init_schema()
-        self._migrate_schema()
-
-    def _init_schema(self):
-        self._connection.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS memories (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                key TEXT NOT NULL,
-                value TEXT NOT NULL,
-                category TEXT NOT NULL DEFAULT 'fact',
-                importance INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                UNIQUE(key, category)
-            );
-
-            CREATE TABLE IF NOT EXISTS conversation_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                role TEXT NOT NULL,
-                text TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS memory_relations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                subject_key TEXT NOT NULL,
-                subject_category TEXT NOT NULL,
-                predicate TEXT NOT NULL,
-                object_key TEXT NOT NULL,
-                object_category TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                UNIQUE(subject_key, subject_category, predicate, object_key, object_category)
-            );
-            """
-        )
-        self._connection.commit()
-
-    def _migrate_schema(self):
-        """Aggiunge colonne introdotte dopo la v0.2 ai database creati con lo schema precedente."""
-        existing_columns = {
-            row["name"] for row in self._connection.execute("PRAGMA table_info(memories)").fetchall()
-        }
-        if "embedding" not in existing_columns:
-            self._connection.execute("ALTER TABLE memories ADD COLUMN embedding TEXT")
-        if "project" not in existing_columns:
-            self._connection.execute("ALTER TABLE memories ADD COLUMN project TEXT")
-        # F5 (Memory 2.0, provenienza e scadenza - vedi ROADMAP.md): source dice CHI ha detto
-        # questo fatto ("user": l'utente lo ha detto esplicitamente, "inferred": Jake lo ha
-        # dedotto, "agent:<nome>": deciso da un agente autonomo) - senza, un ricordo dedotto da
-        # un'ipotesi del modello e uno detto esplicitamente dall'utente sono indistinguibili in
-        # audit. expires_at (nullable = mai) e' quando il ricordo smette di valere da solo, per
-        # fatti con una scadenza naturale (es. "oggi piove" non deve restare vero per sempre).
-        if "source" not in existing_columns:
-            self._connection.execute("ALTER TABLE memories ADD COLUMN source TEXT NOT NULL DEFAULT 'user'")
-        if "expires_at" not in existing_columns:
-            self._connection.execute("ALTER TABLE memories ADD COLUMN expires_at TEXT")
-        self._connection.commit()
+        # F5.7.6: senza secure_delete SQLite lascia il contenuto di una riga cancellata nelle pagine libere
+        # del file finche' non le riscrive: "cancellato" non sarebbe cancellato. Con questa opzione le pagine
+        # liberate vengono azzerate.
+        self._connection.execute("PRAGMA secure_delete = ON")
+        # F5.1: schema versionato con migrazioni transazionali e backup prima di toccare dati esistenti.
+        try:
+            self.migration_report = ensure_schema(self._connection, self.db_path)
+        except BaseException:
+            # un file piu' nuovo del codice, una migrazione fallita: la connessione non deve restare aperta sul
+            # file (su Windows lo terrebbe bloccato: nemmeno un ripristino da backup potrebbe sostituirlo)
+            self._connection.close()
+            raise
 
     @staticmethod
     def _now() -> str:
@@ -111,6 +67,12 @@ class MemoryManager:
         project: str | None = None,
         source: str = "user",
         ttl_days: float | None = None,
+        sensitivity: str | None = None,
+        owner: str | None = None,
+        confidence: float | None = None,
+        valid_from: str | None = None,
+        valid_until: str | None = None,
+        created_by: str | None = None,
     ) -> None:
         """Salva o aggiorna un ricordo (upsert su key+category). Se e' fornito un embedding e
         un ricordo esistente nella stessa categoria/progetto e' semanticamente quasi identico
@@ -127,7 +89,14 @@ class MemoryManager:
         include_expired la' sotto) - None (default) significa 'nessuna scadenza', non 'scade
         subito'. Un ttl esplicito e' una decisione presa da CHI SALVA il ricordo (sa gia' che
         quel fatto ha vita breve, es. 'oggi piove'), diverso da purge_history_older_than (una
-        policy di retention decisa DOPO, dall'utente, per la privacy)."""
+        policy di retention decisa DOPO, dall'utente, per la privacy).
+
+        Metadati F5.1.3 (tutti opzionali): sensitivity (unknown/public/personal/sensitive/secret), owner,
+        created_by, confidence (0-1), valid_from/valid_until (tempo di validita', ISO 8601). Se non dati,
+        un ricordo NUOVO nasce con 'unknown' (esplicito, mai NULL) e uno esistente conserva i valori che
+        ha: un aggiornamento del testo non azzera la sensibilita' scelta prima. created_by si scrive una
+        sola volta (il primo autore resta l'autore)."""
+        self._validate_metadata(sensitivity, confidence, valid_from, valid_until)
         with self._lock:
             now = self._now()
             embedding_json = json.dumps(embedding) if embedding else None
@@ -140,6 +109,9 @@ class MemoryManager:
                 if duplicate_key is not None:
                     key = duplicate_key
 
+            existed = self._connection.execute(
+                "SELECT 1 FROM memories WHERE key = ? AND category = ?", (key, category),
+            ).fetchone() is not None
             self._connection.execute(
                 """
                 INSERT INTO memories
@@ -156,7 +128,52 @@ class MemoryManager:
                 """,
                 (key, value, category, importance, now, now, embedding_json, project, source, expires_at),
             )
+            # chi ha creato un ricordo NUOVO senza dirlo e' la sua fonte (user / inferred / agent:x): la provenienza
+            # che gia' si registra. Su un ricordo esistente created_by non cambia (vedi _apply_metadata).
+            author = created_by if created_by is not None else (None if existed else source)
+            self._apply_metadata(key, category, sensitivity, owner, confidence, valid_from, valid_until, author)
+            self._audit(key, category, "updated" if existed else "created", created_by or source)
             self._connection.commit()
+
+    @staticmethod
+    def _validate_metadata(sensitivity, confidence, valid_from, valid_until) -> None:
+        if sensitivity is not None and sensitivity not in SENSITIVITY_LEVELS:
+            raise ValueError(f"sensitivity non valida: {sensitivity!r} (ammesse: {', '.join(SENSITIVITY_LEVELS)})")
+        if confidence is not None and not 0.0 <= confidence <= 1.0:
+            raise ValueError("confidence deve essere tra 0 e 1")
+        if valid_from and valid_until and valid_from > valid_until:
+            raise ValueError("valid_from non puo' essere dopo valid_until")
+
+    def _apply_metadata(self, key, category, sensitivity, owner, confidence, valid_from, valid_until, created_by) -> None:
+        """Scrive SOLO i metadati dati; created_by solo se il ricordo non ha ancora un autore."""
+        assignments, params = [], []
+        for column, value in (("sensitivity", sensitivity), ("owner", owner), ("confidence", confidence),
+                              ("valid_from", valid_from), ("valid_until", valid_until)):
+            if value is not None:
+                assignments.append(f"{column} = ?")
+                params.append(value)
+        if created_by is not None:
+            assignments.append("created_by = CASE WHEN created_by = 'unknown' THEN ? ELSE created_by END")
+            params.append(created_by)
+        if assignments:
+            self._connection.execute(
+                f"UPDATE memories SET {', '.join(assignments)} WHERE key = ? AND category = ?", (*params, key, category),
+            )
+
+    MAX_AUDIT_EVENTS_PER_MEMORY = 200
+
+    def _audit(self, key: str, category: str, event: str, actor: str = "unknown", detail: str = "") -> None:
+        """Registro di cosa e' successo a un ricordo (F5.7.3). Limitato per ricordo: un ricordo letto mille
+        volte non deve far crescere il database senza fine."""
+        self._connection.execute(
+            "INSERT INTO memory_audit(memory_key, memory_category, event, actor, at, detail) VALUES (?, ?, ?, ?, ?, ?)",
+            (key, category, event, actor, self._now(), detail),
+        )
+        self._connection.execute(
+            "DELETE FROM memory_audit WHERE memory_key = ? AND memory_category = ? AND id NOT IN ("
+            "SELECT id FROM memory_audit WHERE memory_key = ? AND memory_category = ? ORDER BY id DESC LIMIT ?)",
+            (key, category, key, category, self.MAX_AUDIT_EVENTS_PER_MEMORY),
+        )
 
     def _find_duplicate_key(self, embedding: list, category: str, project: str | None, exclude_key: str) -> str | None:
         """Chiave del ricordo esistente piu' simile semanticamente a embedding, nella stessa
@@ -472,3 +489,9 @@ class MemoryManager:
         sequenza. E' un RLock, quindi chiamare `remember()`/`recall()` da dentro quel blocco (che
         riacquisiscono lo stesso lock) e' sicuro."""
         return self._lock
+
+    @property
+    def connection(self) -> sqlite3.Connection:
+        """La connessione SQLite, per i moduli che operano sull'intero archivio (privacy dashboard,
+        backup): chi la usa deve tenere `with memory_manager.lock:` per tutta la sequenza."""
+        return self._connection
