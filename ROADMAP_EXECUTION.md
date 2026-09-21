@@ -4788,15 +4788,34 @@ Criterio di uscita: nessuna contaminazione di memoria o permesso tra profili nei
   guidato da voce ("ripeti tre frasi"), modello di speaker verification vero, comando vocale "modalita' ospite".
   Prova: 42 test in `tests/test_speaker_profiles.py`; due moduli nel mypy selettivo.
 
-### Passo di integrazione F2 (non ancora fatto — dichiarato)
+### Passo di integrazione F2 (in corso)
 
-Tutti i moduli F2.1-F2.7 sopra sono librerie testate in isolamento con finti. Nessuno e' ancora collegato al
-percorso vocale di produzione (`core/voice/wake_word_session.py`, `core/voice/vad_listener.py`, `main.py`): oggi
-`WakeWordSession` parla ancora con `tts_provider.speak(testo intero)` in un thread, scarta i frame mentre Jake
-parla (`VadListener.muted`) e non ha ne' partial, ne' barge-in, ne' eco/replay guard, ne' `MIC_STATE`.
-Ordine previsto: stati di ascolto -> guardie eco/replay/cooldown -> indicatore del microfono ->
-`ChunkedSpeaker` con stile/volume di dispositivo -> riferimento audio dai provider -> AEC + barge-in (solo con
-profilo cuffie/Bluetooth finche' il riferimento non e' verificato) -> partial in streaming.
+I moduli F2.1-F2.7 nascono come librerie testate con finti. Il collegamento al percorso vocale di produzione
+(`core/voice/wake_word_session.py`, `push_to_talk.py`, `main.py`) procede per gradini, ciascuno con test:
+
+- **Fatto il 21/09/2026 (gradino 1) — stati, guardie, indicatore**: `WakeWordSession` non ha piu' quattro variabili
+  sparse ma una `ListeningStateMachine` (`self.listening`); `paused_until`, `dictation_active`, `_follow_up_until` e
+  `_awaiting_command_until` restano come alias (property con setter) per non toccare i 55 test storici ne' il
+  codice HUD, e tutti passano invariati. Dentro `_handle_utterance`: `EchoGuard` (una frase che e' quasi tutta cio'
+  che Jake ha appena detto NON e' un comando, anche con la finestra di comando aperta), `WakeCooldown` (una seconda
+  attivazione entro 1,5 s e' ignorata) e `RepeatGuard` (SPENTO di default: una persona che ripete "Jake che ore sono"
+  non deve essere scambiata per una TV; si attiva con `voice_replay_guard_seconds`). `MicIndicator` pubblica
+  `MIC_STATE` sul bus: aperto all'avvio, "speaking" con `discarding=True` mentre Jake parla, "sleep"/"dictation"/"wake"
+  nei cambi di stato, chiuso in `finally` anche se il ciclo solleva (test).
+- **Fatto (gradino 2) — testo per la voce**: `prepare_for_speech` (Markdown e codice non si leggono, stile
+  normal/brief/detailed/whisper/night da `voice_style`, volume/ritmo per dispositivo da `voice_output_device` tramite
+  `set_speech_params`) in `WakeWordSession._speak_async` e nel push-to-talk. Scelta deliberata: il provider riceve UNA
+  chiamata con il testo intero preparato, NON `ChunkedSpeaker` unita' per unita': Edge TTS prepara la frase seguente mentre
+  suona la precedente, e una chiamata per unita' introdurrebbe uno stacco (~0,4 s di rete) tra le frasi. `ChunkedSpeaker`
+  serve quando JakeCore produrra' testo in streaming (oggi `answer()` ritorna la risposta intera), e per il
+  barge-in con coda da scartare. L'echo-guard registra il testo REALMENTE pronunciato, non l'originale.
+- **Da fare (gradino 3)**: riferimento audio dai provider (Edge/OneCore/Character riproducono con `sd.play` e non lo
+  espongono) + AEC nel percorso del microfono mentre Jake parla + barge-in in produzione. Finche' il riferimento non e'
+  verificato su hardware, il barge-in si abiliterebbe solo con profilo cuffie (il benchmark simulato: 4/4 e nessun falso
+  senza AEC) e mai con altoparlanti.
+- **Da fare (gradino 4)**: partial in streaming verso HUD/sottotitoli (`VadListener` consegna solo frasi complete, non
+  audio in corso: serve un thread di decodifica "l'ultimo vince") e collegamento di `dialogue`/`language_normalizer`/
+  `speaker_profile`/`profiles` a `JakeCore`.
 
 ### Gate F2
 

@@ -430,5 +430,219 @@ class RunReleasesTheMicrophoneTests(unittest.TestCase):
         stream_holder["stream"].__exit__.assert_called_once()
 
 
+class ListeningIntegrationTests(unittest.TestCase):
+    """Collegamento di core/voice/listening_state.py (F2.3.3-F2.3.5) al ciclo reale: gli stati di ascolto
+    sono ora una macchina esplicita dietro gli alias storici, e le protezioni da eco/cooldown/replay e
+    l'indicatore del microfono girano DENTRO WakeWordSession."""
+
+    @staticmethod
+    def _core_with_bus():
+        from core.event_bus import EventBus
+
+        core = mock.MagicMock(EXIT_SENTINEL="ESCI")
+        core.conversation_state.has_pending_action.return_value = False
+        core.event_bus = EventBus()
+        core.answer.return_value = "Fatto."
+        return core
+
+    @staticmethod
+    def _events(bus, queue_):
+        items = []
+        while not queue_.empty():
+            items.append(queue_.get_nowait())
+        return [event for event in items if event.type.value == "MIC_STATE"]
+
+    def test_legacy_aliases_drive_the_state_machine(self):
+        from core.voice.listening_state import ListeningState
+
+        session = _mock_session()
+        session.paused_until = time.time() + 60
+        self.assertEqual(session.listening.state, ListeningState.SLEEP)
+        session.paused_until = 0.0
+        session.dictation_active = True
+        self.assertEqual(session.listening.state, ListeningState.DICTATION)
+        session.dictation_active = False
+        session._awaiting_command_until = time.time() + 5
+        self.assertEqual(session.listening.state, ListeningState.COMMAND)
+
+    def test_pause_and_resume_move_the_state_machine_and_the_microphone_indicator(self):
+        core = self._core_with_bus()
+        queue_ = core.event_bus.subscribe()
+        session = _mock_session(jake_core=core)
+        session.pause_listening(3)
+        session.resume_listening()
+        reasons = [e.payload["reason"] for e in self._events(core.event_bus, queue_)]
+        self.assertEqual(reasons, ["sleep", "wake"])
+        self.assertTrue(all(e for e in reasons))
+
+    def test_run_publishes_open_then_closed_even_when_the_loop_ends(self):
+        core = self._core_with_bus()
+        queue_ = core.event_bus.subscribe()
+        vad = mock.MagicMock(on_level=None, SAMPLE_RATE=16000)
+        vad.is_available.return_value = True
+        vad.listen_for_utterances.return_value = iter([])
+        session = _mock_session(jake_core=core, vad_listener=vad)
+        session.run()
+        events = self._events(core.event_bus, queue_)
+        self.assertEqual([(e.payload["open"], e.payload["reason"]) for e in events], [(True, "wake"), (False, "stopped")])
+
+    def test_the_microphone_is_reported_closed_even_if_the_loop_raises(self):
+        core = self._core_with_bus()
+        queue_ = core.event_bus.subscribe()
+        vad = mock.MagicMock(on_level=None, SAMPLE_RATE=16000)
+        vad.is_available.return_value = True
+        vad.listen_for_utterances.side_effect = RuntimeError("driver audio")
+        session = _mock_session(jake_core=core, vad_listener=vad)
+        with self.assertRaises(RuntimeError):
+            session.run()
+        self.assertFalse(self._events(core.event_bus, queue_)[-1].payload["open"])
+
+    def test_speaking_reports_an_open_microphone_that_is_discarding_frames(self):
+        core = self._core_with_bus()
+        queue_ = core.event_bus.subscribe()
+        session = _mock_session(jake_core=core)
+        session._speak_async("Sono le dieci e mezza del mattino.")
+        session._tts_thread.join(timeout=5)
+        events = self._events(core.event_bus, queue_)
+        self.assertTrue(events[0].payload["open"])
+        self.assertTrue(events[0].payload["discarding"])
+        self.assertEqual(events[0].payload["reason"], "speaking")
+        self.assertFalse(events[-1].payload["discarding"])
+
+    def test_a_session_without_an_event_bus_still_works(self):
+        session = _mock_session(jake_core=SimpleNamespace(conversation_state=SimpleNamespace(has_pending_action=lambda: False)))
+        self.assertIsNone(session.mic_indicator)
+        session.pause_listening(1)  # non solleva
+
+    def test_the_echo_of_jakes_own_answer_is_not_treated_as_a_command(self):
+        session = _mock_session()
+        session.echo_guard.note_spoken("Ho aperto Spotify e messo la tua playlist preferita")
+        session._awaiting_command_until = time.time() + 5  # finestra di comando aperta: un'eco vi finirebbe dentro
+        session.stt_provider.transcribe.return_value = "ho aperto spotify e messo la tua playlist"
+        session._handle_utterance(object())
+        session.jake_core.answer.assert_not_called()
+
+    def test_speaking_registers_the_text_with_the_echo_guard(self):
+        session = _mock_session()
+        session._speak_async("Ho aperto Spotify e messo la tua playlist preferita")
+        session._tts_thread.join(timeout=5)
+        self.assertTrue(session.echo_guard.is_echo("ho aperto spotify e messo la tua playlist"))
+
+    def test_a_second_wake_inside_the_cooldown_is_ignored(self):
+        session = _mock_session()
+        session.stt_provider.transcribe.side_effect = ["Jake che ore sono", "Jake apri spotify"]
+        with mock.patch.object(session, "_respond"):
+            session._handle_utterance(object())
+            session._handle_utterance(object())
+        self.assertEqual(session.jake_core.answer.call_count, 1)
+
+    def test_a_wake_after_the_cooldown_works(self):
+        clock = {"t": 1000.0}
+        session = _mock_session()
+        session.wake_cooldown._clock = lambda: clock["t"]
+        session.stt_provider.transcribe.side_effect = ["Jake che ore sono", "Jake apri spotify"]
+        with mock.patch.object(session, "_respond"):
+            session._handle_utterance(object())
+            clock["t"] += 2.0
+            session._handle_utterance(object())
+        self.assertEqual(session.jake_core.answer.call_count, 2)
+
+    def test_the_replay_guard_is_off_by_default(self):
+        self.assertIsNone(_mock_session().repeat_guard)
+
+    def test_an_identical_phrase_inside_the_configured_replay_window_is_dropped(self):
+        session = _mock_session(replay_window_seconds=5.0)
+        session.wake_cooldown.seconds = 0.0  # isola la guardia anti-replay dal cooldown
+        session.stt_provider.transcribe.return_value = "Jake che ore sono"
+        with mock.patch.object(session, "_respond"):
+            session._handle_utterance(object())
+            session._handle_utterance(object())
+        self.assertEqual(session.jake_core.answer.call_count, 1)
+
+    def test_a_follow_up_after_the_response_is_still_accepted_without_the_wake_word(self):
+        session = _mock_session()
+        session.stt_provider.transcribe.return_value = "e adesso che ore sono"
+        session._open_follow_up()
+        with mock.patch.object(session, "_respond"):
+            session._handle_utterance(object())
+        session.jake_core.answer.assert_called_once_with("e adesso che ore sono")
+
+    def test_follow_up_seconds_changed_after_construction_are_honoured(self):
+        session = _mock_session(follow_up_seconds=0)
+        session.follow_up_seconds = 30
+        session._open_follow_up()
+        self.assertGreater(session._follow_up_until, time.time() + 25)
+
+
+class SpeechPreparationIntegrationTests(unittest.TestCase):
+    """F2.5.1/F2.5.4/F2.5.7 dentro WakeWordSession: cosa arriva DAVVERO al motore TTS."""
+
+    LONG = "Prima frase abbastanza lunga qui. Seconda frase altrettanto lunga qui. Terza frase ancora piu' lunga qui."
+
+    def _speak(self, text, **kwargs):
+        tts = mock.MagicMock(spec=["speak", "stop"])
+        session = _mock_session(tts_provider=tts, **kwargs)
+        session._speak_async(text)
+        if session._tts_thread is not None:
+            session._tts_thread.join(timeout=5)
+        return session, tts
+
+    def test_markdown_is_never_read_aloud(self):
+        _, tts = self._speak("Ho **aperto** [Spotify](https://spotify.com) per te.")
+        tts.speak.assert_called_once_with("Ho aperto Spotify per te.")
+
+    def test_a_code_block_is_announced_once_not_read(self):
+        _, tts = self._speak("Ecco:\n```python\nprint(1)\n```\nFatto.")
+        spoken = tts.speak.call_args.args[0]
+        self.assertNotIn("print", spoken)
+        self.assertEqual(spoken.count("codice"), 1)
+
+    def test_a_brief_style_shortens_the_spoken_answer(self):
+        _, tts = self._speak(self.LONG, speech_style="brief")
+        spoken = tts.speak.call_args.args[0]
+        self.assertNotIn("Terza", spoken)
+        self.assertIn("Il resto e' a schermo.", spoken)
+
+    def test_the_normal_style_says_everything(self):
+        _, tts = self._speak(self.LONG)
+        self.assertIn("Terza frase", tts.speak.call_args.args[0])
+
+    def test_an_unknown_style_falls_back_to_normal(self):
+        session, _ = self._speak(self.LONG, speech_style="urlato")
+        self.assertEqual(session.speech_style.name, "normal")
+
+    def test_text_that_is_only_markup_is_not_spoken_at_all(self):
+        session, tts = self._speak("   ")
+        self.assertIsNone(session._tts_thread)
+        tts.speak.assert_not_called()
+
+    def test_the_echo_guard_learns_what_was_actually_spoken(self):
+        session, _ = self._speak("Ho **aperto** Spotify e messo la tua playlist preferita")
+        self.assertTrue(session.echo_guard.is_echo("ho aperto spotify e messo la tua playlist"))
+
+    def test_the_output_device_adjusts_volume_before_speaking(self):
+        calls = []
+
+        class Tts:
+            def set_speech_params(self, volume, rate):
+                calls.append(("params", volume, rate))
+                return True
+
+            def speak(self, text):
+                calls.append(("speak", text))
+
+            def stop(self):
+                pass
+
+        session = _mock_session(tts_provider=Tts(), output_device_name="Cuffie USB")
+        session._speak_async("Sono le dieci e mezza.")
+        session._tts_thread.join(timeout=5)
+        self.assertEqual(calls, [("params", 0.6, 0), ("speak", "Sono le dieci e mezza.")])
+
+    def test_a_provider_without_speech_params_still_speaks(self):
+        _, tts = self._speak("Sono le dieci e mezza.", output_device_name="Cuffie USB")
+        tts.speak.assert_called_once_with("Sono le dieci e mezza.")
+
+
 if __name__ == "__main__":
     unittest.main()

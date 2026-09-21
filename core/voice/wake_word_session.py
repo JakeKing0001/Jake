@@ -3,6 +3,11 @@ import threading
 import time
 
 from core.logger import get_logger
+from core.voice.audio_profile import apply_to_provider
+from core.voice.listening_state import (
+    EchoGuard, ListeningState, ListeningStateMachine, MicIndicator, RepeatGuard, WakeCooldown,
+)
+from core.voice.speech_text import STYLES, prepare_for_speech
 from core.voice.vad_listener import VadListener
 
 # Varianti di riferimento: Whisper a volte trascrive male "Jake" (nome poco comune in italiano).
@@ -49,7 +54,9 @@ class WakeWordSession:
     CONFIRMATION_WAIT_SECONDS = 20.0
 
     def __init__(self, jake_core, stt_provider, tts_provider, vad_listener: VadListener = None,
-                 wake_words=None, on_state=None, on_level=None, follow_up_seconds: float = None):
+                 wake_words=None, on_state=None, on_level=None, follow_up_seconds: float = None,
+                 replay_window_seconds: float = 0.0, speech_style: str = "normal",
+                 output_device_name: str | None = None):
         self.jake_core = jake_core
         self.stt_provider = stt_provider
         self.tts_provider = tts_provider
@@ -60,16 +67,83 @@ class WakeWordSession:
         self.on_state = on_state  # callable(state: str, detail: str)
         self.on_level = on_level  # callable(level: float, is_speech: bool)
         self.follow_up_seconds = self.FOLLOW_UP_SECONDS if follow_up_seconds is None else follow_up_seconds
+        # F2.5.4/F2.5.7: stile del parlato (normal/brief/detailed/whisper/night) e nome del dispositivo di
+        # uscita per regolare volume e ritmo. Uno stile sconosciuto ricade su "normal".
+        self.speech_style = STYLES.get(speech_style, STYLES["normal"])
+        self.output_device_name = output_device_name
         self._tts_thread = None
         self._running = False
         self._logger = get_logger()
         self.state = "idle"
-        self.dictation_active = False
-        self.paused_until = 0.0
-        self._follow_up_until = 0.0
-        self._awaiting_command_until = 0.0
+        # F2.3.3: gli stati di ascolto vivono in una macchina esplicita (core/voice/listening_state.py); gli
+        # attributi storici (paused_until, dictation_active...) restano come alias qui sotto.
+        self.listening = ListeningStateMachine(
+            command_wait_s=self.COMMAND_WAIT_SECONDS, follow_up_s=self.follow_up_seconds,
+            confirmation_wait_s=self.CONFIRMATION_WAIT_SECONDS,
+        )
+        # F2.3.4: protezioni da eco (la voce di Jake ripresa dal microfono) e da attivazioni ripetute. Il
+        # controllo anti-replay e' SPENTO di default (finestra 0): una persona che ripete "Jake che ore
+        # sono" dopo pochi secondi non deve essere scambiata per una TV; si attiva con
+        # `voice_replay_guard_seconds` in config solo dove serve.
+        self.echo_guard = EchoGuard()
+        self.wake_cooldown = WakeCooldown()
+        self.repeat_guard = RepeatGuard(window_s=replay_window_seconds) if replay_window_seconds > 0 else None
+        self.mic_indicator = self._build_mic_indicator()
         self._lock = threading.Lock()
         self._attach_hooks()
+
+    # ---- alias storici degli stati di ascolto (F2.3.3) -------------------------------
+
+    @property
+    def paused_until(self) -> float:
+        return self.listening.sleep_until
+
+    @paused_until.setter
+    def paused_until(self, value: float) -> None:
+        self.listening.sleep_until = value
+
+    @property
+    def dictation_active(self) -> bool:
+        return self.listening.dictating
+
+    @dictation_active.setter
+    def dictation_active(self, value: bool) -> None:
+        self.listening.dictating = value
+
+    @property
+    def _follow_up_until(self) -> float:
+        return self.listening.follow_up_until
+
+    @_follow_up_until.setter
+    def _follow_up_until(self, value: float) -> None:
+        self.listening.follow_up_until = value
+
+    @property
+    def _awaiting_command_until(self) -> float:
+        return self.listening.command_until
+
+    @_awaiting_command_until.setter
+    def _awaiting_command_until(self, value: float) -> None:
+        self.listening.command_until = value
+
+    def _open_follow_up(self) -> None:
+        self.listening.follow_up_s = self.follow_up_seconds  # rispecchia un eventuale cambio a sessione avviata
+        self.listening.open_follow_up()
+
+    # ---- indicatore del microfono (F2.3.5) --------------------------------------------
+
+    def _build_mic_indicator(self) -> MicIndicator | None:
+        bus = getattr(self.jake_core, "event_bus", None)
+        publish = getattr(bus, "publish", None)
+        return MicIndicator(publish) if callable(publish) else None
+
+    def _update_mic(self, open: bool, reason: str, discarding: bool = False) -> None:
+        if self.mic_indicator is None:
+            return
+        try:
+            self.mic_indicator.update(open, reason, discarding)
+        except Exception:
+            self._logger.exception("Errore pubblicando lo stato del microfono")
 
     # ---- integrazione col core --------------------------------------------------------
 
@@ -140,12 +214,20 @@ class WakeWordSession:
         self._speak_async(text)
 
     def _speak_async(self, text: str) -> None:
+        # F2.5.1: Markdown e codice non si leggono; lo stile puo' abbreviare. Cio' che Jake dice davvero (non
+        # il testo originale) e' cio' che l'eco-guard deve riconoscere.
+        text = prepare_for_speech(text, self.speech_style) if text else ""
         if not text:
             return
         self._interrupt_speech()
+        apply_to_provider(self.tts_provider, self.speech_style, self.output_device_name)
 
         def run():
             self.vad_listener.muted = True
+            # F2.3.4: la voce di Jake ripresa dal microfono non deve diventare un comando.
+            self.echo_guard.note_spoken(text)
+            # F2.3.5: lo stream resta aperto mentre Jake parla, i frame si scartano soltanto.
+            self._update_mic(True, "speaking", discarding=True)
             self._set_state("speaking", text)
             try:
                 self.tts_provider.speak(text)
@@ -156,7 +238,8 @@ class WakeWordSession:
                 time.sleep(0.25)
                 self.vad_listener.muted = False
                 if self.follow_up_seconds > 0:
-                    self._follow_up_until = time.time() + self.follow_up_seconds
+                    self._open_follow_up()
+                self._update_mic(True, self.listening.state.value)
                 if self.state == "speaking":
                     self._set_state("dictation" if self.dictation_active else "idle", "")
 
@@ -175,26 +258,30 @@ class WakeWordSession:
     # ---- controlli --------------------------------------------------------------------
 
     def pause_listening(self, minutes: int = 10) -> None:
-        self.paused_until = time.time() + max(1, int(minutes)) * 60
+        self.listening.sleep(max(1, int(minutes)))
         self._set_state("paused", f"{minutes} min")
+        self._update_mic(True, ListeningState.SLEEP.value)
 
     def resume_listening(self) -> None:
-        self.paused_until = 0.0
+        self.listening.wake_up()
         self._set_state("idle", "")
+        self._update_mic(True, self.listening.state.value)
 
     def arm_listening(self) -> None:
         """Come aver detto 'Jake': la prossima frase e' un comando (click sull'orb dell'HUD)."""
         self._interrupt_speech()
-        self._awaiting_command_until = time.time() + self.COMMAND_WAIT_SECONDS
+        self.listening.arm_command()
         self._set_state("listening", "")
 
     def start_dictation(self) -> None:
-        self.dictation_active = True
+        self.listening.start_dictation()
         self._set_state("dictation", "")
+        self._update_mic(True, ListeningState.DICTATION.value)
 
     def stop_dictation(self) -> None:
-        self.dictation_active = False
+        self.listening.stop_dictation()
         self._set_state("idle", "")
+        self._update_mic(True, self.listening.state.value)
 
     # ---- wake word --------------------------------------------------------------------
 
@@ -235,7 +322,13 @@ class WakeWordSession:
             self._set_state("error", "Nessun microfono disponibile")
             return
         self._set_state("idle", "")
+        self._update_mic(True, self.listening.state.value)
+        try:
+            self._listen_loop()
+        finally:
+            self._update_mic(False, "stopped")
 
+    def _listen_loop(self) -> None:
         for utterance in self.vad_listener.listen_for_utterances(lambda: self._running):
             if utterance.size == 0:
                 continue
@@ -268,6 +361,17 @@ class WakeWordSession:
             return
         self._logger.info("Sentito: %s", text)
 
+        # F2.3.4: una frase che e' (quasi) tutta cio' che Jake ha appena detto e' il suo stesso eco; una frase
+        # identica ripetuta a ridosso (se il controllo e' attivo) e' un loop, non una persona.
+        if self.echo_guard.is_echo(text):
+            self._logger.info("Ignorata: eco della voce di Jake")
+            if self.state in ("transcribing", "listening"):
+                self._set_state("idle", "")
+            return
+        if self.repeat_guard is not None and self.repeat_guard.is_replay(text):
+            self._logger.info("Ignorata: ripetizione identica ravvicinata")
+            return
+
         # In pausa: si sveglia solo con "Jake, svegliati" (o simili). La wake word puo' stare
         # ovunque nella frase (v4.1, Voice Natural 2.0: "scusa se ti disturbo, Jake, svegliati"
         # e' un risveglio naturale quanto "Jake, svegliati"), non solo all'inizio come richiede
@@ -298,9 +402,13 @@ class WakeWordSession:
 
         remainder = self._match_wake_word(text)
         if remainder is not None:
+            if not self.wake_cooldown.allow():
+                self._logger.info("Ignorata: attivazione entro il cooldown")
+                return
+            self.wake_cooldown.register()
             self._interrupt_speech()  # "Jake" detto mentre stava ancora parlando: interrompilo
             if not remainder:
-                self._awaiting_command_until = time.time() + self.COMMAND_WAIT_SECONDS
+                self.listening.arm_command()
                 self._set_state("listening", "")
                 return
             self._process_command(remainder)
@@ -309,8 +417,8 @@ class WakeWordSession:
         if speaking:
             return  # probabilmente la voce di Jake stessa o rumore: ignora senza wake word
 
-        pending = self.jake_core.conversation_state.has_pending_action()
-        if now < self._awaiting_command_until or now < self._follow_up_until or (pending and now < self._follow_up_until + self.CONFIRMATION_WAIT_SECONDS):
+        self.listening.set_pending_action(bool(self.jake_core.conversation_state.has_pending_action()))
+        if self.listening.accepts_without_wake_word():
             self._process_command(text)
             return
 
@@ -319,8 +427,7 @@ class WakeWordSession:
             self._set_state("idle", "")
 
     def _process_command(self, command: str) -> None:
-        self._awaiting_command_until = 0.0
-        self._follow_up_until = 0.0
+        self.listening.command_consumed()
         print(f"Tu > {command}")
         self._set_state("thinking", command)
         response = self.jake_core.answer(command)
@@ -335,7 +442,7 @@ class WakeWordSession:
 
     def _respond(self, response: str) -> None:
         if not response:
-            self._follow_up_until = time.time() + self.follow_up_seconds
+            self._open_follow_up()
             self._set_state("dictation" if self.dictation_active else "idle", "")
             return
         self._set_state("responding", response)
