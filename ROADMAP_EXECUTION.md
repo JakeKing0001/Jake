@@ -250,14 +250,14 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F2.5` | Speech Runtime (F2.5.1-F2.5.7 affrontati il 21/09/2026 a livello libreria/provider; manca il collegamento a WakeWordSession e la misura dal vivo di "prima emissione < 2 s") | `DOING` |
 | `F2.6` | Conversation Runtime (F2.6.1/F2.6.3-F2.6.7 a livello libreria il 21/09/2026; F2.6.2 solo il lato dati - manca l'HUD - e nessun collegamento a JakeCore/WakeWordSession; "< 5% dei turni con 'no, intendevo'" non misurabile senza un benchmark di dialoghi) | `DOING` |
 | `F2.7` | Identity and Voice (F2.7.1-F2.7.6 affrontati il 21/09/2026 con un'impronta vocale grossolana; nessun collegamento a JakeCore/AuthGate/MemoryManager di produzione; la firma NON e' un riconoscitore da produzione, vedi sotto) | `DOING` |
-| `F3.1` | Computer Use Quality (G1 superato, mai iniziato) | `READY` |
-| `F3.2` | Windows Automation (G1 superato, mai iniziato) | `READY` |
-| `F3.3` | Windows Automation (G1 superato, mai iniziato) | `READY` |
-| `F3.4` | Execution Runtime (G1 superato, mai iniziato) | `READY` |
-| `F3.5` | Computer Use Reliability (G1 superato, mai iniziato) | `READY` |
-| `F3.6` | Browser Automation (G1 superato, mai iniziato) | `READY` |
-| `F3.7` | Application Adapters (G1 superato, mai iniziato) | `READY` |
-| `F3.8` | Demonstration Learning (G1 superato, mai iniziato) | `READY` |
+| `F3.1` | Computer Use Quality (F3.1.1/F3.1.2/F3.1.3/F3.1.4/F3.1.6 chiusi; resta F3.1.5 DPI/multi-monitor - riga aggiornata il 21/09/2026, era stantia) | `DOING` |
+| `F3.2` | Windows Automation (F3.2.1/F3.2.3/F3.2.6/F3.2.7 e, il 21/09/2026, F3.2.2 cache, F3.2.4 eventi, F3.2.5 finestre elevate; resta il criterio "cinque app reali" e il collegamento della cache all'engine) | `DOING` |
+| `F3.3` | Windows Automation (F3.3.1-F3.3.4/F3.3.7 chiusi, F3.3.5 con `SelectorStore` il 21/09/2026; resta F3.3.6 inspector HUD) | `DOING` |
+| `F3.4` | Execution Runtime (F3.4.1-F3.4.7 affrontati, vedi la sezione F3.4) | `VERIFY` |
+| `F3.5` | Computer Use Reliability (F3.5.1-F3.5.7 affrontati, vedi la sezione F3.5) | `VERIFY` |
+| `F3.6` | Browser Automation (avviata: solo Edge; vedi la sezione F3.6 per cio' che resta) | `DOING` |
+| `F3.7` | Application Adapters (Esplora File/browser/VS Code/terminale; Impostazioni/Office/media/messaggistica non affrontati) | `DOING` |
+| `F3.8` | Demonstration Learning (RecordedStep/replay/dry-run/parametri/ProcedureManager costruiti; restano versione/app target/undo, sospensione, ri-approvazione) | `DOING` |
 | `F4.1` | Protocol Architecture (F4.1.2/F4.1.3/F4.1.5/F4.1.6 chiusi, F4.1.1 chiuso lato Python (sequence_id+trace_id)/F4.1.4 prima fetta lato Python - 16/09/2026; solo il lato C++ di F4.1.1/F4.1.4 resta scoperto, gap permanente dichiarato) | `DOING` |
 | `F4.2` | Native HUD (F4.2.1/F4.2.4 chiusi, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026; F4.2.5/F4.2.6 e resto di F4.2.3 richiedono test interattivi/visivi) | `DOING` |
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
@@ -5865,6 +5865,38 @@ Dipende da: F3.1.
 7. `F3.2.7` Valutare COM diretto vs helper C++ con benchmark, mantenendo l'adapter stabile.
 
 Criterio di uscita: dump semantico stabile della fixture e di cinque app reali supportate.
+
+- `F3.2.2` (cache), `F3.2.4` (eventi), `F3.2.5` (finestre elevate) e `F3.3.5` (invalidazione dei selettori) —
+  21/09/2026, verificati contro la fixture Qt VERA (non mock):
+  * `core/computer_use/uia_cache.py::TreeCache` (F3.2.2): cache per finestra (HWND + profondita') dell'`ElementInfo`
+    gia' costruito - mai riferimenti COM vivi, che non attraversano gli apartment - valida finche' non (1) avanza la
+    "generazione" della finestra per un evento o (2) scade il TTL. La generazione si legge PRIMA della lettura lenta,
+    quindi un evento arrivato mentre si legge rende obsoleta la voce appena salvata (test). Misurato sulla fixture
+    (52 nodi, profondita' 6): lettura a freddo 48 ms, a caldo 0,35 µs (contatori hits/misses/expirations/events).
+  * `core/computer_use/uia_events.py::UIAEventListener` (F3.2.4): thread MTA proprio con un `IUIAutomation` proprio. **Perche'
+    non sull'adapter** (provato, non ipotizzato): l'adapter vive in un apartment STA e i callback UIA restano fermi se il
+    thread non pompa messaggi COM - zero eventi con e senza `comtypes.client.PumpEvents`; in MTA arrivano su thread del
+    sistema. Un elemento non attraversa gli apartment: si passa l'HWND. **Limite MISURATO del provider Qt**: la fixture
+    solleva gli eventi di FOCUS ma NON quelli di struttura, di proprieta' (Name/IsEnabled/IsSelected/ToggleState),
+    Invoke o Selection (provati uno per uno con handler dedicati, MTA e STA): per questo la cache ha ANCHE il TTL e
+    "nessun evento" non e' mai preso come "nessun cambiamento". Il focus e' un evento globale del desktop: si tiene solo
+    quello del processo osservato (nessun contenuto letto). `RemoveAllEventHandlers` alla chiusura; un callback che solleva
+    non uccide l'ascoltatore; una finestra inesistente fallisce senza rompere l'ascoltatore.
+  * `core/computer_use/process_access.py` (F3.2.5): `process_elevation(pid)` (True/False, None se il processo non e'
+    interrogabile) e `assess_control` spiegano PERCHE' un'app non si puo' pilotare: un'app elevata da un Jake non elevato
+    scarta l'input simulato in silenzio (UIPI) e Jake non si eleva da solo; un livello di privilegio ignoto non si assume
+    sicuro. Provato sul processo reale (coincide con `IsUserAnAdmin`) e sul processo di sistema (non interrogabile o elevato).
+  * `core/computer_use/selector_store.py::SelectorStore` (F3.3.5): salva un selettore con la FIRMA dell'app (eseguibile,
+    versione del file, dimensione) e lo SCHELETRO strutturale della finestra (`structure_tokens`: ruolo + automation id o
+    nome per le etichette; il contenuto variabile - testo dei campi, voci di lista, titolo, controlli ripetuti - e'
+    escluso di proposito, altrimenti aggiungere una voce a una lista farebbe scadere ogni selettore a ogni uso). `check`
+    confronta firma (versione diversa, file modificato, firma illeggibile = non ci si fida) e somiglianza di Jaccard
+    (soglia 0,75) e segna il selettore obsoleto in modo PERSISTENTE (non si riabilita da solo, nemmeno se la firma "torna"
+    uguale: si risalva). Nessuna coordinata assoluta nel file (test). `invalidate_app` per un aggiornamento noto.
+  Non affrontato: il collegamento di `TreeCache`/`SelectorStore` a `SelectorEngine`/`ActionExecutor` (oggi sono moduli
+  a se': l'engine rilegge dal vivo), la prova degli eventi contro app diverse da Qt (Notepad moderno ha un processo
+  stub che esce subito: la sonda non e' riuscita a trovare la finestra, non e' un risultato), e il criterio "cinque app
+  reali". Prova: 49 test in `tests/test_uia_cache_and_store.py` (6 esecuzioni consecutive verdi).
 
 - `F3.2.1`/`F3.2.3` (prima fetta - adapter + proprieta' base, contro la fixture reale di F3.1.1) —
   18/09/2026: nuovo `core/computer_use/` (sottopacchetto, stesso pattern gia' usato per
