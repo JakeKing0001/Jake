@@ -246,7 +246,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F2.1` | Voice Quality (F2.1.1-F2.1.6 affrontati il 21/09/2026: harness sintetico + VAD/WER offline + documento privacy; mancano solo registrazioni consensuali vere, gap dichiarato) | `DOING` |
 | `F2.2` | Speech Runtime (F2.2.1/F2.2.5 chiusi il 21/09/2026 lato segmentazione) | `DOING` |
 | `F2.3` | Voice Quality (F2.3.1-F2.3.7 affrontati il 21/09/2026 a livello libreria; manca il collegamento a WakeWordSession e la misura "falso wake <= 1/24 h", che richiede ascolto vero) | `DOING` |
-| `F2.4` | Audio Systems (G1 superato, mai iniziato) | `READY` |
+| `F2.4` | Audio Systems (F2.4.1-F2.4.7 affrontati il 21/09/2026 su segnali simulati; mancano il collegamento a WakeWordSession/TTS reali e le prove su cuffie/altoparlanti/Bluetooth/TV VERI) | `DOING` |
 | `F2.5` | Speech Runtime (F2.5.1-F2.5.7 affrontati il 21/09/2026 a livello libreria/provider; manca il collegamento a WakeWordSession e la misura dal vivo di "prima emissione < 2 s") | `DOING` |
 | `F2.6` | Conversation Runtime (G1 superato, mai iniziato) | `READY` |
 | `F2.7` | Identity and Voice (G1 superato, mai iniziato) | `READY` |
@@ -4586,6 +4586,44 @@ Dipende da: F2.2 e F2.3.
 7. `F2.4.7` Misurare tempo stop e falsi barge-in per dispositivo.
 
 Criterio di uscita: 95% delle interruzioni del corpus ferma il TTS senza falso comando dall'eco.
+
+- `F2.4.1`-`F2.4.7` — 21/09/2026 (algoritmi e misure su segnali SIMULATI con percorso d'eco noto; il
+  criterio di uscita "95% delle interruzioni del corpus" richiede ancora un corpus vero e almeno tre
+  profili hardware, quindi NON e' soddisfatto):
+  * `F2.4.1`/`F2.4.2` — `core/voice/audio_frontend.py`, numpy puro. `EchoCanceller`: filtro adattivo
+    NLMS (512 tap = 32 ms) con riferimento = l'audio mandato agli altoparlanti (`push_reference`),
+    protezione da double talk (test di Geigel, con una fase iniziale di adattamento incondizionato:
+    con il filtro a zero ogni frame sembrerebbe double talk e non convergerebbe mai) e
+    `estimate_delay` per correlazione incrociata FFT, indispensabile per un ritardo oltre i 32 ms del
+    filtro (un test fissa che SENZA la stima un eco Bluetooth a 181 ms non viene cancellato,
+    ERLE < 3 dB). Misurato: ERLE ~18 dB (portatile e Bluetooth), 0,08x tempo reale. `NoiseSuppressor`:
+    sottrazione spettrale con rumore stimato per minimi su magnitudine lisciata (la prima versione, senza
+    lisciatura, non riduceva nulla: il minimo istantaneo di un rumore oscillante sta molto sotto la
+    media); ricostruzione esatta con radice di Hann dove il guadagno vale 1 (test); +4,3 dB di SNR a
+    rumore 0,03. `AutoGain` con attacco piu' rapido del rilascio, tetto e gate. `AudioFrontEnd` con
+    ogni blocco escludibile (bypass) e identita' quando sono tutti esclusi. La latenza del
+    soppressore (256-512 campioni a seconda del chunking) e' esposta in `latency_samples`.
+  * `F2.4.3`-`F2.4.5` — `core/voice/barge_in.py`: `BargeInDetector` (frame "voce utente" = VAD sul
+    RESIDUO dopo l'AEC E livello sopra 35% del riferimento; 8 frame utili tollerando pause di 2; mai
+    quando Jake non sta parlando), `BargeInController` (ferma il parlato e scarta la coda di
+    `ChunkedSpeaker`, pre-roll di 450 ms in RAM che si svuota alla lettura, nuovo `Turn` di tipo
+    "interruption" con `parent_id` e cosa Jake aveva gia' detto/quante unita' non ha detto),
+    `classify_interruption` (stop / correction con il testo utile / continue / new_request; "no" o
+    "aspetta" da soli sono STOP - trattarli come correzione lascerebbe Jake in attesa di un seguito che
+    forse non arriva; "stop al timer di cucina" e' una richiesta, non uno stop; una correzione
+    concatenata "no, scusa, intendevo X" -> X, bug trovato dal test).
+  * `F2.4.6`/`F2.4.7` — `benchmarks/bench_barge_in.py`: quattro famiglie (cuffie, portatile, Bluetooth
+    180 ms, TV in sottofondo), con e senza AEC, interruzione vera e falso barge-in, webrtcvad reale.
+    Risultati (4 prove per cella): con AEC le interruzioni vere vengono riconosciute 4/4 in ~230-260 ms
+    su cuffie/portatile/Bluetooth e 0 falsi barge-in; SENZA AEC il portatile si interrompe da solo 4/4
+    (e' la ragione d'essere dell'AEC); **la TV accesa produce falsi barge-in 4/4 anche con AEC** - la TV
+    non e' nel riferimento e nessun filtro adattivo la cancella. Un test fissa questo limite invece di
+    nasconderlo. Servirebbe separazione delle sorgenti, o un margine per-dispositivo piu' alto.
+  Non affrontato: collegamento a `WakeWordSession`/`ChunkedSpeaker` in produzione (oggi
+  `VadListener.muted` scarta i frame mentre Jake parla, quindi il barge-in vero non esiste ancora nel
+  flusso reale), cattura del riferimento dal flusso di riproduzione reale (i provider chiamano
+  `sd.play` senza esporre i campioni), misura su hardware vero. Prova: 29 test in
+  `tests/test_audio_frontend.py`, 34 in `tests/test_barge_in.py`; due moduli nel mypy selettivo.
 
 ### F2.5 — TTS streaming e personalità vocale
 
