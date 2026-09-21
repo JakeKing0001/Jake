@@ -278,7 +278,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F6.3` | Notification UX (F6.3.1-F6.3.9 il 21/09/2026 come libreria di decisione con test; nessun collegamento a NotificationCenter/JakeCore, nessuna consegna reale) | `DOING` |
 | `F6.4` | Goal Runtime | `DOING` |
 | `F6.5` | Automation Runtime | `DOING` |
-| `F6.6` | Meeting Experience | `BACKLOG` |
+| `F6.6` | Meeting Experience (libreria di regole il 21/09/2026: brief senza dati inventati, consenso e indicatore, follow-up gated; nessun connettore reale) | `DOING` |
 | `F6.7` | Runtime Reliability | `DOING` |
 | `F7.1` | Companion Security | `DOING` |
 | `F7.2` | Mobile Companion | `BACKLOG` |
@@ -8855,6 +8855,36 @@ Dipende da: connettori autorizzati, F5 e F6.3.
 7. `F6.6.7` Applicare redazione a dati di partecipanti e organizzazioni.
 
 Criterio di uscita: brief privo di dati inventati e meeting workflow conforme al consenso.
+
+- `F6.6.1`-`F6.6.7` (libreria di regole, senza connettori reali) — 21/09/2026: `core/daily_brief.py`, `core/meeting_copilot.py`.
+  I connettori (calendario, posta, viaggio) dipendono da F7 e NON esistono: qui c'e' il contratto (`BriefSource`, `related()`) e gli
+  adattatori per le sole fonti locali (`RemindersSource`, `TodosSource`, provati anche su `ReminderManager`/`TodoManager` VERI).
+  * `F6.6.1`/`F6.6.2` — **la regola che regge il modulo: un elemento entra nel brief solo se dichiara fonte e momento di lettura.**
+    Un elemento senza fonte, con testo vuoto, dal FUTURO (provenienza non credibile) o con sensibilita' sconosciuta e' scartato e
+    contato in `rejected`; una fonte che solleva finisce in `unavailable` e il brief dice "la fonte 'X' non ha risposto: non ho dati
+    da quella parte" - nessuna sezione inventata; se nessuna fonte risponde dice "Non ho dati aggiornati da nessuna fonte".
+    `Brief.provenance()` elenca ogni riga con fonte e `fetched_at`; un test verifica che ogni riga del testo sia nella provenienza.
+    Sezioni in ordine fisso (agenda, scadenze, attivita', meteo, viaggio, casa, altro).
+  * `F6.6.3` — `short` (max 3 righe per sezione per priorita', i dati vecchi OMESSI dichiarandone il numero), `detailed` (tutto, con
+    `[fonte, eta']` e "DATO VECCHIO"), `silent` (testo per lo schermo, nessun `spoken_text`). Su uno speaker condiviso a voce vanno
+    solo gli elementi dichiarati `public`; gli altri si annunciano come "N elementi privati sullo schermo".
+  * `F6.6.7` — `Redactor`: persone e organizzazioni con etichette COERENTI nello stesso brief ("Persona A" e' sempre la stessa
+    persona), i nomi lunghi sostituiti prima dei corti contenuti in essi, email e numeri di telefono sempre coperti; anche per le
+    note da condividere (`redact_notes`).
+  * `F6.6.4` — `prepare`: documenti e decisioni correlati, ciascuno con la fonte; nessun risultato -> "nessun documento correlato
+    trovato", una fonte che fallisce si dichiara e le altre contribuiscono lo stesso.
+  * `F6.6.5` — `MeetingCopilot`: la trascrizione parte SOLO con un `ConsentRecord` evidente (chi consente, partecipanti informati,
+    dichiarazione a parole proprie di almeno 10 caratteri) E con l'indicatore del microfono attivo; se l'indicatore si spegne a meta'
+    la trascrizione si FERMA da sola (`PAUSED`), la frase in arrivo non si registra e riprendere richiede l'indicatore di nuovo attivo.
+    La trascrizione ha una scadenza (7 giorni di default), a fine riunione si butta salvo scelta esplicita e si tengono solo le note
+    scelte.
+  * `F6.6.6` — i follow-up si estraggono SOLO da marcatori espliciti (`AZIONE:`, `TODO:`, `DECISIONE:`, con proprietario in `(a X)` o
+    `@X`): una frase come "forse bisognerebbe sentire il fornitore" non produce nulla. `PendingSend` non parte da solo: `send()` senza
+    `approve(utente)` solleva `ApprovalRequiredError`, l'approvazione e' per QUEL messaggio, un secondo invio e' rifiutato, un
+    follow-up rifiutato non parte nemmeno se era stato approvato prima.
+  Non affrontato: collegamento a connettori reali e a `MicIndicator` di `WakeWordSession` (`indicator_active` e' un callable da
+  passare), trascrizione vera durante la riunione, esposizione come skill/HUD. Prova: 50 test in `tests/test_daily_brief_and_meeting.py`;
+  due moduli nel mypy selettivo.
 
 ### F6.7 — Monitor e digital housekeeping
 

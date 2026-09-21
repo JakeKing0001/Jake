@@ -50,6 +50,8 @@ files = [
     "core/schema_validation.py",
     "core/notification_center.py",
     "core/notification_policy.py",
+    "core/daily_brief.py",
+    "core/meeting_copilot.py",
     "core/autonomy_budget.py",
     "core/session_recorder.py",
     "core/session_hooks.py",
