@@ -49,6 +49,11 @@ class EventType(str, Enum):
     # utterance_id, revision, kind ("partial"|"final"), text, stable_text, confidence. Un client
     # deve trattare `partial` come provvisorio e mai come comando: solo `final` lo e'.
     TRANSCRIPT = "TRANSCRIPT"
+    # F2.3.5: indicatore di ascolto sempre visibile su ogni superficie attiva. Payload: {"open":
+    # bool (lo stream di cattura e' aperto), "discarding": bool (aperto ma i frame si scartano,
+    # es. mentre Jake parla - non e' "spento"), "reason": str, "since": float}. Vedi
+    # core/voice/listening_state.py::MicIndicator, che pubblica solo quando qualcosa cambia.
+    MIC_STATE = "MIC_STATE"
 
 
 # Traduce gli stati gia' in uso da WakeWordSession/SessionHooks.set_state (stringhe libere,

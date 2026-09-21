@@ -245,7 +245,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F1.8` | Runtime Reliability | `DONE` |
 | `F2.1` | Voice Quality (F2.1.1-F2.1.6 affrontati il 21/09/2026: harness sintetico + VAD/WER offline + documento privacy; mancano solo registrazioni consensuali vere, gap dichiarato) | `DOING` |
 | `F2.2` | Speech Runtime (F2.2.1/F2.2.5 chiusi il 21/09/2026 lato segmentazione) | `DOING` |
-| `F2.3` | Voice Quality (G1 superato, mai iniziato) | `READY` |
+| `F2.3` | Voice Quality (F2.3.1-F2.3.7 affrontati il 21/09/2026 a livello libreria; manca il collegamento a WakeWordSession e la misura "falso wake <= 1/24 h", che richiede ascolto vero) | `DOING` |
 | `F2.4` | Audio Systems (G1 superato, mai iniziato) | `READY` |
 | `F2.5` | Speech Runtime (F2.5.1-F2.5.7 affrontati il 21/09/2026 a livello libreria/provider; manca il collegamento a WakeWordSession e la misura dal vivo di "prima emissione < 2 s") | `DOING` |
 | `F2.6` | Conversation Runtime (G1 superato, mai iniziato) | `READY` |
@@ -4528,6 +4528,50 @@ Dipende da: F2.1 e F2.2.
 7. `F2.3.7` Gestire hotword concorrente tra PC e satelliti con device election F7.
 
 Criterio di uscita: falso wake ≤ 1/24 ore di benchmark e miss rate entro la soglia del corpus.
+
+- `F2.3.1`-`F2.3.7` — 21/09/2026 (livello libreria; il collegamento a `WakeWordSession` e' il passo di
+  integrazione dichiarato in fondo a F2):
+  * `F2.3.1` — `core/voice/wake_settings.py::WakeSettings`: wake word, tolleranza di edit, aggressivita'
+    VAD, silenzio di chiusura frase, follow-up e gate di energia, PER DISPOSITIVO
+    (`config["voice_devices"]["<nome>"]`, sezione `default` sotto). Ogni valore e' validato (range,
+    tipo, wake word di 3-20 lettere e non una parola comune come "ok"/"apri"/"stop", che
+    scatterebbe a ogni frase); una chiave con un refuso (`vad_agressiveness`) e' un ERRORE, non
+    ignorata in silenzio; preset `sensitivity` high/medium/low con i valori espliciti che vincono.
+    Un valore non valido solleva `SettingsError` all'avvio invece di configurare l'ascolto a caso.
+  * `F2.3.2` — `NoiseCalibrator`: riceve solo LIVELLI RMS (un float per frame; `add_frame` calcola il
+    livello e scarta il frame - un test verifica che nessun array resti nell'oggetto), classifica
+    quiet/moderate/noisy e raccomanda aggressivita' e gate. Se durante la calibrazione qualcuno ha
+    parlato (picchi molto sopra la mediana) ritorna None invece di tarare sul parlato.
+    `apply_calibration` puo' solo irrigidire l'ascolto, mai renderlo piu' permissivo di quanto
+    l'utente abbia scelto.
+  * `F2.3.3` — `core/voice/listening_state.py::ListeningStateMachine`: stati wake / command /
+    follow_up / confirmation / dictation / sleep come enum con transizioni esplicite, stessi
+    tempi (8 s / 6 s / 20 s) e stessa semantica di `WakeWordSession` (la finestra di conferma resta
+    ancorata alla fine del follow-up come oggi), `accepts_without_wake_word()` scritta una volta sola,
+    `on_change` anche per le scadenze a tempo (`tick()`).
+  * `F2.3.4` — `EchoGuard` (una frase di >= 3 parole quasi tutta contenuta in cio' che Jake ha appena
+    detto e' l'eco dell'altoparlante; le frasi corte non si giudicano mai eco perche' "Jake" da solo
+    puo' essere davvero l'utente), `WakeCooldown` (nessuna nuova attivazione entro 1,5 s; una
+    domanda non prolunga il cooldown, solo `register()`), `RepeatGuard` (stessa frase identica entro
+    2,5 s = loop di uno spot/video, non un umano che aspetta la risposta). Nessuna e' infallibile:
+    riducono i falsi risvegli, il numero vero resta il benchmark su hardware.
+  * `F2.3.5` — `MicIndicator` + `EventType.MIC_STATE` (payload `open`, `discarding`, `reason`, `since`):
+    pubblica solo quando qualcosa cambia, e "aperto ma sta scartando i frame" (Jake parla) NON e'
+    "spento" - lo stream di cattura resta aperto e l'indicatore non deve mentire. Il rendering
+    sull'HUD PySide6/C++ non e' fatto (l'header C++ degli event type si rigenera da solo dall'enum).
+  * `F2.3.6` — il push-to-talk (`--voice`, F9) esisteva gia'; nuovo test in un processo pulito che
+    importare `core.voice.push_to_talk` non trascina webrtcvad, `vad_listener`, `wake_word_session` ne'
+    `listening_state`: se wake word/VAD sbagliano, il fallback deterministico non puo' rompersi con loro.
+  * `F2.3.7` — `core/voice/wake_election.py::WakeElection`: ogni dispositivo che ha sentito "Jake" si
+    candida con un punteggio; chiusa la finestra (0,5 s) UN vincitore: punteggio piu' alto, a parita'
+    (margine 0,05) il dispositivo gia' attivo nel `DeviceRegistry`, poi priorita', poi id (scelta
+    deterministica: mai due vincitori). Una candidatura tardiva non riapre il round (l'ha trovato un
+    test: la prima versione trattava ogni submit dopo la finestra come una nuova attivazione);
+    dopo `hold_s` (3 s) una nuova candidatura apre un round nuovo. `claim_winner` applica il risultato
+    al registro. Nessuna rete: le candidature devono arrivare dal companion (F7.1, non ancora).
+  Non affrontato: collegamento a `WakeWordSession`, rendering dell'indicatore su HUD, ricezione di
+  candidature da satelliti reali, benchmark "falso wake <= 1/24 h". Prova: 25 test in
+  `tests/test_wake_settings.py`, 46 in `tests/test_listening_state.py`; tre moduli nel mypy selettivo.
 
 ### F2.4 — AEC, noise suppression e barge-in
 
