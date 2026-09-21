@@ -49,6 +49,7 @@ files = [
     "core/action_snapshot.py",
     "core/schema_validation.py",
     "core/notification_center.py",
+    "core/notification_policy.py",
     "core/autonomy_budget.py",
     "core/session_recorder.py",
     "core/session_hooks.py",
