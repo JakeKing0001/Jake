@@ -116,6 +116,8 @@ files = [
     "core/voice/wake_election.py",
     "core/voice/audio_frontend.py",
     "core/voice/barge_in.py",
+    "core/voice/language_normalizer.py",
+    "core/voice/dialogue.py",
 ]
 ignore_missing_imports = true
 no_implicit_optional = true

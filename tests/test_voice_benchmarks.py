@@ -59,6 +59,11 @@ class WordErrorRateTests(unittest.TestCase):
         # limite noto del WER puro, documentato: "10" e "dieci" sono parole diverse (F2.6.5).
         self.assertEqual(word_error_rate("dieci minuti", "10 minuti"), 0.5)
 
+    def test_number_normalization_removes_that_false_error_but_not_real_ones(self):
+        self.assertEqual(word_error_rate("dieci minuti", "10 minuti", normalize_numbers=True), 0.0)
+        self.assertEqual(word_error_rate("metti un timer di dieci minuti", "metti un timer di 10 minuti", normalize_numbers=True), 0.0)
+        self.assertEqual(word_error_rate("dieci minuti", "12 minuti", normalize_numbers=True), 0.5)  # un numero SBAGLIATO resta un errore
+
 
 class HardwareProfileTests(unittest.TestCase):
     def test_profile_separates_cpu_and_gpu_baselines(self):
@@ -224,6 +229,7 @@ class SttCorpusRunnerTests(unittest.TestCase):
         report = run_corpus(provider, self._entries())
         self.assertEqual([c["wer"] for c in report["per_clip"]], [0.0, 0.3333])
         self.assertAlmostEqual(report["mean_wer"], 0.1667, places=3)
+        self.assertAlmostEqual(report["mean_wer_numbers_normalized"], 0.1667, places=3)
         self.assertEqual(len(provider.calls), 2)  # la clip di silenzio senza testo non viene trascritta
 
     def test_audio_is_float32_mono_normalized(self):

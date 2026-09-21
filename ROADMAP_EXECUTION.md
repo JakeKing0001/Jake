@@ -248,7 +248,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F2.3` | Voice Quality (F2.3.1-F2.3.7 affrontati il 21/09/2026 a livello libreria; manca il collegamento a WakeWordSession e la misura "falso wake <= 1/24 h", che richiede ascolto vero) | `DOING` |
 | `F2.4` | Audio Systems (F2.4.1-F2.4.7 affrontati il 21/09/2026 su segnali simulati; mancano il collegamento a WakeWordSession/TTS reali e le prove su cuffie/altoparlanti/Bluetooth/TV VERI) | `DOING` |
 | `F2.5` | Speech Runtime (F2.5.1-F2.5.7 affrontati il 21/09/2026 a livello libreria/provider; manca il collegamento a WakeWordSession e la misura dal vivo di "prima emissione < 2 s") | `DOING` |
-| `F2.6` | Conversation Runtime (G1 superato, mai iniziato) | `READY` |
+| `F2.6` | Conversation Runtime (F2.6.1/F2.6.3-F2.6.7 a livello libreria il 21/09/2026; F2.6.2 solo il lato dati - manca l'HUD - e nessun collegamento a JakeCore/WakeWordSession; "< 5% dei turni con 'no, intendevo'" non misurabile senza un benchmark di dialoghi) | `DOING` |
 | `F2.7` | Identity and Voice (G1 superato, mai iniziato) | `READY` |
 | `F3.1` | Computer Use Quality (G1 superato, mai iniziato) | `READY` |
 | `F3.2` | Windows Automation (G1 superato, mai iniziato) | `READY` |
@@ -4701,6 +4701,43 @@ Dipende da: F2.2 e F1.1.
 7. `F2.6.7` Salvare correzioni come esempi soltanto dopo esito verificato.
 
 Criterio di uscita: < 5% dei turni del benchmark richiede “no, intendevo”.
+
+- `F2.6.1`, `F2.6.2` (lato dati), `F2.6.3`-`F2.6.7` — 21/09/2026 (libreria pura: testo e decisioni, nessun
+  modello; NON ancora collegata a `JakeCore.answer`/`WakeWordSession`, che gia' hanno la propria gestione di
+  azioni in sospeso, `CORRECT_LAST`, entita' e pronomi - il passo successivo e' sostituire/affiancare, non
+  duplicare):
+  * `F2.6.1` — `core/voice/language_normalizer.py`: `resolve_ellipsis` ("e a Milano?" dopo un meteo ->
+    stesso intent, slot riempito) SOLO se l'ultimo comando ha un unico parametro testuale, altrimenti
+    None e si chiede; una frase con un verbo di comando non e' un'ellissi. `resolve_ordinals` ("il primo e
+    il terzo", "l'ultimo", "i primi due", "il 2", "tutti") ritorna gli indici o None se uno sfora la lista
+    (meglio chiedere che aprire l'elemento sbagliato); bug trovato dal test: "l'ultimo" era un solo token.
+    Il cambio di intenzione ("anzi...") e' coperto da `barge_in.classify_interruption` (F2.4.5).
+  * `F2.6.2` (dati) — `CorrectionPlanner.last_heard(n)`: gli ultimi turni sentiti, dal piu' recente, per
+    "cosa hai sentito?". Manca la modifica del transcript nell'HUD.
+  * `F2.6.3` — `CorrectionPlanner.plan`: una correzione su un turno MAI eseguito (pending/failed/cancelled)
+    si riesegue; su un'azione locale reversibile gia' eseguita -> `undo_then_rerun`; su qualunque altra gia'
+    eseguita (esterna, distruttiva, non annullabile) -> `ask`. L'azione gia' avvenuta non si ripete mai in
+    silenzio, nemmeno se DESTRUCTIVE e "reversibile" (test).
+  * `F2.6.4` — `core/voice/dialogue.py::classify_reply`: CONFIRM_YES / CONFIRM_NO / AUTH_SECRET /
+    CLARIFICATION_ANSWER / NEW_COMMAND in base a cosa Jake sta aspettando. In attesa di password TUTTO e'
+    il segreto (`Reply.secret`, `repr=False`: non compare in repr/str, test); un si'/no e' una risposta alla
+    conferma solo se la frase e' INTERA un si'/no - "si' ma prima apri Spotify" e' un comando nuovo che ANNULLA
+    la conferma in sospeso, altrimenti un "ok" detto a Spotify potrebbe confermare una cancellazione.
+  * `F2.6.5` — normalizzazione: numeri in lettere -> cifre (0-999.999, con elisioni ventuno/trentotto; "per cento"
+    e "sei" verbo restano parole - "tu sei pronto" non diventa "tu 6 pronto", "sei" e' numero solo davanti a
+    un'unita' di misura; "un/una/uno" mai numeri), sigle scandite ("g p t" -> GPT, mai "a e i o u"), nomi
+    propri corretti sul vocabolario solo con candidato UNICO entro 1 (2 sopra 8 lettere) modifiche, mai su
+    termini inglesi d'uso comune (download, screenshot, playlist...): il code-switching non si "italianizza".
+    Il WER ora ha `normalize_numbers`: "dieci"/"10" non e' piu' un errore di riconoscimento (un numero
+    sbagliato resta errore; test), e `bench_stt` riporta entrambe le cifre.
+  * `F2.6.6` — `needs_confirmation(confidence, risk)`: READ_ONLY mai, LOCAL_REVERSIBLE sotto 0,5, EXTERNAL_ACTION
+    sotto 0,8, DESTRUCTIVE/ADMIN sempre qualunque sia la confidenza (anche 1.0); confidenza ignota = 0,7.
+  * `F2.6.7` — `propose_learning`/`resolve_learning`: la correzione diventa esempio SOLO se l'esito del comando
+    corretto e' verificato, e la proposta si consuma comunque (non risorge con un esito successivo).
+  Non affrontato: collegamento a JakeCore/`LearningManager.correct`, HUD "cosa ho sentito", benchmark di
+  dialoghi per il criterio "< 5%", ellissi con piu' slot, gestione di riferimenti oltre gli ordinali.
+  Prova: 45 test in `tests/test_language_normalizer.py`, 30 in `tests/test_dialogue.py`, 1 nuovo in
+  `tests/test_voice_benchmarks.py`; due moduli nel mypy selettivo.
 
 ### F2.7 — Multiutente prudente
 

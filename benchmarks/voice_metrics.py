@@ -49,9 +49,16 @@ def _tokens(text: str) -> list[str]:
     return _WORD.findall(text.lower())
 
 
-def word_error_rate(reference: str, hypothesis: str) -> float | None:
+def word_error_rate(reference: str, hypothesis: str, normalize_numbers: bool = False) -> float | None:
     """WER = (sostituzioni + inserzioni + cancellazioni) / parole del riferimento, dopo aver
-    ignorato maiuscole e punteggiatura. None se il riferimento non ha parole (indefinito)."""
+    ignorato maiuscole e punteggiatura. None se il riferimento non ha parole (indefinito).
+    `normalize_numbers` porta in cifre i numeri scritti in lettere PRIMA del confronto, cosi' "dieci"
+    e "10" non contano come errore: Whisper scrive le cifre, chi detta la frase di riferimento le
+    lettere, e quell'errore non e' di riconoscimento (F2.6.5)."""
+    if normalize_numbers:
+        from core.voice.language_normalizer import numbers_to_digits
+
+        reference, hypothesis = numbers_to_digits(reference), numbers_to_digits(hypothesis)
     ref, hyp = _tokens(reference), _tokens(hypothesis)
     if not ref:
         return None
