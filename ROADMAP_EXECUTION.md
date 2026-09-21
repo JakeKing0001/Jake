@@ -249,7 +249,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F2.4` | Audio Systems (F2.4.1-F2.4.7 affrontati il 21/09/2026 su segnali simulati; mancano il collegamento a WakeWordSession/TTS reali e le prove su cuffie/altoparlanti/Bluetooth/TV VERI) | `DOING` |
 | `F2.5` | Speech Runtime (F2.5.1-F2.5.7 affrontati il 21/09/2026 a livello libreria/provider; manca il collegamento a WakeWordSession e la misura dal vivo di "prima emissione < 2 s") | `DOING` |
 | `F2.6` | Conversation Runtime (F2.6.1/F2.6.3-F2.6.7 a livello libreria il 21/09/2026; F2.6.2 solo il lato dati - manca l'HUD - e nessun collegamento a JakeCore/WakeWordSession; "< 5% dei turni con 'no, intendevo'" non misurabile senza un benchmark di dialoghi) | `DOING` |
-| `F2.7` | Identity and Voice (G1 superato, mai iniziato) | `READY` |
+| `F2.7` | Identity and Voice (F2.7.1-F2.7.6 affrontati il 21/09/2026 con un'impronta vocale grossolana; nessun collegamento a JakeCore/AuthGate/MemoryManager di produzione; la firma NON e' un riconoscitore da produzione, vedi sotto) | `DOING` |
 | `F3.1` | Computer Use Quality (G1 superato, mai iniziato) | `READY` |
 | `F3.2` | Windows Automation (G1 superato, mai iniziato) | `READY` |
 | `F3.3` | Windows Automation (G1 superato, mai iniziato) | `READY` |
@@ -4751,6 +4751,52 @@ Dipende da: F1.4 e F2.1.
 6. `F2.7.6` Testare voce registrata, speaker simile e rumore.
 
 Criterio di uscita: nessuna contaminazione di memoria o permesso tra profili nei test.
+
+- `F2.7.1`-`F2.7.6` — 21/09/2026 (libreria; nessun collegamento a `JakeCore`, che oggi ha ancora una sola
+  memoria e un solo `ConversationStateManager`):
+  * `F2.7.1` — `core/voice/speaker_profile.py`: profilo vocale OPT-IN (`enroll(..., consent=True)`: senza,
+    `PermissionError`, e un rifiuto non crea nemmeno il file) da almeno 3 campioni validi; l'archivio contiene
+    solo 25 numeri per profilo (12 MFCC medi, 12 deviazioni, altezza mediana), mai audio (test sulla
+    dimensione del file); `delete`/`delete_all` rimuovono davvero (file cancellato quando non resta
+    nessun profilo).
+  * **Onesta' sulla qualita'**: e' una firma grossolana in numpy, non un modello di speaker verification (nessun
+    modello del genere e' installato). Misurata prima di scrivere le soglie: su due voci SAPI reali (Elsa
+    it-IT, Zira en-US) l'impronta di una SINGOLA frase NON separa i parlanti (distanze same-speaker
+    2,9-6,4 contro different-speaker 3,8-7,5, sovrapposte), mentre il CENTROIDE di 5 frasi si' (leave-one-out
+    12/12, ma con un solo margine di ~0,55-0,94). Le soglie sono provvisorie (`ACCEPT_DISTANCE=4.0`,
+    `MARGIN_RATIO=0.75`) e vanno ritarate su arruolamenti veri. Limiti FISSATI da test invece di nascosti: una
+    voce registrata (replay) ha la stessa impronta e viene accettata; una voce con altezza +7% e formanti quasi
+    uguali viene accettata come la stessa persona.
+  * `F2.7.2` — l'esito e' un `SpeakerHint` (profilo, high/low/none, distanze) che serve a SCEGLIERE il profilo,
+    mai a concedere un permesso: `ProfileNamespace.needs_authentication(risk)` e' vero per DESTRUCTIVE/ADMIN
+    per QUALUNQUE profilo, anche con riconoscimento "high" e tetto ADMIN (test).
+  * `F2.7.3` — `SpeakerHint.needs_disambiguation` quando la confidenza non e' "high"; `disambiguation_question`
+    ("Sei Davide o Anna?", "Chi sta parlando?"); con due profili vicini il migliore deve stare a <= 75% della
+    distanza del secondo, altrimenti "low" e si chiede: mai indovinare tra due persone.
+  * `F2.7.4` — `core/profiles.py::ProfileManager`: ogni profilo ha `ConversationStateManager`, database di
+    memoria (`data/profiles/<id>/jake_memory.db`), preferenze e tetto di rischio PROPRI; test con `MemoryManager`
+    veri: cio' che il profilo A ricorda non e' visibile al profilo B. Il tetto puo' solo restringere
+    (`permits`). Gli id sono validati contro path traversal (`../fuori`, `a/b`, maiuscole, spazi, "guest").
+    `delete_profile` cancella anche i dati su disco.
+  * `F2.7.5` — `guest()`: memoria in una cartella temporanea fuori da `data/profiles`, `persistent=False`,
+    `learning_enabled=False`, tetto LOCAL_REVERSIBLE; `close_guest` cancella tutto (test: la cartella non esiste
+    piu'); due ospiti non condividono nulla e nulla dell'ospite raggiunge un profilo vero.
+  * `F2.7.6` — testati: voce registrata (accettata: e' il limite di cui sopra e la ragione per cui la voce non e'
+    mai un lucchetto), parlante simile (mai "high" sul profilo SBAGLIATO), rumore/silenzio (nessuna impronta),
+    voce sconosciuta lontana (rifiutata).
+  Non affrontato: collegamento a JakeCore (memoria/cronologia per profilo nel percorso reale), arruolamento
+  guidato da voce ("ripeti tre frasi"), modello di speaker verification vero, comando vocale "modalita' ospite".
+  Prova: 42 test in `tests/test_speaker_profiles.py`; due moduli nel mypy selettivo.
+
+### Passo di integrazione F2 (non ancora fatto — dichiarato)
+
+Tutti i moduli F2.1-F2.7 sopra sono librerie testate in isolamento con finti. Nessuno e' ancora collegato al
+percorso vocale di produzione (`core/voice/wake_word_session.py`, `core/voice/vad_listener.py`, `main.py`): oggi
+`WakeWordSession` parla ancora con `tts_provider.speak(testo intero)` in un thread, scarta i frame mentre Jake
+parla (`VadListener.muted`) e non ha ne' partial, ne' barge-in, ne' eco/replay guard, ne' `MIC_STATE`.
+Ordine previsto: stati di ascolto -> guardie eco/replay/cooldown -> indicatore del microfono ->
+`ChunkedSpeaker` con stile/volume di dispositivo -> riferimento audio dai provider -> AEC + barge-in (solo con
+profilo cuffie/Bluetooth finche' il riferimento non e' verificato) -> partial in streaming.
 
 ### Gate F2
 

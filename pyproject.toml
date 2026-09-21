@@ -118,6 +118,8 @@ files = [
     "core/voice/barge_in.py",
     "core/voice/language_normalizer.py",
     "core/voice/dialogue.py",
+    "core/voice/speaker_profile.py",
+    "core/profiles.py",
 ]
 ignore_missing_imports = true
 no_implicit_optional = true
