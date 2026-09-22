@@ -10,6 +10,7 @@ from core.agent_checkpoint import AgentCheckpoint, AgentCheckpointStore
 from core.auth_gate import AuthGate
 from core.autonomy_budget import AutonomyBudget
 from core.command import Command
+from core.companion_guard import CompanionAudit, CompanionGuard
 from core.companion_server import CompanionServer
 from core.context_summarizer import ContextSummarizer
 from core.desktop_context import DesktopContextTracker
@@ -159,6 +160,7 @@ class JakeCore:
             event_bus=self.event_bus, command_handler=self.answer,
             port=int(config.get("companion_server_port", 8765) or 8765),
             token=config.get("companion_token"), credential_store=self.device_credential_store,
+            guard=CompanionGuard(audit=CompanionAudit()),
         )
         if bool(config.get("companion_server_enabled", False)):
             self.companion_server.start()

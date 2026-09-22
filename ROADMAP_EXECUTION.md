@@ -280,7 +280,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F6.5` | Automation Runtime | `DOING` |
 | `F6.6` | Meeting Experience (libreria di regole il 21/09/2026: brief senza dati inventati, consenso e indicatore, follow-up gated; nessun connettore reale) | `DOING` |
 | `F6.7` | Runtime Reliability | `DOING` |
-| `F7.1` | Companion Security | `DOING` |
+| `F7.1` | Companion Security (F7.1.1/.4/.5/.6/.7 il 22/09/2026: rate limit, replay, corpo, capability per classe, audit a catena, TLS obbligatorio fuori da loopback; mancano pairing HTTP F7.1.2 e capability persistenti F7.1.3) | `DOING` |
 | `F7.2` | Mobile Companion | `BACKLOG` |
 | `F7.3` | Voice Devices | `BACKLOG` |
 | `F7.4` | Presence Runtime | `DOING` |
@@ -8939,6 +8939,43 @@ Dipende da: F1.4 e F4.1.
 7. `F7.1.7` Separare endpoint read-only, command, approval, file e audio.
 
 Criterio di uscita: penetration test locale non ottiene comando senza device autorizzato.
+
+- `F7.1.1`, `F7.1.4`-`F7.1.7` (difese del server companion) — 22/09/2026: nuovo `core/companion_guard.py`, applicato da `core/companion_server.py`
+  in una pipeline unica (`_Handler._prepare`): versione del protocollo -> blocco per tentativi falliti -> autenticazione (invariata, F1.4.6)
+  -> rate limit -> capability della classe -> anti-replay; poi limite e validazione del corpo, audit, TLS. Provato con un server VERO su
+  porta effimera, un `DeviceCredentialStore` vero (DPAPI) e un vero handshake TLS con un certificato generato da `cryptography`; le
+  regole pure con orologi finti e numeri esatti (62 test in `tests/test_companion_security.py`).
+  * `F7.1.7` — cinque classi distinte (`read_only`, `command`, `approval`, `file`, `audio`). Una capability e' un insieme di classi: un
+    dispositivo solo `read_only` legge lo stato ma sui comandi e su claim/release prende 403 e il gestore non gira mai (test). Default
+    per chi non ha una capability esplicita: read_only + command + approval, **mai file/audio**; i prefissi `/approvals/`, `/files/`,
+    `/audio/` sono gia' classificati, cosi' un endpoint futuro non puo' "dimenticare" i controlli (oggi rispondono 403/404: nessuna route esiste).
+  * `F7.1.5` — token bucket per (identita', classe) con `Retry-After` (i dispositivi sono indipendenti, la lettura ha un secchio suo);
+    blocco per indirizzo dopo 8 autenticazioni fallite in 60 s **senza valutare il token** (un token giusto durante il blocco prende 429:
+    provato) e senza azzerare il conteggio quando un client valido interroga (altrimenti su 127.0.0.1 il polling legittimo neutralizzerebbe
+    il blocco: test). Anti-replay: timestamp entro 120 s + nonce mai visto per identita'; cache con tetto che, piena, RIFIUTA invece di
+    espellere; obbligatorio per i comandi quando l'host non e' loopback, opzionale (ma validato se presente) su 127.0.0.1; un
+    timestamp fuori finestra riceve `server_time` per correggere un orologio sfasato. Corpo: tetto 64 KiB (413 senza aspettare il corpo
+    dichiarato), `Content-Length` solo cifre, `Transfer-Encoding` rifiutato (411), JSON non valido / non oggetto / troncato = 400
+    (prima diventava `{}` in silenzio), tipi/lunghezze/caratteri di controllo di `text`, `device_id`, `session_id`, `name`, id nel percorso
+    (max 4000 caratteri di testo). Timeout di 30 s per richiesta (slowloris: connessione muta chiusa, test) e massimo 4 flussi SSE per identita'.
+  * `F7.1.6` — `CompanionAudit`: JSONL con catena di hash (modifica, cancellazione o inserimento a meta' file rilevati alla riga esatta,
+    la catena riparte dopo un riavvio). Ogni comando scrive `command_received` PRIMA di girare e `command_completed`/`command_failed`
+    dopo, con id richiesta, dispositivo autenticato, endpoint, lunghezza e SHA-256 del testo — **mai il testo** (test: una "password" nel
+    comando non compare nel file, ne' il token); claim/release scrivono chi ha ceduto a chi; ogni rifiuto scrive il motivo. **Se il
+    registro non e' scrivibile il comando NON gira** (503, test con un percorso che e' una cartella). Un'eccezione del gestore ora e' un
+    500 senza dettagli invece di una connessione troncata. Collegato in `JakeCore` (`data/jake_companion_audit.jsonl`).
+  * `F7.1.4` — `start()` rifiuta (`InsecureBindError`, prima di aprire la porta) ogni host non loopback senza `tls_context`; con TLS
+    l'handshake avviene nel thread della richiesta (un client fermo al ClientHello non blocca gli altri: test), il token non e'
+    leggibile su un proxy che registra i byte, HTTP semplice su porta TLS non ottiene nulla e un client che non si fida del certificato
+    fallisce con `SSLCertVerificationError`. `/status` dichiara `encrypted`.
+  * `F7.1.1` — `X-Jake-Protocol`: finestra di compatibilita' `[PROTOCOL_VERSION-1, PROTOCOL_VERSION]`, fuori finestra 426 con gli estremi
+    supportati; senza header il client e' considerato precedente alla regola e accettato. `/status` espone `min_protocol_version`.
+  Non affrontato: `F7.1.2` (challenge/QR con conferma sul PC: `core/pairing_service.py` esiste ma non e' esposto via HTTP) e `F7.1.3`
+    (capability, scadenza e rotazione nel database delle credenziali: le capability di questo passo vivono in memoria e un riavvio le
+    riporta al default); generazione/rinnovo del certificato TLS e sua distribuzione al telefono (pinning); nessun limite globale di
+    connessioni contemporanee; il percorso legacy col token globale resta non identificante. Il criterio "penetration test locale" e' coperto
+    solo da `PenetrationTests` (token assenti/sbagliati/revocati, replay di una richiesta catturata, impersonazione, spazzatura sul socket),
+    non da un test di penetrazione indipendente.
 
 ### F7.2 — Companion mobile MVP
 
