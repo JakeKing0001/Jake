@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Rete locale (F7.1/F7.2): comunica SOLO con il Companion Server sulla stessa rete (o in sviluppo, in
+         loopback via adb reverse) - nessun altro endpoint remoto e' mai contattato da questa app. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Scansione del QR di pairing (F7.1.2/F7.2). -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
+    <application
+        android:name=".JakeApplication"
+        android:allowBackup="false"
+        android:label="Jake Companion"
+        android:icon="@mipmap/ic_launcher"
+        android:theme="@style/Theme.JakeCompanion"
+        android:usesCleartextTraffic="true">
+        <!-- usesCleartextTraffic: SOLO per il caso non-TLS (companion_server_host loopback via adb reverse,
+             sviluppo). Una connessione reale su LAN passa da TLS (core/companion_tls.py) e non ne ha bisogno -
+             vedi FingerprintTrustManager.kt per il modello di fiducia usato quando TLS e' attivo. -->
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.JakeCompanion">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Activity di scansione di zxing-android-embedded (com.journeyapps:zxing-android-embedded). -->
+        <activity
+            android:name="com.journeyapps.barcodescanner.CaptureActivity"
+            android:screenOrientation="fullSensor"
+            android:exported="false" />
+    </application>
+</manifest>
