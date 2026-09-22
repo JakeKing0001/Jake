@@ -13,8 +13,13 @@ pairing rifiutato, scaduto o mai iniziato non crea MAI un dispositivo.
 Le challenge sono EFFIMERE in memoria, non persistite - una richiesta di pairing non completata
 entro `CHALLENGE_TTL_SECONDS` non ha senso sopravviva a un riavvio di Jake, stesso principio gia'
 applicato a `core/device_registry.py` (che traccia solo il dispositivo attivo ORA, mai su disco).
-Il collegamento vero agli endpoint HTTP di `core/companion_server.py` resta un passo successivo
-dichiarato (fasi 6+ del piano), qui solo il servizio."""
+
+F7.1.2/Companion Mobile MVP: collegato agli endpoint HTTP di `core/companion_server.py`
+(`POST /pairing/start`, `GET /pairing/<challenge_id>`) - il companion (nuovo, senza credenziali)
+chiama il primo, `JakeCore` mostra la richiesta sul canale locale (voce/CLI, lo stesso
+meccanismo di conferma gia' usato per ogni altra azione ADMIN - vedi `skills/pairing.py`) e il
+companion ritira l'esito col secondo. `take_result()` (sotto) e' la consegna one-time
+dell'esito a chi lo ritira."""
 import secrets
 import threading
 import time
@@ -36,6 +41,13 @@ class PairingService:
         self._logger = get_logger()
         self._lock = threading.Lock()
         self._challenges: dict[str, PairingChallenge] = {}
+        # F7.1.2/Companion Mobile MVP: l'ESITO di una challenge risolta (la credenziale appena
+        # emessa, o il sentinel "rejected"), consegnato UNA volta sola a chi lo ritira
+        # (take_result) - stesso principio "one-time" gia' applicato al token in
+        # DeviceCredentialStore.issue_credential: chi lo scopre in ritardo (una connessione persa
+        # tra l'approvazione e il prossimo poll del companion) non deve trovarlo ancora li'
+        # all'infinito, ma nemmeno perderlo se arriva un istante dopo l'approvazione.
+        self._results: dict[str, DeviceCredential | str] = {}
 
     def start_pairing(self, requested_name: str = "") -> PairingChallenge:
         """Nuova richiesta di pairing. `challenge_id` e' generato con secrets.token_urlsafe, non
@@ -81,6 +93,8 @@ class PairingService:
         device_id = secrets.token_hex(_DEVICE_ID_BYTES)
         self.credential_store.register_device(device_id, name)
         credential = self.credential_store.issue_credential(device_id)
+        with self._lock:
+            self._results[challenge_id] = credential
         self._logger.info("Pairing approvato: nuovo dispositivo %s (%s).", device_id, name or "senza nome")
         return credential
 
@@ -93,4 +107,14 @@ class PairingService:
             if challenge is None or not challenge.is_usable(now=self._time_source()):
                 return False
             challenge.used = True
+            self._results[challenge_id] = "rejected"
             return True
+
+    def take_result(self, challenge_id: str) -> DeviceCredential | str | None:
+        """L'esito di una challenge gia' RISOLTA (approvata o rifiutata), consegnato UNA sola
+        volta: `DeviceCredential` per un'approvazione, la stringa "rejected" per un rifiuto,
+        `None` se la challenge e' ancora in sospeso, non esiste, o il suo esito era gia' stato
+        ritirato (chi chiama distingue quest'ultimo caso da "ancora in sospeso" leggendo
+        `get_challenge(challenge_id).used`, ancora vero anche dopo il ritiro)."""
+        with self._lock:
+            return self._results.pop(challenge_id, None)

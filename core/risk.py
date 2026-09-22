@@ -305,6 +305,12 @@ SKILL_RISK: dict[str, RiskLevel] = {
     # CONFIRMATION_REQUIRED (skills/undo.py) - e' l'intent compensatorio dentro quella busta
     # (spesso DESTRUCTIVE, es. DELETE_PATH) a passare comunque da PolicyEngine per conto suo.
     "UNDO_LAST_ACTION": RiskLevel.READ_ONLY,
+    # F7.1.2 (Companion Mobile MVP): autorizza un dispositivo NUOVO a controllare Jake con gli
+    # stessi privilegi dell'utente - equivalente a consegnare un secondo companion_token.
+    # ADMIN, non in SELF_CONFIRMING_INTENTS: passa dal gate centrale come ogni altra azione ADMIN,
+    # quindi chiede la passphrase se ne e' stata configurata una (v5.4/5.5), esattamente come
+    # SET_POWER_PLAN/RUN_COMMAND - nessuna eccezione per questo intent.
+    "APPROVE_PAIRING": RiskLevel.ADMIN,
 }
 
 

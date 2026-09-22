@@ -75,6 +75,10 @@ EFFECT_CLASSES = frozenset({
 INTENT_EFFECT_CLASS: dict[str, str] = {
     "ADD_NOTE": EFFECT_CLASS_CREATE,
     "ADD_TODO": EFFECT_CLASS_CREATE,
+    # F7.1.2: crea un'identita' di dispositivo e una credenziale nuove - un "create" nel senso
+    # letterale del censimento, non un effetto "external" (l'effetto e' sul portachiavi/registro
+    # di Jake stesso, non su un sistema di terzi).
+    "APPROVE_PAIRING": EFFECT_CLASS_CREATE,
     "ASK_QUESTION": EFFECT_CLASS_READ,
     "BUILD_SEMANTIC_INDEX": EFFECT_CLASS_CREATE,
     "CALCULATE": EFFECT_CLASS_READ,

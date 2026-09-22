@@ -33,6 +33,7 @@ from core.notification_policy import NotificationPolicy, QuietHours
 from core.ollama_client import OllamaClient
 from core import orchestrator
 from core.orchestrator import JakeOrchestrator
+from core.pairing_service import PairingService
 from core.policy_engine import POLICY_REASONS, PolicyDecision, PolicyEngine, strip_authorization_signals
 from core.plugin_loader import load_plugins
 from core.request_context import (
@@ -50,6 +51,7 @@ from core.session_recorder import SessionRecorder
 from core.skill_forge import SkillForge
 from core.skill_registry import SkillRegistry
 from core.skill_result import SkillResult
+from core.sync_crypto import Keyring
 from core.system_advisor import SystemAdvisor
 from core.task_monitor import MonitorStore, TaskMonitorRegistry
 from core.task_notification_bridge import TaskNotificationBridge
@@ -63,6 +65,7 @@ from skills.session_control import (
     StartDictationSkill, StopDictationSkill, StopTalkingSkill,
 )
 from skills.notification_mode import GetNotificationModeSkill, SetNotificationModeSkill
+from skills.pairing import ApprovePairingSkill
 from skills.skill_forge_skills import CreateSkillSkill, DeleteCreatedSkillSkill, ListCreatedSkillsSkill
 from skills.undo import UndoLastActionSkill
 
@@ -194,6 +197,15 @@ class JakeCore:
         # autenticare per-dispositivo appena il primo pairing avviene, senza bisogno di un
         # riavvio di Jake per "attivare" la funzionalita'.
         self.device_credential_store = DeviceCredentialStore()
+        # F7.1.2/Companion Mobile MVP: il servizio di pairing (fase 4 del piano) collegato per
+        # davvero agli endpoint HTTP (core/companion_server.py) - vedi _on_pairing_requested piu'
+        # sotto per il lato "conferma sul PC". sync_keyring (F7.6) e' il portachiavi dei
+        # dispositivi companion per la sincronizzazione cifrata: pairing e' anche il momento in
+        # cui le chiavi pubbliche di sync di un dispositivo (se le manda) entrano qui - vedi
+        # skills/pairing.py. Nessun trasporto/transport reale usa ancora questo portachiavi
+        # (limite dichiarato F7.6), qui solo la registrazione.
+        self.sync_keyring = Keyring()
+        self.pairing_service = PairingService(self.device_credential_store)
         # F1.3.5 (adozione - collegato a tutti e tre i chokepoint reali: il percorso a comando
         # diretto qui sotto, i tre TaskAgent - vedi self.agent/coding_agent/research_agent - e
         # PlanExecutor subito sotto, stesso principio "un solo store condiviso" gia' applicato a
@@ -209,6 +221,8 @@ class JakeCore:
             port=int(config.get("companion_server_port", 8765) or 8765),
             token=config.get("companion_token"), credential_store=self.device_credential_store,
             guard=CompanionGuard(audit=CompanionAudit()),
+            pairing_service=self.pairing_service, conversation_state=self.skill_registry.conversation_state,
+            on_pairing_requested=self._on_pairing_requested,
         )
         if bool(config.get("companion_server_enabled", False)):
             self.companion_server.start()
@@ -466,6 +480,7 @@ class JakeCore:
             ("SET_NOTIFICATION_MODE", SetNotificationModeSkill(self.notification_center)),
             ("GET_NOTIFICATION_MODE", GetNotificationModeSkill(self.notification_center)),
             ("UNDO_LAST_ACTION", UndoLastActionSkill(self)),
+            ("APPROVE_PAIRING", ApprovePairingSkill(self.pairing_service, self.sync_keyring)),
         ):
             self.skill_registry.register_skill(intent, skill)
 
@@ -563,6 +578,39 @@ class JakeCore:
         if gated is None:
             return
         print(f"\nJake > {gated}\nTu > ", end="", flush=True)
+
+    def _on_pairing_requested(self, challenge, requested_name: str, sync_public_key: dict | None) -> None:
+        """F7.1.2 (Companion Mobile MVP): il lato "conferma sul PC" del pairing - collegato da
+        core/companion_server.py::_handle_pairing_start subito dopo aver aperto la challenge.
+        Imposta una richiesta di conferma sul canale LOCALE (voce/CLI: current_device_id() e'
+        sempre None sul thread che gestisce /pairing/start, mai impostato per quell'endpoint -
+        vedi core/companion_guard.py::EndpointClass.PAIRING) con lo STESSO meccanismo gia' usato
+        per ogni altra azione ADMIN (_handle_confirmation/_finalize_pending_action): un "si'" (e
+        la passphrase, se ne e' stata configurata una - APPROVE_PAIRING e' classificato ADMIN in
+        core/risk.py) autorizza per davvero. Nessun dispositivo nasce da solo: se l'utente non e'
+        li' a leggere, la challenge scade da sola dopo 5 minuti (core/pairing_service.py) - questo
+        metodo non riprova ne' attende, e' chiamato una volta sola per richiesta.
+
+        "text" e' deliberatamente VUOTO (a differenza di ogni altra azione che la popola per
+        l'apprendimento, vedi _finalize_pending_action): imparare "pairing di X" come comando
+        insegnato riprodurrebbe un challenge_id ormai scaduto/consumato, inutile e fuorviante."""
+        label = (requested_name or "").strip() or "sconosciuto"
+        self.conversation_state.set_pending_action({
+            "intent": "APPROVE_PAIRING",
+            "parameters": {
+                "challenge_id": challenge.challenge_id, "requested_name": requested_name,
+                "sync_public_key": sync_public_key,
+            },
+            "reason": "confirmation_required",
+            "text": "",
+        })
+        message = self.notify(
+            "pairing",
+            f"Un nuovo dispositivo '{label}' chiede di collegarsi a Jake. Autorizzi il pairing? (scade tra 5 minuti)",
+        )
+        if message is None:
+            return
+        print(f"\nJake > {message}\nTu > ", end="", flush=True)
 
     def _default_on_trigger_fired(self, trigger: dict, outcome, total_steps: int) -> None:
         # F1.3.8: il percorso automatico (nessun turno di conversazione, nessun utente in
@@ -1043,6 +1091,11 @@ class JakeCore:
                 "parameters": {"request": request, "question": outcome.question},
                 "reason": "agent_question",
                 "text": remember_text,
+                # F6.3/F6.7: cosi' _continue_agent puo' chiudere il compito che il ponte stava
+                # seguendo quando l'utente risponde (vedi resolve_decision li' sotto) - nessun
+                # altro codice esistente leggeva "trace_id" per un'azione "agent_question" prima
+                # di questo incremento, aggiungerlo non cambia alcun comportamento gia' esistente.
+                "trace_id": outcome.trace_id,
             })
             # F6.3/F6.7: anche una domanda di chiarimento e' una decisione richiesta all'utente a
             # meta' di un compito (intent=None: nessun rischio da un'azione specifica da
@@ -1073,7 +1126,14 @@ class JakeCore:
 
     def _continue_agent(self, action: dict, answer_text: str) -> str:
         """L'utente ha risposto alla domanda di chiarimento posta dall'agente: si riprende il
-        compito con la richiesta originale piu' la risposta appena data."""
+        compito con la richiesta originale piu' la risposta appena data.
+
+        F6.3/F6.7: il compito che il ponte stava seguendo (decision_required per la domanda
+        stessa, vedi _run_agent) si chiude QUI - la risposta lo risolve, anche se il compito
+        VERO continua sotto un trace_id nuovo (_run_agent ne genera sempre uno fresco): sono due
+        esecuzioni distinte per il ledger/il checkpoint (mai state la stessa), lo sono anche per
+        il monitor."""
+        self._publish_task_event(lambda: self.task_bridge.resolve_decision(action.get("trace_id"), message=answer_text, success=True))
         request = action["parameters"]["request"]
         question = action["parameters"].get("question", "")
         combined = f"{request}\n(L'utente ha risposto alla domanda \"{question}\" con: {answer_text})"
@@ -1334,7 +1394,22 @@ class JakeCore:
         if intent_patterns.is_positive_answer(text):
             return self._finalize_pending_action(action, text)
         if intent_patterns.is_negative_answer(text):
+            # F7.1.2: un "no" a un pairing non deve solo restare senza effetto (il comportamento
+            # generico sotto) - deve anche dirlo esplicitamente a pairing_service, cosi' il
+            # companion in attesa vede "rejected" al prossimo poll invece di aspettare i 5 minuti
+            # della scadenza naturale. Nessun'altra azione ADMIN ha bisogno di un callback simile
+            # (un "no" qualunque non ha un secondo sistema a cui riportare l'esito), quindi resta
+            # un caso a se', non un meccanismo generico.
+            if action.get("intent") == "APPROVE_PAIRING":
+                challenge_id = (action.get("parameters") or {}).get("challenge_id")
+                if challenge_id:
+                    self.pairing_service.reject(challenge_id)
             self._log_denied_action(action, result="denied_confirmation")
+            # F6.3/F6.7: stesso principio del "si'" in _finalize_pending_action - un "no" chiude il
+            # compito che il ponte stava seguendo, se ce n'era uno (no-op altrimenti).
+            self._publish_task_event(lambda: self.task_bridge.resolve_decision(
+                action.get("trace_id"), message="annullato", success=False,
+            ))
             return "Va bene, annullato."
         # Ne' si' ne' no: l'utente e' passato ad altro. L'azione e' gia' stata consumata sopra
         # (take_pending_action()/il default di questo metodo), quindi qui basta procedere.
@@ -1437,6 +1512,12 @@ class JakeCore:
         if action.get("reason") in ("confirmation_required", "auth_required") and action.get("text"):
             self.learning.observe(action["text"], command, result, route="llm" if self.last_route == "llm" else "confirmed")
         self._remember_exchange(action.get("text", fallback_text), command, response)
+        # F6.3/F6.7: se questa conferma apparteneva a un compito che il ponte stava seguendo
+        # (decision_required, vedi _run_agent) e si risolve QUI (non con una nuova richiesta di
+        # conferma, gia' gestita sopra), il compito e' concluso - resolve_decision() e' un no-op
+        # sicuro per ogni altra conferma (es. DELETE_PATH da un comando diretto) che il ponte non
+        # aveva mai tracciato.
+        self._publish_task_event(lambda: self.task_bridge.resolve_decision(trace_id, message=response, success=result is not None and result.success))
         return response
 
     def _remember_exchange(self, text: str, command: Command, response: str) -> None:

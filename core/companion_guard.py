@@ -64,6 +64,13 @@ class EndpointClass(str, Enum):
     APPROVAL = "approval"
     FILE = "file"
     AUDIO = "audio"
+    # F7.1.2/Companion Mobile MVP: un dispositivo NUOVO non ha ancora una credenziale - per
+    # costruzione non passa mai da _authenticate() (vedi _Handler._prepare in
+    # core/companion_server.py). La sicurezza non viene da un token ma dalla conferma esplicita
+    # sul PC (core/pairing_service.py): questa classe resta comunque protetta da rate limit (per
+    # indirizzo, l'unica identita' disponibile prima del pairing) e dal resto della pipeline del
+    # corpo/audit, solo non dall'autenticazione ne' dalla capability per-dispositivo.
+    PAIRING = "pairing"
 
 
 # Capability di default per un dispositivo che non ne ha una esplicita: le tre classi che esistono davvero oggi.
@@ -75,16 +82,21 @@ DEFAULT_CAPABILITIES = frozenset({EndpointClass.READ_ONLY, EndpointClass.COMMAND
 def classify(method: str, path: str) -> EndpointClass | None:
     """Classe dell'endpoint, o None se il percorso non e' noto (il server risponde 404 DOPO l'autenticazione).
     I prefissi /approvals/, /files/ e /audio/ sono riservati: un endpoint futuro li eredita con la classe giusta
-    senza poter "dimenticare" i controlli."""
+    senza poter "dimenticare" i controlli. /pairing/ e' l'unico prefisso deliberatamente RAGGIUNGIBILE senza
+    autenticazione (vedi EndpointClass.PAIRING)."""
     method = method.upper()
     path = path.split("?", 1)[0]
     if method == "GET" and path in ("/status", "/events"):
         return EndpointClass.READ_ONLY
+    if method == "GET" and path.startswith("/pairing/"):
+        return EndpointClass.PAIRING
     if method == "POST":
         if path == "/command":
             return EndpointClass.COMMAND
         if path.startswith("/devices/") and (path.endswith("/claim") or path.endswith("/release")):
             return EndpointClass.COMMAND  # cambia la sessione attiva: e' un'azione, non una lettura
+        if path == "/pairing/start":
+            return EndpointClass.PAIRING
         if path.startswith("/approvals/"):
             return EndpointClass.APPROVAL
         if path.startswith("/files/"):
@@ -132,6 +144,10 @@ DEFAULT_LIMITS: dict[EndpointClass, Limit] = {
     EndpointClass.APPROVAL: Limit(10, 1),
     EndpointClass.FILE: Limit(5, 0.5),
     EndpointClass.AUDIO: Limit(20, 5),
+    # Piu' stretto di ogni altra classe: non autenticato, quindi l'unico freno prima della
+    # conferma esplicita sul PC e' questo - un indirizzo non deve poter aprire una raffica di
+    # richieste di pairing.
+    EndpointClass.PAIRING: Limit(5, 0.1),
 }
 
 

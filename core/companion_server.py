@@ -62,10 +62,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import cast
 
 from core.companion_guard import (
-    MIN_PROTOCOL_VERSION, CompanionGuard, EndpointClass, ValidationError, check_bind_policy, check_protocol,
-    classify, new_request_id, text_fingerprint, validate_claim_body, validate_command_body, validate_identifier,
+    MAX_NAME_CHARS, MIN_PROTOCOL_VERSION, CompanionGuard, EndpointClass, ValidationError, check_bind_policy,
+    check_protocol, classify, new_request_id, text_fingerprint, validate_claim_body, validate_command_body,
+    validate_identifier, validate_text,
 )
 from core.device_credential_store import DeviceCredentialStore
+from core.device_identity import DeviceCredential
 from core.device_registry import DeviceRegistry
 from core.event_bus import EventBus
 from core.hud_protocol import EventType, HudEvent
@@ -100,12 +102,21 @@ class CompanionServer:
     F7.1: `guard` (`core/companion_guard.py`) raccoglie rate limit, anti-replay, limite del body,
     capability per classe di endpoint e audit, con default sicuri (nessuna configurazione = gia'
     protetto). `tls_context` (un `ssl.SSLContext` di server) cifra il canale; senza, `start()` rifiuta
-    ogni host non locale (F7.1.4)."""
+    ogni host non locale (F7.1.4).
+
+    F7.1.2/Companion Mobile MVP: `pairing_service` (opzionale) abilita `/pairing/start`/
+    `/pairing/<id>` - senza, quei due endpoint rispondono 404 "pairing_not_configured", stesso
+    principio opt-in di `credential_store`/`tls_context`. `conversation_state` (opzionale) abilita
+    `/approvals/<task_id>` - senza, ogni approvazione risponde "nessuna decisione in sospeso" (fail
+    closed, mai un tentativo di risolvere qualcosa alla cieca). `on_pairing_requested(challenge,
+    requested_name, sync_public_key)` e' il collegamento al canale LOCALE (voce/CLI) dove l'utente
+    da' l'approvazione esplicita - vedi `core/jake_core.py::_on_pairing_requested`."""
 
     def __init__(
         self, event_bus: EventBus | None = None, command_handler=None, host: str = DEFAULT_HOST, port: int = 0,
         token: str | None = None, credential_store: DeviceCredentialStore | None = None,
         tls_context: ssl.SSLContext | None = None, guard: CompanionGuard | None = None,
+        pairing_service=None, conversation_state=None, on_pairing_requested=None,
     ):
         self.event_bus = event_bus or EventBus()
         self.command_handler = command_handler or (lambda text: "")
@@ -116,6 +127,9 @@ class CompanionServer:
         self.credential_store = credential_store
         self.tls_context = tls_context
         self.guard = guard or CompanionGuard()
+        self.pairing_service = pairing_service
+        self.conversation_state = conversation_state
+        self.on_pairing_requested = on_pairing_requested
         self._httpd: "_Server | None" = None
 
     @property
@@ -251,6 +265,18 @@ class _Handler(BaseHTTPRequestHandler):
         compatible, supported = check_protocol(self.headers.get("X-Jake-Protocol"))
         if not compatible:
             return self._reject(426, "protocol_unsupported", extra=supported)
+        if self._cls == EndpointClass.PAIRING:
+            # F7.1.2: raggiungibile PER COSTRUZIONE senza credenziali (un dispositivo nuovo non ne
+            # ha ancora una) - la sicurezza viene dalla conferma esplicita sul PC
+            # (core/pairing_service.py), non da un token. Resta comunque protetto dal rate limit
+            # (per indirizzo, l'unica identita' disponibile) e da tutto cio' che segue
+            # (validazione del corpo, audit): salta SOLO blocco-per-tentativi/autenticazione/
+            # capability/anti-replay, non l'intera pipeline.
+            ok, wait = guard.rate_limiter.allow(self._identity, EndpointClass.PAIRING)
+            if not ok:
+                return self._reject(429, "rate_limited", retry_after=wait)
+            self._authenticated_device_id = None
+            return True
         wait = guard.auth_throttle.retry_after(self._identity)
         if wait > 0:
             return self._reject(429, "too_many_auth_failures", retry_after=wait)
@@ -339,6 +365,15 @@ class _Handler(BaseHTTPRequestHandler):
             })
         if self._path == "/events":
             return self._stream_events()
+        if self._path.startswith("/pairing/"):
+            challenge_id = self._path[len("/pairing/"):]
+            try:
+                validated = validate_identifier(challenge_id, "challenge_id", required=True)
+            except ValidationError as exc:
+                self._reject(400, exc.code)
+                return None
+            assert validated is not None
+            return self._handle_pairing_poll(validated)
         self._json_response(404, {"error": "not_found"})
         return None
 
@@ -347,6 +382,8 @@ class _Handler(BaseHTTPRequestHandler):
             return None
         if self._path == "/command":
             return self._handle_command()
+        if self._path == "/pairing/start":
+            return self._handle_pairing_start()
         parts = self._path.split("/")
         if len(parts) == 4 and parts[1] == "devices" and parts[3] in ("claim", "release"):
             try:
@@ -356,6 +393,14 @@ class _Handler(BaseHTTPRequestHandler):
                 return None
             assert device_id is not None
             return self._handle_claim(device_id) if parts[3] == "claim" else self._handle_release(device_id)
+        if len(parts) == 3 and parts[1] == "approvals":
+            try:
+                task_id = validate_identifier(parts[2], "task_id", required=True)
+            except ValidationError as exc:
+                self._reject(400, exc.code)
+                return None
+            assert task_id is not None
+            return self._handle_approval(task_id)
         self._drain_body()
         self._json_response(404, {"error": "not_found"})
         return None
@@ -462,6 +507,115 @@ class _Handler(BaseHTTPRequestHandler):
         released = self.companion.devices.release(device_id)
         self._audit("handoff_release", status=200, target_device=device_id, released=released)
         self._json_response(200, {"released": released})
+        return None
+
+    # ---- pairing (F7.1.2, Companion Mobile MVP) ------------------------------------------
+
+    def _handle_pairing_start(self):
+        """Un dispositivo NUOVO (senza credenziali: EndpointClass.PAIRING salta l'autenticazione,
+        vedi _prepare) chiede di avviare il pairing. Non crea da sola alcun dispositivo: apre solo
+        una `PairingChallenge` effimera e avvisa il canale locale - l'approvazione vera resta un
+        "si'" (o la passphrase, se l'utente ne ha configurata una) detto/scritto li', mai un
+        secondo passo HTTP raggiungibile dal companion stesso."""
+        if self.companion.pairing_service is None:
+            self._drain_body()
+            return self._json_response(404, {"error": "pairing_not_configured"})
+        body = self._read_json_object()
+        if body is None:
+            return None
+        try:
+            name = validate_text(body.get("requested_name"), "requested_name", max_chars=MAX_NAME_CHARS)
+        except ValidationError as exc:
+            return self._reject_body(400, exc.code)
+        sync_public_key = body.get("sync_public_key")
+        if sync_public_key is not None and not (
+            isinstance(sync_public_key, dict) and isinstance(sync_public_key.get("sign"), str)
+            and isinstance(sync_public_key.get("agree"), str)
+        ):
+            return self._reject_body(400, "invalid_sync_public_key")
+        challenge = self.companion.pairing_service.start_pairing(requested_name=name)
+        self._audit("pairing_started", status=200, challenge_id=challenge.challenge_id, requested_name=name)
+        if self.companion.on_pairing_requested is not None:
+            try:
+                self.companion.on_pairing_requested(challenge, name, sync_public_key)
+            except Exception:
+                _logger.exception("Errore nel callback on_pairing_requested")
+        self._json_response(200, {"challenge_id": challenge.challenge_id, "expires_at": challenge.expires_at})
+        return None
+
+    def _handle_pairing_poll(self, challenge_id: str):
+        """`take_result()` e' one-time: un secondo poll DOPO aver gia' ritirato una credenziale non
+        la ritrova (la challenge resta comunque `used`, distinta da "mai esistita")."""
+        if self.companion.pairing_service is None:
+            return self._json_response(404, {"error": "pairing_not_configured"})
+        pairing = self.companion.pairing_service
+        result = pairing.take_result(challenge_id)
+        if isinstance(result, DeviceCredential):
+            self._audit("pairing_delivered", status=200, challenge_id=challenge_id, target_device=result.device_id)
+            return self._json_response(200, {
+                "status": "approved", "device_id": result.device_id, "token": result.token,
+                "expires_at": result.expires_at,
+            })
+        if result == "rejected":
+            self._audit("pairing_poll", status=200, challenge_id=challenge_id, pairing_status="rejected")
+            return self._json_response(200, {"status": "rejected"})
+        challenge = pairing.get_challenge(challenge_id)
+        if challenge is None:
+            return self._json_response(404, {"error": "unknown_challenge"})
+        if not challenge.is_usable():
+            status = "expired" if challenge.is_expired() else "already_delivered"
+            return self._json_response(200, {"status": status})
+        return self._json_response(200, {"status": "pending"})
+
+    # ---- approvazioni di un compito in corso (F6.3/F6.7 -> companion, notifica -> approve/deny) ------------------
+
+    def _handle_approval(self, task_id: str):
+        """Risolve la STESSA decisione in sospeso che ha generato la notifica con questo task_id
+        (core/task_notification_bridge.py) - riusando integralmente il meccanismo di conferma gia'
+        esistente (JakeCore._handle_confirmation via command_handler), mai un secondo percorso di
+        esecuzione: "approve"/"deny" diventano lo stesso "si'"/"no" che l'utente digiterebbe in
+        chat, sullo stesso canale (device_id autenticato) e sulla stessa conversazione - nessun
+        nuovo trace_id, nessuna nuova voce di conversation_state creata apposta."""
+        body = self._read_json_object()
+        if body is None:
+            return None
+        decision = body.get("decision")
+        if decision not in ("approve", "deny"):
+            return self._reject_body(400, "invalid_decision")
+        try:
+            session_id = validate_identifier(body.get("session_id"), "session_id")
+        except ValidationError as exc:
+            return self._reject_body(400, exc.code)
+        device_id = self._authenticated_device_id
+        if device_id is None:
+            # Senza un'identita' autenticata non c'e' modo di sapere DI CHI e' la decisione in
+            # sospeso da risolvere (percorso legacy/nessun credential_store): niente da indovinare.
+            return self._reject_body(403, "device_identity_required")
+        if self.companion.conversation_state is None:
+            return self._reject_body(404, "no_matching_pending_decision")
+        device_token = set_current_device_id(device_id)
+        session_token = set_current_session_id(session_id)
+        try:
+            pending = self.companion.conversation_state.get_pending_action()
+            if pending is None or pending.get("trace_id") != task_id:
+                return self._reject_body(404, "no_matching_pending_decision")
+            text = "sì" if decision == "approve" else "no"
+            if not self._audit("approval_received", task_id=task_id, decision=decision, **text_fingerprint(text)):
+                return self._reject_body(503, "audit_unavailable")
+            started = time.monotonic()
+            try:
+                response = self.companion.command_handler(text)
+            except Exception as exc:
+                self._audit(
+                    "approval_failed", error=type(exc).__name__, duration_ms=round((time.monotonic() - started) * 1000),
+                )
+                _logger.exception("Errore nel gestore dell'approvazione companion")
+                return self._json_response(500, {"error": "approval_failed"})
+        finally:
+            reset_current_device_id(device_token)
+            reset_current_session_id(session_token)
+        self._audit("approval_completed", status=200, duration_ms=round((time.monotonic() - started) * 1000))
+        self._json_response(200, {"response": response})
         return None
 
     def _stream_events(self):
