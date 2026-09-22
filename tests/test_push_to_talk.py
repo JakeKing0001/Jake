@@ -90,6 +90,44 @@ class InterruptSpeechTests(unittest.TestCase):
         tts.stop.assert_not_called()
 
 
+class IdentifySpeakerTokenTests(unittest.TestCase):
+    """F2.7 (adozione, stesso identico principio di
+    tests/test_wake_word_session.py::IdentifySpeakerTokenTests)."""
+
+    def test_without_a_speaker_store_returns_none(self):
+        session = _session()
+        self.assertIsNone(session._identify_speaker_token(np.array([0.1], dtype="float32")))
+
+    def test_a_high_confidence_match_sets_the_context_var(self):
+        from core.request_context import current_speaker_profile_id, reset_current_speaker_profile_id
+        from core.voice.speaker_profile import SpeakerHint
+
+        session = _session(speaker_store=mock.MagicMock())
+        hint = SpeakerHint(profile_id="davide", confidence="high")
+        with mock.patch("core.voice.push_to_talk.extract_features", return_value=object()), \
+             mock.patch("core.voice.push_to_talk.identify", return_value=hint):
+            token = session._identify_speaker_token(np.array([0.1], dtype="float32"))
+        try:
+            self.assertIsNotNone(token)
+            self.assertEqual(current_speaker_profile_id(), "davide")
+        finally:
+            reset_current_speaker_profile_id(token)
+
+    def test_a_low_confidence_match_does_not_set_the_context_var(self):
+        from core.voice.speaker_profile import SpeakerHint
+
+        session = _session(speaker_store=mock.MagicMock())
+        hint = SpeakerHint(profile_id="davide", confidence="low")
+        with mock.patch("core.voice.push_to_talk.extract_features", return_value=object()), \
+             mock.patch("core.voice.push_to_talk.identify", return_value=hint):
+            self.assertIsNone(session._identify_speaker_token(np.array([0.1], dtype="float32")))
+
+    def test_an_exception_during_identification_is_swallowed_not_raised(self):
+        session = _session(speaker_store=mock.MagicMock())
+        with mock.patch("core.voice.push_to_talk.extract_features", side_effect=RuntimeError("boom")):
+            self.assertIsNone(session._identify_speaker_token(np.array([0.1], dtype="float32")))
+
+
 class RunTests(unittest.TestCase):
     def test_no_microphone_available_exits_immediately(self):
         microphone = mock.MagicMock()
@@ -125,6 +163,46 @@ class RunTests(unittest.TestCase):
         jake_core.answer.assert_called_once_with("che ore sono")
         session._tts_thread.join(timeout=2)
         tts.speak.assert_called_once_with("Sono le dieci.")
+
+    def test_the_recognized_profile_is_visible_only_during_answer_and_cleared_after(self):
+        """F2.7: stesso identico contratto di
+        tests/test_wake_word_session.py::ProcessCommandSpeakerIdentificationTests."""
+        from core.request_context import current_speaker_profile_id
+        from core.voice.speaker_profile import SpeakerHint
+
+        microphone = mock.MagicMock()
+        microphone.is_available.return_value = True
+        microphone.sample_rate = 16000
+        microphone.record_while.return_value = np.array([0.1, 0.2], dtype="float32")
+
+        stt = mock.MagicMock()
+        stt.transcribe.return_value = "che ore sono"
+
+        seen_during_answer = []
+
+        def fake_answer(text):
+            seen_during_answer.append(current_speaker_profile_id())
+            return "Sono le dieci."
+
+        jake_core = mock.MagicMock(EXIT_SENTINEL="ESCI")
+        jake_core.answer.side_effect = fake_answer
+
+        fake_keyboard = mock.MagicMock()
+        fake_keyboard.is_pressed.return_value = False
+        fake_keyboard.wait.side_effect = [None, _StopTestLoop()]
+
+        hint = SpeakerHint(profile_id="davide", confidence="high")
+        session = _session(
+            jake_core=jake_core, stt_provider=stt, microphone=microphone, speaker_store=mock.MagicMock(),
+        )
+        with mock.patch.dict("sys.modules", {"keyboard": fake_keyboard}), \
+             mock.patch("core.voice.push_to_talk.extract_features", return_value=object()), \
+             mock.patch("core.voice.push_to_talk.identify", return_value=hint):
+            with self.assertRaises(_StopTestLoop):
+                session.run()
+
+        self.assertEqual(seen_during_answer, ["davide"])
+        self.assertIsNone(current_speaker_profile_id())
 
     def test_the_exit_sentinel_response_ends_the_loop(self):
         microphone = mock.MagicMock()

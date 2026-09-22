@@ -228,7 +228,7 @@ def run_voice_mode():
     core = JakeCore()
     tts_provider, stt_provider, server_manager = _setup_voice(core)
 
-    session = PushToTalkSession(core, stt_provider, tts_provider)
+    session = PushToTalkSession(core, stt_provider, tts_provider, speaker_store=_speaker_store())
     try:
         session.run()
     finally:
