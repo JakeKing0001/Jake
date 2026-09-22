@@ -288,7 +288,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F7.6` | Sync and Crypto (motore cifrato con conflitti deterministici, revoca, wipe e coda limitata il 21/09/2026; senza trasporto ne' collegamento a memoria/pairing) | `DOING` |
 | `F7.7` | Edge Devices | `BACKLOG` |
 | `F8.1` | Skill Platform (manifest validato e loader che rifiuta prima dell'import il 22/09/2026; rischio dichiarato non ancora collegato al policy engine, hook non eseguiti) | `DOING` |
-| `F8.2` | Supply-chain Security | `BACKLOG` |
+| `F8.2` | Supply-chain Security (pacchetti firmati, catalogo, quarantena/revoca, pin/rollback il 22/09/2026; senza UI di approvazione ne' distribuzione) | `DOING` |
 | `F8.3` | Skill Forge | `DOING` |
 | `F8.4` | Model Runtime | `BACKLOG` |
 | `F8.5` | Agent Runtime | `DOING` |
@@ -9194,6 +9194,47 @@ Dipende da: F8.1 e F1.4.
 7. `F8.2.7` Pin e rollback a una versione precedente.
 
 Criterio di uscita: pacchetto alterato o firma sconosciuta viene rifiutato prima dell'import.
+
+- `F8.2.1`-`F8.2.7` (pacchetti firmati, catalogo, quarantena, rollback) — 22/09/2026: `core/skill_package.py`, piu' un campo `changelog`
+  facoltativo nel manifest (`core/skill_manifest.py`). Crittografia VERA (Ed25519 di `cryptography`), archivi ZIP veri (anche costruiti a
+  mano per essere malevoli), cartelle vere su disco e il loader di F8.1. **Criterio di uscita provato**: un pacchetto alterato o con firma
+  sconosciuta e' rifiutato prima dell'import — e anche dopo l'installazione: un file alterato su disco mette la versione in quarantena
+  al primo caricamento e il suo codice non viene importato (modulo che scrive un file all'import: il file non compare). Tre mutazioni
+  del codice (digest, prefisso dell'id, controllo di integrita' all'uso) fanno fallire i test giusti.
+  * `F8.2.1` — ZIP deterministico: voci ordinate, data fissa 1980, nessun campo extra, solo `STORED` (la compressione dipende dalla
+    versione di zlib): stessi file = stessi byte = stesso digest indipendentemente da mtime, cartella o ordine di creazione (test);
+    `__pycache__`, `.git`, `.pyc` esclusi, collegamenti simbolici rifiutati. Lettura in memoria con controlli di sicurezza: nomi con
+    `..`, assoluti, drive, doppie barre, nomi riservati di Windows, duplicati (anche per maiuscole), voci compresse/cifrate/non regolari
+    (symlink, device), piu' di 200 file, 5 MiB per file, 20 MiB in totale.
+  * `F8.2.2` — firma staccata sul digest del pacchetto E su id e versione (una firma non si trasferisce a un altro id/versione: test);
+    `TrustStore` popolato solo dall'utente, con **prefisso di id per chiave** (una chiave fidata per `davide.` non puo' firmare
+    `mario.*`); ordine dei controlli: struttura, firmatario noto/attivo, digest, firma, archivio, manifest, coerenza manifest/firma,
+    prefisso. Firma sconosciuta, chiave revocata (e non reintroducibile), un solo bit cambiato, firma di un'altra chiave con `key_id`
+    falso, base64 non valido: tutti con un codice stabile.
+  * `F8.2.3` — catalogo (`catalog.json`, scrittura atomica): per versione digest, firmatario, capability, rischio massimo, changelog e hash di
+    ogni file. Un aggiornamento che AGGIUNGE capability o alza il rischio richiede `allow_permission_increase` (test); `plan.summary`
+    mostra i permessi con le righe "ATTENZIONE" per l'aumento e il downgrade.
+  * `F8.2.4` — `install` richiede un `UserApproval` legato al digest del piano (assente, con attore vuoto o per un altro pacchetto: rifiutato,
+    nulla scritto); una versione e' immutabile (stesso id+versione con contenuto diverso = `version_conflict`); un downgrade richiede il suo
+    consenso; il modulo **non contiene codice di rete o di processo** (test AST sugli import) e riceve solo byte.
+    Limite onesto: la garanzia e' STRUTTURALE (nessun percorso di installazione senza approvazione, nessun fetch nel modulo); chi chiama
+    `approve()` senza chiedere all'utente la aggira — la UI di approvazione non esiste ancora.
+  * `F8.2.5` — dipendenze solo da pacchetti Python GIA' installati, letti dai metadati (`importlib.metadata`, nessun import); mancante o
+    in conflitto = piano bloccato; `setup.py`, `conftest.py`, `.pth` nel pacchetto non vengono mai eseguiti (test con marker); una skill
+    non puo' prendere un intent gia' di un'altra.
+  * `F8.2.6` — quarantena reversibile (solo se i file sono integri) con ripiego automatico sulla versione sana precedente; revoca
+    permanente che nega il digest anche per il futuro; lista di revoca firmata (un editore revoca solo cio' che potrebbe firmare; lista
+    manomessa o di un firmatario ignoto rifiutata); revoca di un firmatario = quarantena di tutto cio' che ha firmato, senza toccare le
+    skill degli altri. All'uso: hash di ogni file, file estranei e mancanti rilevati; i `__pycache__` si cancellano prima del controllo
+    (un `.pyc` preparato non e' contenuto firmato) e il caricamento non ne scrive di nuovi.
+  * `F8.2.7` — `pin` (un aggiornamento si installa ma non si attiva), `rollback` alla precedente versione SANA (salta le alterate) con pin
+    automatico (senza, la prossima installazione riattiverebbe la versione da cui si e' scappati), potatura a 3 versioni proteggendo
+    attiva e bloccata; stato persistente al riavvio.
+  Non affrontato: interfaccia di approvazione (HUD/CLI) e distribuzione dei pacchetti/delle chiavi (nessuna PKI: la fiducia parte da chi
+    popola il `TrustStore`); catalogo e trust store non protetti da un attaccante gia' in grado di scrivere nella cartella (l'hash all'uso
+    protegge i pacchetti, non il catalogo); esecuzione dei test/hook dichiarati dal pacchetto in sandbox (F8.3); collegamento a `main.py`/
+    `JakeCore` (oggi `load_plugins` continua a caricare i file singoli di `plugins/`); il rischio dichiarato non e' ancora usato dal
+    policy engine. Prova: 51 test in `tests/test_skill_package.py`; un modulo nel mypy selettivo.
 
 ### F8.3 — Skill Forge 2.0
 
