@@ -11,8 +11,10 @@ from core.agent_checkpoint import AgentCheckpoint, AgentCheckpointStore
 from core.auth_gate import AuthGate
 from core.autonomy_budget import AutonomyBudget
 from core.command import Command
-from core.companion_guard import CompanionAudit, CompanionGuard
+from core.companion_guard import CompanionAudit, CompanionGuard, is_loopback_host
+from core.companion_server import DEFAULT_HOST as DEFAULT_COMPANION_HOST
 from core.companion_server import CompanionServer
+from core.companion_tls import build_server_context, current_fingerprint, ensure_certificate
 from core.context_summarizer import ContextSummarizer
 from core.desktop_context import DesktopContextTracker
 from core.device_credential_store import DeviceCredentialStore
@@ -216,17 +218,38 @@ class JakeCore:
         # kill_switch: assegnato subito dopo, invece di lasciargli l'istanza locale che
         # UndoStore.__init__ crea da solo quando nessuno gliene passa una.
         self.skill_registry.plan_executor.undo_store = self.undo_store
+        # F7.1.4/F7.2 (Companion Mobile MVP): un telefono VERO e' una macchina diversa dal PC - non puo'
+        # raggiungere il server su un'interfaccia diversa da 127.0.0.1 senza TLS (check_bind_policy lo impone
+        # gia': "un bind LAN senza TLS non deve esistere nemmeno per un istante"). Fino a questo incremento
+        # nessun tls_context veniva mai costruito, quindi il server poteva SOLO ascoltare in loopback - qui lo
+        # si costruisce (certificato autofirmato persistito, core/companion_tls.py) quando companion_server_host
+        # e' stato impostato a qualcosa di diverso dal default loopback, o esplicitamente richiesto per il solo
+        # TLS (companion_server_tls_enabled - utile anche in loopback, per sviluppo/test dell'app companion).
+        # Comportamento INVARIATO (nessun certificato generato, come da sempre) per chi non ha mai toccato
+        # nessuna delle due chiavi.
+        companion_host = config.get("companion_server_host") or DEFAULT_COMPANION_HOST
+        companion_tls_context = None
+        self.companion_tls_fingerprint = None
+        if not is_loopback_host(companion_host) or bool(config.get("companion_server_tls_enabled", False)):
+            cert_path, key_path = ensure_certificate()
+            companion_tls_context = build_server_context(cert_path, key_path)
+            self.companion_tls_fingerprint = current_fingerprint(cert_path)
+            self.logger.info("TLS companion attivo - impronta del certificato: %s", self.companion_tls_fingerprint)
         self.companion_server = CompanionServer(
-            event_bus=self.event_bus, command_handler=self.answer,
+            event_bus=self.event_bus, command_handler=self.answer, host=companion_host,
             port=int(config.get("companion_server_port", 8765) or 8765),
             token=config.get("companion_token"), credential_store=self.device_credential_store,
-            guard=CompanionGuard(audit=CompanionAudit()),
+            guard=CompanionGuard(audit=CompanionAudit()), tls_context=companion_tls_context,
+            tls_fingerprint=self.companion_tls_fingerprint,
             pairing_service=self.pairing_service, conversation_state=self.skill_registry.conversation_state,
             on_pairing_requested=self._on_pairing_requested,
         )
         if bool(config.get("companion_server_enabled", False)):
             self.companion_server.start()
-            self.logger.info("Server companion in ascolto su 127.0.0.1:%d", self.companion_server.port)
+            self.logger.info(
+                "Server companion in ascolto su %s:%d%s", companion_host, self.companion_server.port,
+                " (TLS)" if companion_tls_context is not None else "",
+            )
 
         # Skill/plugin installabili (v2.0): un file .py in plugins/ con una funzione
         # register(registry) diventa una capacita' di Jake senza toccare il core.
