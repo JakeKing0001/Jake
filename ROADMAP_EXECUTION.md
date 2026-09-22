@@ -9043,6 +9043,22 @@ Criterio di uscita: penetration test locale non ottiene comando senza device aut
   unit test sulla generazione del certificato (12 test in `tests/test_companion_tls.py`).
   Non affrontato: distribuzione/pinning del certificato al telefono oltre al mostrarne l'impronta durante il pairing (il client la
   fissa da solo dopo conferma dell'utente - vedi F7.2); rinnovo automatico prima della scadenza; rotazione della chiave.
+- `F7.1.2` (correzione di un bug reale in produzione, trovato mentre si verificava la CI del Companion Mobile MVP, non
+  ipotetico) — 22/09/2026: `core/pairing_service.py::start_pairing`. `challenge_id` era generato con
+  `secrets.token_urlsafe()`, il cui alfabeto base64url include `-`/`_` anche come PRIMO carattere; ma
+  `core/companion_guard.py::_ID_RE` (lo stesso validatore che protegge ogni identificativo nel percorso HTTP, challenge_id
+  incluso) pretende che il primo carattere sia alfanumerico. Un id generato da Jake stesso finiva quindi
+  occasionalmente rifiutato dal suo STESSO validatore su `GET /pairing/<challenge_id>` (400 `invalid_challenge_id`), pur
+  essendo stato appena restituito da `POST /pairing/start` (che non lo valida, essendo l'output) - **riprodotto ~1 volta
+  su 32 in isolamento completo** (40 esecuzioni ripetute della stessa singola richiesta HTTP, nessun altro test
+  interferente), non un sintomo di carico su CI. Coincide esattamente con la causa di una CI rossa sul commit
+  `5f023a9` (Companion Mobile MVP): quel commit non toccava alcun file Python, a conferma che il fallimento era
+  preesistente e indipendente. Corretto passando a `secrets.token_hex()` (stesso schema gia' usato per `device_id`
+  nella stessa funzione), il cui alfabeto esadecimale soddisfa sempre `_ID_RE` a prescindere dai byte casuali. Prova:
+  nuovo `test_every_generated_challenge_id_matches_the_servers_own_path_identifier_pattern` in
+  `tests/test_pairing_service.py` (2000 challenge generate, tutte verificate contro `_ID_RE` - una probabilita'
+  trascurabile di non intercettare una regressione futura); riprodotto il bug PRIMA della correzione (2 fallimenti su
+  40 in un repro isolato) e confermato risolto DOPO (0 fallimenti su 150).
   Non affrontato: `F7.1.2` (challenge/QR con conferma sul PC: `core/pairing_service.py` esiste ma non e' esposto via HTTP) e `F7.1.3`
     (capability, scadenza e rotazione nel database delle credenziali: le capability di questo passo vivono in memoria e un riavvio le
     riporta al default); nessun limite globale di connessioni contemporanee; il percorso legacy col token globale resta non

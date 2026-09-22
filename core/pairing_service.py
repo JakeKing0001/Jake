@@ -50,13 +50,24 @@ class PairingService:
         self._results: dict[str, DeviceCredential | str] = {}
 
     def start_pairing(self, requested_name: str = "") -> PairingChallenge:
-        """Nuova richiesta di pairing. `challenge_id` e' generato con secrets.token_urlsafe, non
-        indovinabile: la sicurezza del pairing non viene dalla segretezza del QR (il payload e'
-        dichiaratamente non sensibile) ma dal fatto che approvarlo richiede comunque un'azione
-        ESPLICITA dell'utente sul PC - l'id non indovinabile impedisce solo che un TERZO possa
-        proporsi al posto del companion legittimo indovinando/enumerando id brevi."""
+        """Nuova richiesta di pairing. `challenge_id` e' generato con secrets.token_hex (stesso
+        schema di `device_id` sotto, non secrets.token_urlsafe): non indovinabile - la sicurezza
+        del pairing non viene dalla segretezza del QR (il payload e' dichiaratamente non
+        sensibile) ma dal fatto che approvarlo richiede comunque un'azione ESPLICITA dell'utente
+        sul PC - l'id non indovinabile impedisce solo che un TERZO possa proporsi al posto del
+        companion legittimo indovinando/enumerando id brevi.
+
+        Bug reale trovato in produzione (fallimento intermittente ~1 challenge su 32, riprodotto
+        anche in isolamento completo, non solo sotto carico - vedi ROADMAP_EXECUTION.md F7.2):
+        `token_urlsafe` puo' iniziare con `-`/`_` (entrambi nel suo alfabeto base64url), ma
+        `core/companion_guard.py::_ID_RE` (lo stesso validatore che protegge OGNI id nel percorso
+        HTTP, incluso questo) richiede che il PRIMO carattere sia alfanumerico - un id
+        auto-generato da Jake stesso veniva quindi occasionalmente rifiutato dal suo stesso
+        validatore su `GET /pairing/<challenge_id>` (400 `invalid_challenge_id`), pur essendo
+        stato appena restituito da `POST /pairing/start` (che non lo valida, essendo l'output).
+        L'alfabeto esadecimale (0-9a-f) soddisfa sempre `_ID_RE` a prescindere dai byte casuali."""
         with self._lock:
-            challenge_id = secrets.token_urlsafe(_CHALLENGE_ID_BYTES)
+            challenge_id = secrets.token_hex(_CHALLENGE_ID_BYTES)
             now = self._time_source()
             challenge = PairingChallenge(
                 challenge_id=challenge_id, created_at=now, expires_at=now + CHALLENGE_TTL_SECONDS,
