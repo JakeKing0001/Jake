@@ -5085,9 +5085,17 @@ Stato al 22/09/2026 (onesto, criterio per criterio - riga sui sottotitoli corret
 | fallback push-to-talk/offline funzionante | **fatto**: push-to-talk indipendente da wake word/VAD (test in processo pulito), voce offline con lo stesso contenuto (test) |
 | accessibilita' via sottotitoli e testo equivalente | **fatto**: `core/gui/hud/app.py::JarvisApp` collega `WakeWordSession.on_state`/`on_level` (gia' presente) E ORA anche `on_transcript` (nuovo `Bridge.transcript` Signal, 22/09/2026) a un vero `QLabel` (`core/gui/hud/overlay.py`/`widgets.py`) - il sottotitolo si aggiorna ora PAROLA PER PAROLA mentre l'utente sta ancora parlando (`TranscriptEvent.text`, LocalAgreement-2), non solo a frase completa come prima di questo incremento. Lo stato (ascolto/trascrizione/risposta/parlato/pausa/dettatura) resta visibile tramite `hud.set_state()`, l'equivalente sostanziale di un indicatore microfono anche se non e' l'evento `MIC_STATE` specifico dal bus. Prova: 3 nuovi test in `tests/test_hud_app.py::LiveTranscriptTests`/`InitTests`, verificati FALLIRE contro il codice precedente (`git stash` di `core/gui/hud/app.py`); smoke test verde. |
 
-Il gate NON e' ancora superato: restano le prove su hardware e il collegamento di dialogo/isolamento memoria per
-profilo a `JakeCore` (entrambi deliberatamente non affrettati, vedi le voci datate 22/09/2026 in F2.6/F2.7:
-toccano la macchina a stati di conferma o la memoria persistente piu' sensibili del progetto).
+**Il gate letteralmente NON e' superato, ma per l'unico motivo ammesso esplicitamente dall'utente**: dei
+cinque criteri, tre sono `fatto` (buffer volatile, fallback push-to-talk/offline, sottotitoli) e i restanti
+due (benchmark hardware pubblicato, full-duplex/barge-in su tre profili VERI) sono bloccati ESCLUSIVAMENTE
+dalla misura su hardware fisico che questo ambiente non ha - il codice/gli algoritmi/l'integrazione per
+entrambi esistono gia' e sono testati su segnali simulati, non c'e' altro lavoro software rimasto per questi
+due criteri. Restano DICHIARATI aperti, separatamente dal gate (non ne fanno parte in senso letterale, ma
+fanno parte dell'output piu' ampio di F2, "conversazione... correggibile"): il collegamento di
+dialogo/correzione (F2.6 oltre F2.6.6) e l'isolamento vero di memoria/cronologia per profilo (F2.7 oltre la
+prima fetta) a `JakeCore` - entrambi deliberatamente non affrettati (vedi le voci datate 22/09/2026 in
+F2.6/F2.7: toccano la macchina a stati di conferma o la memoria persistente piu' sensibili del progetto), non
+bloccati da hardware ma da un rischio architetturale reale che merita un incremento dedicato a se'.
 
 ## 9. F3 — Computer Use Engine 3.0
 
