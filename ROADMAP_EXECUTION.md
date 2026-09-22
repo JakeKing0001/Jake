@@ -4660,9 +4660,12 @@ Criterio di uscita: falso wake ≤ 1/24 ore di benchmark e miss rate entro la so
   Non affrontato ALLORA (nota stantia, corretta il 22/09/2026): il collegamento a `WakeWordSession`
   e' arrivato lo stesso giorno con il "passo di integrazione F2" (gradino 1, piu' avanti in questo
   documento) - `ListeningStateMachine`/`EchoGuard`/`WakeCooldown`/`RepeatGuard`/`MicIndicator` sono
-  tutti costruiti e usati davvero da `WakeWordSession._handle_utterance`. Restano aperti solo: il
-  rendering dell'indicatore su HUD (nessun rendering esiste ancora nell'HUD per NESSUN evento
-  vocale, non solo questo), la ricezione di candidature da satelliti reali (dipende da F7, non
+  tutti costruiti e usati davvero da `WakeWordSession._handle_utterance`. Lo stato che ne deriva E'
+  gia' visibile nell'HUD (correzione ulteriore, sempre il 22/09/2026: la frase "nessun rendering
+  esiste ancora nell'HUD per nessun evento vocale", scritta qui in una prima passata di questa
+  stessa correzione, era essa stessa sbagliata - vedi Gate F2 piu' avanti per il dettaglio:
+  `core/gui/hud/app.py::JarvisApp` collega gia' `WakeWordSession.on_state` a un vero `QLabel`).
+  Restano aperti solo: la ricezione di candidature da satelliti reali (dipende da F7, non
   ancora), e il benchmark "falso wake <= 1/24 h" su ascolto vero. Prova: 25 test in
   `tests/test_wake_settings.py`, 46 in `tests/test_listening_state.py`; tre moduli nel mypy selettivo.
 
@@ -5046,12 +5049,21 @@ I moduli F2.1-F2.7 nascono come librerie testate con finti. Il collegamento al p
   22/09/2026 nella sezione F2.7 sopra per il dettaglio - `speaker_profile` e' ora collegato a `WakeWordSession`/
   `main.py` per SOLO l'identificazione (`current_speaker_profile_id`, contextvar), mai per spostare memoria o
   cronologia.
+- **Fatto (22/09/2026) — F2.6.6 (conferma addizionale su bassa confidenza) e identificazione del parlante
+  (F2.7, prima fetta)**: vedi le voci datate 22/09/2026 nelle rispettive sezioni sopra.
+- **Corretto (22/09/2026) — sottotitoli/stato nell'HUD NON erano un gap**: riga precedente stantia (diceva
+  "l'evento c'e', il rendering no... l'HUD non ha alcuna connessione al bus eventi") - verificato il codice
+  vero: `core/gui/hud/app.py::JarvisApp` collega GIA' `WakeWordSession.on_state`/`on_level` (non l'evento sul
+  bus, un meccanismo Qt-signal parallelo gia' esistente) a un vero `QLabel` per transcript/risposta e allo
+  stato (ascolto/trascrizione/risposta/parlato). Resta vero solo per la sottotitolazione LIVE parola-per-parola
+  (`on_transcript`/`EventType.TRANSCRIPT`, ancora scollegato) - vedi il Gate F2 sotto per il dettaglio.
 - **Da fare**: `profiles` resta scollegato da `JakeCore` (l'isolamento vero di memoria/cronologia per profilo
   richiede prima che `MemoryManager` sappia ripuntare la propria connessione SQLite in modo sicuro, verificato
   ancora da fare metodo per metodo - vedi la voce F2.7 sopra); `dialogue`/`language_normalizer` restano scollegati
   da `JakeCore` (`JakeCore` gestisce da se' azioni in sospeso e `CORRECT_LAST`, mai la correzione/ellissi/ordinali
-  della libreria); sottotitoli/indicatore nell'HUD (l'evento c'e', il rendering no - l'HUD desktop nativo non ha
-  oggi alcuna connessione al bus eventi, un gap piu' ampio della sola sottotitolazione); le prove su hardware vero.
+  della libreria, oltre a `needs_confirmation` gia' collegato - vedi F2.6.6); sottotitolazione LIVE parola-per-
+  parola nell'HUD (`on_transcript` non ancora collegato, a differenza del transcript a frase completa che gia'
+  funziona); le prove su hardware vero.
 
 ### Gate F2
 
@@ -5061,7 +5073,7 @@ I moduli F2.1-F2.7 nascono come librerie testate con finti. Il collegamento al p
 - fallback push-to-talk/offline funzionante;
 - accessibilità via sottotitoli e testo equivalente.
 
-Stato al 21/09/2026 (onesto, criterio per criterio):
+Stato al 22/09/2026 (onesto, criterio per criterio - riga sui sottotitoli corretta, era stantia):
 
 | Criterio | Stato |
 |---|---|
@@ -5069,10 +5081,12 @@ Stato al 21/09/2026 (onesto, criterio per criterio):
 | full-duplex e barge-in stabili su almeno tre profili hardware | **NON soddisfatto**: algoritmi e integrazione ci sono, provati solo su segnali simulati (cuffie/portatile/Bluetooth 4/4 senza falsi; TV in sottofondo = falso barge-in anche con AEC, limite fissato da test). Default `voice_barge_in=off` finche' non si prova su hardware vero |
 | buffer audio volatile verificato | **fatto** per le parti in codice del progetto (segmentatore, buffer dei partial, pre-roll, calibrazione del rumore: solo RAM, svuotati dopo l'uso, con test); il buffer interno di Whisper/ctranslate2 non e' verificabile da qui |
 | fallback push-to-talk/offline funzionante | **fatto**: push-to-talk indipendente da wake word/VAD (test in processo pulito), voce offline con lo stesso contenuto (test) |
-| accessibilita' via sottotitoli e testo equivalente | **in parte**: eventi `TRANSCRIPT` e `MIC_STATE` sul bus, callback `on_transcript`; nessun rendering nell'HUD |
+| accessibilita' via sottotitoli e testo equivalente | **fatto in gran parte, riga precedente stantia**: `core/gui/hud/app.py::JarvisApp` collega GIA' `WakeWordSession.on_state`/`on_level` a un `Bridge` Qt (segnali, thread-safe) - `_on_state()` chiama `hud.set_transcript(detail)` per il comando appena trascritto (stato "thinking") e `hud.set_response(detail)` per la risposta di Jake (stato "responding"), ENTRAMBI resi come vero testo su schermo (`QLabel` in `core/gui/hud/overlay.py`/`widgets.py`, non uno stub) - verificato leggendo il codice reale, non l'evento sul bus che si cercava. Lo stato (ascolto/trascrizione/risposta/parlato/pausa/dettatura) e' visibile allo stesso modo tramite `hud.set_state()`, l'equivalente sostanziale di un indicatore microfono anche se non e' l'evento `MIC_STATE` specifico. **Resta davvero mancante**: la sottotitolazione LIVE, parola per parola, MENTRE l'utente sta ancora parlando (`WakeWordSession.on_transcript`/`EventType.TRANSCRIPT`, F2.2.7 - un meccanismo diverso e piu' granulare, verificato non collegato in ne' `main.py` ne' `core/gui/hud/app.py`) - oggi il sottotitolo compare solo a frase COMPLETA, non in streaming. |
 
-Il gate NON e' superato: restano le prove su hardware, il rendering HUD dei sottotitoli e il collegamento di
-dialogo/profili a `JakeCore`.
+Il gate NON e' superato: restano le prove su hardware, la sottotitolazione LIVE (parola per parola, non solo a
+frase completa - vedi la riga corretta sopra) e il collegamento di dialogo/isolamento memoria per profilo a
+`JakeCore` (entrambi deliberatamente non affrettati, vedi le voci datate 22/09/2026 in F2.6/F2.7: toccano la
+macchina a stati di conferma o la memoria persistente piu' sensibili del progetto).
 
 ## 9. F3 — Computer Use Engine 3.0
 
