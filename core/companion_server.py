@@ -43,18 +43,33 @@ il comportamento e' IDENTICO a prima (device_id dal body, non autenticato) - un 
 dichiarato del percorso legacy, non una regressione introdotta qui. Nessun fallback automatico
 nella direzione opposta: un token per-dispositivo REVOCATO/SCADUTO non ripiega mai sul token
 globale, anche se quello e' ancora configurato (F1.4.6, "non deve esistere fallback automatico a
-un token globale")."""
+un token globale").
+
+F7.1 (protocollo companion sicuro): le difese che stanno PRIMA di un comando vivono in
+core/companion_guard.py e questo server le applica in una pipeline unica (`_Handler._prepare`):
+versione del protocollo -> blocco per tentativi falliti -> autenticazione -> rate limit -> capability
+della classe di endpoint (read-only/command/approval/file/audio) -> anti-replay; poi limite e
+validazione del corpo, audit di ogni comando remoto e handoff, e TLS (`tls_context`) obbligatorio
+per ogni host non locale. Vedi il docstring di quel modulo per i limiti dichiarati."""
 import hmac
 import json
 import queue
+import socket
+import ssl
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import cast
 
+from core.companion_guard import (
+    MIN_PROTOCOL_VERSION, CompanionGuard, EndpointClass, ValidationError, check_bind_policy, check_protocol,
+    classify, new_request_id, text_fingerprint, validate_claim_body, validate_command_body, validate_identifier,
+)
 from core.device_credential_store import DeviceCredentialStore
 from core.device_registry import DeviceRegistry
 from core.event_bus import EventBus
 from core.hud_protocol import EventType, HudEvent
+from core.logger import get_logger
 from core.request_context import (
     reset_current_device_id, reset_current_session_id, set_current_device_id, set_current_session_id,
 )
@@ -62,6 +77,14 @@ from core.version import PROTOCOL_VERSION, VERSION
 
 DEFAULT_HOST = "127.0.0.1"
 SSE_KEEPALIVE_SECONDS = 15
+# Tempo massimo per leggere una richiesta (e per completare l'handshake TLS): chi apre la connessione e poi tace
+# (slowloris) libera il thread invece di occuparlo per sempre. Non vale per l'attesa sullo stream SSE, che e' solo
+# scrittura del server.
+REQUEST_TIMEOUT_SECONDS = 30
+# Oltre questa dimensione di corpo dichiarata non si prova nemmeno a svuotare il buffer prima di rifiutare.
+_DRAIN_FACTOR = 4
+
+_logger = get_logger("companion_server")
 
 
 class CompanionServer:
@@ -72,11 +95,17 @@ class CompanionServer:
     token (F1, opt-in): se impostato, ogni richiesta deve presentare "Authorization: Bearer
     <token>", altrimenti riceve 401 - vedi il docstring del modulo. credential_store (F1.4.6,
     fase 6, opt-in): se presente, un Bearer token che verifica per-dispositivo autentica la
-    richiesta E produce un device_id fidato, invece di quello auto-dichiarato nel body."""
+    richiesta E produce un device_id fidato, invece di quello auto-dichiarato nel body.
+
+    F7.1: `guard` (`core/companion_guard.py`) raccoglie rate limit, anti-replay, limite del body,
+    capability per classe di endpoint e audit, con default sicuri (nessuna configurazione = gia'
+    protetto). `tls_context` (un `ssl.SSLContext` di server) cifra il canale; senza, `start()` rifiuta
+    ogni host non locale (F7.1.4)."""
 
     def __init__(
         self, event_bus: EventBus | None = None, command_handler=None, host: str = DEFAULT_HOST, port: int = 0,
         token: str | None = None, credential_store: DeviceCredentialStore | None = None,
+        tls_context: ssl.SSLContext | None = None, guard: CompanionGuard | None = None,
     ):
         self.event_bus = event_bus or EventBus()
         self.command_handler = command_handler or (lambda text: "")
@@ -85,6 +114,8 @@ class CompanionServer:
         self.port = port
         self.token = token
         self.credential_store = credential_store
+        self.tls_context = tls_context
+        self.guard = guard or CompanionGuard()
         self._httpd: "_Server | None" = None
 
     @property
@@ -100,6 +131,8 @@ class CompanionServer:
     def start(self) -> None:
         if self._httpd is not None:
             return
+        # F7.1.4: PRIMA di aprire la porta - un bind LAN senza TLS non deve esistere nemmeno per un istante.
+        check_bind_policy(self.host, self.tls_context is not None)
         self._httpd = _Server((self.host, self.port), _Handler, self)
         self.port = self._httpd.server_address[1]
         self._httpd.start_serving()
@@ -121,6 +154,19 @@ class _Server(ThreadingHTTPServer):
         self._thread: threading.Thread | None = None
         super().__init__(address, handler_cls)
 
+    def get_request(self):
+        sock, address = super().get_request()
+        if self.companion.tls_context is not None:
+            # L'handshake NON si fa qui (girerebbe sul thread che accetta: un client lento bloccherebbe tutti):
+            # si fa alla prima lettura, nel thread della richiesta, dove vale REQUEST_TIMEOUT_SECONDS.
+            sock = self.companion.tls_context.wrap_socket(sock, server_side=True, do_handshake_on_connect=False)
+        return sock, address
+
+    def handle_error(self, request, client_address):
+        # Un handshake fallito, un client che chiude a meta' o un timeout non sono errori del server: senza questo
+        # socketserver stamperebbe un traceback su stderr per ciascuno.
+        _logger.debug("Richiesta companion da %s terminata con errore", client_address, exc_info=True)
+
     def start_serving(self) -> None:
         self._thread = threading.Thread(target=self.serve_forever, daemon=True)
         self._thread.start()
@@ -136,6 +182,12 @@ class _Handler(BaseHTTPRequestHandler):
     # sicurezza se un metodo lo leggesse prima che quelli girino (oggi non succede: BaseHTTPRequest
     # Handler chiama do_GET/do_POST dal proprio __init__), mai un AttributeError inatteso.
     _authenticated_device_id: str | None = None
+    _request_id: str | None = None
+    _cls: EndpointClass | None = None
+    _path: str = ""
+    _method: str = ""
+    _identity: str = "ip:?"
+    timeout = REQUEST_TIMEOUT_SECONDS
 
     def log_message(self, format, *args):  # silenzia il log di default di http.server
         pass
@@ -143,6 +195,10 @@ class _Handler(BaseHTTPRequestHandler):
     @property
     def companion(self) -> CompanionServer:
         return cast(_Server, self.server).companion
+
+    @property
+    def _remote(self) -> str:
+        return str(self.client_address[0])
 
     # ---- autenticazione (F1, opt-in - vedi il docstring del modulo) ----------------------
 
@@ -178,42 +234,129 @@ class _Handler(BaseHTTPRequestHandler):
             return credential_store is None, None
         return hmac.compare_digest(header, f"Bearer {token}"), None
 
-    # ---- routing ------------------------------------------------------------------------
+    # ---- pipeline comune (F7.1.1, F7.1.5-F7.1.7) ---------------------------------------------
 
-    def do_GET(self):
+    def _prepare(self, method: str) -> bool:
+        """Tutto cio' che una richiesta deve superare PRIMA di raggiungere un gestore, in un ordine che non regala
+        informazioni a chi non e' autorizzato: versione del protocollo, blocco per troppi tentativi falliti,
+        autenticazione, frequenza, capability della classe di endpoint, anti-replay. Ritorna False (con la risposta
+        gia' inviata e la riga di audit gia' scritta) se la richiesta e' stata respinta."""
+        guard = self.companion.guard
+        self._request_id = new_request_id()
+        self._method = method
+        self._path = self.path.split("?", 1)[0]
+        self._cls = classify(method, self._path)
+        self._identity = f"ip:{self._remote}"
+
+        compatible, supported = check_protocol(self.headers.get("X-Jake-Protocol"))
+        if not compatible:
+            return self._reject(426, "protocol_unsupported", extra=supported)
+        wait = guard.auth_throttle.retry_after(self._identity)
+        if wait > 0:
+            return self._reject(429, "too_many_auth_failures", retry_after=wait)
         authorized, self._authenticated_device_id = self._authenticate()
         if not authorized:
-            return self._json_response(401, {"error": "unauthorized"})
-        if self.path == "/status":
+            # Nessun reset dei fallimenti su un successo: su 127.0.0.1 un client legittimo che interroga di continuo
+            # azzererebbe il conteggio di chi sta indovinando il token dallo stesso indirizzo.
+            guard.auth_throttle.record_failure(self._identity)
+            return self._reject(401, "unauthorized", event="auth_failed")
+        if self._authenticated_device_id is not None:
+            self._identity = f"dev:{self._authenticated_device_id}"
+        ok, wait = guard.rate_limiter.allow(self._identity, self._cls or EndpointClass.READ_ONLY)
+        if not ok:
+            return self._reject(429, "rate_limited", retry_after=wait)
+        if self._cls is not None and not guard.allowed(self._authenticated_device_id, self._cls):
+            return self._reject(403, "capability_denied", extra={"required": self._cls.value})
+        needs_replay = self._cls not in (None, EndpointClass.READ_ONLY)
+        problem = guard.replay.check(
+            self._identity, self.headers.get("X-Jake-Timestamp"), self.headers.get("X-Jake-Nonce"),
+            required=needs_replay and guard.replay_required(self.companion.host),
+        )
+        if problem is not None:
+            status = 409 if problem == "replayed_nonce" else 503 if problem == "replay_cache_full" else 400
+            extra = {"server_time": time.time()} if problem == "stale_timestamp" else None
+            return self._reject(status, problem, extra=extra)
+        return True
+
+    def _audit(self, event: str, **fields) -> bool:
+        """Scrive una riga di audit. False se il registro non e' scrivibile: chi esegue un COMANDO deve trattarlo
+        come un rifiuto - nessun comando remoto deve girare senza traccia (F7.1.6)."""
+        audit = self.companion.guard.audit
+        if audit is None:
+            return True
+        try:
+            audit.record(
+                event, request_id=self._request_id, method=self._method, endpoint=self._path,
+                endpoint_class=self._cls.value if self._cls else None, device_id=self._authenticated_device_id,
+                authenticated=self._authenticated_device_id is not None, remote=self._remote, **fields,
+            )
+            return True
+        except OSError:
+            _logger.error("Audit companion non scrivibile", exc_info=True)
+            return False
+
+    def _drain_body(self) -> None:
+        """Svuota il corpo non letto (se ragionevole) prima di una risposta di rifiuto: byte rimasti nel buffer di
+        ricezione quando la connessione si chiude fanno rispondere con un RST su Windows invece di una FIN pulita
+        (il flake [WinError 10053] descritto per _handle_release in F0 - vedi ROADMAP.md)."""
+        try:
+            length = int(self.headers.get("Content-Length", 0) or 0)
+        except ValueError:
+            return
+        if 0 < length <= self.companion.guard.max_body_bytes * _DRAIN_FACTOR:
+            try:
+                self.rfile.read(length)
+            except OSError:
+                pass
+
+    def _reject(self, status: int, error: str, *, event: str = "rejected", retry_after: float | None = None,
+                extra: dict | None = None) -> bool:
+        if self._method == "POST":
+            self._drain_body()
+        self._audit(event, status=status, reason=error)
+        payload = {"error": error, **(extra or {})}
+        headers = {}
+        if retry_after is not None:
+            headers["Retry-After"] = str(max(1, int(retry_after + 0.999)))
+            payload["retry_after"] = round(retry_after, 2)
+        self._json_response(status, payload, headers)
+        return False
+
+    # ---- routing ------------------------------------------------------------------------------------------
+
+    def do_GET(self):
+        if not self._prepare("GET"):
+            return None
+        if self._path == "/status":
             return self._json_response(200, {
                 "ok": True,
                 "version": VERSION,
                 "protocol_version": PROTOCOL_VERSION,
+                "min_protocol_version": MIN_PROTOCOL_VERSION,
+                "encrypted": self.companion.tls_context is not None,
                 "active_device": self.companion.devices.active_device_id,
                 "devices": self.companion.devices.list_devices(),
             })
-        if self.path == "/events":
+        if self._path == "/events":
             return self._stream_events()
         self._json_response(404, {"error": "not_found"})
         return None
 
     def do_POST(self):
-        authorized, self._authenticated_device_id = self._authenticate()
-        if not authorized:
-            # Drena comunque il body: byte non letti nel buffer di ricezione quando la
-            # connessione si chiude fanno rispondere con un RST su Windows invece di una FIN
-            # pulita (lo stesso flake intermittente [WinError 10053] gia' descritto e risolto
-            # per _handle_release in F0 - vedi ROADMAP.md).
-            self._read_json_body()
-            return self._json_response(401, {"error": "unauthorized"})
-        if self.path == "/command":
+        if not self._prepare("POST"):
+            return None
+        if self._path == "/command":
             return self._handle_command()
-        if self.path.startswith("/devices/") and self.path.endswith("/claim"):
-            device_id = self.path.split("/")[2]
-            return self._handle_claim(device_id)
-        if self.path.startswith("/devices/") and self.path.endswith("/release"):
-            device_id = self.path.split("/")[2]
-            return self._handle_release(device_id)
+        parts = self._path.split("/")
+        if len(parts) == 4 and parts[1] == "devices" and parts[3] in ("claim", "release"):
+            try:
+                device_id = validate_identifier(parts[2], "device_id", required=True)
+            except ValidationError as exc:
+                self._reject(400, exc.code)
+                return None
+            assert device_id is not None
+            return self._handle_claim(device_id) if parts[3] == "claim" else self._handle_release(device_id)
+        self._drain_body()
         self._json_response(404, {"error": "not_found"})
         return None
 
@@ -233,10 +376,14 @@ class _Handler(BaseHTTPRequestHandler):
         # OGNI scambio, non solo quelli arrivati via companion server (anche voce/CLI). Farlo
         # anche qui li pubblicherebbe due volte. Un command_handler indipendente da JakeCore, se
         # vuole quella visibilita', deve pubblicarla da se'.
-        body = self._read_json_body()
-        text = (body.get("text") or "").strip()
-        if not text:
-            return self._json_response(400, {"error": "missing_text"})
+        body = self._read_json_object()
+        if body is None:
+            return None
+        try:
+            fields = validate_command_body(body)
+        except ValidationError as exc:
+            return self._reject_body(400, exc.code)
+        text = fields["text"]
         # F1.2.3/F1.8.1 (fondamenta): device_id opzionale nel body - se il client lo manda (lo
         # stesso id gia' usato per /claim), il resto della catena di chiamate su QUESTO thread
         # (JakeCore.answer -> ... -> ActionLedger) lo vede tramite core/request_context.py senza
@@ -250,61 +397,91 @@ class _Handler(BaseHTTPRequestHandler):
         # semplicemente l'id nella richiesta. Il body resta l'unica fonte solo sul percorso
         # legacy (nessun token per-dispositivo verificato), comportamento invariato per chi non
         # ha ancora fatto il pairing di alcun dispositivo.
-        device_id = self._authenticated_device_id or (body.get("device_id") or "").strip() or None
+        device_id = self._authenticated_device_id or fields["device_id"]
+        # F7.1.6: la riga "ricevuto" si scrive PRIMA di eseguire. Se il registro non e' scrivibile il comando NON
+        # gira: un comando remoto senza traccia e' peggio di un comando rifiutato.
+        if not self._audit("command_received", claimed_device_id=fields["device_id"], **text_fingerprint(text)):
+            return self._reject_body(503, "audit_unavailable")
         device_token = set_current_device_id(device_id)
         # F1.2.3 (capability per SESSIONE): session_id opzionale nel body - lo stesso ricevuto da
         # /claim in risposta. Stesso schema/stesse garanzie di device_id sopra.
-        session_id = (body.get("session_id") or "").strip() or None
-        session_token = set_current_session_id(session_id)
+        session_token = set_current_session_id(fields["session_id"])
+        started = time.monotonic()
         try:
             response = self.companion.command_handler(text)
+        except Exception as exc:
+            self._audit("command_failed", error=type(exc).__name__, duration_ms=round((time.monotonic() - started) * 1000))
+            _logger.exception("Errore nel gestore del comando companion")
+            return self._json_response(500, {"error": "command_failed"})
         finally:
             reset_current_device_id(device_token)
             reset_current_session_id(session_token)
+        self._audit("command_completed", status=200, duration_ms=round((time.monotonic() - started) * 1000))
         self._json_response(200, {"response": response})
         return None
 
     def _handle_claim(self, device_id: str):
-        body = self._read_json_body()
+        body = self._read_json_object()
+        if body is None:
+            return None
         # F1.4.6 (fase 6): un dispositivo autenticato con un token per-dispositivo puo'
         # reclamare SOLO se stesso - non gli id di altri dispositivi gia' accoppiati, anche se
         # possiede comunque un token valido (il proprio). Nessun controllo sul percorso legacy
         # (nessuna identita' autenticata da confrontare), comportamento invariato.
         if self._device_id_mismatch(device_id):
-            return self._json_response(403, {"error": "device_id_mismatch"})
-        name = body.get("name", "")
+            return self._reject_body(403, "device_id_mismatch")
+        try:
+            name = validate_claim_body(body)["name"]
+        except ValidationError as exc:
+            return self._reject_body(400, exc.code)
         # F1.2.3 (capability per SESSIONE): session_id e' NUOVO a ogni claim(), anche per lo
         # stesso device_id di prima - il client lo deve rimandare in /command (campo opzionale
         # "session_id", stesso schema gia' usato per "device_id") perche' il resto della catena
         # di chiamate su QUEL thread lo veda tramite core/request_context.py.
         previous, session_id = self.companion.devices.claim(device_id, name)
+        self._audit("handoff_claim", status=200, target_device=device_id, previous_device=previous)
         if previous:
             self.companion.event_bus.publish(HudEvent(EventType.DEVICE_HANDOFF, {"from": previous, "to": device_id}))
         self._json_response(200, {"active_device": device_id, "session_id": session_id})
         return None
 
     def _handle_release(self, device_id: str):
-        # _read_json_body() scarta il risultato (release non ha ancora parametri), ma va
+        # _read_json_object() scarta il risultato (release non ha ancora parametri), ma va
         # comunque chiamato: se il client manda un body (anche vuoto, "{}") e il gestore non lo
         # legge, quei byte restano non letti nel buffer TCP quando la connessione si chiude. Su
         # Windows questo fa rispondere con un RST invece di una FIN pulita, e il client vede un
         # ConnectionAbortedError [WinError 10053] intermittente (dipende dal timing con cui i
         # byte del body arrivano rispetto alla chiusura) - il flake descritto nella roadmap F0,
         # riprodotto qui in ~10% delle richieste su 400+ esecuzioni finche' non si legge il body.
-        self._read_json_body()
+        if self._read_json_object() is None:
+            return None
         # F1.4.6 (fase 6): stesso principio di _handle_claim - un dispositivo autenticato non
         # deve poter rilasciare un device_id che non e' il proprio.
         if self._device_id_mismatch(device_id):
-            return self._json_response(403, {"error": "device_id_mismatch"})
+            return self._reject_body(403, "device_id_mismatch")
         released = self.companion.devices.release(device_id)
+        self._audit("handoff_release", status=200, target_device=device_id, released=released)
         self._json_response(200, {"released": released})
         return None
 
     def _stream_events(self):
+        guard = self.companion.guard
+        if not guard.open_stream(self._identity):
+            self._reject(429, "too_many_streams")
+            return
+        self._audit("stream_open", status=200)
+        try:
+            self._stream_events_locked()
+        finally:
+            guard.close_stream(self._identity)
+
+    def _stream_events_locked(self):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "keep-alive")
+        if self._request_id:
+            self.send_header("X-Jake-Request-Id", self._request_id)
         self.end_headers()
         # F4.1.3 ("resume dall'ultimo sequence id"): un client che riconnette manda l'header SSE
         # standard Last-Event-ID con l'ultimo sequence_id visto (id: <n> prima di ogni riga data:
@@ -347,23 +524,59 @@ class _Handler(BaseHTTPRequestHandler):
 
     # ---- utilita' -----------------------------------------------------------------------
 
-    def _read_json_body(self) -> dict:
-        try:
-            length = int(self.headers.get("Content-Length", 0) or 0)
-        except ValueError:
-            length = 0
-        if length <= 0:
-            return {}
-        raw = self.rfile.read(length)
-        try:
-            return json.loads(raw.decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return {}
+    def _reject_body(self, status: int, error: str):
+        """Rifiuto dopo che il corpo e' gia' stato letto: niente drain, stessa audit."""
+        self._audit("rejected", status=status, reason=error)
+        return self._json_response(status, {"error": error})
 
-    def _json_response(self, status: int, payload: dict):
+    def _read_json_object(self) -> dict | None:
+        """Corpo JSON come oggetto ({} se assente). None = richiesta gia' rifiutata (risposta e audit inviati).
+        F7.1.5: nessun Transfer-Encoding (non lo leggiamo: rifiutarlo e' meglio che leggere male), Content-Length
+        solo cifre e sotto il tetto, JSON valido e di tipo oggetto - prima un corpo sbagliato diventava
+        silenziosamente `{}`."""
+        if self.headers.get("Transfer-Encoding"):
+            self._reject_body(411, "length_required")
+            return None
+        raw_length = self.headers.get("Content-Length")
+        if raw_length is None:
+            return {}
+        if not raw_length.strip().isdigit():
+            self._reject_body(400, "invalid_content_length")
+            return None
+        length = int(raw_length)
+        limit = self.companion.guard.max_body_bytes
+        if length > limit:
+            self._drain_body()
+            self._reject_body(413, "body_too_large")
+            return None
+        if length == 0:
+            return {}
+        try:
+            raw = self.rfile.read(length)
+        except (socket.timeout, TimeoutError):
+            self._reject_body(408, "request_timeout")
+            return None
+        if len(raw) < length:
+            self._reject_body(400, "truncated_body")
+            return None
+        try:
+            parsed = json.loads(raw.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            self._reject_body(400, "invalid_json")
+            return None
+        if not isinstance(parsed, dict):
+            self._reject_body(400, "body_must_be_object")
+            return None
+        return parsed
+
+    def _json_response(self, status: int, payload: dict, headers: dict | None = None):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        if self._request_id:
+            self.send_header("X-Jake-Request-Id", self._request_id)
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
