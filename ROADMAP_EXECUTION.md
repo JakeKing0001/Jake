@@ -280,8 +280,8 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F6.5` | Automation Runtime | `DOING` |
 | `F6.6` | Meeting Experience (libreria di regole il 21/09/2026: brief senza dati inventati, consenso e indicatore, follow-up gated; nessun connettore reale) | `DOING` |
 | `F6.7` | Runtime Reliability (monitor/housekeeping il 22/09/2026; task monitor collegato a JakeCore/EventBus/HUD lo stesso giorno - vedi F6.3; housekeeping senza connettori reali ne' pilot) | `DOING` |
-| `F7.1` | Companion Security (F7.1.1/.4/.5/.6/.7 il 22/09/2026; F7.1.2 - pairing HTTP - chiuso il 22/09/2026, vedi F7.2; manca capability persistenti F7.1.3) | `DOING` |
-| `F7.2` | Mobile Companion (pairing/chat live/approve-deny sullo stesso task end-to-end il 22/09/2026; senza file share/offline queue/wipe via companion) | `DOING` |
+| `F7.1` | Companion Security (F7.1.1/.4/.5/.6/.7 il 22/09/2026; F7.1.2 - pairing HTTP - chiuso il 22/09/2026, vedi F7.2; TLS reale generato/persistito dal server il 22/09/2026; manca capability persistenti F7.1.3 e distribuzione del certificato al telefono oltre al pairing) | `DOING` |
+| `F7.2` | Mobile Companion (pairing/chat live/approve-deny sullo stesso task end-to-end il 22/09/2026; lista/revoca dispositivi via HTTP e prima app Android reale - MAI compilata/eseguita in questo ambiente - il 22/09/2026; senza file share/offline queue/wipe via companion) | `DOING` |
 | `F7.3` | Voice Devices | `BACKLOG` |
 | `F7.4` | Presence Runtime | `DOING` |
 | `F7.5` | Home Integration | `DOING` |
@@ -9032,12 +9032,22 @@ Criterio di uscita: penetration test locale non ottiene comando senza device aut
     fallisce con `SSLCertVerificationError`. `/status` dichiara `encrypted`.
   * `F7.1.1` — `X-Jake-Protocol`: finestra di compatibilita' `[PROTOCOL_VERSION-1, PROTOCOL_VERSION]`, fuori finestra 426 con gli estremi
     supportati; senza header il client e' considerato precedente alla regola e accettato. `/status` espone `min_protocol_version`.
+- `F7.1.4` (generazione/persistenza reale del certificato TLS, preparazione al Companion Mobile - chiude una parte del gap dichiarato
+  sopra) — 22/09/2026: nuovo `core/companion_tls.py`. `ensure_certificate()` genera un certificato EC P-256 autofirmato (825 giorni,
+  SAN con hostname/IP passati) SOLO se non ne esiste gia' uno su disco, altrimenti riusa quello persistito (test: nessuna rigenerazione
+  tra due chiamate, nessun file `.tmp` residuo - scrittura atomica); `fingerprint_sha256()` produce l'impronta SHA-256 esadecimale a
+  due punti che il pairing mostra all'utente; `build_server_context()` impone TLS 1.2 minimo. `core/jake_core.py` collega tutto questo
+  a `CompanionServer` (nuovo `tls_context`/`tls_fingerprint`) SOLO quando l'host configurato non e' loopback o quando
+  `companion_server_tls_enabled` e' esplicito - comportamento invariato per chi non tocca queste due chiavi. Provato con handshake TLS
+  VERI su socket reali (un client che pinna l'impronta esatta si connette, uno che ne pinna una diversa viene rifiutato), non solo
+  unit test sulla generazione del certificato (12 test in `tests/test_companion_tls.py`).
+  Non affrontato: distribuzione/pinning del certificato al telefono oltre al mostrarne l'impronta durante il pairing (il client la
+  fissa da solo dopo conferma dell'utente - vedi F7.2); rinnovo automatico prima della scadenza; rotazione della chiave.
   Non affrontato: `F7.1.2` (challenge/QR con conferma sul PC: `core/pairing_service.py` esiste ma non e' esposto via HTTP) e `F7.1.3`
     (capability, scadenza e rotazione nel database delle credenziali: le capability di questo passo vivono in memoria e un riavvio le
-    riporta al default); generazione/rinnovo del certificato TLS e sua distribuzione al telefono (pinning); nessun limite globale di
-    connessioni contemporanee; il percorso legacy col token globale resta non identificante. Il criterio "penetration test locale" e' coperto
-    solo da `PenetrationTests` (token assenti/sbagliati/revocati, replay di una richiesta catturata, impersonazione, spazzatura sul socket),
-    non da un test di penetrazione indipendente.
+    riporta al default); nessun limite globale di connessioni contemporanee; il percorso legacy col token globale resta non
+    identificante. Il criterio "penetration test locale" e' coperto solo da `PenetrationTests` (token assenti/sbagliati/revocati, replay
+    di una richiesta catturata, impersonazione, spazzatura sul socket), non da un test di penetrazione indipendente.
 
 ### F7.2 — Companion mobile MVP
 
@@ -9098,6 +9108,40 @@ una notifica apre il task corretto e un'eventuale risposta aggiorna la stessa se
     completo); `tests/test_jake_core_pipeline.py`/`tests/test_jake_core_permissions.py` estesi con le stesse
     istanze reali del ponte F6 (un gap trovato SUBITO dalla suite completa, non dai test mirati); suite intera
     4532 test OK.
+- `F7.2.1` (lista/revoca dispositivi via HTTP, lato server - chiude il "non fatto" dichiarato sopra) —
+  22/09/2026: `core/companion_server.py` (`GET /devices`, `POST /devices/<id>/revoke`),
+  `core/companion_guard.py` (classificazione: lista in `EndpointClass.READ_ONLY`, revoca in `EndpointClass.COMMAND`,
+  stesso riconoscimento di percorso gia' usato per claim/release). La lista non espone mai il token (solo
+  device_id/nome/stato/timestamp); la revoca resta self-only (lo stesso controllo `_device_id_mismatch` di
+  claim/release) - un dispositivo non puo' revocarne un altro; un chiamante autenticato solo col token legacy
+  globale (senza identita' per-dispositivo) prende 403, non una revoca silenziosa. Prova: 11 nuovi test in
+  `tests/test_companion_devices.py`.
+- `F7.2` (primo Jake Companion Mobile MVP, Android-first - app installabile reale, non solo endpoint server) —
+  22/09/2026: nuovo albero `mobile/android/` (Kotlin, Jetpack Compose, OkHttp+SSE, kotlinx-serialization,
+  EncryptedSharedPreferences, scansione QR via ZXing). Copre pairing (QR o inserimento manuale host/porta +
+  conferma dell'impronta TLS mostrata a schermo prima di accettare - vedi F7.1.4), storage cifrato di
+  device_id/token, connessione autenticata via `/status`+`/devices/<id>/claim`, stato online/offline/reconnect
+  con backoff esponenziale, chat via `/command` (la cronologia mostrata arriva SOLO dallo stream `/events`, mai
+  duplicata leggendo anche la risposta HTTP diretta), notifiche del task monitor (F6.7, origin `task_monitor`)
+  con schermata dedicata (situazione, azioni gia' eseguite, decisione richiesta, decisione di `NotificationPolicy`
+  sull'urgenza) e Approve/Deny via `POST /approvals/<task_id>` sullo STESSO task, lista dispositivi con revoca del
+  telefono stesso (via i due endpoint sopra). Nessuna copia lato mobile di `ConversationState`/`PolicyEngine`/
+  `TaskAgent`/logica decisionale: `repository/UiStateReducer.kt` legge solo la `DecisionDto` che il PC ha gia'
+  prodotto, non la ricalcola mai (provato in `UiStateReducerTest.kt`, vedi sotto). Evitati per scelta esplicita
+  in questo MVP: VoIP, wake word mobile, streaming audio, Home Hub, UI complessa, replica locale dell'LLM.
+  **Limite dichiarato, non nascosto**: questo ambiente non ha una toolchain Android (nessun Gradle, nessun
+  compilatore Kotlin, nessun Android SDK) - il codice e' scritto per intero contro i contratti reali del server
+  ma non e' MAI stato compilato, installato o eseguito qui. Lo scenario end-to-end completo (`pair -> comando ->
+  task -> decisione -> notifica -> Approve -> stesso task continua sul PC`) e' verificato SOLO lato server (vedi
+  F7.2.1/F7.2.4/F7.2.8 sopra) e scritto in modo coerente lato client; la prova finale richiede Android Studio con
+  un SDK reale contro un `JakeCore` in esecuzione. Per compensare, la logica priva di dipendenze Android
+  (protocollo sul filo, percorsi HTTP, riduzione dello stato UI, backoff di riconnessione, parsing del payload
+  QR) e' isolata in Kotlin puro con 5 file di test JUnit scritti per compilare e passare su una JVM
+  (`CompanionPathsTest.kt`, `ReconnectPolicyTest.kt`, `HudEventParsingTest.kt`, `QrPayloadTest.kt`,
+  `UiStateReducerTest.kt`) - non eseguiti in questa sessione per lo stesso limite di toolchain, quindi non
+  dichiarati "verdi", solo scritti e pronti. Nessun generatore di QR lato PC esiste ancora (gap dichiarato, solo
+  il lato scansione e' implementato): l'inserimento manuale di host/porta resta l'unico percorso completo fino a
+  quando un pannello lato PC non lo mostrera'. Dettagli e modello di fiducia TLS in `mobile/android/README.md`.
 
 ### F7.3 — Voce mobile e satellite
 

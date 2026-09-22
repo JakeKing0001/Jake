@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Tema di sistema minimale (la UI vera e' Compose, vedi ui/theme/Theme.kt) - serve solo come tema
+         Android "prima che Compose disegni" per evitare un lampo bianco all'avvio. -->
+    <style name="Theme.JakeCompanion" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
