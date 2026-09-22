@@ -64,12 +64,50 @@ class InitTests(unittest.TestCase):
         _jarvis_app(session=session)
         self.assertIsNotNone(session.on_state)
         self.assertIsNotNone(session.on_level)
+        self.assertIsNotNone(session.on_transcript)
+
+    def test_without_a_session_no_transcript_callback_is_wired(self):
+        """F2.2.7: nessuna sessione vocale -> niente da collegare, stesso principio gia' vero per
+        on_state/on_level (il ramo else usa session_hooks, non i callback di WakeWordSession)."""
+        core = _fake_core()
+        app = _jarvis_app(core=core)
+        self.assertIsNone(app.session)
 
     def test_loads_recent_history_into_the_hud(self):
         core = _fake_core()
         core.memory_manager.get_recent_history.return_value = [{"role": "user", "text": "ciao"}]
         app = _jarvis_app(core=core)
         self.assertEqual(app.hud.conversation.list.count(), 1)
+
+
+class LiveTranscriptTests(unittest.TestCase):
+    """F2.2.7/Gate F2 ("accessibilita' via sottotitoli"): a differenza di _on_state("thinking",
+    ...) (gia' collegato, ma solo a frase FINITA), session.on_transcript porta il testo PARZIALE
+    mentre l'utente sta ancora parlando - la sottotitolazione live che mancava davvero (vedi
+    ROADMAP_EXECUTION.md, Gate F2, 22/09/2026)."""
+
+    def test_a_partial_transcript_updates_the_hud_before_the_phrase_ends(self):
+        """Un TranscriptEvent VERO (non un testo a mano) - lo stesso oggetto che
+        WakeWordSession._deliver_transcript consegna davvero al callback."""
+        from core.voice.streaming_stt import TranscriptEvent
+
+        session = mock.MagicMock()
+        app = _jarvis_app(session=session)
+        event = TranscriptEvent(utterance_id="u1", revision=1, kind="partial", text="che ore", stable_text="che")
+
+        session.on_transcript(event)
+
+        self.assertEqual(app.hud.stage.transcript.text(), "«che ore»")
+
+    def test_a_later_revision_replaces_the_earlier_partial_text(self):
+        from core.voice.streaming_stt import TranscriptEvent
+
+        session = mock.MagicMock()
+        app = _jarvis_app(session=session)
+        session.on_transcript(TranscriptEvent("u1", 1, "partial", "che ore", "che"))
+        session.on_transcript(TranscriptEvent("u1", 2, "partial", "che ore sono", "che ore"))
+
+        self.assertEqual(app.hud.stage.transcript.text(), "«che ore sono»")
 
 
 class SnapshotTests(unittest.TestCase):

@@ -60,6 +60,11 @@ class Bridge(QObject):
     response = Signal(str, str)
     show = Signal(bool)
     hide = Signal()
+    # F2.2.7/Gate F2 ("accessibilita' via sottotitoli"): a differenza di `state` (che mostra il
+    # comando solo a frase FINITA, gia' collegato) questo porta il testo PARZIALE mentre l'utente
+    # sta ancora parlando (WakeWordSession.on_transcript, TranscriptEvent.text) - la sottotitolazione
+    # live che mancava davvero, non uno stub.
+    transcript = Signal(str)
 
 
 class VoiceThread(QThread):
@@ -106,6 +111,7 @@ class JarvisApp:
         self.bridge.level.connect(self.hud.set_level)
         self.bridge.hotkey.connect(self._on_hotkey)
         self.bridge.response.connect(self._on_text_response)
+        self.bridge.transcript.connect(self.hud.set_transcript)
         self.bridge.show.connect(lambda input_mode: self.hud.show_hud(input_mode=input_mode))
         self.bridge.hide.connect(self.hud.hide_hud)
         self.hud.submitted.connect(self._on_text_command)
@@ -117,6 +123,14 @@ class JarvisApp:
         if self.session is not None:
             self.session.on_state = lambda state, detail: self.bridge.state.emit(state, detail or "")
             self.session.on_level = lambda level, speech: self.bridge.level.emit(float(level), bool(speech))
+            # F2.2.7 (sottotitolazione live): un partial arriva SOLO mentre l'utente sta ancora
+            # parlando (VadListener.on_utterance_frame, gia' filtrato per privacy da
+            # WakeWordSession._transcript_is_addressed prima di raggiungere questo callback -
+            # mai il parlato ambientale/la dettatura). event.text cresce/si corregge a ogni
+            # revisione (LocalAgreement-2): lo stesso QLabel gia' usato per il transcript a frase
+            # finita (state == "thinking") si limita ad aggiornarsi PRIMA che la frase finisca,
+            # invece di comparire tutto insieme solo alla fine.
+            self.session.on_transcript = lambda event: self.bridge.transcript.emit(event.text)
         else:
             if hooks is not None:
                 hooks.kind = "hud"

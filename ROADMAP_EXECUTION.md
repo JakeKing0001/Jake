@@ -5055,15 +5055,17 @@ I moduli F2.1-F2.7 nascono come librerie testate con finti. Il collegamento al p
   "l'evento c'e', il rendering no... l'HUD non ha alcuna connessione al bus eventi") - verificato il codice
   vero: `core/gui/hud/app.py::JarvisApp` collega GIA' `WakeWordSession.on_state`/`on_level` (non l'evento sul
   bus, un meccanismo Qt-signal parallelo gia' esistente) a un vero `QLabel` per transcript/risposta e allo
-  stato (ascolto/trascrizione/risposta/parlato). Resta vero solo per la sottotitolazione LIVE parola-per-parola
-  (`on_transcript`/`EventType.TRANSCRIPT`, ancora scollegato) - vedi il Gate F2 sotto per il dettaglio.
+  stato (ascolto/trascrizione/risposta/parlato).
+- **Fatto (22/09/2026) — sottotitolazione LIVE parola-per-parola**: unico pezzo davvero mancante dalla riga
+  sopra - nuovo `Bridge.transcript` Signal, `session.on_transcript` collegato allo stesso `QLabel` gia' usato
+  per il transcript a frase completa (`hud.set_transcript`, ora aggiornato anche DURANTE la frase, non solo
+  alla fine). Con questo il criterio "accessibilita' via sottotitoli e testo equivalente" del Gate F2 e' **fatto**
+  per intero - vedi il Gate F2 sotto.
 - **Da fare**: `profiles` resta scollegato da `JakeCore` (l'isolamento vero di memoria/cronologia per profilo
   richiede prima che `MemoryManager` sappia ripuntare la propria connessione SQLite in modo sicuro, verificato
   ancora da fare metodo per metodo - vedi la voce F2.7 sopra); `dialogue`/`language_normalizer` restano scollegati
   da `JakeCore` (`JakeCore` gestisce da se' azioni in sospeso e `CORRECT_LAST`, mai la correzione/ellissi/ordinali
-  della libreria, oltre a `needs_confirmation` gia' collegato - vedi F2.6.6); sottotitolazione LIVE parola-per-
-  parola nell'HUD (`on_transcript` non ancora collegato, a differenza del transcript a frase completa che gia'
-  funziona); le prove su hardware vero.
+  della libreria, oltre a `needs_confirmation` gia' collegato - vedi F2.6.6); le prove su hardware vero.
 
 ### Gate F2
 
@@ -5073,7 +5075,7 @@ I moduli F2.1-F2.7 nascono come librerie testate con finti. Il collegamento al p
 - fallback push-to-talk/offline funzionante;
 - accessibilità via sottotitoli e testo equivalente.
 
-Stato al 22/09/2026 (onesto, criterio per criterio - riga sui sottotitoli corretta, era stantia):
+Stato al 22/09/2026 (onesto, criterio per criterio - riga sui sottotitoli corretta e poi chiusa lo stesso giorno):
 
 | Criterio | Stato |
 |---|---|
@@ -5081,12 +5083,11 @@ Stato al 22/09/2026 (onesto, criterio per criterio - riga sui sottotitoli corret
 | full-duplex e barge-in stabili su almeno tre profili hardware | **NON soddisfatto**: algoritmi e integrazione ci sono, provati solo su segnali simulati (cuffie/portatile/Bluetooth 4/4 senza falsi; TV in sottofondo = falso barge-in anche con AEC, limite fissato da test). Default `voice_barge_in=off` finche' non si prova su hardware vero |
 | buffer audio volatile verificato | **fatto** per le parti in codice del progetto (segmentatore, buffer dei partial, pre-roll, calibrazione del rumore: solo RAM, svuotati dopo l'uso, con test); il buffer interno di Whisper/ctranslate2 non e' verificabile da qui |
 | fallback push-to-talk/offline funzionante | **fatto**: push-to-talk indipendente da wake word/VAD (test in processo pulito), voce offline con lo stesso contenuto (test) |
-| accessibilita' via sottotitoli e testo equivalente | **fatto in gran parte, riga precedente stantia**: `core/gui/hud/app.py::JarvisApp` collega GIA' `WakeWordSession.on_state`/`on_level` a un `Bridge` Qt (segnali, thread-safe) - `_on_state()` chiama `hud.set_transcript(detail)` per il comando appena trascritto (stato "thinking") e `hud.set_response(detail)` per la risposta di Jake (stato "responding"), ENTRAMBI resi come vero testo su schermo (`QLabel` in `core/gui/hud/overlay.py`/`widgets.py`, non uno stub) - verificato leggendo il codice reale, non l'evento sul bus che si cercava. Lo stato (ascolto/trascrizione/risposta/parlato/pausa/dettatura) e' visibile allo stesso modo tramite `hud.set_state()`, l'equivalente sostanziale di un indicatore microfono anche se non e' l'evento `MIC_STATE` specifico. **Resta davvero mancante**: la sottotitolazione LIVE, parola per parola, MENTRE l'utente sta ancora parlando (`WakeWordSession.on_transcript`/`EventType.TRANSCRIPT`, F2.2.7 - un meccanismo diverso e piu' granulare, verificato non collegato in ne' `main.py` ne' `core/gui/hud/app.py`) - oggi il sottotitolo compare solo a frase COMPLETA, non in streaming. |
+| accessibilita' via sottotitoli e testo equivalente | **fatto**: `core/gui/hud/app.py::JarvisApp` collega `WakeWordSession.on_state`/`on_level` (gia' presente) E ORA anche `on_transcript` (nuovo `Bridge.transcript` Signal, 22/09/2026) a un vero `QLabel` (`core/gui/hud/overlay.py`/`widgets.py`) - il sottotitolo si aggiorna ora PAROLA PER PAROLA mentre l'utente sta ancora parlando (`TranscriptEvent.text`, LocalAgreement-2), non solo a frase completa come prima di questo incremento. Lo stato (ascolto/trascrizione/risposta/parlato/pausa/dettatura) resta visibile tramite `hud.set_state()`, l'equivalente sostanziale di un indicatore microfono anche se non e' l'evento `MIC_STATE` specifico dal bus. Prova: 3 nuovi test in `tests/test_hud_app.py::LiveTranscriptTests`/`InitTests`, verificati FALLIRE contro il codice precedente (`git stash` di `core/gui/hud/app.py`); smoke test verde. |
 
-Il gate NON e' superato: restano le prove su hardware, la sottotitolazione LIVE (parola per parola, non solo a
-frase completa - vedi la riga corretta sopra) e il collegamento di dialogo/isolamento memoria per profilo a
-`JakeCore` (entrambi deliberatamente non affrettati, vedi le voci datate 22/09/2026 in F2.6/F2.7: toccano la
-macchina a stati di conferma o la memoria persistente piu' sensibili del progetto).
+Il gate NON e' ancora superato: restano le prove su hardware e il collegamento di dialogo/isolamento memoria per
+profilo a `JakeCore` (entrambi deliberatamente non affrettati, vedi le voci datate 22/09/2026 in F2.6/F2.7:
+toccano la macchina a stati di conferma o la memoria persistente piu' sensibili del progetto).
 
 ## 9. F3 — Computer Use Engine 3.0
 
