@@ -28,6 +28,8 @@ from core.command import Command
 from core.conversation_state import ConversationStateManager
 from core.event_bus import EventBus
 from core.jake_core import JakeCore
+from core.notification_center import NotificationCenter
+from core.notification_policy import NotificationPolicy
 from core.planner import Plan, PlanStep
 from core.plan_executor import PlanOutcome, StepOutcome
 from core.policy_engine import PolicyEngine
@@ -36,6 +38,8 @@ from core.request_context import (
 )
 from core.session_recorder import SessionRecorder
 from core.skill_result import SkillResult
+from core.task_monitor import MonitorStore, TaskMonitorRegistry
+from core.task_notification_bridge import TaskNotificationBridge
 from core.undo_store import UndoStore
 from skills.delete_path import DeletePathSkill
 from tests.test_skill_registry import _bare_registry
@@ -268,6 +272,23 @@ def _bare_core(**overrides) -> JakeCore:
     # vero - vedi core/agent_checkpoint.py.
     core.agent_checkpoints = overrides.get(
         "agent_checkpoints", AgentCheckpointStore(path=Path(overrides["ledger_path"]).parent / "agent_checkpoint.json"),
+    )
+    # F6.3/F6.7 (Notification Intelligence + Task Monitor, collegati a JakeCore): istanze REALI
+    # (leggere, in memoria/un file temporaneo), stesso principio gia' seguito sopra per
+    # conversation_state/event_bus - la logica da verificare e' come _run_agent/
+    # _on_agent_step_completed li usano davvero, non se loro stessi funzionano (gia' testati in
+    # tests/test_notification_policy.py, tests/test_task_monitor.py, tests/test_task_notification_
+    # bridge.py).
+    core.notification_center = overrides.get("notification_center", NotificationCenter())
+    core.task_monitor = overrides.get("task_monitor", TaskMonitorRegistry())
+    core.notification_policy = overrides.get("notification_policy", NotificationPolicy(mode=core.notification_center.mode))
+    core.task_monitor_store = overrides.get(
+        "task_monitor_store", MonitorStore(path=Path(overrides["ledger_path"]).parent / "task_monitors.json"),
+    )
+    core.task_bridge = overrides.get(
+        "task_bridge",
+        TaskNotificationBridge(core.task_monitor, core.notification_policy, core.event_bus,
+                               mode_source=lambda: core.notification_center.mode),
     )
     return core
 
