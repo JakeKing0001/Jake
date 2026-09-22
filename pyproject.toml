@@ -53,6 +53,7 @@ files = [
     "core/sync_crypto.py",
     "core/sync_engine.py",
     "core/companion_guard.py",
+    "core/skill_manifest.py",
     "core/daily_brief.py",
     "core/meeting_copilot.py",
     "core/autonomy_budget.py",
