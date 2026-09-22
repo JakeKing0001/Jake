@@ -170,10 +170,12 @@ class TaskNotificationBridge:
 
     def finish_task(self, outcome, *, message: str = "", success: bool = True,
                     session_id: str | None = None, device_id: str | None = None) -> Decision | None:
-        """F6.7.2/F6.7.7: chiude un compito CONCLUSO (risposta finale o errore). None se nessun monitor era mai
-        stato aperto per questa esecuzione (nessun passo e' mai arrivato a `track_progress`/
-        `decision_required` - il caso normale di un turno che non ha mai eseguito un passo dell'agente) o se
-        era gia' concluso/in attesa di decisione (non tocca a questo metodo chiuderlo)."""
+        """F6.7.2/F6.7.7: chiude un compito CONCLUSO SENZA MAI aver chiesto una decisione (risposta finale o
+        errore diretto - vedi `resolve_decision` per il caso in cui una decisione E' stata chiesta e ORA si
+        risolve). None se nessun monitor era mai stato aperto per questa esecuzione (nessun passo e' mai
+        arrivato a `track_progress` - il caso normale di un turno che non ha mai eseguito un passo
+        dell'agente) o se il compito e' gia' concluso o in attesa di una decisione (non tocca a QUESTO
+        metodo chiuderlo in quel caso)."""
         task_id = outcome.trace_id
         if task_id is None:
             return None
@@ -183,13 +185,34 @@ class TaskNotificationBridge:
             return None
         if task.status not in (TaskStatus.RUNNING, TaskStatus.ANOMALY):
             return None
-        label = task.label
         self._update_context(task_id, session_id, device_id)
         self._actions[task_id] = self._steps_to_actions(outcome.steps)
+        return self._close(task_id, task.label, message, success, source=outcome.agent_name or "")
+
+    def resolve_decision(self, task_id: str | None, *, message: str = "", success: bool = True) -> Decision | None:
+        """F6.7.2: chiude un compito la cui decisione era stata chiesta con `decision_required` e ORA e' stata
+        risolta FUORI da un nuovo `AgentOutcome` - una conferma testuale ordinaria ("si'"/"no", anche da
+        `POST /approvals/<task_id>`), non un nuovo giro dell'agente (vedi `core/jake_core.py::
+        _finalize_pending_action`/`_handle_confirmation`). A differenza di `finish_task`, non ha un
+        `AgentOutcome` da cui aggiornare le azioni gia' fatte: usa quelle gia' note al compito dall'ultimo
+        `track_progress`/`decision_required`. None se il compito non era mai stato tracciato (task_id
+        assente/sconosciuto - il caso normale di una conferma che non passa mai da `decision_required`, es.
+        DELETE_PATH confermato da un comando diretto) o e' gia' concluso."""
+        if task_id is None:
+            return None
+        try:
+            task = self.monitor.get(task_id)
+        except UnknownTaskError:
+            return None
+        if task.status not in (TaskStatus.RUNNING, TaskStatus.ANOMALY, TaskStatus.NEEDS_DECISION):
+            return None
+        return self._close(task_id, task.label, message, success)
+
+    def _close(self, task_id: str, label: str, message: str, success: bool, *, source: str = "") -> Decision:
         self._sync_mode()
         kind = "task_completed" if success else "task_error"
         notification = Notification(kind=kind, message=message or ("completato" if success else "errore"),
-                                     source=outcome.agent_name or "", critical=False)
+                                     source=source, critical=False)
         decision = self.policy.decide(notification, None)
         if success:
             self.monitor.complete(task_id, message or "completato")

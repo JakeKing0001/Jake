@@ -30,6 +30,7 @@ from core.event_bus import EventBus
 from core.jake_core import JakeCore
 from core.notification_center import NotificationCenter
 from core.notification_policy import NotificationPolicy
+from core.pairing_service import PairingService
 from core.planner import Plan, PlanStep
 from core.plan_executor import PlanOutcome, StepOutcome
 from core.policy_engine import PolicyEngine
@@ -38,6 +39,7 @@ from core.request_context import (
 )
 from core.session_recorder import SessionRecorder
 from core.skill_result import SkillResult
+from core.sync_crypto import Keyring
 from core.task_monitor import MonitorStore, TaskMonitorRegistry
 from core.task_notification_bridge import TaskNotificationBridge
 from core.undo_store import UndoStore
@@ -290,6 +292,12 @@ def _bare_core(**overrides) -> JakeCore:
         TaskNotificationBridge(core.task_monitor, core.notification_policy, core.event_bus,
                                mode_source=lambda: core.notification_center.mode),
     )
+    # F7.1.2 (Companion Mobile MVP): pairing_service REALE costruito sullo STESSO
+    # device_credential_store del core (di norma un MagicMock qui - un test che vuole pairing
+    # vero passa un DeviceCredentialStore vero come override, stesso schema di ledger_path per
+    # ActionLedger). sync_keyring (F7.6) e' sempre reale: e' puro stato in memoria, nessun costo.
+    core.pairing_service = overrides.get("pairing_service", PairingService(core.device_credential_store))
+    core.sync_keyring = overrides.get("sync_keyring", Keyring())
     return core
 
 

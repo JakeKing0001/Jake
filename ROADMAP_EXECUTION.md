@@ -280,8 +280,8 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F6.5` | Automation Runtime | `DOING` |
 | `F6.6` | Meeting Experience (libreria di regole il 21/09/2026: brief senza dati inventati, consenso e indicatore, follow-up gated; nessun connettore reale) | `DOING` |
 | `F6.7` | Runtime Reliability (monitor/housekeeping il 22/09/2026; task monitor collegato a JakeCore/EventBus/HUD lo stesso giorno - vedi F6.3; housekeeping senza connettori reali ne' pilot) | `DOING` |
-| `F7.1` | Companion Security (F7.1.1/.4/.5/.6/.7 il 22/09/2026: rate limit, replay, corpo, capability per classe, audit a catena, TLS obbligatorio fuori da loopback; mancano pairing HTTP F7.1.2 e capability persistenti F7.1.3) | `DOING` |
-| `F7.2` | Mobile Companion | `BACKLOG` |
+| `F7.1` | Companion Security (F7.1.1/.4/.5/.6/.7 il 22/09/2026; F7.1.2 - pairing HTTP - chiuso il 22/09/2026, vedi F7.2; manca capability persistenti F7.1.3) | `DOING` |
+| `F7.2` | Mobile Companion (pairing/chat live/approve-deny sullo stesso task end-to-end il 22/09/2026; senza file share/offline queue/wipe via companion) | `DOING` |
 | `F7.3` | Voice Devices | `BACKLOG` |
 | `F7.4` | Presence Runtime | `DOING` |
 | `F7.5` | Home Integration | `DOING` |
@@ -9055,6 +9055,49 @@ Dipende da: F7.1.
 
 Criterio di uscita: tutti i comandi mobile attraversano lo stesso policy kernel del PC;
 una notifica apre il task corretto e un'eventuale risposta aggiorna la stessa sessione.
+
+- `F7.2.1`/`F7.2.2`/`F7.2.3`/`F7.2.4`/`F7.2.8` (Companion Mobile MVP end-to-end, riuso di F7.1/F7.6/F6 senza sistemi
+  paralleli) — 22/09/2026: `core/pairing_service.py` (esteso), `core/companion_guard.py`/`core/companion_server.py`
+  (nuovi endpoint), `skills/pairing.py`, `core/task_notification_bridge.py` (esteso). **Criterio di uscita provato
+  end-to-end**: un test guida un vero `CompanionServer` attraverso pairing -> claim -> `/command` che avvia un
+  compito -> notifica SSE con lo STESSO task_id/session_id -> `POST /approvals/<task_id>` che risolve lo STESSO
+  task attraverso l'identica pipeline di conferma di JakeCore (nessuna nuova conversazione, nessun secondo motore
+  di esecuzione).
+  * `F7.2.1` (pairing, chiude il gap F7.1.2 dichiarato) — `POST /pairing/start`/`GET /pairing/<challenge_id>`:
+    nuova `EndpointClass.PAIRING` (companion_guard) raggiungibile SENZA credenziali (un dispositivo nuovo non ne
+    ha ancora) ma rate-limitata per indirizzo; l'approvazione resta un "si'" (e la passphrase, se configurata -
+    `APPROVE_PAIRING` e' ADMIN in core/risk.py, nessuna eccezione al gate centrale) sul canale LOCALE, MAI un
+    secondo endpoint HTTP che il companion potrebbe raggiungere da solo - `_on_pairing_requested` (JakeCore)
+    imposta il pending_action e avvisa via `notify()` (v4.3, "pairing" aggiunto a `MODE_ALLOWED_KINDS`). Consegna
+    one-time del token (`PairingService.take_result`, mai una seconda lettura) e "no" rifiuta SUBITO invece di
+    aspettare i 5 minuti di scadenza (test). Non fatto: unpair/lista dedicata via companion (gia' coperti da
+    `/status`+`DeviceCredentialStore.revoke`, non un nuovo endpoint).
+  * F7.6 (chiude il gap dichiarato "scambio delle chiavi pubbliche dentro il pairing") — un `sync_public_key`
+    opzionale nel body di `/pairing/start` entra nel `Keyring` (nuovo `JakeCore.sync_keyring`) all'approvazione,
+    con profili VUOTI di default (F7.6.4: nessun profilo concesso solo per essere stato appena accoppiato); una
+    chiave malformata non blocca mai il pairing gia' riuscito (test). Nessun trasporto reale usa ancora questo
+    portachiavi (limite gia' dichiarato in F7.6, invariato).
+  * `F7.2.2`/`F7.2.3` (stato/chat live, autenticazione) — nessun codice nuovo: `/status`, `/events`, `/command`,
+    `/devices/<id>/claim` erano gia' reali (F7.1); provati qui end-to-end come UN client companion vero li
+    userebbe in sequenza.
+  * `F7.2.4`/`F7.2.8` (notifiche approve/deny sullo stesso task) — `POST /approvals/<task_id>` (classe gia'
+    riservata `EndpointClass.APPROVAL`, F7.1): autentica per-dispositivo, verifica che la decisione in sospeso
+    DI QUEL dispositivo abbia esattamente quel task_id (mai risolta alla cieca - un id sbagliato o quella di un
+    ALTRO dispositivo e' 404, provato), poi "approve"/"deny" diventano "si'"/"no" attraverso `core.answer()` -
+    l'IDENTICA pipeline (`_process` -> `_handle_confirmation` -> `_finalize_pending_action`/negazione) gia' usata
+    per ogni conferma testuale: stessa `conversation_state` (la cronologia CRESCE, non viene sostituita - test),
+    stesso trace_id/ledger, nessun secondo motore. Il ponte F6 chiude il compito sullo stesso task_id quando la
+    decisione si risolve FUORI da un nuovo `AgentOutcome` (`TaskNotificationBridge.resolve_decision`, nuovo -
+    collegato in tre punti: la conferma "si'" che esegue per davvero, il "no" che annulla, e la ripresa dopo una
+    domanda di chiarimento) - un buco reale trovato scrivendo il test end-to-end completo (il compito restava
+    "in attesa di decisione" per sempre dopo una risposta, la sola `finish_task` esistente non lo copriva).
+  Non affrontato: `F7.2.5` (file share), `F7.2.6` (offline queue visibile lato companion - F7.6 ha una coda ma
+    non collegata qui), `F7.2.7` (remote wipe via companion - F7.6 ha `DeviceKeys.wipe` ma nessun endpoint la
+    invoca), snooze/show-evidence su una notifica (solo approve/deny). Prova: 26 nuovi test (17 in
+    `tests/test_companion_pairing.py`, 9 in `tests/test_companion_approvals.py` incluso lo scenario end-to-end
+    completo); `tests/test_jake_core_pipeline.py`/`tests/test_jake_core_permissions.py` estesi con le stesse
+    istanze reali del ponte F6 (un gap trovato SUBITO dalla suite completa, non dai test mirati); suite intera
+    4532 test OK.
 
 ### F7.3 — Voce mobile e satellite
 

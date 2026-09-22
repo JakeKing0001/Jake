@@ -55,11 +55,16 @@ MODE_LABELS_IT = {
 # completato", "backup fatto") e' spesso rilevante anche a schermo intero, a differenza degli
 # avvisi di sistema che possono aspettare. MEETING non lascia passare nulla, promemoria incluso.
 MODE_ALLOWED_KINDS: dict[NotificationMode, frozenset] = {
-    NotificationMode.NORMAL: frozenset({"reminder", "advisory", "trigger"}),
-    NotificationMode.DO_NOT_DISTURB: frozenset({"reminder"}),
-    NotificationMode.STUDY: frozenset({"reminder"}),
+    NotificationMode.NORMAL: frozenset({"reminder", "advisory", "trigger", "pairing"}),
+    # "pairing" (F7.1.2, Companion Mobile MVP): l'utente ha appena scansionato un QR o avviato il
+    # pairing DI PROPOSITO sul telefono - stesso principio gia' applicato a "reminder" (un evento
+    # che l'utente ha causato lui stesso adesso, non un avviso proattivo che puo' aspettare).
+    # Fuori solo da MEETING/SLEEP, come "reminder": nemmeno un pairing interrompe una riunione o
+    # il sonno, resta in coda finche' la challenge non scade (5 minuti, core/pairing_service.py).
+    NotificationMode.DO_NOT_DISTURB: frozenset({"reminder", "pairing"}),
+    NotificationMode.STUDY: frozenset({"reminder", "pairing"}),
     NotificationMode.SLEEP: frozenset({"reminder"}),
-    NotificationMode.GAMING: frozenset({"reminder", "trigger"}),
+    NotificationMode.GAMING: frozenset({"reminder", "trigger", "pairing"}),
     NotificationMode.MEETING: frozenset(),
 }
 

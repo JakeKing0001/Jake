@@ -18,10 +18,16 @@ from core.action_ledger import ActionLedger
 from core.auth_gate import AuthGate
 from core.command import Command
 from core.conversation_state import ConversationStateManager
+from core.event_bus import EventBus
 from core.jake_core import JakeCore
+from core.logger import get_logger
+from core.notification_center import NotificationCenter
+from core.notification_policy import NotificationPolicy
 from core.policy_engine import PolicyEngine
 from core.session_recorder import SessionRecorder
 from core.skill_result import SkillResult
+from core.task_monitor import MonitorStore, TaskMonitorRegistry
+from core.task_notification_bridge import TaskNotificationBridge
 
 
 class FakeSkill:
@@ -411,6 +417,18 @@ def _bare_core_for_confirmation(skill_registry, auth_gate) -> JakeCore:
     core.model = "test-model"
     core.action_ledger = ActionLedger()
     core.session_recorder = SessionRecorder()
+    # F6.3/F6.7: _finalize_pending_action/_handle_confirmation chiudono (in modo sicuro, no-op se
+    # il compito non era mai stato tracciato - il caso normale qui, dove nessuna conferma passa
+    # da TaskAgent) il compito che il ponte stava seguendo, vedi core/jake_core.py. Istanze REALI
+    # leggere (stesso principio gia' seguito sopra per action_ledger/session_recorder).
+    core.logger = get_logger()
+    core.event_bus = EventBus()
+    core.notification_center = NotificationCenter()
+    core.task_monitor = TaskMonitorRegistry()
+    core.notification_policy = NotificationPolicy(mode=core.notification_center.mode)
+    core.task_monitor_store = MonitorStore(path=Path(tempfile.mkdtemp()) / "task_monitors.json")
+    core.task_bridge = TaskNotificationBridge(core.task_monitor, core.notification_policy, core.event_bus,
+                                              mode_source=lambda: core.notification_center.mode)
     return core
 
 
