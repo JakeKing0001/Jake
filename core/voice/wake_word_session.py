@@ -5,6 +5,7 @@ import time
 import numpy as np
 
 from core.logger import get_logger
+from core.request_context import reset_current_speaker_profile_id, set_current_speaker_profile_id
 from core.voice.audio_profile import apply_to_provider, classify_output_device
 from core.voice.barge_in import BargeInController, classify_interruption
 from core.voice.live_transcriber import LiveTranscriber
@@ -12,6 +13,7 @@ from core.voice.listening_state import (
     EchoGuard, ListeningState, ListeningStateMachine, MicIndicator, RepeatGuard, WakeCooldown,
 )
 from core.voice.playback_aec import PlaybackAec
+from core.voice.speaker_profile import SpeakerProfileStore, extract_features, identify
 from core.voice.speech_text import STYLES, prepare_for_speech
 from core.voice.streaming_stt import TranscriptEvent, to_hud_event
 from core.voice.vad_listener import VadListener
@@ -79,10 +81,19 @@ class WakeWordSession:
                  wake_words=None, on_state=None, on_level=None, follow_up_seconds: float = None,
                  replay_window_seconds: float = 0.0, speech_style: str = "normal",
                  output_device_name: str | None = None, barge_in: str = "off", partials: str = "off",
-                 on_transcript=None):
+                 on_transcript=None, speaker_store: SpeakerProfileStore | None = None):
         self.jake_core = jake_core
         self.stt_provider = stt_provider
         self.tts_provider = tts_provider
+        # F2.7 (adozione, prima fetta - identificazione): None (il default) preserva il
+        # comportamento di sempre, nessun profilo arruolato viene mai cercato. Quando presente,
+        # SOLO un riconoscimento ad alta confidenza per la frase appena trascritta imposta
+        # core.request_context.current_speaker_profile_id() per la durata della chiamata a
+        # core.answer() - un'informazione di IDENTIFICAZIONE, mai un permesso (vedi
+        # core/profiles.py): non sposta memoria ne' cronologia, quell'isolamento resta un
+        # incremento successivo dichiarato (vedi il docstring del contextvar).
+        self.speaker_store = speaker_store
+        self._last_utterance_audio: np.ndarray | None = None
         self.vad_listener = vad_listener or VadListener(on_level=self._on_frame_level)
         if self.vad_listener.on_level is None:
             self.vad_listener.on_level = self._on_frame_level
@@ -533,6 +544,10 @@ class WakeWordSession:
     def _handle_utterance(self, utterance) -> None:
         now = time.time()
         speaking = self._tts_thread is not None and self._tts_thread.is_alive()
+        # F2.7: stessa frase gia' registrata dal VAD, riusata per l'identificazione del parlante
+        # (nessuna cattura audio in piu') - letta da _process_command sotto, che e' l'unico punto
+        # in cui questa frase diventa davvero un comando per core.answer().
+        self._last_utterance_audio = utterance
 
         text = self._transcribe(utterance)
         if not text:
@@ -623,11 +638,35 @@ class WakeWordSession:
         if self.state in ("transcribing", "listening"):
             self._set_state("idle", "")
 
+    def _identify_speaker_token(self):
+        """F2.7 (adozione, prima fetta): None (il caso normale) se non c'e' uno speaker_store, se
+        l'audio dell'utterance non e' disponibile, se il riconoscimento fallisce, o se la
+        confidenza non e' "high" - un riconoscimento incerto non deve MAI etichettare il turno
+        con un profilo indovinato (vedi core/voice/speaker_profile.py::SpeakerHint). Un errore
+        qui non deve mai impedire a Jake di rispondere: stesso principio gia' applicato a
+        echo_guard/repeat_guard/barge-in in questo stesso file."""
+        if self.speaker_store is None or self._last_utterance_audio is None:
+            return None
+        try:
+            features = extract_features(self._last_utterance_audio)
+            hint = identify(features, self.speaker_store.profiles())
+        except Exception:
+            self._logger.exception("Errore identificando la voce")
+            return None
+        if hint.confidence != "high" or hint.profile_id is None:
+            return None
+        return set_current_speaker_profile_id(hint.profile_id)
+
     def _process_command(self, command: str) -> None:
         self.listening.command_consumed()
         print(f"Tu > {command}")
         self._set_state("thinking", command)
-        response = self.jake_core.answer(command)
+        speaker_token = self._identify_speaker_token()
+        try:
+            response = self.jake_core.answer(command)
+        finally:
+            if speaker_token is not None:
+                reset_current_speaker_profile_id(speaker_token)
         print(f"Jake > {response}")
 
         if response == self.jake_core.EXIT_SENTINEL:

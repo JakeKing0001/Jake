@@ -307,6 +307,126 @@ class ProcessCommandTests(unittest.TestCase):
         respond.assert_called_once_with("Fatto.")
 
 
+class IdentifySpeakerTokenTests(unittest.TestCase):
+    """F2.7 (adozione, prima fetta - identificazione): _identify_speaker_token() e' il pezzo
+    nuovo, isolato dal resto di _process_command cosi' da poterlo provare senza dover costruire
+    audio vero (extract_features/identify sono patchati al punto in cui wake_word_session.py li
+    ha importati, non reimplementati qui)."""
+
+    def test_without_a_speaker_store_returns_none(self):
+        session = _mock_session()
+        session._last_utterance_audio = object()
+        self.assertIsNone(session._identify_speaker_token())
+
+    def test_without_any_captured_audio_returns_none_even_with_a_store(self):
+        session = _mock_session(speaker_store=mock.MagicMock())
+        session._last_utterance_audio = None
+        self.assertIsNone(session._identify_speaker_token())
+
+    def test_a_high_confidence_match_sets_the_context_var(self):
+        from core.request_context import current_speaker_profile_id, reset_current_speaker_profile_id
+        from core.voice.speaker_profile import SpeakerHint
+
+        session = _mock_session(speaker_store=mock.MagicMock())
+        session._last_utterance_audio = object()
+        hint = SpeakerHint(profile_id="davide", confidence="high")
+        with mock.patch("core.voice.wake_word_session.extract_features", return_value=object()), \
+             mock.patch("core.voice.wake_word_session.identify", return_value=hint):
+            token = session._identify_speaker_token()
+        try:
+            self.assertIsNotNone(token)
+            self.assertEqual(current_speaker_profile_id(), "davide")
+        finally:
+            reset_current_speaker_profile_id(token)
+
+    def test_a_low_confidence_match_does_not_set_the_context_var(self):
+        from core.voice.speaker_profile import SpeakerHint
+
+        session = _mock_session(speaker_store=mock.MagicMock())
+        session._last_utterance_audio = object()
+        hint = SpeakerHint(profile_id="davide", confidence="low")
+        with mock.patch("core.voice.wake_word_session.extract_features", return_value=object()), \
+             mock.patch("core.voice.wake_word_session.identify", return_value=hint):
+            self.assertIsNone(session._identify_speaker_token())
+
+    def test_no_match_does_not_set_the_context_var(self):
+        from core.voice.speaker_profile import SpeakerHint
+
+        session = _mock_session(speaker_store=mock.MagicMock())
+        session._last_utterance_audio = object()
+        hint = SpeakerHint(profile_id=None, confidence="none")
+        with mock.patch("core.voice.wake_word_session.extract_features", return_value=object()), \
+             mock.patch("core.voice.wake_word_session.identify", return_value=hint):
+            self.assertIsNone(session._identify_speaker_token())
+
+    def test_an_exception_during_identification_is_swallowed_not_raised(self):
+        session = _mock_session(speaker_store=mock.MagicMock())
+        session._last_utterance_audio = object()
+        with mock.patch("core.voice.wake_word_session.extract_features", side_effect=RuntimeError("boom")):
+            self.assertIsNone(session._identify_speaker_token())
+
+
+class ProcessCommandSpeakerIdentificationTests(unittest.TestCase):
+    """F2.7 (adozione, prima fetta): il profilo riconosciuto e' visibile SOLO durante la chiamata
+    a core.answer(), mai prima ne' dopo - lo stesso identico contratto gia' provato per gli altri
+    contextvar di request_context.py (F1.2.3/F1.5.2/F1.3.4)."""
+
+    def test_the_recognized_profile_is_visible_only_during_answer_and_cleared_after(self):
+        from core.request_context import current_speaker_profile_id
+        from core.voice.speaker_profile import SpeakerHint
+
+        session = _mock_session(speaker_store=mock.MagicMock())
+        session._last_utterance_audio = object()
+        seen_during_answer = []
+
+        def fake_answer(text):
+            seen_during_answer.append(current_speaker_profile_id())
+            return "Fatto."
+
+        session.jake_core.answer.side_effect = fake_answer
+        hint = SpeakerHint(profile_id="davide", confidence="high")
+        with mock.patch.object(session, "_respond"), \
+             mock.patch("core.voice.wake_word_session.extract_features", return_value=object()), \
+             mock.patch("core.voice.wake_word_session.identify", return_value=hint):
+            session._process_command("che ore sono")
+
+        self.assertEqual(seen_during_answer, ["davide"])
+        self.assertIsNone(current_speaker_profile_id())
+
+    def test_a_failing_answer_still_clears_the_recognized_profile(self):
+        """finally, non solo il percorso felice: un'eccezione da core.answer() non deve lasciare
+        il profilo riconosciuto visibile a un turno futuro scollegato sullo stesso thread."""
+        from core.request_context import current_speaker_profile_id
+        from core.voice.speaker_profile import SpeakerHint
+
+        session = _mock_session(speaker_store=mock.MagicMock())
+        session._last_utterance_audio = object()
+        session.jake_core.answer.side_effect = RuntimeError("boom")
+        hint = SpeakerHint(profile_id="davide", confidence="high")
+        with mock.patch("core.voice.wake_word_session.extract_features", return_value=object()), \
+             mock.patch("core.voice.wake_word_session.identify", return_value=hint):
+            with self.assertRaises(RuntimeError):
+                session._process_command("che ore sono")
+
+        self.assertIsNone(current_speaker_profile_id())
+
+    def test_without_a_speaker_store_the_context_var_stays_none(self):
+        from core.request_context import current_speaker_profile_id
+
+        session = _mock_session()
+        seen_during_answer = []
+
+        def fake_answer(text):
+            seen_during_answer.append(current_speaker_profile_id())
+            return "Fatto."
+
+        session.jake_core.answer.side_effect = fake_answer
+        with mock.patch.object(session, "_respond"):
+            session._process_command("che ore sono")
+
+        self.assertEqual(seen_during_answer, [None])
+
+
 class RespondTests(unittest.TestCase):
     def test_an_empty_response_opens_a_follow_up_window_without_speaking(self):
         session = _mock_session()

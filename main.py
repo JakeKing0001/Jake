@@ -171,6 +171,20 @@ def _build_character_tts_provider(base_tts_provider, character_name: str):
     return provider, manager
 
 
+def _speaker_store():
+    """F2.7 (adozione, prima fetta - identificazione): sempre creato, MAI condizionato da una
+    configurazione esplicita - `SpeakerProfileStore` legge un archivio JSON che semplicemente non
+    esiste finche' nessuno arruola una voce (`SpeakerProfileStore.enroll`, oggi raggiungibile solo
+    da codice/test: nessuna skill o CLI di arruolamento esiste ancora, gap dichiarato), quindi
+    `profiles()` resta sempre vuoto e il comportamento resta IDENTICO a prima di questo
+    incremento per chiunque non abbia mai arruolato nessuno - stesso principio "opt-in, zero
+    cambi di comportamento per chi non lo usa" gia' seguito per ogni altro meccanismo opzionale
+    in questo progetto."""
+    from core.voice.speaker_profile import SpeakerProfileStore
+
+    return SpeakerProfileStore()
+
+
 def _setup_voice(core=None):
     """Prepara TTS/STT (ed eventualmente la voce di personaggio) condivisi da push-to-talk,
     voce continua e HUD. Restituisce (tts_provider, stt_provider, server_manager_o_None)."""
@@ -240,6 +254,7 @@ def run_wake_word_mode():
         output_device_name=core.config.get("voice_output_device") or None,
         barge_in=str(core.config.get("voice_barge_in", "off") or "off"),
         partials=str(core.config.get("voice_partials", "auto") or "auto"),
+        speaker_store=_speaker_store(),
     )
     try:
         session.run()
@@ -289,6 +304,7 @@ def run_jarvis_mode(with_voice: bool = True):
                 output_device_name=core.config.get("voice_output_device") or None,
                 barge_in=str(core.config.get("voice_barge_in", "off") or "off"),
                 partials=str(core.config.get("voice_partials", "auto") or "auto"),
+                speaker_store=_speaker_store(),
             )
             if not session.vad_listener.is_available():
                 print("Nessun microfono: HUD in modalita' solo testo.")

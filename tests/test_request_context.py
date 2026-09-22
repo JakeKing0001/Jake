@@ -9,9 +9,10 @@ import unittest
 
 from core.request_context import (
     current_agent_name, current_command_source_intent, current_device_id, current_session_id,
-    reset_current_agent_name, reset_current_command_source_intent, reset_current_device_id,
-    reset_current_session_id, set_current_agent_name, set_current_command_source_intent,
-    set_current_device_id, set_current_session_id,
+    current_speaker_profile_id, reset_current_agent_name, reset_current_command_source_intent,
+    reset_current_device_id, reset_current_session_id, reset_current_speaker_profile_id,
+    set_current_agent_name, set_current_command_source_intent, set_current_device_id,
+    set_current_session_id, set_current_speaker_profile_id,
 )
 
 
@@ -242,6 +243,60 @@ class CommandSourceIntentSetAndResetTests(unittest.TestCase):
         token = set_current_command_source_intent("READ_FILE_TEXT")
         reset_current_command_source_intent(token)
         self.assertIsNone(current_command_source_intent())
+
+
+class SpeakerProfileIdDefaultTests(unittest.TestCase):
+    """F2.7 (adozione, prima fetta - identificazione): stesso identico contratto di
+    current_device_id/current_agent_name sopra."""
+
+    def test_default_is_none_when_never_set(self):
+        self.assertIsNone(current_speaker_profile_id())
+
+
+class SpeakerProfileIdSetAndResetTests(unittest.TestCase):
+    def test_set_makes_the_value_visible_on_this_thread(self):
+        token = set_current_speaker_profile_id("davide")
+        try:
+            self.assertEqual(current_speaker_profile_id(), "davide")
+        finally:
+            reset_current_speaker_profile_id(token)
+
+    def test_reset_restores_the_previous_value(self):
+        outer_token = set_current_speaker_profile_id("davide")
+        inner_token = set_current_speaker_profile_id("ospite")
+        reset_current_speaker_profile_id(inner_token)
+        try:
+            self.assertEqual(current_speaker_profile_id(), "davide")
+        finally:
+            reset_current_speaker_profile_id(outer_token)
+
+    def test_reset_restores_none_when_nothing_was_set_before(self):
+        token = set_current_speaker_profile_id("davide")
+        reset_current_speaker_profile_id(token)
+        self.assertIsNone(current_speaker_profile_id())
+
+
+class SpeakerProfileIdThreadIsolationTests(unittest.TestCase):
+    def test_concurrent_threads_never_see_each_others_speaker_profile_id(self):
+        seen = {}
+        barrier = threading.Barrier(2)
+
+        def worker(name: str) -> None:
+            token = set_current_speaker_profile_id(name)
+            try:
+                barrier.wait(timeout=5)
+                seen[name] = current_speaker_profile_id()
+            finally:
+                reset_current_speaker_profile_id(token)
+
+        t1 = threading.Thread(target=worker, args=("davide",))
+        t2 = threading.Thread(target=worker, args=("ospite",))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        self.assertEqual(seen, {"davide": "davide", "ospite": "ospite"})
 
 
 if __name__ == "__main__":
