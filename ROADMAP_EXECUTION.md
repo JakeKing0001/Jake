@@ -292,7 +292,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F8.3` | Skill Forge | `DOING` |
 | `F8.4` | Model Runtime (router con capability/inventario/eval/warm-unload/redazione il 22/09/2026; non ancora collegato a JakeCore) | `DOING` |
 | `F8.5` | Agent Runtime | `DOING` |
-| `F8.6` | Release Safety | `BACKLOG` |
+| `F8.6` | Release Safety (golden/security set, confronto, canary, rollback, canali firmati il 22/09/2026; senza runner reali ne' collegamento HUD) | `DOING` |
 
 ## 6. F0 — Baseline verde e release riproducibile
 
@@ -9327,6 +9327,38 @@ Dipende da: F0.5 e F8.1.
 7. `F8.6.7` Report leggibile nell'HUD.
 
 Criterio di uscita: una release regressiva non raggiunge stable.
+
+- `F8.6.1`-`F8.6.7` (eval, canary, rollback, canali firmati) — 22/09/2026: `core/release_eval.py`. Nessun runner reale (NLU/agenti/
+  memoria/voce/computer use non sono ancora collegati: `run_eval` prende un `runner` iniettato, i test ne passano uno finto), ma la
+  LOGICA di decisione e' reale e provata end-to-end, non solo sulle funzioni isolate.
+  * `F8.6.1`/`F8.6.2` — `validate_golden_set` rifiuta un set che non copre tutte e cinque le aree dichiarate (NLU, agenti, memoria,
+    voce, computer use) o con id duplicati; **zero casi di sicurezza e' un errore del set, non un set "piu' piccolo ma valido"**
+    (`empty_security_set`) - il cancello di sicurezza non puo' restare vuoto perche' nessuno lo ha popolato.
+  * esecuzione — `run_eval` distingue un CRASH (eccezione nel runner o nel controllo stesso) da un controllo che dice semplicemente
+    "no": un caso rotto non ferma la corsa e non conta come lo stesso tipo di problema di un caso che fallisce normalmente (test
+    dedicati per entrambi). L'errore registrato e' troncato (200 caratteri, nome dell'eccezione + messaggio) - mai l'intera traccia.
+  * `F8.6.3` — `compare` segnala solo le aree che PEGGIORANO oltre la soglia dichiarata rispetto alla stabile; un miglioramento non e'
+    mai un problema (test), un'area presente nella stabile ma assente nella candidata conta come crollata a zero (una copertura persa
+    e' comunque una regressione).
+  * `F8.6.4` — `canary_sample`: campionamento deterministico (stesso seed = stesso campione) di SOLI casi non di sicurezza - i casi di
+    sicurezza girano per intero a ogni eval, mai a campione.
+  * `F8.6.5` — `decide_rollback`: crash sopra soglia, QUALSIASI fallimento di sicurezza, o una regressione oltre soglia bastano CIASCUNO
+    da solo (non una media pesata che una condizione potrebbe compensare con le altre); le ragioni si accumulano quando piu' di una si
+    applica.
+  * `F8.6.6` — `ReleaseRegistry` con canali `dev`/`beta`/`stable`, manifest firmati Ed25519 (stessa libreria gia' usata da
+    `core/sync_crypto.py`/`core/skill_package.py`, nessuna crittografia scritta a mano); chiave sconosciuta, revocata, manifest alterato
+    dopo la firma: tutti rifiutati PRIMA di toccare il canale. **Criterio di uscita della fase provato end-to-end**: `publish` su
+    `stable` rifiuta da solo (senza che il chiamante debba ricordarsene) una release con fallimenti di sicurezza, un crash rate sopra
+    soglia, o una regressione contro la `stable` corrente - `test_a_regressive_release_never_reaches_stable` pubblica prima una buona
+    release, poi una peggiore, e verifica che `stable` resti sulla prima. `promote` costruisce il manifest della promozione solo in
+    avanti (dev -> beta -> stable, mai a ritroso ne' saltando un canale) dalla release corrente del canale di partenza; `rollback`
+    torna al manifest precedente di un canale.
+  * `F8.6.7` — `render_report`: testo italiano deterministico con l'esito per area e l'elenco dei fallimenti (un CRASH marcato
+    distintamente da un fallimento ordinario) - il testo che un pannello HUD mostrerebbe.
+  Non affrontato: nessun runner reale collegato alle cinque aree (NLU/agenti/memoria/voce/computer use); nessun evento HUD pubblicato
+    (F8.6.7 produce solo testo, nessun pannello lo consuma); il registro dei canali e' in memoria, non persistito tra riavvii; nessuna
+    pipeline CI che costruisca/firmi/pubblichi automaticamente una release. Prova: 47 test in `tests/test_release_eval.py`; un modulo
+    nel mypy selettivo.
 
 ## 16. Funzionalità trasversali
 
