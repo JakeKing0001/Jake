@@ -245,9 +245,9 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F1.8` | Runtime Reliability | `DONE` |
 | `F2.1` | Voice Quality (F2.1.1-F2.1.6 affrontati il 21/09/2026: harness sintetico + VAD/WER offline + documento privacy; mancano solo registrazioni consensuali vere, gap dichiarato) | `DOING` |
 | `F2.2` | Speech Runtime (F2.2.1-F2.2.7 affrontati e collegati a WakeWordSession il 21/09/2026: partial su thread proprio, privacy dei sottotitoli, evento TRANSCRIPT; "partial p95 < 1 s" non misurabile senza GPU/hardware vero) | `DOING` |
-| `F2.3` | Voice Quality (F2.3.1-F2.3.7 affrontati il 21/09/2026 a livello libreria; manca il collegamento a WakeWordSession e la misura "falso wake <= 1/24 h", che richiede ascolto vero) | `DOING` |
-| `F2.4` | Audio Systems (F2.4.1-F2.4.7 affrontati il 21/09/2026 su segnali simulati; mancano il collegamento a WakeWordSession/TTS reali e le prove su cuffie/altoparlanti/Bluetooth/TV VERI) | `DOING` |
-| `F2.5` | Speech Runtime (F2.5.1-F2.5.7 affrontati il 21/09/2026 a livello libreria/provider; manca il collegamento a WakeWordSession e la misura dal vivo di "prima emissione < 2 s") | `DOING` |
+| `F2.3` | Voice Quality (F2.3.1-F2.3.7 affrontati il 21/09/2026 E collegati a WakeWordSession lo stesso giorno - "passo di integrazione F2", gradino 1: ListeningStateMachine/EchoGuard/WakeCooldown/RepeatGuard/MicIndicator; riga corretta il 22/09/2026, era stantia; resta solo F2.3.7 [elezione da satelliti reali, dipende da F7] e la misura "falso wake <= 1/24 h" su ascolto vero) | `DOING` |
+| `F2.4` | Audio Systems (F2.4.1-F2.4.7 affrontati il 21/09/2026 E collegati a WakeWordSession/TTS reali lo stesso giorno - gradino 3: AEC su riferimento reale, BargeInController, `voice_barge_in` di default `off`; riga corretta il 22/09/2026, era stantia; resta solo la prova sulle tre categorie di hardware VERE, per cui il default resta `off`) | `DOING` |
+| `F2.5` | Speech Runtime (F2.5.1-F2.5.7 affrontati il 21/09/2026 E collegati a WakeWordSession/push-to-talk lo stesso giorno per stile/dispositivo/pulizia markdown - gradino 2; riga corretta il 22/09/2026, era stantia; resta solo `ChunkedSpeaker` per-unita' - bloccato su JakeCore che non produce ancora testo in streaming, non un gap lato voce - e la misura dal vivo di "prima emissione < 2 s") | `DOING` |
 | `F2.6` | Conversation Runtime (F2.6.1/F2.6.3-F2.6.7 a livello libreria il 21/09/2026; F2.6.2 solo il lato dati - manca l'HUD - e nessun collegamento a JakeCore/WakeWordSession; "< 5% dei turni con 'no, intendevo'" non misurabile senza un benchmark di dialoghi) | `DOING` |
 | `F2.7` | Identity and Voice (F2.7.1-F2.7.6 affrontati il 21/09/2026 con un'impronta vocale grossolana; nessun collegamento a JakeCore/AuthGate/MemoryManager di produzione; la firma NON e' un riconoscitore da produzione, vedi sotto) | `DOING` |
 | `F3.1` | Computer Use Quality (F3.1.1/F3.1.2/F3.1.3/F3.1.4/F3.1.6 chiusi; resta F3.1.5 DPI/multi-monitor - riga aggiornata il 21/09/2026, era stantia) | `DOING` |
@@ -4657,8 +4657,13 @@ Criterio di uscita: falso wake ≤ 1/24 ore di benchmark e miss rate entro la so
     test: la prima versione trattava ogni submit dopo la finestra come una nuova attivazione);
     dopo `hold_s` (3 s) una nuova candidatura apre un round nuovo. `claim_winner` applica il risultato
     al registro. Nessuna rete: le candidature devono arrivare dal companion (F7.1, non ancora).
-  Non affrontato: collegamento a `WakeWordSession`, rendering dell'indicatore su HUD, ricezione di
-  candidature da satelliti reali, benchmark "falso wake <= 1/24 h". Prova: 25 test in
+  Non affrontato ALLORA (nota stantia, corretta il 22/09/2026): il collegamento a `WakeWordSession`
+  e' arrivato lo stesso giorno con il "passo di integrazione F2" (gradino 1, piu' avanti in questo
+  documento) - `ListeningStateMachine`/`EchoGuard`/`WakeCooldown`/`RepeatGuard`/`MicIndicator` sono
+  tutti costruiti e usati davvero da `WakeWordSession._handle_utterance`. Restano aperti solo: il
+  rendering dell'indicatore su HUD (nessun rendering esiste ancora nell'HUD per NESSUN evento
+  vocale, non solo questo), la ricezione di candidature da satelliti reali (dipende da F7, non
+  ancora), e il benchmark "falso wake <= 1/24 h" su ascolto vero. Prova: 25 test in
   `tests/test_wake_settings.py`, 46 in `tests/test_listening_state.py`; tre moduli nel mypy selettivo.
 
 ### F2.4 — AEC, noise suppression e barge-in
@@ -4707,11 +4712,16 @@ Criterio di uscita: 95% delle interruzioni del corpus ferma il TTS senza falso c
     (e' la ragione d'essere dell'AEC); **la TV accesa produce falsi barge-in 4/4 anche con AEC** - la TV
     non e' nel riferimento e nessun filtro adattivo la cancella. Un test fissa questo limite invece di
     nasconderlo. Servirebbe separazione delle sorgenti, o un margine per-dispositivo piu' alto.
-  Non affrontato: collegamento a `WakeWordSession`/`ChunkedSpeaker` in produzione (oggi
-  `VadListener.muted` scarta i frame mentre Jake parla, quindi il barge-in vero non esiste ancora nel
-  flusso reale), cattura del riferimento dal flusso di riproduzione reale (i provider chiamano
-  `sd.play` senza esporre i campioni), misura su hardware vero. Prova: 29 test in
-  `tests/test_audio_frontend.py`, 34 in `tests/test_barge_in.py`; due moduli nel mypy selettivo.
+  Non affrontato ALLORA (nota stantia, corretta il 22/09/2026): tutti e tre i punti sono stati
+  chiusi lo stesso giorno con il "passo di integrazione F2" (gradino 3, piu' avanti in questo
+  documento) - `VadListener` ora offre i frame durante il muto a `on_speaking_frame` invece di
+  scartarli soltanto, i provider che riproducono da se' (Edge/OneCore/Character) pubblicano il
+  riferimento vero via `TtsProvider.reference_sink` (SAPI/pyttsx3 restano senza, dichiarato:
+  `has_reference` falso), e `WakeWordSession(barge_in=...)`/`voice_barge_in` collegano tutto in
+  produzione (default `off`). Resta aperta solo la misura su hardware vero (tre profili) - il
+  limite gia' trovato sul benchmark simulato (TV in sottofondo = falso barge-in anche con AEC) e'
+  la ragione per cui il default resta `off`. Prova: 29 test in `tests/test_audio_frontend.py`, 34
+  in `tests/test_barge_in.py`; due moduli nel mypy selettivo.
 
 ### F2.5 — TTS streaming e personalità vocale
 
@@ -4769,10 +4779,17 @@ Criterio di uscita: prima emissione percepita < 2 s per risposta semplice e stop
     tutti i provider (pyttsx3: proprieta' rate/volume; Edge: parametro rate + guadagno PCM, inoltrato
     al ripiego offline; OneCore: guadagno PCM, ritmo non regolato; Character: guadagno + base) o
     `False` se non supportato.
-  Non affrontato: collegamento a `WakeWordSession` (oggi `_speak_async` chiama ancora
-  `tts_provider.speak(testo intero)`), rilevamento del nome del dispositivo di uscita reale su Windows,
-  ritmo per OneCore, "prima emissione < 2 s" misurata con un vero motore. Prova: 34 test in
-  `tests/test_speech_text.py`, 20 in `tests/test_chunked_speaker.py`, 23 in
+  Non affrontato ALLORA (nota stantia, corretta il 22/09/2026): il collegamento a `WakeWordSession`
+  e' arrivato lo stesso giorno con il "passo di integrazione F2" (gradino 2, piu' avanti in questo
+  documento) - `_speak_async` chiama davvero `prepare_for_speech`/`apply_to_provider` prima di
+  parlare, in produzione. `_speak_async` continua deliberatamente a chiamare
+  `tts_provider.speak(testo intero)` invece di `ChunkedSpeaker` unita' per unita' - non una svista:
+  Edge TTS prepara la frase seguente mentre suona la precedente, e una chiamata per unita'
+  introdurrebbe uno stacco di rete (~0,4 s) tra le frasi; `ChunkedSpeaker` serve quando
+  `JakeCore.answer()` produrra' testo in streaming (oggi ritorna la risposta intera) - un gap
+  lato `JakeCore`, non lato voce. Restano aperti: rilevamento del nome del dispositivo di uscita
+  reale su Windows, ritmo per OneCore, "prima emissione < 2 s" misurata con un vero motore. Prova:
+  34 test in `tests/test_speech_text.py`, 20 in `tests/test_chunked_speaker.py`, 23 in
   `tests/test_voice_consent_and_profile.py`, 21 in `tests/test_tts_speech_params.py`; quattro moduli
   nuovi nel mypy selettivo.
 
