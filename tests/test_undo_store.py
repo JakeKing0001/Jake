@@ -75,6 +75,102 @@ class GenerateUndoDescriptorTests(unittest.TestCase):
         self.assertTrue(descriptor.is_usable())
 
 
+class TenAdditionalReversibleActionPairsTests(unittest.TestCase):
+    """F1.3 (criterio di uscita, '80% delle azioni reversibili dispone di undo testato'): le dieci
+    coppie aggiunte a core/execution_safety.py oltre alle quattro filesystem gia' esistenti - vedi
+    il commento sopra UNDO_PARAMS_BY_INTENT li' per il criterio di selezione/esclusione applicato
+    a tutte le 67 intent LOCAL_REVERSIBLE (core/risk.py)."""
+
+    def test_add_todo_produces_a_delete_todo_undo(self):
+        descriptor = generate_undo_descriptor("a1", "ADD_TODO", {"text": "compra il latte"})
+        self.assertEqual(descriptor.compensating_intent, "DELETE_TODO")
+        self.assertEqual(descriptor.compensating_parameters, {"text": "compra il latte"})
+
+    def test_set_reminder_produces_a_delete_reminder_undo(self):
+        descriptor = generate_undo_descriptor("a2", "SET_REMINDER", {"text": "chiamare mamma", "due_at_local": "18:00"})
+        self.assertEqual(descriptor.compensating_intent, "DELETE_REMINDER")
+        self.assertEqual(descriptor.compensating_parameters, {"text": "chiamare mamma"})
+
+    def test_set_daily_reminder_produces_a_delete_reminder_undo(self):
+        descriptor = generate_undo_descriptor("a3", "SET_DAILY_REMINDER", {"text": "stretching", "at_time": "07:00"})
+        self.assertEqual(descriptor.compensating_intent, "DELETE_REMINDER")
+        self.assertEqual(descriptor.compensating_parameters, {"text": "stretching"})
+
+    def test_set_timer_produces_a_cancel_timer_undo_keyed_by_label(self):
+        descriptor = generate_undo_descriptor(
+            "a4", "SET_TIMER", {"seconds_total": 300, "duration": "5 minuti", "label": "pasta", "due_at_local": "12:05:00"},
+        )
+        self.assertEqual(descriptor.compensating_intent, "CANCEL_TIMER")
+        self.assertEqual(descriptor.compensating_parameters, {"label": "pasta"})
+
+    def test_start_pomodoro_produces_a_parameterless_stop_pomodoro_undo(self):
+        descriptor = generate_undo_descriptor("a5", "START_POMODORO", {"minutes": 25})
+        self.assertEqual(descriptor.compensating_intent, "STOP_POMODORO")
+        self.assertEqual(descriptor.compensating_parameters, {})
+
+    def test_maximize_window_produces_a_restore_window_undo(self):
+        descriptor = generate_undo_descriptor("a6", "MAXIMIZE_WINDOW", {"title": "Blocco note"})
+        self.assertEqual(descriptor.compensating_intent, "RESTORE_WINDOW")
+        self.assertEqual(descriptor.compensating_parameters, {"title": "Blocco note"})
+
+    def test_minimize_window_produces_a_restore_window_undo(self):
+        descriptor = generate_undo_descriptor("a7", "MINIMIZE_WINDOW", {"title": "Calcolatrice"})
+        self.assertEqual(descriptor.compensating_intent, "RESTORE_WINDOW")
+        self.assertEqual(descriptor.compensating_parameters, {"title": "Calcolatrice"})
+
+    def test_take_screenshot_produces_a_delete_path_undo(self):
+        descriptor = generate_undo_descriptor("a8", "TAKE_SCREENSHOT", {"path": "C:\\screenshots\\s1.png"})
+        self.assertEqual(descriptor.compensating_intent, "DELETE_PATH")
+        self.assertEqual(descriptor.compensating_parameters, {"path": "C:\\screenshots\\s1.png", "confirmed": True})
+
+    def test_duplicate_file_produces_a_delete_path_undo_targeting_the_copy_not_the_original(self):
+        descriptor = generate_undo_descriptor(
+            "a9", "DUPLICATE_FILE", {"path": "C:\\doc.txt", "destination": "C:\\doc - copia.txt"},
+        )
+        self.assertEqual(descriptor.compensating_intent, "DELETE_PATH")
+        self.assertEqual(descriptor.compensating_parameters, {"path": "C:\\doc - copia.txt", "confirmed": True})
+
+    def test_toggle_dark_mode_produces_a_toggle_back_undo(self):
+        descriptor = generate_undo_descriptor("a10", "TOGGLE_DARK_MODE", {"enabled": True})
+        self.assertEqual(descriptor.compensating_intent, "TOGGLE_DARK_MODE")
+        self.assertEqual(descriptor.compensating_parameters, {"enabled": False})
+
+    def test_toggle_dark_mode_undo_inverts_the_other_direction_too(self):
+        descriptor = generate_undo_descriptor("a11", "TOGGLE_DARK_MODE", {"enabled": False})
+        self.assertEqual(descriptor.compensating_parameters, {"enabled": True})
+
+    def test_upsert_backed_actions_deliberately_have_no_undo(self):
+        """REMEMBER/SET_TRIGGER/LEARN_COMMAND poggiano su un upsert (core/memory_manager.py::
+        remember o core/nlu/examples.py::add_learned) - un undo-by-delete cancellerebbe una voce
+        PRECEDENTE all'azione da annullare se la chiave esisteva gia'. Nessun inverso qui, per
+        design, non per una dimenticanza (vedi il commento sopra UNDO_PARAMS_BY_INTENT)."""
+        self.assertIsNone(generate_undo_descriptor("a12", "REMEMBER", {"key": "k", "value": "v"}))
+        self.assertIsNone(generate_undo_descriptor(
+            "a13", "SET_TRIGGER", {"name": "n", "workflow_name": "w"},
+        ))
+        self.assertIsNone(generate_undo_descriptor("a14", "LEARN_COMMAND", {"phrase": "p", "intent": "GET_TIME"}))
+
+    def test_overwrite_prone_actions_deliberately_have_no_undo(self):
+        """COMPRESS_PATH (shutil.make_archive) ed EXPORT_NOTES (Path.write_text) sovrascrivono
+        incondizionatamente un file che avesse gia' quel nome/percorso - stesso motivo delle
+        azioni upsert sopra, verificato leggendo il codice delle skill."""
+        self.assertIsNone(generate_undo_descriptor("a15", "COMPRESS_PATH", {"path": "x", "archive_path": "x.zip"}))
+        self.assertIsNone(generate_undo_descriptor("a16", "EXPORT_NOTES", {"path": "x.txt"}))
+
+    def test_set_private_mode_deliberately_has_no_undo(self):
+        """Vedi il commento sopra UNDO_PARAMS_BY_INTENT in core/execution_safety.py: l'inverso
+        sarebbe meccanicamente pulito, ma renderebbe la modalita' privata riattivabile in automatico
+        dal rollback di un compito interrotto - non un default sicuro per un controllo di privacy."""
+        self.assertIsNone(generate_undo_descriptor("a17", "SET_PRIVATE_MODE", {"enabled": True}))
+
+    def test_actions_with_no_reachable_inverse_skill_have_no_undo(self):
+        """SET_WINDOW_ALWAYS_ON_TOP (nessuna skill toglie il flag) e SNAP_WINDOW_LEFT/RIGHT
+        (data={}, nessun titolo da passare a RESTORE_WINDOW)."""
+        self.assertIsNone(generate_undo_descriptor("a18", "SET_WINDOW_ALWAYS_ON_TOP", {"title": "x"}))
+        self.assertIsNone(generate_undo_descriptor("a19", "SNAP_WINDOW_LEFT", {}))
+        self.assertIsNone(generate_undo_descriptor("a20", "SNAP_WINDOW_RIGHT", {}))
+
+
 class UndoStoreTests(unittest.TestCase):
     def test_a_saved_descriptor_can_be_retrieved_by_action_id(self):
         store = UndoStore()

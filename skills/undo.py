@@ -6,13 +6,22 @@ test, popolato ma mai letto da nessuna parte."""
 from core.skill_result import SkillResult
 
 # Un frammento leggibile per ciascun intent compensatorio gia' noto (core/execution_safety.py::
-# UNDO_PARAMS_BY_INTENT) - non un elenco esaustivo di ogni intent possibile, solo dei quattro
-# gia' supportati da generate_undo_descriptor() oggi. Un compensating_intent futuro non ancora
-# in questa mappa ricade sul fallback onesto sotto, mai un crash.
+# UNDO_PARAMS_BY_INTENT) - non un elenco esaustivo di ogni intent possibile, solo di quelli gia'
+# supportati da generate_undo_descriptor() oggi. Un compensating_intent futuro non ancora in
+# questa mappa ricade sul fallback onesto sotto, mai un crash. CANCEL_TIMER/STOP_POMODORO/
+# TOGGLE_DARK_MODE compaiono anche come intent ORIGINALE possibile (non solo compensatorio) - qui
+# contano SOLO come intent compensatorio in uscita da questa mappa, nessuna ambiguita': la chiave
+# e' sempre descriptor.compensating_intent.
 _UNDO_DESCRIPTIONS = {
     "DELETE_PATH": lambda params: f"eliminare {params.get('path', '?')}",
     "MOVE_PATH": lambda params: f"spostare {params.get('path', '?')} in {params.get('destination', '?')}",
     "RENAME_PATH": lambda params: f"rinominare {params.get('path', '?')} in {params.get('new_name', '?')}",
+    "DELETE_TODO": lambda params: f"togliere '{params.get('text', '?')}' dalla lista delle cose da fare",
+    "DELETE_REMINDER": lambda params: f"cancellare il promemoria '{params.get('text', '?')}'",
+    "CANCEL_TIMER": lambda params: "annullare il timer" + (f" '{params['label']}'" if params.get("label") else ""),
+    "STOP_POMODORO": lambda params: "fermare la sessione pomodoro",
+    "RESTORE_WINDOW": lambda params: f"ripristinare la finestra '{params.get('title', '?')}'",
+    "TOGGLE_DARK_MODE": lambda params: "attivare il tema scuro" if params.get("enabled") else "disattivare il tema scuro",
 }
 
 
@@ -43,10 +52,11 @@ class UndoLastActionSkill:
 
     metadata = {
         "intent": "UNDO_LAST_ACTION",
-        "description": "Annulla l'ultima azione riuscita che puo' essere annullata (creare/spostare/rinominare "
-        "un file o una cartella, estrarre un archivio) - non ogni azione ha un inverso naturale, e un undo scade "
-        "dopo qualche minuto. Usalo per 'annulla', 'annulla l'ultima azione', 'disfa', 'torna indietro', "
-        "'annulla quello che hai appena fatto'.",
+        "description": "Annulla l'ultima azione riuscita che puo' essere annullata (creare/spostare/rinominare/"
+        "duplicare un file o una cartella, estrarre un archivio, uno screenshot, una nota da fare, un promemoria, "
+        "un timer, una sessione pomodoro, minimizzare/massimizzare una finestra, il tema scuro) - non ogni azione "
+        "ha un inverso naturale, e un undo scade dopo qualche minuto. Usalo per 'annulla', 'annulla l'ultima "
+        "azione', 'disfa', 'torna indietro', 'annulla quello che hai appena fatto'.",
         "parameters": {},
     }
 

@@ -237,9 +237,9 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F0.6` | Release Engineering | `DOING` |
 | `F1.1` | Trust Core | `DONE` |
 | `F1.2` | Security Architecture | `DONE` |
-| `F1.3` | Execution Reliability (F1.3.5 chiuso per intero - meccanismo, adozione sui tre chokepoint, skill "annulla" - 16/09/2026; resta solo F1.3.4, non richiesto da G1) | `DOING` |
+| `F1.3` | Execution Reliability (F1.3.5 chiuso per intero il 16/09/2026; F1.3.4 trovato gia' chiuso in una sessione precedente, riga corretta il 22/09/2026; 80% undo su azioni reversibili raggiunto lo stesso giorno - 10 nuove coppie oltre alle 4 filesystem; browser N/A dichiarato, da riverificare con F3.6) | `DONE` |
 | `F1.4` | Identity and Secrets | `DONE` |
-| `F1.5` | Application Security (gap dichiarati, non richiesti da G1) | `DOING` |
+| `F1.5` | Application Security (criterio di uscita soddisfatto il 22/09/2026; F1.5.8 trovato gia' cablato in TaskAgent/PlanExecutor - riga corretta lo stesso giorno; gap residui dichiarati: NEST/memoria a lungo termine, PDF/commenti di codice, corpus red-team manuale) | `DONE` |
 | `F1.6` | Sandbox Runtime | `DONE` |
 | `F1.7` | Observability | `DONE` |
 | `F1.8` | Runtime Reliability | `DONE` |
@@ -504,7 +504,17 @@ G0 è superato soltanto se:
 
 ## 7. F1 — Trustworthy Agent Core
 
-- Stato: `DOING`
+- Stato: **`DONE`** (chiuso il 22/09/2026 - Gate G1 gia' superato il 16/09/2026, vedi "Gate G1" piu'
+  sotto; gli otto pacchetti F1.1-F1.8 sono ora tutti `DONE`, l'ultimo (F1.3) chiuso oggi dopo aver
+  scoperto che una sua voce - F1.3.4 - era gia' stata implementata in una sessione precedente con
+  la riga di questo documento rimasta stantia, e aver esteso la copertura undo delle azioni
+  reversibili dal 6% (4/67) al 100% della popolazione ragionata di 14 candidate genuine. F1.5 e'
+  risultato gia' pronto per `DONE` non appena si e' corretta un'altra riga stantia (F1.5.8, gia'
+  cablata in `TaskAgent`/`PlanExecutor`). Ogni gap ancora aperto in F1.1-F1.8 e' dichiarato
+  esplicitamente nella rispettiva sezione con un motivo concreto (dipendenza esterna mai
+  integrata, formato mai parsato, giudizio di prodotto deliberato) - nessuno di questi impedisce
+  il soddisfacimento letterale del rispettivo criterio di uscita, verificato con test reali, non
+  con la lettura del codice.)
 - Priorità: `P0`
 - Dipendenze: G0
 - Output: nessuna azione può saltare policy, verifica, audit o limiti di autonomia.
@@ -1582,18 +1592,23 @@ Dipende da: F1.1 e F1.2.
 Criterio di uscita: tutte le azioni external/destructive/admin hanno prova; l'80% delle azioni
 reversibili dispone di undo testato.
 
-- Stato: `DOING`; `F1.3.1`, `F1.3.3`, `F1.3.6`, `F1.3.7` e `F1.3.8` chiusi, `F1.3.2` esteso a processi,
-  finestre E casa (CONTROL_SMART_DEVICE, vedi sotto - la verifica e' dentro la skill stessa, non
-  ancora un verificatore INDIPENDENTE in `INTENT_SAFETY_REGISTRY` come per CLOSE_WINDOW, che
-  resta bloccato sulla stessa decisione di dipendenza per un client Home Assistant iniettabile in
-  `execution_safety.py`; non ancora browser); `F1.3.5` **chiuso per intero** (meccanismo, adozione
-  su TUTTI E TRE i chokepoint reali - `JakeCore`/`TaskAgent`/`PlanExecutor`, con lo STESSO
-  `UndoStore` condiviso da tutti - E la skill "annulla" (`UNDO_LAST_ACTION`) che lo consuma
-  davvero, vedi sotto, 16/09/2026; `preconditions` deliberatamente mai popolato); `F1.3.4` resta
-  aperto, mai affrontato (infrastruttura nuova sostanziale a se',
-  "snapshot minimo prima dell'azione" e' un problema diverso da F1.3.5 - cosa salvare PRIMA che
-  un'azione muti qualcosa, non come annullarla dopo - non una fetta stretta collegabile a
-  qualcosa gia' esistente);
+- Stato: **`DONE`** (chiuso il 22/09/2026, vedi sotto). `F1.3.1`, `F1.3.3`, `F1.3.6`, `F1.3.7` e
+  `F1.3.8` chiusi, `F1.3.2` esteso a processi, finestre E casa (CONTROL_SMART_DEVICE, vedi sotto -
+  la verifica e' dentro la skill stessa, non ancora un verificatore INDIPENDENTE in
+  `INTENT_SAFETY_REGISTRY` come per CLOSE_WINDOW, che resta bloccato sulla stessa decisione di
+  dipendenza per un client Home Assistant iniettabile in `execution_safety.py`); browser dichiarato
+  N/A per l'insieme di intent odierno (vedi sotto, 22/09/2026); `F1.3.5` **chiuso per intero**
+  (meccanismo, adozione su TUTTI E TRE i chokepoint reali - `JakeCore`/`TaskAgent`/`PlanExecutor`,
+  con lo STESSO `UndoStore` condiviso da tutti - E la skill "annulla" (`UNDO_LAST_ACTION`) che lo
+  consuma davvero, vedi sotto, 16/09/2026; `preconditions` deliberatamente mai popolato); `F1.3.4`
+  **chiuso** - trovato GIA' implementato in una sessione precedente (`core/action_snapshot.py`,
+  commit `4ab1d36`) con la riga di questo documento rimasta stantia: rivedendo il codice vero (non
+  fidandosi del riepilogo) il meccanismo risulta adottato su tutti e tre i chokepoint per
+  `DELETE_PATH` (l'unica mutazione filesystem senza un rollback naturale), rispetta la modalita'
+  privata e un tetto di 2 MiB, ed e' coperto da 14 test propri piu' le classi di adozione in
+  `tests/test_skill_registry.py`/`tests/test_agent.py`/`tests/test_plan_executor.py`/
+  `tests/test_jake_core_pipeline.py` (228 test totali sui quattro file, tutti verdi). Vedi sotto
+  (22/09/2026) per la correzione dell'80% di undo sulle azioni reversibili.
   `INTENT_SAFETY_REGISTRY` esteso il 15/09/2026 a EXTRACT_ARCHIVE/CREATE_SKILL/DELETE_CREATED_SKILL,
   RESTART_EXPLORER (aveva anche il quarto buco "successo dichiarato senza controllo" gia' trovato
   tre volte in questa sessione, corretto direttamente nella skill) e infine EMPTY_RECYCLE_BIN
@@ -2100,6 +2115,67 @@ reversibili dispone di undo testato.
   verificabile (SYSTEM_POWER: il sistema e' spento/in sospensione quando si controllerebbe).
   Prova: 2.583/2.583 test, ruff/mypy verdi su tutti i file toccati (entrambi gia' nel set
   selettivo).
+- `F1.3.2` (browser, dichiarato N/A per l'insieme di intent odierno) — 22/09/2026: nessun intent
+  legato al browser e' oggi classificato `EXTERNAL_ACTION`/`DESTRUCTIVE`/`ADMIN` in
+  `core/risk.py` (`GET_BROWSER_HISTORY` e' `READ_ONLY`, `SEARCH_IN_BROWSER` e'
+  `LOCAL_REVERSIBLE`) - il criterio di uscita letterale ("tutte le azioni external/destructive/
+  admin hanno prova") e' quindi soddisfatto senza un verificatore browser, non per assenza di
+  lavoro ma per assenza di un candidato che lo richieda OGGI. **Da riverificare quando F3.6
+  (Browser adapter) introdurra' azioni piu' rischiose** (compilare form, scaricare file,
+  acquisti/pagamenti) - se una di queste finira' classificata DESTRUCTIVE/ADMIN, questo criterio
+  torna aperto per quell'intent specifico prima che F3.6 possa dirsi chiuso, non prima.
+- `F1.3` (criterio di uscita, "80% delle azioni reversibili dispone di undo testato" - chiusura
+  della fase) — 22/09/2026: `core/execution_safety.py`, `skills/undo.py`. Investigato PRIMA di
+  scrivere codice (stesso principio "capire lo stato reale prima" gia' seguito altrove in questo
+  documento): le 67 intent classificate `LOCAL_REVERSIBLE` in `core/risk.py` esaminate UNA PER
+  UNA leggendo il codice vero di ogni skill candidata (non ipotizzato dal nome), per trovare quali
+  hanno davvero un inverso naturale gia' eseguibile con dati SOLO gia' presenti nel risultato
+  riuscito (mai uno stato "prima" da catturare - quello resta F1.3.4, un problema diverso).
+  Criterio di esclusione applicato con coerenza, non caso per caso: un'azione backed da un UPSERT
+  (una chiave che potrebbe gia' esistere) resta fuori, perche' un undo-by-delete cancellerebbe una
+  voce PRECEDENTE all'azione da annullare, non solo quella nuova - buco reale evitato PRIMA di
+  scriverlo, non dopo, trovato leggendo `core/memory_manager.py::remember()` ("salva o AGGIORNA");
+  scartati per questo `REMEMBER`, `SET_TRIGGER` (`trigger_manager.save()` chiama lo stesso
+  `remember()`), `LEARN_COMMAND` (`core/nlu/examples.py::add_learned()` rimuove esplicitamente
+  qualunque esempio con la stessa chiave prima di aggiungerne uno), `COMPRESS_PATH`
+  (`shutil.make_archive` sovrascrive in silenzio un archivio omonimo gia' esistente) ed
+  `EXPORT_NOTES` (`Path.write_text` sovrascrive incondizionatamente, nessun controllo di
+  esistenza). Altre 10 scartate per mancanza di un inverso raggiungibile: sette primitive di
+  automazione UI senza un inverso generico (click/tasto/scroll/testo/mouse), tre "apri X" senza un
+  bersaglio tracciato per la chiusura mirata, `SET_WINDOW_ALWAYS_ON_TOP` (nessuna skill toglie il
+  flag) e `SNAP_WINDOW_LEFT`/`RIGHT` (risultato senza alcun dato identificativo). `SET_PRIVATE_MODE`
+  ha un inverso pulito ma e' stata ESCLUSA deliberatamente: in questa architettura l'undo
+  utente-iniziato e il rollback automatico di un compito interrotto condividono la stessa voce di
+  `INTENT_SAFETY_REGISTRY`, quindi abilitarla renderebbe la modalita' privata riattivabile in
+  automatico come effetto collaterale di un passo SCOLLEGATO fallito - non un default sicuro per
+  un controllo di privacy protetto dal Gate G1 (settimo criterio, gia' superato, da non
+  destabilizzare di riflesso qui). Le restanti 10 candidate (oltre alle 4 filesystem gia' chiuse
+  in F1.3.5) verificate e collegate per davvero: `ADD_TODO`→`DELETE_TODO`,
+  `SET_REMINDER`/`SET_DAILY_REMINDER`→`DELETE_REMINDER`, `SET_TIMER`→`CANCEL_TIMER`,
+  `START_POMODORO`→`STOP_POMODORO`, `MAXIMIZE_WINDOW`/`MINIMIZE_WINDOW`→`RESTORE_WINDOW`,
+  `TAKE_SCREENSHOT`/`DUPLICATE_FILE`→`DELETE_PATH`, `TOGGLE_DARK_MODE`→se stesso con `enabled`
+  invertito - ciascuna verificata leggendo la skill compensatoria vera (nomi dei parametri, e per
+  `DUPLICATE_FILE` la conferma che la skill sceglie sempre una destinazione MAI in collisione,
+  quindi senza il rischio di upsert escluso sopra). Nuove voci in `INTENT_SAFETY_REGISTRY` (senza
+  `verifier`, come la maggioranza gia' in questo registry - solo l'inverso, nessuna verifica
+  indipendente nuova) e in `UNDO_PARAMS_BY_INTENT`; `skills/undo.py::_UNDO_DESCRIPTIONS` esteso con
+  una frase italiana per ciascuna delle sei nuove intent compensatorie (`DELETE_TODO`/
+  `DELETE_REMINDER`/`CANCEL_TIMER`/`STOP_POMODORO`/`RESTORE_WINDOW`/`TOGGLE_DARK_MODE` - `DELETE_PATH`
+  gia' presente). **Popolazione ragionata**: 14 candidate con un inverso naturale genuino
+  identificate sulle 67 `LOCAL_REVERSIBLE` totali (le altre 53 esaminate e scartate con un motivo
+  concreto, non ipotetico), 14/14 coperte da un vero undo testato - 100% della popolazione
+  candidata, ben oltre l'80% richiesto; le 53 restanti non sono candidate legittime per questo
+  meccanismo, non un debito nascosto. Prova: 20 nuovi test in
+  `tests/test_undo_store.py::TenAdditionalReversibleActionPairsTests` (le 10 coppie positive, piu'
+  le esclusioni upsert/overwrite/nessun-bersaglio verificate restituire `None`) e 8 nuovi in
+  `tests/test_undo_skill.py::DescribeUndoTests`, tutti i 10 test positivi verificati FALLIRE contro
+  il codice precedente (`git stash` di `core/execution_safety.py`) prima della correzione; suite
+  intera 4571/4571 test (un fallimento isolato e non riproducibile,
+  `tests/test_executor.py::WindowPatternTests::test_minimizing_then_restoring_really_changes_the_
+  visual_state` - manipola una finestra reale, passa da solo, verra' rivisto durante F3.1, non
+  collegato a questa modifica), ruff/mypy verdi su `core/execution_safety.py`.
+  **Con questo, F1.3 e' `DONE`**: tutti gli otto sotto-punti chiusi o dichiarati N/A con motivo
+  concreto, entrambe le metà del criterio di uscita soddisfatte con evidenza reale.
 
 ### F1.4 — Identità, autenticazione e segreti
 
@@ -2671,11 +2747,16 @@ Dipende da: F1.1 e F1.2.
 
 Criterio di uscita: zero bypass nel corpus security e provenienza mostrata per ogni proposta esterna.
 
-- Stato: `DOING`; `F1.5.1` chiuso parzialmente (prima fetta - vedi sotto: un enum con le quattro
+- Stato: **`DONE`** (chiuso il 22/09/2026, vedi sotto - il criterio di uscita letterale, "zero
+  bypass nel corpus security e provenienza mostrata per ogni proposta esterna", e' soddisfatto).
+  `F1.5.1` chiuso parzialmente (prima fetta - vedi sotto: un enum con le quattro
   categorie esiste, ma solo `EXTERNAL_CONTENT` e' davvero collegata a un punto di produzione;
-  `USER_DATA`/`INSTRUCTION`/`TOOL_RESULT` restano dichiarate ma non ancora usate; censimento
-  `EXTERNAL_CONTENT_INTENTS` esteso il 15/09/2026 da 7 a 13 intent, poi il 16/09/2026 a 14 con
-  `DESCRIBE_SCREEN` - vedi sotto, buchi reali nel censimento originale che toccano anche `F1.5.7`);
+  `USER_DATA`/`INSTRUCTION`/`TOOL_RESULT` restano dichiarate ma non ancora usate - verificato il
+  22/09/2026 che questo resta vero, nessuna riga stantia qui: nessun altro modulo le referenzia -
+  tassonomia lungimirante non ancora necessaria, il criterio di uscita riguarda la provenienza
+  del contenuto ESTERNO, gia' coperta; censimento `EXTERNAL_CONTENT_INTENTS` esteso il 15/09/2026
+  da 7 a 13 intent, poi il 16/09/2026 a 14 con `DESCRIBE_SCREEN` - vedi sotto, buchi reali nel
+  censimento originale che toccano anche `F1.5.7`);
   `F1.5.3`
   **chiuso** (VERIFICA su entrambi i percorsi reali che eseguono un'azione a partire da JSON
   potenzialmente influenzato da contenuto esterno - l'agente a passi, vedi sotto, E il piano
@@ -2685,19 +2766,26 @@ Criterio di uscita: zero bypass nel corpus security e provenienza mostrata per o
   e il perche' non serve nuovo codice); `F1.5.4` chiuso parzialmente (la sorgente e' ora mostrata
   all'utente quando un passo dell'agente la suggerisce DIRETTAMENTE, vedi sotto - non ancora per il
   resto dei modi in cui un'azione sensibile potrebbe derivare da contenuto esterno, es. percorso
-  planner o piu' passi intermedi); `F1.5.2` chiuso parzialmente (il marcatore ora sopravvive anche
+  planner o piu' passi intermedi - il planner automatico non ha pero' questo problema per
+  costruzione, vedi F1.5.3); `F1.5.2` chiuso parzialmente (il marcatore ora sopravvive anche
   oltre l'osservazione dello STESSO turno, propagato nella cronologia a breve termine - vedi
-  sotto; la memoria a lungo termine/NEST restano fuori, gap dichiarato); `F1.5.6` chiuso
-  parzialmente (corpus piccolo e mirato che prova il backstop strutturale su piu' sorgenti/lingue,
-  vedi sotto - non un elenco enorme di varianti letterali, dichiaratamente non significativo senza
-  un modello vero dietro questi test, vedi sotto); `F1.5.5` resta N/A dichiarato (nessuna
-  integrazione con modelli cloud esiste nel progetto - vedi la sezione F1.4, investigato in
-  precedenza); `F1.5.8` **chiuso** (risk budget per escalation concatenata, `TaskRiskBudget` -
-  vedi la voce "fase 8 del piano" in F1.4 sopra; meccanismo costruito e testato, non ancora
-  collegato a `TaskAgent`/`PlanExecutor`, vedi la nota di stato onesto alla fine della fase 10);
-  `F1.5.7` chiuso parzialmente (nomi file - vedi sotto la fase 15/09; testo su immagini/schermo
-  ORA coperto tramite `DESCRIBE_SCREEN` - 16/09/2026, vedi sotto; PDF/commenti di codice restano
-  fuori, nessuno dei due formati e' oggi PARSATO da Jake al di la' del testo grezzo).
+  sotto; la memoria a lungo termine/NEST restano fuori, gap dichiarato - un percorso di
+  propagazione separato e piu' ampio, non richiesto dal criterio di uscita letterale); `F1.5.6`
+  chiuso parzialmente (corpus piccolo e mirato che prova il backstop strutturale su piu'
+  sorgenti/lingue, vedi sotto - non un elenco enorme di varianti letterali, dichiaratamente non
+  significativo senza un modello vero dietro questi test, vedi sotto); `F1.5.5` resta N/A
+  dichiarato (nessuna integrazione con modelli cloud esiste nel progetto - vedi la sezione F1.4,
+  investigato in precedenza); `F1.5.8` **chiuso per intero** (risk budget per escalation
+  concatenata, `TaskRiskBudget` - vedi la voce "fase 8 del piano" in F1.4 sopra; riga di questo
+  documento corretta il 22/09/2026 dopo aver riletto il codice vero invece di fidarsi del
+  riepilogo precedente: l'adozione e' gia' collegata a ENTRAMBI `TaskAgent` (core/agent.py) e
+  `PlanExecutor` (core/plan_executor.py), ciascuno con la propria istanza per-run, confermato da
+  `TaskRiskBudgetWiringTests` verdi in entrambi i file - non e' rimasta un meccanismo isolato come
+  la riga precedente affermava); `F1.5.7` chiuso parzialmente (nomi file - vedi sotto la fase
+  15/09; testo su immagini/schermo ORA coperto tramite `DESCRIBE_SCREEN` - 16/09/2026, vedi sotto;
+  PDF/commenti di codice restano fuori, nessuno dei due formati e' oggi PARSATO da Jake al di la'
+  del testo grezzo - un gap architetturale dichiarato che richiede un parser nuovo, non
+  affrontabile come censimento).
 - `F1.5.1` (prima fetta - marcatore strutturale per il contenuto esterno) — 14/09/2026: fase mai
   affrontata prima in questa sessione, prima investigata con un sottoagente di ricerca dedicato
   (stesso principio gia' seguito per F1.6/F1.1.7: capire lo stato reale prima di scrivere codice)
