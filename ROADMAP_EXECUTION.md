@@ -290,7 +290,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F8.1` | Skill Platform (manifest validato e loader che rifiuta prima dell'import il 22/09/2026; rischio dichiarato non ancora collegato al policy engine, hook non eseguiti) | `DOING` |
 | `F8.2` | Supply-chain Security (pacchetti firmati, catalogo, quarantena/revoca, pin/rollback il 22/09/2026; senza UI di approvazione ne' distribuzione) | `DOING` |
 | `F8.3` | Skill Forge | `DOING` |
-| `F8.4` | Model Runtime | `BACKLOG` |
+| `F8.4` | Model Runtime (router con capability/inventario/eval/warm-unload/redazione il 22/09/2026; non ancora collegato a JakeCore) | `DOING` |
 | `F8.5` | Agent Runtime | `DOING` |
 | `F8.6` | Release Safety | `BACKLOG` |
 
@@ -9264,6 +9264,41 @@ Dipende da: G0.
 7. `F8.4.7` Misurare ogni scelta con eval, non con nome o moda del modello.
 
 Criterio di uscita: perdita del modello principale non blocca i comandi locali semplici.
+
+- `F8.4.1`-`F8.4.7` (instradamento dei modelli, senza collegamento a `JakeCore`) — 22/09/2026: `core/model_router.py`. Oggi il nome del
+  modello (`qwen2.5:7b`) e' ripetuto hardcoded in `core/jake_core.py`, `core/router.py` e `core/skill_catalog.py`: questo modulo e' il
+  posto UNICO dove la scelta si farebbe, non ancora collegato a quei tre punti (dichiarato sotto).
+  * `F8.4.1` — sette `Capability` chiuse (classify, reason, code, vision, embedding, stt, tts); un `ModelSpec` deve dichiararne almeno
+    una per essere selezionabile.
+  * `F8.4.2` — `ModelInventory` incrocia i modelli DICHIARATI con quelli REALMENTE installati (`OllamaClient.list_models`, iniettabile) e
+    un rilevatore di hardware iniettabile che di default ritorna "sconosciuto" (nessuna telemetria VRAM/batteria reale integrata: un
+    vincolo su un valore sconosciuto non e' mai dato per soddisfatto, non lo esclude nemmeno - test su entrambi i lati). Un provider
+    locale irraggiungibile e' distinto da "zero modelli locali" (`installed_names() is None`): i cloud abilitati restano comunque visibili.
+  * `F8.4.7` — **principio guida verificato nei test**: "misurare ogni scelta con eval, non con nome o moda del modello" - `EvalStore`
+    usa la baseline dichiarata finche' non ci sono abbastanza osservazioni reali (min_samples), poi la qualita' OSSERVATA (pesata verso
+    le osservazioni recenti con un decadimento esponenziale, e ridotta dal tasso di fallimento: un modello che fallisce spesso non
+    guadagna la qualita' osservata sui soli successi); un nome altisonante senza osservazioni non vale piu' della baseline (test
+    `test_a_name_alone_never_grants_quality_only_recorded_evals_do`).
+  * `F8.4.3` — `select` filtra per vincoli DICHIARATI dal chiamante (qualita' minima, `require_local`, classe di latenza, impatto sulla
+    batteria, costo massimo, VRAM se nota) e ordina per qualita' osservata; `prefer` rompe solo i pareggi, non scavalca mai un filtro
+    (test). Un cloud che punteggerebbe piu' alto viene escluso da `require_local`.
+  * `F8.4.4` — `WarmPlan`/`warm_plan`: nessun'azione se il modello e' gia' caldo; oltre `max_warm_models` scarica il piu' vecchio per
+    ULTIMO USO (non per ordine di caricamento: `mark_used` lo sposta in fondo alla coda di espulsione). `idle_unload_due` rispetta
+    sempre `keep_alive_seconds` dall'ultimo uso, mai prima. **Criterio di uscita provato**: `RouteDecision.fallback_chain` porta l'intera
+    catena di candidati locali residui, cosi' la perdita del modello principale scelto ripiega su un modello locale senza richiamare
+    `select` da capo e senza mai restituire una lista vuota quando un candidato locale esiste ancora.
+  * `F8.4.5` — `Provider` (`available`/`warm`/`unload`): `OllamaProviderAdapter` provato su un `OllamaClient` finto (warm = chat con
+    `num_predict: 0`; `unload` e' un `NotImplementedError` DICHIARATO - `OllamaClient` non espone ancora un keep_alive per chiamata);
+    `WindowsAIProvider` e' uno stub dichiarato (`available()` sempre falso, `warm`/`unload` sollevano invece di fingere di funzionare);
+    `CloudProvider` disattivato per default, rifiuta `send()` se non abilitato esplicitamente.
+  * `F8.4.6` — `redact_for_upload`: **stesso principio della memoria "rischio dichiarato, non dedotto"** gia' applicato altrove in Jake -
+    solo i campi che il CHIAMANTE dichiara sensibili (`sensitive_fields`) vengono coperti, mai un'inferenza sul contenuto (un valore
+    come "50000" non dichiarato resta in chiaro: test); email e numeri di telefono restano sempre coperti perche' e' un pattern
+    STRUTTURALE, non un'inferenza di significato. Il `CloudProvider` passa sempre da qui prima di un ipotetico invio.
+  Non affrontato: collegamento reale a `JakeCore`/`SkillRegistry`/`core/router.py` (i tre punti che oggi hardcodano `qwen2.5:7b` restano
+    invariati); nessuna telemetria hardware reale (VRAM/batteria) ne' integrazione Windows AI/NPU; nessun servizio cloud reale viene
+    chiamato; persistenza di `EvalStore` tra riavvii; chi popola `EvalRecord.quality` (richiede una verifica del risultato che oggi
+    nessun chiamante produce). Prova: 41 test in `tests/test_model_router.py`; un modulo nel mypy selettivo.
 
 ### F8.5 — Agenti specializzati
 
