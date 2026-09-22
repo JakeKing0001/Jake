@@ -213,8 +213,20 @@ POLICY_REASON_TIME_WINDOW_DENIED = "outside_allowed_time_window"
 # per core.request_context.current_session_id() - l'id della CONNESSIONE companion corrente,
 # distinto dal device_id persistente - invece che per dispositivo.
 POLICY_REASON_SESSION_BLOCKED = "intent_in_session_blocked_intents"
+# F2.6.6 ("chiedere conferma dipende dall'impatto E dalla certezza del riconoscimento"): una
+# motivazione DIVERSA da POLICY_REASON_CONFIRM (che significa specificamente "l'intent e' nella
+# lista always_confirm_intents", un fatto sulla POLICY indipendente da chi lo chiede) - questa
+# nasce invece da JakeCore._authorize_command (non da PolicyEngine.decide_interactive, che resta
+# volutamente cieco alla voce/confidenza: un chiamante testuale/programmatico non deve mai vedere
+# una conferma in piu' solo perche' esiste il canale vocale) quando un comando arrivato per voce
+# ha una confidenza di trascrizione bassa per il suo livello di rischio (core.voice.dialogue::
+# needs_confirmation) - un audit del ledger deve poter distinguere "la policy richiede sempre
+# conferma per questo intent" da "Jake non era abbastanza sicuro di aver capito", due motivi
+# ben diversi anche se producono lo stesso risultato (CONFIRMATION_REQUIRED) nel turno.
+POLICY_REASON_LOW_RECOGNITION_CONFIDENCE = "low_voice_recognition_confidence"
 POLICY_REASONS = frozenset({
     POLICY_REASON_BLOCKED, POLICY_REASON_REQUIRE_AUTH, POLICY_REASON_CONFIRM, POLICY_REASON_ALLOWED,
+    POLICY_REASON_LOW_RECOGNITION_CONFIDENCE,
     POLICY_REASON_CAPABILITY_DENIED, POLICY_REASON_DEVICE_BLOCKED, POLICY_REASON_WEB_CAPABILITY_DENIED,
     POLICY_REASON_APP_CAPABILITY_DENIED, POLICY_REASON_CONTACT_CAPABILITY_DENIED,
     POLICY_REASON_SMART_DEVICE_CAPABILITY_DENIED, POLICY_REASON_WINDOWS_USER_BLOCKED,

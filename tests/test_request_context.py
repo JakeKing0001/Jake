@@ -9,10 +9,11 @@ import unittest
 
 from core.request_context import (
     current_agent_name, current_command_source_intent, current_device_id, current_session_id,
-    current_speaker_profile_id, reset_current_agent_name, reset_current_command_source_intent,
-    reset_current_device_id, reset_current_session_id, reset_current_speaker_profile_id,
-    set_current_agent_name, set_current_command_source_intent, set_current_device_id,
-    set_current_session_id, set_current_speaker_profile_id,
+    current_speaker_profile_id, current_stt_confidence, reset_current_agent_name,
+    reset_current_command_source_intent, reset_current_device_id, reset_current_session_id,
+    reset_current_speaker_profile_id, reset_current_stt_confidence, set_current_agent_name,
+    set_current_command_source_intent, set_current_device_id, set_current_session_id,
+    set_current_speaker_profile_id, set_current_stt_confidence,
 )
 
 
@@ -297,6 +298,60 @@ class SpeakerProfileIdThreadIsolationTests(unittest.TestCase):
         t2.join()
 
         self.assertEqual(seen, {"davide": "davide", "ospite": "ospite"})
+
+
+class SttConfidenceDefaultTests(unittest.TestCase):
+    """F2.6.6 (chiedere conferma dipende anche dalla certezza del riconoscimento): stesso
+    identico contratto di current_device_id/current_agent_name sopra."""
+
+    def test_default_is_none_when_never_set(self):
+        self.assertIsNone(current_stt_confidence())
+
+
+class SttConfidenceSetAndResetTests(unittest.TestCase):
+    def test_set_makes_the_value_visible_on_this_thread(self):
+        token = set_current_stt_confidence(0.42)
+        try:
+            self.assertEqual(current_stt_confidence(), 0.42)
+        finally:
+            reset_current_stt_confidence(token)
+
+    def test_reset_restores_the_previous_value(self):
+        outer_token = set_current_stt_confidence(0.9)
+        inner_token = set_current_stt_confidence(0.1)
+        reset_current_stt_confidence(inner_token)
+        try:
+            self.assertEqual(current_stt_confidence(), 0.9)
+        finally:
+            reset_current_stt_confidence(outer_token)
+
+    def test_reset_restores_none_when_nothing_was_set_before(self):
+        token = set_current_stt_confidence(0.5)
+        reset_current_stt_confidence(token)
+        self.assertIsNone(current_stt_confidence())
+
+
+class SttConfidenceThreadIsolationTests(unittest.TestCase):
+    def test_concurrent_threads_never_see_each_others_confidence(self):
+        seen = {}
+        barrier = threading.Barrier(2)
+
+        def worker(value: float) -> None:
+            token = set_current_stt_confidence(value)
+            try:
+                barrier.wait(timeout=5)
+                seen[value] = current_stt_confidence()
+            finally:
+                reset_current_stt_confidence(token)
+
+        t1 = threading.Thread(target=worker, args=(0.2,))
+        t2 = threading.Thread(target=worker, args=(0.9,))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        self.assertEqual(seen, {0.2: 0.2, 0.9: 0.9})
 
 
 if __name__ == "__main__":

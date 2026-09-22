@@ -1,7 +1,10 @@
 import threading
 
 from core.logger import get_logger
-from core.request_context import reset_current_speaker_profile_id, set_current_speaker_profile_id
+from core.request_context import (
+    reset_current_speaker_profile_id, reset_current_stt_confidence, set_current_speaker_profile_id,
+    set_current_stt_confidence,
+)
 from core.voice.microphone import Microphone, MicrophoneError
 from core.voice.speaker_profile import SpeakerProfileStore, extract_features, identify
 from core.voice.speech_text import prepare_for_speech
@@ -85,8 +88,16 @@ class PushToTalkSession:
             # JakeCore.answer(): un errore imprevisto qui (es. Whisper, audio device) non deve
             # terminare l'intera sessione vocale, altrimenti Jake resta muto in silenzio finche'
             # l'utente non si accorge e riavvia a mano.
+            confidence = None
             try:
-                text = self.stt_provider.transcribe(audio, self.microphone.sample_rate).strip()
+                # F2.6.6: stessa scelta di core/voice/wake_word_session.py::_transcribe - si
+                # guarda la CLASSE (non un attributo d'istanza), cosi' un finto/mock senza
+                # transcribe_detailed produce confidence=None, mai un valore inventato.
+                if getattr(type(self.stt_provider), "transcribe_detailed", None) is not None:
+                    text, confidence = self.stt_provider.transcribe_detailed(audio, self.microphone.sample_rate)
+                    text = text.strip()
+                else:
+                    text = self.stt_provider.transcribe(audio, self.microphone.sample_rate).strip()
             except Exception:
                 get_logger().exception("Errore nella trascrizione vocale")
                 print("Non sono riuscito a capire, riprova.")
@@ -96,11 +107,14 @@ class PushToTalkSession:
             print(f"Tu > {text}")
 
             speaker_token = self._identify_speaker_token(audio)
+            confidence_token = set_current_stt_confidence(confidence) if confidence is not None else None
             try:
                 response = self.jake_core.answer(text.lower())
             finally:
                 if speaker_token is not None:
                     reset_current_speaker_profile_id(speaker_token)
+                if confidence_token is not None:
+                    reset_current_stt_confidence(confidence_token)
             print(f"Jake > {response}")
 
             if response == self.jake_core.EXIT_SENTINEL:

@@ -36,15 +36,19 @@ from core.ollama_client import OllamaClient
 from core import orchestrator
 from core.orchestrator import JakeOrchestrator
 from core.pairing_service import PairingService
-from core.policy_engine import POLICY_REASONS, PolicyDecision, PolicyEngine, strip_authorization_signals
+from core.policy_engine import (
+    POLICY_REASON_LOW_RECOGNITION_CONFIDENCE, POLICY_REASONS, PolicyDecision, PolicyEngine,
+    strip_authorization_signals,
+)
 from core.plugin_loader import load_plugins
 from core.request_context import (
     current_action_id, current_command_source_intent, current_device_id, current_session_id,
-    reset_current_command_source_intent, set_current_command_source_intent,
+    current_stt_confidence, reset_current_command_source_intent, set_current_command_source_intent,
 )
 from core.taint import wrap_external_content
 from core.response_formatter import format_plan_outcome, format_skill_result
 from core.risk import risk_of
+from core.voice.dialogue import needs_confirmation
 from core.router import Router
 from core.scheduler import ReminderScheduler
 from core.schema_validation import validate_confirm_envelope
@@ -983,6 +987,27 @@ class JakeCore:
                 },
                 error="CONFIRMATION_REQUIRED",
             ), policy_reason
+        # F2.6.6 ("chiedere conferma dipende dall'impatto E dalla certezza del riconoscimento"):
+        # la policy da sola non sa se questo comando e' arrivato per voce ne' quanto Jake fosse
+        # sicuro di averlo capito bene (deliberato: PolicyEngine resta cieco alla voce, vedi il
+        # docstring di POLICY_REASON_LOW_RECOGNITION_CONFIDENCE) - qui, DOPO che la policy ha gia'
+        # detto "nessuna conferma necessaria", si aggiunge (mai si toglie) una conferma quando la
+        # trascrizione vocale di QUESTO turno era poco sicura per il rischio dell'intent
+        # (core.voice.dialogue.needs_confirmation, stessa soglia gia' provata a livello di
+        # libreria in F2.6). `current_stt_confidence()` e' None per ogni comando non vocale (o un
+        # provider senza confidenza) - nessun cambio di comportamento in quel caso, il caso di
+        # ogni test/chiamante esistente prima di questo incremento.
+        confidence = current_stt_confidence()
+        if confidence is not None and needs_confirmation(confidence, risk_of(resolved.intent)).required:
+            return resolved, SkillResult(
+                success=False,
+                data={
+                    "message": f"Non sono sicuro di aver capito bene: {self.describe_command(resolved)}?",
+                    "confirm_parameters": {**(resolved.parameters or {}), "confirmed": True},
+                    "confirm_intent": resolved.intent,
+                },
+                error="CONFIRMATION_REQUIRED",
+            ), POLICY_REASON_LOW_RECOGNITION_CONFIDENCE
         return resolved, None, policy_reason
 
     def _resolve_and_execute(self, command: Command, action_id: str | None = None) -> ActionExecution:

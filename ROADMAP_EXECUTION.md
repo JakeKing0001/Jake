@@ -248,7 +248,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F2.3` | Voice Quality (F2.3.1-F2.3.7 affrontati il 21/09/2026 E collegati a WakeWordSession lo stesso giorno - "passo di integrazione F2", gradino 1: ListeningStateMachine/EchoGuard/WakeCooldown/RepeatGuard/MicIndicator; riga corretta il 22/09/2026, era stantia; resta solo F2.3.7 [elezione da satelliti reali, dipende da F7] e la misura "falso wake <= 1/24 h" su ascolto vero) | `DOING` |
 | `F2.4` | Audio Systems (F2.4.1-F2.4.7 affrontati il 21/09/2026 E collegati a WakeWordSession/TTS reali lo stesso giorno - gradino 3: AEC su riferimento reale, BargeInController, `voice_barge_in` di default `off`; riga corretta il 22/09/2026, era stantia; resta solo la prova sulle tre categorie di hardware VERE, per cui il default resta `off`) | `DOING` |
 | `F2.5` | Speech Runtime (F2.5.1-F2.5.7 affrontati il 21/09/2026 E collegati a WakeWordSession/push-to-talk lo stesso giorno per stile/dispositivo/pulizia markdown - gradino 2; riga corretta il 22/09/2026, era stantia; resta solo `ChunkedSpeaker` per-unita' - bloccato su JakeCore che non produce ancora testo in streaming, non un gap lato voce - e la misura dal vivo di "prima emissione < 2 s") | `DOING` |
-| `F2.6` | Conversation Runtime (F2.6.1/F2.6.3-F2.6.7 a livello libreria il 21/09/2026; F2.6.2 solo il lato dati - manca l'HUD - e nessun collegamento a JakeCore/WakeWordSession; "< 5% dei turni con 'no, intendevo'" non misurabile senza un benchmark di dialoghi) | `DOING` |
+| `F2.6` | Conversation Runtime (F2.6.6 collegato a JakeCore/WakeWordSession/push-to-talk il 22/09/2026 - conferma aggiuntiva su bassa confidenza vocale, mai una conferma tolta; F2.6.1/F2.6.3-F2.6.5/F2.6.7 restano a livello libreria per rischio dichiarato - toccherebbero la macchina a stati di conferma piu' centrale del progetto; F2.6.2 solo il lato dati, manca l'HUD; "< 5% dei turni con 'no, intendevo'" non misurabile senza un benchmark di dialoghi) | `DOING` |
 | `F2.7` | Identity and Voice (F2.7.1-F2.7.6 affrontati il 21/09/2026 con un'impronta vocale grossolana; collegata a WakeWordSession/main.py il 22/09/2026 per la SOLA identificazione, opt-in, zero impatto finche' nessuno arruola una voce; isolamento vero di memoria/cronologia per profilo resta una fetta successiva dichiarata - richiede prima MemoryManager multi-database; la firma NON e' un riconoscitore da produzione, vedi sotto) | `DOING` |
 | `F3.1` | Computer Use Quality (F3.1.1/F3.1.2/F3.1.3/F3.1.4/F3.1.6 chiusi; resta F3.1.5 DPI/multi-monitor - riga aggiornata il 21/09/2026, era stantia) | `DOING` |
 | `F3.2` | Windows Automation (F3.2.1/F3.2.3/F3.2.6/F3.2.7 e, il 21/09/2026, F3.2.2 cache, F3.2.4 eventi, F3.2.5 finestre elevate; resta il criterio "cinque app reali" e il collegamento della cache all'engine) | `DOING` |
@@ -4839,10 +4839,39 @@ Criterio di uscita: < 5% dei turni del benchmark richiede “no, intendevo”.
     sotto 0,8, DESTRUCTIVE/ADMIN sempre qualunque sia la confidenza (anche 1.0); confidenza ignota = 0,7.
   * `F2.6.7` — `propose_learning`/`resolve_learning`: la correzione diventa esempio SOLO se l'esito del comando
     corretto e' verificato, e la proposta si consuma comunque (non risorge con un esito successivo).
-  Non affrontato: collegamento a JakeCore/`LearningManager.correct`, HUD "cosa ho sentito", benchmark di
+  Non affrontato ALLORA: collegamento a JakeCore/`LearningManager.correct`, HUD "cosa ho sentito", benchmark di
   dialoghi per il criterio "< 5%", ellissi con piu' slot, gestione di riferimenti oltre gli ordinali.
   Prova: 45 test in `tests/test_language_normalizer.py`, 30 in `tests/test_dialogue.py`, 1 nuovo in
   `tests/test_voice_benchmarks.py`; due moduli nel mypy selettivo.
+- `F2.6.6` (adozione, prima fetta - unica parte di F2.6 collegata a `JakeCore` finora) — 22/09/2026:
+  investigato PRIMA di scrivere codice se l'intero modulo `dialogue.py` fosse collegabile in sicurezza a
+  `JakeCore.answer()`: `classify_reply`/`CorrectionPlanner` SOVRAPPONGONO la gestione GIA' esistente di
+  conferma/chiarimento/azioni in sospeso di `JakeCore` (`conversation_state.pending_action`,
+  `_handle_confirmation`, `intent_patterns.is_positive_answer`/`is_negative_answer`) - sostituirla o
+  affiancarla e' un cambiamento ad alto rischio sulla macchina a stati piu' centrale e piu' testata del
+  progetto (ogni comando testuale E vocale ci passa), non una fetta stretta da affrettare in coda a una
+  sessione gia' lunga. `needs_confirmation(confidence, risk)` invece e' l'UNICA parte del modulo che non
+  sostituisce nulla di gia' esistente: la policy oggi decide se serve conferma SOLO dal rischio dell'intent
+  (`PolicyEngine.decide_interactive`), mai dalla certezza con cui Jake ha capito la voce - un comando
+  LOCAL_REVERSIBLE/EXTERNAL_ACTION mal trascritto con bassa confidenza veniva eseguito alla cieca esattamente
+  come uno capito perfettamente. Nuovo `core.request_context.current_stt_confidence` (stesso contratto degli
+  altri contextvar del modulo); `WakeWordSession`/`PushToTalkSession` lo impostano con la confidenza VERA gia'
+  riportata dal provider (`self.last_confidence`/`transcribe_detailed`, mai un valore inventato) per la sola
+  durata di `core.answer()`. `JakeCore._authorize_command` lo legge SOLO DOPO che `PolicyEngine` ha gia' detto
+  "nessuna conferma necessaria" - mai per toglierne una gia' richiesta dalla policy, solo per aggiungerne una
+  quando `needs_confirmation()` lo richiede (stessa soglia gia' provata a livello di libreria: 0,5 per
+  LOCAL_REVERSIBLE, 0,8 per EXTERNAL_ACTION). Nuovo `core.policy_engine.POLICY_REASON_LOW_RECOGNITION_CONFIDENCE`
+  (motivazione DISTINTA da `POLICY_REASON_CONFIRM`, che significa specificamente "l'intent e' nella lista
+  always_confirm_intents" - un audit del ledger deve poter distinguere le due cause anche se producono lo
+  stesso `CONFIRMATION_REQUIRED`). Un comando testuale/companion (`current_stt_confidence() is None`) non
+  vede alcun cambio di comportamento. 13 nuovi test (`tests/test_request_context.py`,
+  `tests/test_jake_core_pipeline.py::LowConfidenceConfirmationTests`, un aggiornamento a
+  `tests/test_wake_word_session.py`/`tests/test_push_to_talk.py`), tutti verificati FALLIRE contro il codice
+  precedente prima della correzione (`git stash` di `core/jake_core.py`+`core/policy_engine.py`+
+  `core/request_context.py`). Smoke test verde. **Deliberatamente NON affrontato** (fetta successiva
+  dichiarata, non una svista): `classify_reply`/`CorrectionPlanner` restano scollegati da `JakeCore` per il
+  motivo di rischio sopra; HUD "cosa ho sentito"; benchmark del criterio "< 5%". Suite completa: vedi la
+  prova finale di questo incremento piu' sotto (Passo di integrazione F2).
 
 ### F2.7 — Multiutente prudente
 
