@@ -1,5 +1,6 @@
 import threading
 import time
+from datetime import time as datetime_time
 
 from core import fallbacks
 from core import intent_patterns
@@ -28,13 +29,14 @@ from core.nlu.index import lexical_similarity
 from core.nlu.normalizer import TranscriptNormalizer
 from core.nlu.retriever import CapabilityRetriever
 from core.notification_center import NotificationCenter
+from core.notification_policy import NotificationPolicy, QuietHours
 from core.ollama_client import OllamaClient
 from core import orchestrator
 from core.orchestrator import JakeOrchestrator
 from core.policy_engine import POLICY_REASONS, PolicyDecision, PolicyEngine, strip_authorization_signals
 from core.plugin_loader import load_plugins
 from core.request_context import (
-    current_action_id, current_command_source_intent, current_device_id,
+    current_action_id, current_command_source_intent, current_device_id, current_session_id,
     reset_current_command_source_intent, set_current_command_source_intent,
 )
 from core.taint import wrap_external_content
@@ -49,6 +51,8 @@ from core.skill_forge import SkillForge
 from core.skill_registry import SkillRegistry
 from core.skill_result import SkillResult
 from core.system_advisor import SystemAdvisor
+from core.task_monitor import MonitorStore, TaskMonitorRegistry
+from core.task_notification_bridge import TaskNotificationBridge
 from core.trigger_scheduler import TriggerScheduler
 from core.undo_store import UndoStore, generate_undo_descriptor
 from skills.kill_switch import KillSwitchSkill, ResetKillSwitchSkill
@@ -61,6 +65,20 @@ from skills.session_control import (
 from skills.notification_mode import GetNotificationModeSkill, SetNotificationModeSkill
 from skills.skill_forge_skills import CreateSkillSkill, DeleteCreatedSkillSkill, ListCreatedSkillsSkill
 from skills.undo import UndoLastActionSkill
+
+
+def _parse_quiet_hours(start: str | None, end: str | None) -> QuietHours | None:
+    """F6.3: "HH:MM"-"HH:MM" da config.json (opt-in, come companion_token/session_recording_*) -
+    None se non impostate (comportamento invariato: NotificationPolicy senza quiet hours) o se il
+    formato non e' valido (un valore corrotto in config non deve mai far fallire l'avvio di Jake)."""
+    if not start or not end:
+        return None
+    try:
+        start_h, start_m = (int(part) for part in start.split(":", 1))
+        end_h, end_m = (int(part) for part in end.split(":", 1))
+        return QuietHours(datetime_time(start_h, start_m), datetime_time(end_h, end_m))
+    except (ValueError, TypeError):
+        return None
 
 
 class JakeCore:
@@ -136,6 +154,36 @@ class JakeCore:
         # parte solo se companion_server_enabled e' esplicitamente vero in config.json, stesso
         # pattern gia' usato da system_advisor_enabled.
         self.event_bus = EventBus()
+
+        # F6.3/F6.7 (Notification Intelligence + Task Monitor, primo collegamento reale a
+        # JakeCore/EventBus/HUD): entrambi i moduli esistevano gia' come librerie testate ma
+        # scollegate da qualunque punto reale della pipeline. Il ponte (core/task_notification_
+        # bridge.py) segue un compito composto (TaskAgent) passo per passo in silenzio
+        # (task_monitor, F6.7.1) e, quando incontra un evento IMPORTANTE a meta' strada (una
+        # conferma/autenticazione richiesta, una domanda di chiarimento - vedi _run_agent piu'
+        # sotto), lo valuta per urgenza/contesto con notification_policy (F6.3: priorita', la
+        # modalita' CORRENTE, quiet hours, contatti critici/VIP) e pubblica su event_bus un
+        # HudEvent NOTIFICATION con task/session/device id, le azioni GIA' eseguite e la
+        # decisione richiesta - leggibile da un HUD o un'app companion in tempo reale, non solo
+        # dal testo della conversazione. mode_source legge notification_center.mode (sopra) AD
+        # OGNI decisione invece di tenerne una seconda copia che potrebbe disallinearsi (la
+        # stessa classe di buco gia' trovata e corretta piu' volte in questa sessione per altri
+        # stati condivisi tra thread/componenti).
+        self.task_monitor = TaskMonitorRegistry()
+        self.task_monitor_store = MonitorStore()
+        self.notification_policy = NotificationPolicy(
+            mode=self.notification_center.mode,
+            quiet_hours=_parse_quiet_hours(
+                config.get("notification_quiet_hours_start"), config.get("notification_quiet_hours_end"),
+            ),
+            critical_contacts=set(config.get("notification_critical_contacts") or []),
+            vip_contacts=set(config.get("notification_vip_contacts") or []),
+        )
+        self.task_bridge = TaskNotificationBridge(
+            self.task_monitor, self.notification_policy, self.event_bus,
+            mode_source=lambda: self.notification_center.mode,
+        )
+
         # F1 (Identity & Authentication, "capability token... per dispositivo" - vedi
         # ROADMAP.md): opt-in - se companion_token non e' mai stato impostato in config.json,
         # il server resta come prima di questa fase (nessuna autenticazione), per non cambiare
@@ -601,6 +649,28 @@ class JakeCore:
         except OSError:
             self.logger.exception("Errore salvando il checkpoint del compito in corso")
 
+        # F6.7 (adozione, stesso hook della riga sopra): segue il compito in silenzio (F6.7.1,
+        # nessun evento a ogni passo) e salva lo snapshot dei compiti ancora in corso - un
+        # monitor RUNNING sopravvive a un'interruzione anomala (F6.7.7), senza alcuna ripresa
+        # automatica (vedi il docstring di core/task_notification_bridge.py). Un errore qui
+        # (bridge o disco) non deve MAI fermare il compito in corso, stesso principio del
+        # checkpoint sopra.
+        try:
+            self.task_bridge.track_progress(outcome, session_id=current_session_id(), device_id=current_device_id())
+            self.task_monitor_store.save(self.task_monitor)
+        except Exception:
+            self.logger.exception("Errore aggiornando il task monitor del compito in corso")
+
+    def _publish_task_event(self, action) -> None:
+        """F6.3/F6.7: avvolge OGNI chiamata al ponte task monitor/notifiche usata da _run_agent (decisione
+        richiesta, fine del compito) - un errore qui (bridge, notification_policy, disco) non deve MAI
+        impedire a Jake di rispondere, stesso principio gia' applicato a _on_agent_step_completed sopra."""
+        try:
+            action()
+            self.task_monitor_store.save(self.task_monitor)
+        except Exception:
+            self.logger.exception("Errore nel ponte task monitor / notifiche")
+
     def _on_skill_installed(self, draft) -> None:
         # F1: always_confirm_intents/require_auth_intents (vedi sopra) sono popolati una sola
         # volta in __init__, leggendo self.skill_registry.skills COM'ERA in quel momento - una
@@ -947,6 +1017,18 @@ class JakeCore:
             message = outcome.pending_confirmation["message"]
             if external_source is not None:
                 message = f"{message} (Attenzione: suggerito da contenuto esterno - {external_source})"
+            # F6.3/F6.7: l'evento IMPORTANTE che questo incremento collega - una conferma/
+            # autenticazione richiesta a meta' di un compito composto. Il ponte valuta urgenza e
+            # contesto (rischio dell'intent, modalita' corrente, quiet hours) e pubblica su
+            # event_bus task/session/device id, le azioni GIA' eseguite e questa stessa decisione
+            # - la sua Decision non cambia il messaggio testuale (gia' deciso sopra), solo se/come
+            # Jake segnala l'evento su un canale esterno (HUD/companion).
+            pending = outcome.pending_confirmation
+            self._publish_task_event(lambda: self.task_bridge.decision_required(
+                outcome, message=message, intent=pending["intent"], parameters=pending["parameters"],
+                policy_reason=pending.get("policy_reason"),
+                session_id=current_session_id(), device_id=current_device_id(),
+            ))
             self._remember_exchange(remember_text, Command("AGENT", {"request": request}), message)
             return message
 
@@ -962,6 +1044,13 @@ class JakeCore:
                 "reason": "agent_question",
                 "text": remember_text,
             })
+            # F6.3/F6.7: anche una domanda di chiarimento e' una decisione richiesta all'utente a
+            # meta' di un compito (intent=None: nessun rischio da un'azione specifica da
+            # valutare, mai critica per default) - stessa valutazione/stesso evento contestuale
+            # della conferma sopra, non un percorso separato.
+            self._publish_task_event(lambda: self.task_bridge.decision_required(
+                outcome, message=outcome.question, session_id=current_session_id(), device_id=current_device_id(),
+            ))
             self._remember_exchange(remember_text, Command("AGENT", {"request": request}), outcome.question)
             return outcome.question
 
@@ -971,6 +1060,14 @@ class JakeCore:
         # qualcosa da riprendere quando in realta' il compito precedente e' semplicemente finito).
         self.agent_checkpoints.clear()
         response = outcome.final_answer or self.NO_PLAN
+        # F6.7.2: chiude il compito (nessun effetto se il ponte non lo aveva mai aperto - un
+        # turno che non ha eseguito alcun passo dell'agente, il caso comune di una risposta
+        # breve). `outcome.error` distingue un compito finito con un errore interno da uno
+        # concluso normalmente, senza alcuna nuova logica: il campo esiste gia'.
+        self._publish_task_event(lambda: self.task_bridge.finish_task(
+            outcome, message=response, success=outcome.error is None,
+            session_id=current_session_id(), device_id=current_device_id(),
+        ))
         self._remember_exchange(remember_text, Command("AGENT", {"request": request}), response)
         return response
 

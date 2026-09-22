@@ -275,11 +275,11 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F5.7` | Privacy Engineering (libreria completa il 21/09/2026: ricerca/spiegazione, modifica, cancellazione con ricevuta e residui, purge, export, backup cifrato, retention per profilo; non ancora esposta come skill/HUD) | `DOING` |
 | `F6.1` | Proactivity Platform | `DOING` |
 | `F6.2` | Proactivity Quality | `DOING` |
-| `F6.3` | Notification UX (F6.3.1-F6.3.9 il 21/09/2026 come libreria di decisione con test; nessun collegamento a NotificationCenter/JakeCore, nessuna consegna reale) | `DOING` |
+| `F6.3` | Notification UX (libreria di decisione il 21/09/2026; collegata a JakeCore/EventBus/HUD il 22/09/2026 - vedi F6.7; nessuna consegna reale di call/companion) | `DOING` |
 | `F6.4` | Goal Runtime | `DOING` |
 | `F6.5` | Automation Runtime | `DOING` |
 | `F6.6` | Meeting Experience (libreria di regole il 21/09/2026: brief senza dati inventati, consenso e indicatore, follow-up gated; nessun connettore reale) | `DOING` |
-| `F6.7` | Runtime Reliability (monitor senza spam di notifiche e housekeeping senza cancellazione autonoma il 22/09/2026; senza connettori reali ne' pilot) | `DOING` |
+| `F6.7` | Runtime Reliability (monitor/housekeeping il 22/09/2026; task monitor collegato a JakeCore/EventBus/HUD lo stesso giorno - vedi F6.3; housekeeping senza connettori reali ne' pilot) | `DOING` |
 | `F7.1` | Companion Security (F7.1.1/.4/.5/.6/.7 il 22/09/2026: rate limit, replay, corpo, capability per classe, audit a catena, TLS obbligatorio fuori da loopback; mancano pairing HTTP F7.1.2 e capability persistenti F7.1.3) | `DOING` |
 | `F7.2` | Mobile Companion | `BACKLOG` |
 | `F7.3` | Voice Devices | `BACKLOG` |
@@ -8813,6 +8813,38 @@ contatto si testa in F6; notifica/call reali richiedono F7.2/F7.3 e scenario S8.
   Non affrontato: collegamento a `JakeCore.notify`/`NotificationCenter` (oggi la policy e' una libreria: chi produce notifiche
   non dichiara ancora `critical`/`sensitivity`), rilevamento reale di dispositivo attivo/speaker condiviso (dipende da F7), consegna
   di notifica/call (F7.2/F7.3), misura nel pilot. Prova: 63 test in `tests/test_notification_policy.py`; modulo nel mypy selettivo.
+
+- `F6.3`/`F6.7` collegati a JakeCore/EventBus/HUD (primo flusso end-to-end reale) — 22/09/2026: `core/task_notification_bridge.py` +
+  cablaggio in `core/jake_core.py` (costruttore, `_on_agent_step_completed`, `_run_agent`). Chiude il gap "nessun collegamento a
+  JakeCore" dichiarato sopra E quello dichiarato in F6.7: nessuna logica nuova, solo il filo tra i due sistemi gia' costruiti.
+  * Il flusso: un compito composto (`TaskAgent`) viene seguito passo per passo in silenzio (`track_progress`, via l'hook
+    `on_step_completed` gia' esistente, F6.7.1 - nessun evento a ogni passo); quando incontra un evento IMPORTANTE a meta' strada -
+    una conferma/autenticazione richiesta O una domanda di chiarimento (`decision_required`, chiamato dai tre punti gia' esistenti in
+    `_run_agent` che gestiscono `pending_confirmation`/`outcome.question`) - il rischio dell'intent (`core/risk.py::risk_of`, la
+    stessa tassonomia usata da PolicyEngine/TaskRiskBudget: rischio DICHIARATO dal sistema, mai dedotto dal testo del messaggio)
+    decide la criticita', `NotificationPolicy.decide` valuta modalita' corrente/quiet hours/soglia e produce una `Decision`
+    (interrompere ora / mettere in coda / digest), e un `HudEvent` NOTIFICATION vero viene pubblicato su `event_bus` con task_id
+    (il trace_id gia' usato per UNDO/VERIFICATION), session_id/device_id (letti da `core/request_context.py`, gia' propagati dal
+    companion server), le azioni GIA' eseguite (`outcome.steps`, solo intent+esito, mai l'intero `SkillResult`) e la decisione
+    richiesta per intero (intent, parametri, messaggio, policy_reason). Un completamento pulito o un errore chiude il compito
+    (`finish_task`, mai critico: solo decisione/errore/anomalia interrompono per urgenza, F6.7.2) con un evento a bassa priorita'.
+  * `notification_policy.mode` non e' una seconda copia della modalita' corrente: e' riletta da `notification_center.mode` (l'UNICA
+    fonte di verita', cambiata da SET_NOTIFICATION_MODE) a OGNI decisione tramite `mode_source` - stesso principio gia' applicato
+    ad altri stati condivisi tra thread/componenti in questa sessione. Verificato con un test end-to-end dedicato che imposta la
+    modalita' solo tramite `notification_center` e non tocca mai `notification_policy.mode` a mano.
+  * Un errore nel ponte (bus rotto, disco) non blocca MAI la risposta all'utente (`_publish_task_event`, stesso principio gia'
+    applicato al salvataggio del checkpoint dell'agente) - provato spezzando `task_bridge.finish_task` e verificando che la risposta
+    arrivi comunque.
+  * F6.7.7 chiuso per davvero: `task_monitor_store.save()` dopo ogni passo completato e dopo ogni transizione - un compito ancora
+    `RUNNING` quando Jake si ferma in modo anomalo sopravvive su un file che un `MonitorStore` appena costruito rilegge (nessuna
+    ripresa automatica, come dichiarato).
+  Non affrontato (collegare cio' che esiste, non nuova superficie): `devices` resta `None` (JakeCore non mantiene ancora una lista
+    di `Device` dai companion accoppiati - il canale voce/schermo e la soglia restano comunque pienamente valutati); nessuna
+    rilevazione di anomalia/stallo (richiederebbe un timer in background non ancora presente); nessuna skill espone
+    `resume_candidates()`; `quiet_hours`/`critical_contacts`/`vip_contacts` sono leggibili da config.json ma nessuna UI li imposta.
+    Prova: 26 nuovi test (18 in `tests/test_task_notification_bridge.py`, 8 end-to-end in
+    `tests/test_task_notification_integration.py` che guidano `JakeCore._run_agent()` vero); suite completa 4506 test OK; due
+    moduli nel mypy selettivo.
 
 ### F6.4 — Commitment e goal manager
 
