@@ -59,6 +59,7 @@ files = [
     "core/release_eval.py",
     "core/task_monitor.py",
     "core/task_notification_bridge.py",
+    "core/companion_tls.py",
     "core/daily_brief.py",
     "core/meeting_copilot.py",
     "core/autonomy_budget.py",

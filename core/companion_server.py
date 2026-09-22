@@ -116,7 +116,7 @@ class CompanionServer:
         self, event_bus: EventBus | None = None, command_handler=None, host: str = DEFAULT_HOST, port: int = 0,
         token: str | None = None, credential_store: DeviceCredentialStore | None = None,
         tls_context: ssl.SSLContext | None = None, guard: CompanionGuard | None = None,
-        pairing_service=None, conversation_state=None, on_pairing_requested=None,
+        pairing_service=None, conversation_state=None, on_pairing_requested=None, tls_fingerprint: str | None = None,
     ):
         self.event_bus = event_bus or EventBus()
         self.command_handler = command_handler or (lambda text: "")
@@ -130,6 +130,10 @@ class CompanionServer:
         self.pairing_service = pairing_service
         self.conversation_state = conversation_state
         self.on_pairing_requested = on_pairing_requested
+        # F7.2 (Companion Mobile MVP): SOLO un dato da mostrare durante il pairing (trust-on-first-use, vedi
+        # core/companion_tls.py - questo modulo non calcola ne' verifica nulla, resta puro protocollo/routing) -
+        # None quando tls_context e' None o non e' stato passato.
+        self.tls_fingerprint = tls_fingerprint
         self._httpd: "_Server | None" = None
 
     @property
@@ -365,6 +369,8 @@ class _Handler(BaseHTTPRequestHandler):
             })
         if self._path == "/events":
             return self._stream_events()
+        if self._path == "/devices":
+            return self._handle_list_devices()
         if self._path.startswith("/pairing/"):
             challenge_id = self._path[len("/pairing/"):]
             try:
@@ -385,14 +391,18 @@ class _Handler(BaseHTTPRequestHandler):
         if self._path == "/pairing/start":
             return self._handle_pairing_start()
         parts = self._path.split("/")
-        if len(parts) == 4 and parts[1] == "devices" and parts[3] in ("claim", "release"):
+        if len(parts) == 4 and parts[1] == "devices" and parts[3] in ("claim", "release", "revoke"):
             try:
                 device_id = validate_identifier(parts[2], "device_id", required=True)
             except ValidationError as exc:
                 self._reject(400, exc.code)
                 return None
             assert device_id is not None
-            return self._handle_claim(device_id) if parts[3] == "claim" else self._handle_release(device_id)
+            if parts[3] == "claim":
+                return self._handle_claim(device_id)
+            if parts[3] == "release":
+                return self._handle_release(device_id)
+            return self._handle_revoke(device_id)
         if len(parts) == 3 and parts[1] == "approvals":
             try:
                 task_id = validate_identifier(parts[2], "task_id", required=True)
@@ -509,6 +519,44 @@ class _Handler(BaseHTTPRequestHandler):
         self._json_response(200, {"released": released})
         return None
 
+    # ---- dispositivi accoppiati (F7.2.1, Companion Mobile MVP: "lista dispositivi e possibilita' di
+    # scollegare/revocare QUESTO telefono") -----------------------------------------------------------
+
+    def _handle_list_devices(self):
+        """I dispositivi ACCOPPIATI (credential_store, F1.4.6) - non i dispositivi con una sessione attiva ADESSO
+        (quelli sono su /status, un concetto diverso: DeviceRegistry e' effimero, questo e' persistente). MAI il
+        token, che DeviceIdentity non porta nemmeno (vive solo in DeviceCredential, mai restituito qui)."""
+        if self.companion.credential_store is None:
+            return self._json_response(404, {"error": "devices_not_configured"})
+        devices = [
+            {"device_id": d.device_id, "name": d.name, "status": d.status, "created_at": d.created_at,
+             "last_seen_at": d.last_seen_at}
+            for d in self.companion.credential_store.list_devices()
+        ]
+        self._json_response(200, {"devices": devices})
+        return None
+
+    def _handle_revoke(self, device_id: str):
+        """Un dispositivo revoca SOLO se stesso (stesso principio di _handle_claim/_handle_release: mai un altro
+        device_id, anche con un token valido) - "scollegare/revocare QUESTO telefono", non un pannello admin che
+        revoca dispositivi altrui (fuori scopo per questo MVP). Il token smette di funzionare immediatamente
+        (DeviceCredentialStore.verify_token lo controlla gia' a ogni richiesta); l'app locale deve comunque
+        cancellare le proprie credenziali salvate - questo endpoint non puo' farlo per lei."""
+        if self._read_json_object() is None:
+            return None
+        if self.companion.credential_store is None:
+            return self._reject_body(404, "devices_not_configured")
+        if self._device_id_mismatch(device_id):
+            return self._reject_body(403, "device_id_mismatch")
+        if self._authenticated_device_id is None:
+            # Percorso legacy (nessun token per-dispositivo verificato): non c'e' un'identita' autenticata da
+            # revocare "se stessa" - stesso principio gia' applicato a _handle_approval per lo stesso motivo.
+            return self._reject_body(403, "device_identity_required")
+        revoked = self.companion.credential_store.revoke(device_id)
+        self._audit("device_revoked", status=200, target_device=device_id, revoked=revoked)
+        self._json_response(200, {"revoked": revoked})
+        return None
+
     # ---- pairing (F7.1.2, Companion Mobile MVP) ------------------------------------------
 
     def _handle_pairing_start(self):
@@ -540,7 +588,12 @@ class _Handler(BaseHTTPRequestHandler):
                 self.companion.on_pairing_requested(challenge, name, sync_public_key)
             except Exception:
                 _logger.exception("Errore nel callback on_pairing_requested")
-        self._json_response(200, {"challenge_id": challenge.challenge_id, "expires_at": challenge.expires_at})
+        self._json_response(200, {
+            "challenge_id": challenge.challenge_id, "expires_at": challenge.expires_at,
+            # F7.2/trust-on-first-use: l'app la mostra all'utente, che la confronta con quella stampata sul PC
+            # PRIMA di dire "si'" - null quando il server non ha TLS attivo (bind solo su loopback).
+            "tls_fingerprint": self.companion.tls_fingerprint,
+        })
         return None
 
     def _handle_pairing_poll(self, challenge_id: str):

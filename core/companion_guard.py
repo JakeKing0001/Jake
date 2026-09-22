@@ -86,15 +86,15 @@ def classify(method: str, path: str) -> EndpointClass | None:
     autenticazione (vedi EndpointClass.PAIRING)."""
     method = method.upper()
     path = path.split("?", 1)[0]
-    if method == "GET" and path in ("/status", "/events"):
+    if method == "GET" and path in ("/status", "/events", "/devices"):
         return EndpointClass.READ_ONLY
     if method == "GET" and path.startswith("/pairing/"):
         return EndpointClass.PAIRING
     if method == "POST":
         if path == "/command":
             return EndpointClass.COMMAND
-        if path.startswith("/devices/") and (path.endswith("/claim") or path.endswith("/release")):
-            return EndpointClass.COMMAND  # cambia la sessione attiva: e' un'azione, non una lettura
+        if path.startswith("/devices/") and (path.endswith("/claim") or path.endswith("/release") or path.endswith("/revoke")):
+            return EndpointClass.COMMAND  # cambia la sessione attiva o l'accesso di un dispositivo: sempre un'azione
         if path == "/pairing/start":
             return EndpointClass.PAIRING
         if path.startswith("/approvals/"):
