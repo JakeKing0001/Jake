@@ -287,7 +287,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F7.5` | Home Integration | `DOING` |
 | `F7.6` | Sync and Crypto (motore cifrato con conflitti deterministici, revoca, wipe e coda limitata il 21/09/2026; senza trasporto ne' collegamento a memoria/pairing) | `DOING` |
 | `F7.7` | Edge Devices | `BACKLOG` |
-| `F8.1` | Skill Platform | `DOING` |
+| `F8.1` | Skill Platform (manifest validato e loader che rifiuta prima dell'import il 22/09/2026; rischio dichiarato non ancora collegato al policy engine, hook non eseguiti) | `DOING` |
 | `F8.2` | Supply-chain Security | `BACKLOG` |
 | `F8.3` | Skill Forge | `DOING` |
 | `F8.4` | Model Runtime | `BACKLOG` |
@@ -9145,6 +9145,41 @@ Dipende da: G1.
 7. `F8.1.7` Generare documentazione e permission summary dal manifest.
 
 Criterio di uscita: loader rifiuta skill incompleta, incompatibile o con capability sconosciuta.
+
+- `F8.1.1`-`F8.1.7` (manifest e loader che rifiuta prima dell'import) — 22/09/2026: `core/skill_manifest.py` e `load_skill_package` in
+  `core/plugin_loader.py`. Il manifest (`skill.json`) e' dati, non codice; la validazione raccoglie TUTTI gli errori con il loro percorso e
+  non esegue niente del pacchetto. Riusa `RiskLevel` (core/risk.py) e `EFFECT_CLASSES` (core/action_contracts.py): nessun secondo elenco.
+  * `F8.1.1` — id (`davide.moneta`), nome, versione `X.Y.Z`, autore e provenienza (`builtin|user|forge|registry`, fonte, data ISO, `sha256`
+    opzionale); chiavi sconosciute rifiutate (un refuso non diventa un campo ignorato); un intent che collide con uno integrato
+    (`SKILL_RISK`/`INTENT_EFFECT_CLASS`) o gia' registrato e' rifiutato.
+  * `F8.1.2` — JSON Schema per input/output ed elenco errori `{code, description}`. Sottoinsieme dichiarato (type, properties, required,
+    additionalProperties, enum, minimum/maximum, minLength/maxLength, items, minItems/maxItems): **una parola chiave non supportata
+    (`$ref`, `oneOf`, `pattern`, `format`) e' un errore, mai ignorata in silenzio** da un validatore parziale; profondita' massima 6;
+    l'input e' sempre un oggetto. Le fixture sono controllate contro gli schemi e gli errori dichiarati (un `error_code` non dichiarato
+    o uno schema violato dalla fixture e' un errore del manifest).
+  * `F8.1.3` — rischio, effect class, capability (vocabolario chiuso `KNOWN_CAPABILITIES`: una capability sconosciuta e' rifiutata),
+    verifier (`none` solo con motivo, `function`/`declarative` con nome/atteso) e undo (`supported` con funzione, oppure motivo) per OGNI
+    intent. Coerenza imposta: `read_only` richiede effetto `read` e nessuna capability che modifica o esce dal PC; rete/web/contatti/casa/
+    subprocess richiedono almeno `external_action`; sistema/processi almeno `destructive`; una skill che cambia qualcosa non puo' avere
+    verifier `none`.
+  * `F8.1.4` — compatibilita' obbligatoria con Jake, Python e Windows come intervalli (`>=5.9,<6`) valutati contro un `Environment`
+    iniettabile (fuori Windows = incompatibile); dipendenze solo come `{name, spec}` con intervallo di versione: URL, VCS, percorsi e
+    duplicati sono rifiutati.
+  * `F8.1.5` — obbligatori: almeno un file di test (percorso relativo, dentro il pacchetto, esistente su disco) e, per ogni intent, una
+    fixture di successo e — se dichiara errori — una che li esercita.
+  * `F8.1.6` — solo gli hook `migrate` e `uninstall`, solo `touches: own_data`, `timeout_s` tra 0 e 30, nome di funzione semplice, nessuna
+    altra chiave. **Il manifest li dichiara e li limita; nessuno li esegue ancora** (l'esecuzione con timeout resta a F8.2/F8.3).
+  * `F8.1.7` — `permission_summary` e `render_docs` derivano SOLO dai campi validati (testo in italiano, deterministico: stesso manifest =
+    stessi byte), con "NON annullabile" esplicito e la lista delle capability in parole.
+  * Loader (`load_skill_package`): il manifest e la sua coerenza col disco sono verificati PRIMA di importare — provato con un modulo che
+    scrive un file all'import: nei casi di manifest incompleto, capability sconosciuta, incompatibilita' e collisione di intent il file
+    NON compare. Le registrazioni passano da un registro di staging e sono atomiche: un pacchetto che registra un intent non dichiarato,
+    o ne dichiara due e ne registra uno, non lascia nulla nel registro; un'eccezione nel pacchetto e' riportata senza registrare.
+  Non affrontato: il rischio dichiarato NON e' ancora usato da `risk_of()`/`PolicyEngine` (un intent di pacchetto resta trattato col
+    ripiego prudente finche' l'utente non approva: non si lascia a una skill decidere da sola di essere `read_only`); `load_plugins`
+    (file singoli in `plugins/`) resta senza manifest per non rompere plugin esistenti e skill forgiate; esecuzione delle fixture/dei test
+    dichiarati e degli hook in sandbox; migrazione automatica dei plugin esistenti a pacchetti. Prova: 50 test in
+    `tests/test_skill_manifest.py`; un modulo nel mypy selettivo.
 
 ### F8.2 — Registry e pacchetti firmati
 
