@@ -249,7 +249,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F2.4` | Audio Systems (F2.4.1-F2.4.7 affrontati il 21/09/2026 E collegati a WakeWordSession/TTS reali lo stesso giorno - gradino 3: AEC su riferimento reale, BargeInController, `voice_barge_in` di default `off`; riga corretta il 22/09/2026, era stantia; resta solo la prova sulle tre categorie di hardware VERE, per cui il default resta `off`) | `DOING` |
 | `F2.5` | Speech Runtime (F2.5.1-F2.5.7 affrontati il 21/09/2026 E collegati a WakeWordSession/push-to-talk lo stesso giorno per stile/dispositivo/pulizia markdown - gradino 2; riga corretta il 22/09/2026, era stantia; resta solo `ChunkedSpeaker` per-unita' - bloccato su JakeCore che non produce ancora testo in streaming, non un gap lato voce - e la misura dal vivo di "prima emissione < 2 s") | `DOING` |
 | `F2.6` | Conversation Runtime (F2.6.1/F2.6.3-F2.6.7 a livello libreria il 21/09/2026; F2.6.2 solo il lato dati - manca l'HUD - e nessun collegamento a JakeCore/WakeWordSession; "< 5% dei turni con 'no, intendevo'" non misurabile senza un benchmark di dialoghi) | `DOING` |
-| `F2.7` | Identity and Voice (F2.7.1-F2.7.6 affrontati il 21/09/2026 con un'impronta vocale grossolana; nessun collegamento a JakeCore/AuthGate/MemoryManager di produzione; la firma NON e' un riconoscitore da produzione, vedi sotto) | `DOING` |
+| `F2.7` | Identity and Voice (F2.7.1-F2.7.6 affrontati il 21/09/2026 con un'impronta vocale grossolana; collegata a WakeWordSession/main.py il 22/09/2026 per la SOLA identificazione, opt-in, zero impatto finche' nessuno arruola una voce; isolamento vero di memoria/cronologia per profilo resta una fetta successiva dichiarata - richiede prima MemoryManager multi-database; la firma NON e' un riconoscitore da produzione, vedi sotto) | `DOING` |
 | `F3.1` | Computer Use Quality (F3.1.1/F3.1.2/F3.1.3/F3.1.4/F3.1.6 chiusi; resta F3.1.5 DPI/multi-monitor - riga aggiornata il 21/09/2026, era stantia) | `DOING` |
 | `F3.2` | Windows Automation (F3.2.1/F3.2.3/F3.2.6/F3.2.7 e, il 21/09/2026, F3.2.2 cache, F3.2.4 eventi, F3.2.5 finestre elevate; resta il criterio "cinque app reali" e il collegamento della cache all'engine) | `DOING` |
 | `F3.3` | Windows Automation (F3.3.1-F3.3.4/F3.3.7 chiusi, F3.3.5 con `SelectorStore` il 21/09/2026; resta F3.3.6 inspector HUD) | `DOING` |
@@ -4889,9 +4889,52 @@ Criterio di uscita: nessuna contaminazione di memoria o permesso tra profili nei
   * `F2.7.6` — testati: voce registrata (accettata: e' il limite di cui sopra e la ragione per cui la voce non e'
     mai un lucchetto), parlante simile (mai "high" sul profilo SBAGLIATO), rumore/silenzio (nessuna impronta),
     voce sconosciuta lontana (rifiutata).
-  Non affrontato: collegamento a JakeCore (memoria/cronologia per profilo nel percorso reale), arruolamento
+  Non affrontato ALLORA: collegamento a JakeCore (memoria/cronologia per profilo nel percorso reale), arruolamento
   guidato da voce ("ripeti tre frasi"), modello di speaker verification vero, comando vocale "modalita' ospite".
   Prova: 42 test in `tests/test_speaker_profiles.py`; due moduli nel mypy selettivo.
+- `F2.7` (adozione, prima fetta - identificazione, non ancora isolamento di memoria/cronologia) —
+  22/09/2026: dopo aver chiuso F1, verificato con l'utente come procedere su un cambiamento con
+  una superficie ampia (rendere `JakeCore` multi-profilo tocca `WorkflowManager`/`TriggerManager`/
+  `ProcedureManager`/`ContactBook`/le skill di memoria/note/todo, che oggi tengono TUTTI un
+  riferimento fisso a `self.memory_manager` preso alla costruzione - riassegnare quell'attributo
+  su `JakeCore` non li raggiungerebbe mai, verificato leggendo `core/skill_registry.py` prima di
+  scrivere qualunque codice, non assunto) - deciso di procedere per gradini sicuri, stesso
+  principio "prima il meccanismo, poi l'adozione, un pezzo alla volta" gia' seguito per
+  `UndoStore`/`TaskRiskBudget`/`ActionSnapshot`. Questa prima fetta e' SOLO identificazione, mai
+  isolamento: nuovo `core.request_context.current_speaker_profile_id` (stesso contratto/stesse
+  garanzie di isolamento per thread di `current_device_id`/`current_agent_name`/
+  `current_action_id` gia' in quel modulo). `WakeWordSession` accetta ora un `speaker_store:
+  SpeakerProfileStore | None = None` (default `None`, nessun cambio di comportamento per chi non
+  lo passa); quando presente, `_process_command` chiama `extract_features()`/`identify()`
+  sull'audio GIA' catturato dal VAD per quella frase (nessuna cattura in piu') e, SOLO con
+  confidenza "high", imposta il contextvar per la sola durata della chiamata a
+  `core.answer()` (`finally` lo ripulisce sempre, anche se `answer()` solleva). `main.py` collega
+  un vero `SpeakerProfileStore()` a entrambi i punti di costruzione di `WakeWordSession`
+  (`run_wake_word_mode`/`run_jarvis_mode`) - sempre creato, mai condizionato: l'archivio JSON
+  semplicemente non esiste finche' nessuno arruola una voce, quindi il comportamento resta
+  IDENTICO a prima per chiunque non abbia mai arruolato nessuno (nessuna skill/CLI di
+  arruolamento esiste ancora, gap dichiarato sotto). Deliberatamente NON affrontato qui (la
+  fetta successiva, dichiarata, non affrettata): isolare per davvero memoria/cronologia per
+  profilo (F2.7.4/F2.7.5) - richiede prima un modo per `MemoryManager` di ripuntare la propria
+  connessione SQLite mantenendo lo STESSO oggetto Python (cosi' i collaboratori che ne tengono
+  gia' un riferimento fisso vedrebbero il cambio senza dover essere ricostruiti), verificato che
+  quasi tutti i suoi metodi pubblici gia' passano da `self._lock` (`RLock`) prima di toccare
+  `self._connection` - ma non tutti, un'esatta verifica metodo per metodo resta da fare prima di
+  fidarsi che un cambio di database a caldo sia sicuro sotto lo stesso lock, non qualcosa da
+  affrettare sulla memoria persistente piu' sensibile del progetto; ne' l'uso del riconoscimento
+  per personalizzare risposte/domande di disambiguazione (`disambiguation_question()` gia'
+  pronta, mai ancora chiamata dal flusso conversazionale reale); ne' un comando/CLI di
+  arruolamento (oggi raggiungibile solo da codice/test). Nuovi test: 4 in
+  `tests/test_request_context.py` (stesso contratto letterale degli altri contextvar, incluso
+  l'isolamento tra thread veri) e 9 in `tests/test_wake_word_session.py`
+  (`IdentifySpeakerTokenTests`/`ProcessCommandSpeakerIdentificationTests` - nessuno store, nessun
+  audio catturato, confidenza bassa/nessuna, un'eccezione durante l'identificazione, e il
+  contratto "visibile SOLO durante answer(), ripulito anche se answer() solleva"), tutti
+  verificati FALLIRE contro il codice precedente (`git stash` di `core/request_context.py` +
+  `core/voice/wake_word_session.py`) prima della correzione. `python -m tools.smoke_test` (lo
+  stesso smoke test della CI) verificato verde dopo la modifica a `main.py`. Prova: 73 test in
+  `tests/test_wake_word_session.py`, 25 in `tests/test_request_context.py`, ruff/compileall verdi
+  (nessuno dei tre file toccati e' nel set selettivo mypy).
 
 ### Passo di integrazione F2 (in corso)
 
@@ -4961,9 +5004,16 @@ I moduli F2.1-F2.7 nascono come librerie testate con finti. Il collegamento al p
   del provider: un finto senza il metodo riporta `None`, mai un valore inventato). Un barge-in semina anche i partial
   con il pre-roll. Prova: 15 test in `tests/test_live_transcriber.py` (thread veri, 12 esecuzioni consecutive verdi) e 21 in
   `tests/test_partials_integration.py`.
-- **Da fare**: collegare `dialogue`, `language_normalizer`, `speaker_profile` e `profiles` a `JakeCore` (oggi sono
-  librerie: `JakeCore` ha una sola memoria e un solo `ConversationStateManager`, e gestisce da se' azioni in sospeso e
-  `CORRECT_LAST`), sottotitoli/indicatore nell'HUD (l'evento c'e', il rendering no), e le prove su hardware vero.
+- **Fatto in parte (22/09/2026) — identificazione del parlante, non ancora isolamento**: vedi la voce datata
+  22/09/2026 nella sezione F2.7 sopra per il dettaglio - `speaker_profile` e' ora collegato a `WakeWordSession`/
+  `main.py` per SOLO l'identificazione (`current_speaker_profile_id`, contextvar), mai per spostare memoria o
+  cronologia.
+- **Da fare**: `profiles` resta scollegato da `JakeCore` (l'isolamento vero di memoria/cronologia per profilo
+  richiede prima che `MemoryManager` sappia ripuntare la propria connessione SQLite in modo sicuro, verificato
+  ancora da fare metodo per metodo - vedi la voce F2.7 sopra); `dialogue`/`language_normalizer` restano scollegati
+  da `JakeCore` (`JakeCore` gestisce da se' azioni in sospeso e `CORRECT_LAST`, mai la correzione/ellissi/ordinali
+  della libreria); sottotitoli/indicatore nell'HUD (l'evento c'e', il rendering no - l'HUD desktop nativo non ha
+  oggi alcuna connessione al bus eventi, un gap piu' ampio della sola sottotitolazione); le prove su hardware vero.
 
 ### Gate F2
 

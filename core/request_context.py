@@ -164,3 +164,41 @@ def set_current_action_id(action_id: str | None) -> contextvars.Token:
 
 def reset_current_action_id(token: contextvars.Token) -> None:
     _current_action_id.reset(token)
+
+
+# F2.7 (adozione, prima fetta - identificazione, non ancora isolamento della memoria): stesso
+# identico meccanismo/stesse garanzie di isolamento per thread degli altri contextvar sopra.
+# `core/voice/wake_word_session.py::_process_command` lo imposta SOLO quando `identify()`
+# (core/voice/speaker_profile.py) ha riconosciuto una voce arruolata con confidenza "high" per
+# l'utterance appena trascritta, subito prima di chiamare `JakeCore.answer()`, e lo ripulisce
+# subito dopo (`finally`) - lo stesso pattern gia' usato per current_command_source_intent.
+# Deliberatamente SOLO un'informazione di IDENTIFICAZIONE, non un permesso e non ancora uno
+# scambio di memoria/cronologia: vedi `core/profiles.py` ("la voce sceglie il profilo, non apre
+# la serratura") - isolare per davvero memoria e cronologia per profilo (F2.7.4/F2.7.5) resta un
+# incremento successivo dichiarato, perche' richiede di rendere `MemoryManager` in grado di
+# ripuntare la propria connessione senza rompere i molti collaboratori (WorkflowManager/
+# TriggerManager/ProcedureManager/ContactBook/skill) che oggi ne tengono gia' un riferimento
+# fisso dalla costruzione - un cambiamento con una superficie molto piu' ampia di un
+# semplice ContextVar, che merita la propria verifica dedicata invece di essere affrettato qui.
+_current_speaker_profile_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "current_speaker_profile_id", default=None,
+)
+
+
+def current_speaker_profile_id() -> str | None:
+    """L'id del profilo vocale riconosciuto con alta confidenza per il turno in corso su QUESTO
+    thread, o None se non impostato (nessun profilo arruolato, riconoscimento incerto, comando
+    non vocale, companion/testo) - il caso normale per chi non chiama mai
+    set_current_speaker_profile_id()."""
+    return _current_speaker_profile_id.get()
+
+
+def set_current_speaker_profile_id(profile_id: str | None) -> contextvars.Token:
+    """Imposta il profilo vocale riconosciuto per il resto dell'esecuzione su QUESTO thread.
+    Restituisce un Token da passare a reset_current_speaker_profile_id() per ripristinare il
+    valore precedente al termine del turno."""
+    return _current_speaker_profile_id.set(profile_id)
+
+
+def reset_current_speaker_profile_id(token: contextvars.Token) -> None:
+    _current_speaker_profile_id.reset(token)
