@@ -163,18 +163,143 @@ def _rollback_extract_archive(registry, data, policy_engine):
     registry.execute("DELETE_PATH", _extract_archive_undo_params(data), policy_engine=policy_engine)
 
 
+# F1.3 (criterio di uscita, "80% delle azioni reversibili dispone di undo testato" - vedi
+# ROADMAP_EXECUTION.md): dieci coppie in piu' oltre alle quattro sopra, trovate riesaminando UNA
+# PER UNA tutte le 67 intent classificate LOCAL_REVERSIBLE in core/risk.py (non ipotizzate dal
+# nome) e verificando il codice VERO di ciascuna skill candidata prima di collegarla, con un
+# criterio di esclusione unico e applicato con coerenza: un'azione entra qui SOLO se (a) esiste
+# gia' una skill che esegue davvero il suo inverso naturale, (b) quella skill e' raggiungibile
+# con SOLI dati gia' presenti nel risultato riuscito dell'azione originale (mai uno stato "prima"
+# da catturare - quello e' F1.3.4, un problema diverso), e (c) l'operazione originale e' un
+# INSERT puro (una nuova riga/voce sempre distinta), MAI un upsert - un upsert su una chiave che
+# potrebbe gia' esistere renderebbe l'undo pericoloso: cancellerebbe una voce PRECEDENTE
+# all'azione da annullare, non solo quella appena creata. Scartate per questo motivo, verificato
+# leggendo il codice (non assunto dal nome): REMEMBER (core/memory_manager.py::remember() e' un
+# upsert su key+category), SET_TRIGGER (trigger_manager.save() chiama lo STESSO remember() upsert
+# sopra), LEARN_COMMAND (core/nlu/examples.py::add_learned() rimuove esplicitamente qualunque
+# esempio con la stessa chiave prima di aggiungere il nuovo), COMPRESS_PATH (shutil.make_archive
+# sovrascrive in silenzio un archivio .zip che avesse gia' quel nome) ed EXPORT_NOTES
+# (Path.write_text sovrascrive incondizionatamente qualunque file preesistente a quel percorso,
+# nessun controllo di esistenza prima di scrivere). SET_WINDOW_ALWAYS_ON_TOP resta fuori perche'
+# non esiste alcuna skill che tolga il flag "sempre in primo piano" (nessun inverso possibile
+# oggi); SNAP_WINDOW_LEFT/RIGHT restano fuori perche' non restituiscono alcun dato che identifichi
+# la finestra spostata (data={}), quindi RESTORE_WINDOW non avrebbe un bersaglio.
+#
+# SET_PRIVATE_MODE ha un inverso naturale pulito (richiamare lo stesso intent con "enabled"
+# invertito, nessun upsert coinvolto) ma e' stata deliberatamente ESCLUSA: l'unico modo per farla
+# partecipare all'undo utente-iniziato (F1.3.5) e' registrarla anche qui sotto, che la rende PERO'
+# automaticamente candidata anche al rollback AUTOMATICO di un compito multi-passo interrotto
+# (vedi TaskAgent._rollback in core/agent.py) - i due meccanismi condividono lo stesso
+# `IntentSafetyEntry.rollback`, non sono disattivabili indipendentemente in questa architettura.
+# Riattivare la modalita' privata da sola in automatico perche' un passo SUCCESSIVO e scollegato
+# di un compito e' fallito non e' un default sicuro per un controllo di privacy (Gate G1, settimo
+# criterio, gia' superato - non va destabilizzato di riflesso qui): resta un candidato dichiarato
+# per un futuro incremento che disaccoppi i due percorsi, non una svista.
+def _text_undo_params(data: dict) -> dict:
+    """Per le tre coppie sotto (ADD_TODO/SET_REMINDER/SET_DAILY_REMINDER) che condividono la
+    stessa forma "cerca per testo e cancella" gia' usata dalle rispettive skill DELETE_*/CANCEL_*
+    per l'uso manuale - lo stesso limite di quella ricerca per somiglianza (potrebbe in teoria
+    corrispondere a una voce preesistente con un testo simile invece di quella appena creata) resta
+    IDENTICO a quello gia' accettato per l'uso manuale della stessa skill, non un rischio nuovo
+    introdotto dall'undo."""
+    return {"text": data["text"]}
+
+
+def _rollback_add_todo(registry, data, policy_engine):
+    registry.execute("DELETE_TODO", _text_undo_params(data), policy_engine=policy_engine)
+
+
+def _rollback_set_reminder(registry, data, policy_engine):
+    registry.execute("DELETE_REMINDER", _text_undo_params(data), policy_engine=policy_engine)
+
+
+def _rollback_set_daily_reminder(registry, data, policy_engine):
+    registry.execute("DELETE_REMINDER", _text_undo_params(data), policy_engine=policy_engine)
+
+
+def _timer_label_undo_params(data: dict) -> dict:
+    return {"label": data["label"]}
+
+
+def _rollback_set_timer(registry, data, policy_engine):
+    registry.execute("CANCEL_TIMER", _timer_label_undo_params(data), policy_engine=policy_engine)
+
+
+def _pomodoro_undo_params(data: dict) -> dict:
+    # StopPomodoroSkill non ha parametri (cerca sempre per l'etichetta fissa "pomodoro") - la
+    # funzione esiste comunque, invece di omettere la coppia in UNDO_PARAMS_BY_INTENT, per lo
+    # stesso motivo di coerenza di struttura delle altre nove: un dizionario vuoto e' comunque un
+    # calcolo esplicito, non un'omissione.
+    return {}
+
+
+def _rollback_start_pomodoro(registry, data, policy_engine):
+    registry.execute("STOP_POMODORO", _pomodoro_undo_params(data), policy_engine=policy_engine)
+
+
+def _window_title_undo_params(data: dict) -> dict:
+    return {"title": data["title"]}
+
+
+def _rollback_maximize_window(registry, data, policy_engine):
+    registry.execute("RESTORE_WINDOW", _window_title_undo_params(data), policy_engine=policy_engine)
+
+
+def _rollback_minimize_window(registry, data, policy_engine):
+    registry.execute("RESTORE_WINDOW", _window_title_undo_params(data), policy_engine=policy_engine)
+
+
+def _take_screenshot_undo_params(data: dict) -> dict:
+    return {"path": data["path"], "confirmed": True}
+
+
+def _rollback_take_screenshot(registry, data, policy_engine):
+    registry.execute("DELETE_PATH", _take_screenshot_undo_params(data), policy_engine=policy_engine)
+
+
+def _duplicate_file_undo_params(data: dict) -> dict:
+    # A differenza di CREATE_PATH/TAKE_SCREENSHOT, il file da cancellare per annullare NON e'
+    # "path" (l'originale, che deve restare intatto) ma "destination" (la copia appena creata) -
+    # DuplicateFileSkill sceglie sempre un nome NON in collisione (" - copia", " - copia 2", ...
+    # verificato leggendo skills/file_utils.py::DuplicateFileSkill.execute()), quindi non c'e' mai
+    # il rischio di upsert gia' escluso sopra per COMPRESS_PATH/EXPORT_NOTES.
+    return {"path": data["destination"], "confirmed": True}
+
+
+def _rollback_duplicate_file(registry, data, policy_engine):
+    registry.execute("DELETE_PATH", _duplicate_file_undo_params(data), policy_engine=policy_engine)
+
+
+def _toggle_dark_mode_undo_params(data: dict) -> dict:
+    return {"enabled": not data["enabled"]}
+
+
+def _rollback_toggle_dark_mode(registry, data, policy_engine):
+    registry.execute("TOGGLE_DARK_MODE", _toggle_dark_mode_undo_params(data), policy_engine=policy_engine)
+
+
 # F1.3.5: {intent originale: funzione pura che calcola i parametri dell'intent compensatorio dai
 # dati della ricevuta originale} - lo stesso identico calcolo gia' usato da ciascun
 # "_rollback_*" sopra (che li riusa direttamente, non li duplica), esposto anche per
 # core/undo_store.py::generate_undo_descriptor() (pubblico, non con un trattino basso, proprio
-# perche' un modulo esterno lo consuma - stesso principio di INTENT_SAFETY_REGISTRY). Solo i
-# quattro intent che hanno gia' un `RollbackAction` qui sotto: un intent senza inverso naturale
-# (es. DELETE_PATH) non ha un compensating_parameters sensato da calcolare.
+# perche' un modulo esterno lo consuma - stesso principio di INTENT_SAFETY_REGISTRY). Solo gli
+# intent che hanno gia' un `RollbackAction` qui sotto: un intent senza inverso naturale (es.
+# DELETE_PATH) non ha un compensating_parameters sensato da calcolare.
 UNDO_PARAMS_BY_INTENT: dict[str, Callable[[dict], dict]] = {
     "CREATE_PATH": _create_path_undo_params,
     "RENAME_PATH": _rename_path_undo_params,
     "MOVE_PATH": _move_path_undo_params,
     "EXTRACT_ARCHIVE": _extract_archive_undo_params,
+    "ADD_TODO": _text_undo_params,
+    "SET_REMINDER": _text_undo_params,
+    "SET_DAILY_REMINDER": _text_undo_params,
+    "SET_TIMER": _timer_label_undo_params,
+    "START_POMODORO": _pomodoro_undo_params,
+    "MAXIMIZE_WINDOW": _window_title_undo_params,
+    "MINIMIZE_WINDOW": _window_title_undo_params,
+    "TAKE_SCREENSHOT": _take_screenshot_undo_params,
+    "DUPLICATE_FILE": _duplicate_file_undo_params,
+    "TOGGLE_DARK_MODE": _toggle_dark_mode_undo_params,
 }
 
 
@@ -347,6 +472,23 @@ INTENT_SAFETY_REGISTRY: dict[str, IntentSafetyEntry] = {
         verifier=lambda data: not Path(data["path"]).exists(),
         rollback=None,  # cancellare una skill non ha un inverso naturale, stesso principio di DELETE_PATH
     ),
+    # F1.3 (criterio "80% delle azioni reversibili" - vedi il commento sopra UNDO_PARAMS_BY_INTENT
+    # per il criterio di selezione ed esclusione applicato a tutte le 67 intent LOCAL_REVERSIBLE):
+    # nessuno di questi dieci ha un verificatore indipendente (verifier=None, come la maggioranza
+    # gia' in questo registry) - solo un inverso naturale, per l'undo utente-iniziato (F1.3.5) e,
+    # di conseguenza, anche per il rollback automatico di un compito multi-passo interrotto
+    # (TaskAgent._rollback/PlanExecutor, gia' esistente per CREATE_PATH/RENAME_PATH/MOVE_PATH
+    # sopra - stessa semantica estesa, non un meccanismo nuovo).
+    "ADD_TODO": IntentSafetyEntry(rollback=RollbackAction(_rollback_add_todo, "DELETE_TODO")),
+    "SET_REMINDER": IntentSafetyEntry(rollback=RollbackAction(_rollback_set_reminder, "DELETE_REMINDER")),
+    "SET_DAILY_REMINDER": IntentSafetyEntry(rollback=RollbackAction(_rollback_set_daily_reminder, "DELETE_REMINDER")),
+    "SET_TIMER": IntentSafetyEntry(rollback=RollbackAction(_rollback_set_timer, "CANCEL_TIMER")),
+    "START_POMODORO": IntentSafetyEntry(rollback=RollbackAction(_rollback_start_pomodoro, "STOP_POMODORO")),
+    "MAXIMIZE_WINDOW": IntentSafetyEntry(rollback=RollbackAction(_rollback_maximize_window, "RESTORE_WINDOW")),
+    "MINIMIZE_WINDOW": IntentSafetyEntry(rollback=RollbackAction(_rollback_minimize_window, "RESTORE_WINDOW")),
+    "TAKE_SCREENSHOT": IntentSafetyEntry(rollback=RollbackAction(_rollback_take_screenshot, "DELETE_PATH")),
+    "DUPLICATE_FILE": IntentSafetyEntry(rollback=RollbackAction(_rollback_duplicate_file, "DELETE_PATH")),
+    "TOGGLE_DARK_MODE": IntentSafetyEntry(rollback=RollbackAction(_rollback_toggle_dark_mode, "TOGGLE_DARK_MODE")),
 }
 
 # Derivato dal registry, non piu' mantenuto a mano: non puo' andare fuori sincrono con

@@ -82,10 +82,37 @@ class DescribeUndoTests(unittest.TestCase):
         self.assertEqual(description, "rinominare C:\\nuovo.txt in vecchio.txt")
 
     def test_an_unknown_compensating_intent_falls_back_to_a_generic_but_honest_description(self):
-        """Nessuno dei quattro intent compensatori noti oggi manca mai a questo dizionario (sono
-        tutti in UNDO_PARAMS_BY_INTENT) - questo copre solo un futuro quinto intent compensatorio
-        non ancora aggiunto qui, mai un crash su un valore inatteso."""
+        """Nessuno degli intent compensatori noti oggi manca mai a questo dizionario (F1.3, vedi
+        ROADMAP_EXECUTION.md) - questo copre solo un futuro intent compensatorio non ancora
+        aggiunto qui, mai un crash su un valore inatteso."""
         self.assertEqual(_describe_undo("SOME_FUTURE_INTENT", {}), "eseguire SOME_FUTURE_INTENT")
+
+    def test_delete_todo_is_described_with_the_todo_text(self):
+        self.assertEqual(
+            _describe_undo("DELETE_TODO", {"text": "compra il latte"}),
+            "togliere 'compra il latte' dalla lista delle cose da fare",
+        )
+
+    def test_delete_reminder_is_described_with_the_reminder_text(self):
+        self.assertEqual(
+            _describe_undo("DELETE_REMINDER", {"text": "chiamare mamma"}), "cancellare il promemoria 'chiamare mamma'",
+        )
+
+    def test_cancel_timer_is_described_with_the_label_when_present(self):
+        self.assertEqual(_describe_undo("CANCEL_TIMER", {"label": "pasta"}), "annullare il timer 'pasta'")
+
+    def test_cancel_timer_without_a_label_omits_it_instead_of_showing_an_empty_quote(self):
+        self.assertEqual(_describe_undo("CANCEL_TIMER", {"label": ""}), "annullare il timer")
+
+    def test_stop_pomodoro_is_described_without_needing_any_parameter(self):
+        self.assertEqual(_describe_undo("STOP_POMODORO", {}), "fermare la sessione pomodoro")
+
+    def test_restore_window_is_described_with_the_window_title(self):
+        self.assertEqual(_describe_undo("RESTORE_WINDOW", {"title": "Blocco note"}), "ripristinare la finestra 'Blocco note'")
+
+    def test_toggle_dark_mode_is_described_according_to_the_direction_it_toggles_to(self):
+        self.assertEqual(_describe_undo("TOGGLE_DARK_MODE", {"enabled": True}), "attivare il tema scuro")
+        self.assertEqual(_describe_undo("TOGGLE_DARK_MODE", {"enabled": False}), "disattivare il tema scuro")
 
 
 if __name__ == "__main__":
