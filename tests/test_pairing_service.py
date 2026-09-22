@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from core.companion_guard import _ID_RE
 from core.device_credential_store import DeviceCredentialStore
 from core.pairing_service import PairingService
 
@@ -33,6 +34,21 @@ class StartPairingTests(_WithService):
     def test_expiry_is_five_minutes_out(self):
         challenge = self.service.start_pairing()
         self.assertAlmostEqual(challenge.expires_at - challenge.created_at, 5 * 60, delta=1)
+
+    def test_every_generated_challenge_id_matches_the_servers_own_path_identifier_pattern(self):
+        """Bug reale (produzione, non solo teorico): `GET /pairing/<challenge_id>`
+        (`core/companion_server.py`) valida il segmento di percorso con
+        `core/companion_guard.py::_ID_RE`, che pretende un PRIMO carattere alfanumerico -
+        `secrets.token_urlsafe` (usato qui prima della correzione) puo' invece iniziare con `-`
+        o `_`, entrambi nel suo alfabeto base64url. Un id auto-generato da Jake stesso finiva
+        cosi' occasionalmente rifiutato dal suo stesso validatore (400 `invalid_challenge_id`),
+        pur essendo appena stato restituito da `start_pairing()` - riprodotto ~1 volta su 32 in
+        isolamento completo, non un problema di carico. Molte iterazioni: la probabilita' di NON
+        pescare mai il carattere iniziale sbagliato per puro caso renderebbe un test a poche
+        iterazioni inutile a prevenire una regressione futura."""
+        for _ in range(2000):
+            challenge = self.service.start_pairing()
+            self.assertRegex(challenge.challenge_id, _ID_RE)
 
 
 class QrPayloadTests(_WithService):
