@@ -279,7 +279,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F6.4` | Goal Runtime | `DOING` |
 | `F6.5` | Automation Runtime | `DOING` |
 | `F6.6` | Meeting Experience (libreria di regole il 21/09/2026: brief senza dati inventati, consenso e indicatore, follow-up gated; nessun connettore reale) | `DOING` |
-| `F6.7` | Runtime Reliability | `DOING` |
+| `F6.7` | Runtime Reliability (monitor senza spam di notifiche e housekeeping senza cancellazione autonoma il 22/09/2026; senza connettori reali ne' pilot) | `DOING` |
 | `F7.1` | Companion Security (F7.1.1/.4/.5/.6/.7 il 22/09/2026: rate limit, replay, corpo, capability per classe, audit a catena, TLS obbligatorio fuori da loopback; mancano pairing HTTP F7.1.2 e capability persistenti F7.1.3) | `DOING` |
 | `F7.2` | Mobile Companion | `BACKLOG` |
 | `F7.3` | Voice Devices | `BACKLOG` |
@@ -8899,6 +8899,36 @@ Dipende da: F6.1–F6.3.
 7. `F6.7.7` Chiudere monitor completati e riprendere quelli interrotti con checkpoint.
 
 Criterio di uscita: 30 giorni di pilot senza loop di notifica o azione distruttiva autonoma.
+
+- `F6.7.1`-`F6.7.7` (monitor e housekeeping, senza connettori reali) — 22/09/2026: `core/task_monitor.py`. Il criterio di uscita ("30
+  giorni di pilot") non si simula in un test: qui si prova la STRUTTURA che lo rende possibile - idempotenza delle notifiche e un
+  `apply()` che non puo' mai girare senza un'approvazione legata esattamente al piano, non un pilot reale.
+  * `F6.7.1`/`F6.7.2` — `TaskMonitorRegistry`: `progress()` aggiorna la recenza SENZA generare eventi; un evento nasce solo da una
+    transizione (completamento, errore, anomalia, decisione richiesta) ed e' IDEMPOTENTE - `drain_events()` richiamato senza una nuova
+    transizione ritorna una lista vuota (il "loop di notifica" che il criterio di uscita vieta, provato direttamente:
+    `test_draining_twice_without_a_new_transition_is_idempotent`). Un'anomalia non e' terminale: puo' tornare a `RUNNING`
+    (`resume_progress`, nessun evento) o proseguire verso completamento/errore. `is_stalled` segnala soltanto - non trasforma da solo
+    un compito fermo in un'anomalia: la decisione resta a chi chiama.
+  * `F6.7.3` — `scan`/`find_duplicates`/`stale_backups`/`available_updates`/`security_posture`: analisi PURA su record dichiarati dal
+    chiamante (hash/dimensione, ultimo backup riuscito, versioni installate/disponibili, esiti di controlli) - nessuna scansione del
+    filesystem o chiamata di rete nel modulo (verificato anche con un test AST sugli import). Un duplicato richiede STESSO hash E STESSA
+    dimensione; un backup vecchio o un aggiornamento di sicurezza pesano piu' di uno ordinario.
+  * `F6.7.4`/`F6.7.5` — `HousekeepingPlan`: `propose()` costruisce SOLO l'anteprima (`preview()`, percorsi e byte, mai eseguito); solo i
+    duplicati possono diventare un'azione (`delete_duplicates=True`, tiene sempre la prima copia) - backup/aggiornamenti/sicurezza restano
+    sempre e solo un suggerimento da leggere, mai un'azione automatica. **Il modulo non puo' cancellare nulla da solo**: `apply()` rifiuta
+    senza un'`Approval` il cui digest corrisponde ESATTAMENTE al piano (alterare il piano dopo l'approvazione la invalida, test), e delega
+    ogni azione a un `executor` iniettato - nessun `shutil`/`os.remove` importato nel modulo (test AST dedicato).
+  * `F6.7.6` — `AutonomyBudgetTracker`: finestra scorrevole su piu' dimensioni di costo dichiarate (byte, azioni, qualunque chiave, non un
+    elenco chiuso) - stesso principio di `core/autonomy_budget.py::AutonomyBudget` (gia' esistente, per la sola frequenza dei trigger),
+    generalizzato. `apply()` con un `budget` rifiuta PRIMA di eseguire una sola azione se una qualunque dimensione verrebbe superata.
+  * `F6.7.7` — `MonitorStore`: solo i compiti ANCORA in corso sopravvivono a `save()` (stesso pattern di `core/agent_checkpoint.py`,
+    scrittura atomica); `resume_candidates()` ritorna SOLO i dati del compito interrotto, mai un'azione - nessuna ripresa automatica
+    (stesso principio gia' applicato al checkpoint dell'agente: riprendere da soli un'automazione senza che l'utente lo sappia sarebbe
+    l'autonomia non richiesta che F1 vuole evitare). Un file di store corrotto non fa mai crashare il lettore.
+  Non affrontato: nessun collegamento a `JakeCore`/HUD/`core/event_bus.py` (nessun pannello consuma questi eventi); nessuna scansione
+    reale (filesystem/rete/versioni software - tutti i dati sono dichiarati dal chiamante nei test); nessuna pipeline reale che chiami
+    `TaskMonitorRegistry` per un compito vero di Jake; nessun pilot reale di 30 giorni. Prova: 46 test in `tests/test_task_monitor.py`;
+    un modulo nel mypy selettivo.
 
 ### Pilot F6
 

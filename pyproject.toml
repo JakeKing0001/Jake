@@ -57,6 +57,7 @@ files = [
     "core/skill_package.py",
     "core/model_router.py",
     "core/release_eval.py",
+    "core/task_monitor.py",
     "core/daily_brief.py",
     "core/meeting_copilot.py",
     "core/autonomy_budget.py",
