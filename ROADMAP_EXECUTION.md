@@ -4935,6 +4935,15 @@ Criterio di uscita: nessuna contaminazione di memoria o permesso tra profili nei
   stesso smoke test della CI) verificato verde dopo la modifica a `main.py`. Prova: 73 test in
   `tests/test_wake_word_session.py`, 25 in `tests/test_request_context.py`, ruff/compileall verdi
   (nessuno dei tre file toccati e' nel set selettivo mypy).
+- `F2.7` (adozione, stessa fetta - coerenza col percorso push-to-talk) — 22/09/2026: lo stesso
+  identico meccanismo esteso a `core/voice/push_to_talk.py::PushToTalkSession` (l'altro punto di
+  produzione reale che chiama `core.answer()` da un turno vocale, non ancora toccato sopra) -
+  `speaker_store` opzionale, `_identify_speaker_token(audio)` sull'audio gia' registrato da
+  `microphone.record_while()`, contextvar impostato/ripulito attorno alla sola chiamata a
+  `core.answer()`. `main.py` collega lo stesso `_speaker_store()` gia' usato per
+  `WakeWordSession`. 5 nuovi test in `tests/test_push_to_talk.py`, verificati FALLIRE contro il
+  codice precedente prima della correzione; smoke test verde. Prova: 17 test in
+  `tests/test_push_to_talk.py`.
 
 ### Passo di integrazione F2 (in corso)
 
