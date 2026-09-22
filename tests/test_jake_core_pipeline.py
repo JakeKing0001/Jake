@@ -35,7 +35,8 @@ from core.planner import Plan, PlanStep
 from core.plan_executor import PlanOutcome, StepOutcome
 from core.policy_engine import PolicyEngine
 from core.request_context import (
-    reset_current_device_id, set_current_command_source_intent, set_current_device_id,
+    reset_current_device_id, reset_current_stt_confidence, set_current_command_source_intent,
+    set_current_device_id, set_current_stt_confidence,
 )
 from core.session_recorder import SessionRecorder
 from core.skill_result import SkillResult
@@ -540,6 +541,62 @@ class ExecuteCommandTests(_JakeCoreTestCase):
         core = self._core(skill_registry=registry, router=FakeRouter(Command("OPEN_APP", {"app": "chrome"})))
         core._execute_command("apri chrome", Command("OPEN_APP", {"app": "chrome"}))
         self.assertEqual(core.conversation_state.get_entities().get("app"), "chrome")
+
+
+class LowConfidenceConfirmationTests(_JakeCoreTestCase):
+    """F2.6.6 ("chiedere conferma dipende dall'impatto E dalla certezza del riconoscimento"):
+    core/request_context.py::current_stt_confidence, letto da JakeCore._authorize_command SOLO
+    per aggiungere una conferma che la policy da sola non avrebbe richiesto - mai per toglierne
+    una. OPEN_APP e' LOCAL_REVERSIBLE (core/risk.py, soglia 0.5 in core/voice/dialogue.py::
+    _CONFIRM_BELOW), non nella lista always_confirm_intents di default: senza il contextvar
+    impostato l'azione va sempre diretta, esattamente come prima di questo incremento."""
+
+    def _run_with_confidence(self, confidence: float | None):
+        registry = FakeRegistry({"OPEN_APP": FakeSkill()})
+        core = self._core(skill_registry=registry)
+        token = set_current_stt_confidence(confidence) if confidence is not None else None
+        try:
+            return core, core._execute_command("apri spotify", Command("OPEN_APP", {"name": "spotify"}))
+        finally:
+            if token is not None:
+                reset_current_stt_confidence(token)
+
+    def test_low_confidence_on_a_local_reversible_intent_adds_a_confirmation(self):
+        core, response = self._run_with_confidence(0.2)
+        self.assertTrue(core.conversation_state.has_pending_action())
+        self.assertIn("Non sono sicuro", response)
+
+    def test_high_confidence_on_the_same_intent_executes_directly(self):
+        core, response = self._run_with_confidence(0.95)
+        self.assertFalse(core.conversation_state.has_pending_action())
+        self.assertNotIn("Non sono sicuro", response)
+
+    def test_no_confidence_information_never_adds_a_confirmation(self):
+        """None (nessun contextvar impostato) e' il comportamento di ogni comando testuale/
+        companion e di ogni test scritto prima di questo incremento - deve restare invariato."""
+        core, response = self._run_with_confidence(None)
+        self.assertFalse(core.conversation_state.has_pending_action())
+
+    def test_the_pending_action_carries_the_low_confidence_policy_reason(self):
+        from core.policy_engine import POLICY_REASON_LOW_RECOGNITION_CONFIDENCE
+
+        core, _ = self._run_with_confidence(0.2)
+        action = core.conversation_state.get_pending_action()
+        self.assertEqual(action["policy_reason"], POLICY_REASON_LOW_RECOGNITION_CONFIDENCE)
+
+    def test_low_confidence_never_overrides_an_already_blocked_intent(self):
+        """L'aggiunta di una conferma vale solo per un'azione che la policy avrebbe gia'
+        eseguito senza fiatare - un intent BLOCCATO resta bloccato, mai declassato a
+        'chiedi conferma' solo perche' la confidenza era bassa."""
+        registry = FakeRegistry({"OPEN_APP": FakeSkill()})
+        core = self._core(skill_registry=registry, blocked_intents=["OPEN_APP"])
+        token = set_current_stt_confidence(0.1)
+        try:
+            response = core._execute_command("apri spotify", Command("OPEN_APP", {"name": "spotify"}))
+        finally:
+            reset_current_stt_confidence(token)
+        self.assertFalse(core.conversation_state.has_pending_action())
+        self.assertIn("disabilitata", response)
 
 
 class ExecuteCommandUndoStoreWiringTests(_JakeCoreTestCase):

@@ -5,7 +5,10 @@ import time
 import numpy as np
 
 from core.logger import get_logger
-from core.request_context import reset_current_speaker_profile_id, set_current_speaker_profile_id
+from core.request_context import (
+    reset_current_speaker_profile_id, reset_current_stt_confidence, set_current_speaker_profile_id,
+    set_current_stt_confidence,
+)
 from core.voice.audio_profile import apply_to_provider, classify_output_device
 from core.voice.barge_in import BargeInController, classify_interruption
 from core.voice.live_transcriber import LiveTranscriber
@@ -662,11 +665,18 @@ class WakeWordSession:
         print(f"Tu > {command}")
         self._set_state("thinking", command)
         speaker_token = self._identify_speaker_token()
+        # F2.6.6: self.last_confidence e' la confidenza VERA gia' riportata da _transcribe()
+        # (None per un provider che non la riporta - mai un valore inventato qui). JakeCore la
+        # legge per decidere se aggiungere una conferma quando Jake non era sicuro di aver capito
+        # bene, vedi core/request_context.py::current_stt_confidence.
+        confidence_token = set_current_stt_confidence(self.last_confidence) if self.last_confidence is not None else None
         try:
             response = self.jake_core.answer(command)
         finally:
             if speaker_token is not None:
                 reset_current_speaker_profile_id(speaker_token)
+            if confidence_token is not None:
+                reset_current_stt_confidence(confidence_token)
         print(f"Jake > {response}")
 
         if response == self.jake_core.EXIT_SENTINEL:

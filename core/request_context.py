@@ -202,3 +202,39 @@ def set_current_speaker_profile_id(profile_id: str | None) -> contextvars.Token:
 
 def reset_current_speaker_profile_id(token: contextvars.Token) -> None:
     _current_speaker_profile_id.reset(token)
+
+
+# F2.6.6 ("chiedere conferma dipende dall'impatto E dalla certezza del riconoscimento"): stesso
+# identico meccanismo/stesse garanzie di isolamento per thread degli altri contextvar sopra.
+# `core/voice/wake_word_session.py`/`core/voice/push_to_talk.py` impostano questo SOLO quando il
+# provider STT riporta una confidenza vera per la frase appena trascritta (mai un valore
+# inventato per un provider che non la riporta - vedi `WhisperSttProvider.transcribe_detailed`),
+# subito prima di chiamare `JakeCore.answer()`. `JakeCore._authorize_command` lo legge per
+# decidere se un'azione che la policy consentirebbe SENZA conferma merita comunque di chiederla,
+# quando Jake non era abbastanza sicuro di aver capito bene la voce (core.voice.dialogue::
+# needs_confirmation) - MAI per rilassare una conferma gia' richiesta dalla policy, solo per
+# aggiungerne una in piu'. `None` (il default, e il comportamento di chi non chiama mai
+# set_current_stt_confidence - un comando testuale, companion, o un provider senza confidenza)
+# significa "nessuna informazione di confidenza per questo turno": nessuna conferma aggiuntiva
+# viene mai richiesta in quel caso, esattamente il comportamento di prima di questo meccanismo.
+_current_stt_confidence: contextvars.ContextVar[float | None] = contextvars.ContextVar(
+    "current_stt_confidence", default=None,
+)
+
+
+def current_stt_confidence() -> float | None:
+    """La confidenza VERA riportata dal motore di trascrizione per la frase del turno in corso su
+    QUESTO thread, o None se non impostata (comando non vocale, o un provider che non la
+    riporta)."""
+    return _current_stt_confidence.get()
+
+
+def set_current_stt_confidence(confidence: float | None) -> contextvars.Token:
+    """Imposta la confidenza di trascrizione per il resto dell'esecuzione su QUESTO thread.
+    Restituisce un Token da passare a reset_current_stt_confidence() per ripristinare il valore
+    precedente al termine del turno."""
+    return _current_stt_confidence.set(confidence)
+
+
+def reset_current_stt_confidence(token: contextvars.Token) -> None:
+    _current_stt_confidence.reset(token)
