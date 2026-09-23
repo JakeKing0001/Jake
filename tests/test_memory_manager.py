@@ -2,6 +2,7 @@
 2.0). Usa un file sqlite temporaneo per test (mai il database vero di produzione) ed embedding
 finti (semplici vettori 2D): cosine_similarity e' pura matematica, non richiede Ollama."""
 import shutil
+import sqlite3
 import tempfile
 import threading
 import unittest
@@ -329,6 +330,127 @@ class ConcurrentAccessTests(MemoryManagerTestCase):
         # (200), quindi nessuna riga deve mancare.
         history = self.manager.get_recent_history(limit=thread_count * per_thread + 10)
         self.assertEqual(len(history), thread_count * per_thread)
+
+
+class SwitchDatabaseTests(MemoryManagerTestCase):
+    """F2.7 (adozione, seconda fetta - isolamento vero di memoria/cronologia per profilo):
+    switch_database() ripunta la STESSA istanza a un altro file, senza dover ricostruire i
+    collaboratori (WorkflowManager/TriggerManager/ProcedureManager/ContactBook/skill di memoria)
+    che gia' ne tengono un riferimento fisso dalla loro costruzione. Prova diretta del
+    ragionamento di sicurezza in ROADMAP_EXECUTION.md: ogni metodo pubblico passa dallo stesso
+    RLock prima di toccare self._connection, quindi lo scambio e' visibile atomicamente."""
+
+    def test_data_written_before_the_switch_is_not_visible_after(self):
+        self.manager.set_preference("citta", "Roma")
+        other_path = self.tmp_dir / "altro-profilo.db"
+
+        self.manager.switch_database(other_path)
+
+        self.assertIsNone(self.manager.get_preference("citta"))
+
+    def test_data_written_after_the_switch_lands_in_the_new_file_not_the_old_one(self):
+        old_path = self.manager.db_path
+        new_path = self.tmp_dir / "altro-profilo.db"
+        self.manager.switch_database(new_path)
+
+        self.manager.set_preference("citta", "Milano")
+
+        reopened_old = MemoryManager(db_path=old_path)
+        self.addCleanup(reopened_old.close)
+        self.assertIsNone(reopened_old.get_preference("citta"))
+
+    def test_switching_back_to_the_original_file_finds_its_data_intact(self):
+        original_path = self.manager.db_path
+        self.manager.set_preference("citta", "Roma")
+        self.manager.switch_database(self.tmp_dir / "altro-profilo.db")
+        self.manager.set_preference("citta", "Milano")
+
+        self.manager.switch_database(original_path)
+
+        self.assertEqual(self.manager.get_preference("citta"), "Roma")
+
+    def test_the_db_path_attribute_reflects_the_active_database(self):
+        new_path = self.tmp_dir / "altro-profilo.db"
+        self.manager.switch_database(new_path)
+        self.assertEqual(self.manager.db_path, new_path)
+
+    def test_the_old_connection_is_really_closed_not_leaked(self):
+        """Se la vecchia connessione restasse aperta, il file non sarebbe eliminabile su Windows
+        (un handle aperto blocca la cancellazione) - la prova piu' diretta che close() e' stato
+        chiamato per davvero, non solo che il nuovo file funziona."""
+        old_path = self.manager.db_path
+        self.manager.set_preference("citta", "Roma")
+        self.manager.switch_database(self.tmp_dir / "altro-profilo.db")
+
+        old_path.unlink()  # solleverebbe PermissionError su Windows se la connessione fosse ancora aperta
+
+        self.assertFalse(old_path.exists())
+
+    def test_a_dependent_holding_a_fixed_reference_follows_the_switch_automatically(self):
+        """Il punto centrale di F2.7: TriggerManager (come WorkflowManager/ProcedureManager/
+        ContactBook/le skill di memoria in produzione) tiene un riferimento FISSO a questa
+        istanza dalla propria costruzione, mai ricostruito - qui si dimostra che vede il nuovo
+        database SENZA essere toccato in alcun modo."""
+        from core.trigger_manager import TriggerManager
+        from core.workflow_manager import WorkflowManager
+
+        workflow_manager = WorkflowManager(self.manager)
+        trigger_manager = TriggerManager(self.manager, workflow_manager)
+        trigger_manager.save("promemoria-latte", "qualunque", "time", {"at": "09:00"})
+
+        self.manager.switch_database(self.tmp_dir / "altro-profilo.db")
+
+        self.assertEqual(trigger_manager.list_all(), [])
+        trigger_manager.save("promemoria-pane", "qualunque", "time", {"at": "10:00"})
+        self.assertEqual(len(trigger_manager.list_all()), 1)
+        self.assertEqual(trigger_manager.list_all()[0]["name"], "promemoria-pane")
+
+    def test_a_migration_failure_on_the_new_path_leaves_the_old_connection_still_usable(self):
+        """Un file nuovo corrotto (qui: una cartella al posto di un file, cosi' sqlite3.connect
+        stesso fallisce) non deve MAI lasciare l'istanza senza alcuna connessione valida - i dati
+        gia' presenti restano leggibili/scrivibili sul database originale."""
+        self.manager.set_preference("citta", "Roma")
+        broken_path = self.tmp_dir / "non-un-file"
+        broken_path.mkdir()
+
+        with self.assertRaises(sqlite3.OperationalError):
+            self.manager.switch_database(broken_path)
+
+        self.assertEqual(self.manager.get_preference("citta"), "Roma")
+        self.manager.set_preference("altra-chiave", "ancora funzionante")
+        self.assertEqual(self.manager.get_preference("altra-chiave"), "ancora funzionante")
+
+    def test_concurrent_remember_calls_during_a_switch_never_corrupt_either_database(self):
+        """Thread veri: un thread scrive senza sosta mentre un altro esegue lo switch - ogni
+        singola remember() deve finire per intero PRIMA o DOPO lo switch (mai a cavallo, mai
+        un'eccezione non gestita), grazie allo stesso RLock gia' usato da ogni metodo pubblico."""
+        new_path = self.tmp_dir / "altro-profilo.db"
+        errors = []
+        stop = threading.Event()
+
+        def _remember_forever():
+            i = 0
+            while not stop.is_set():
+                try:
+                    self.manager.remember(f"chiave-{i}", f"valore-{i}")
+                except Exception as exc:  # pragma: no cover - fallirebbe il test comunque
+                    errors.append(exc)
+                i += 1
+
+        # daemon=True: se switch_database() sollevasse (es. contro il codice precedente a questo
+        # incremento, che non ha ancora il metodo) il test non deve restare appeso per sempre in
+        # attesa di un thread scrittore che nessuno fermerebbe piu' - stesso principio "un test
+        # non deve mai bloccare l'intera suite" gia' seguito altrove in questo progetto.
+        writer = threading.Thread(target=_remember_forever, daemon=True)
+        writer.start()
+        try:
+            self.manager.switch_database(new_path)
+        finally:
+            stop.set()
+            writer.join(timeout=5)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(self.manager.db_path, new_path)
 
 
 if __name__ == "__main__":

@@ -31,13 +31,17 @@ from core.jake_core import JakeCore
 from core.notification_center import NotificationCenter
 from core.notification_policy import NotificationPolicy
 from core.pairing_service import PairingService
+from core.memory_manager import MemoryManager
 from core.planner import Plan, PlanStep
 from core.plan_executor import PlanOutcome, StepOutcome
+from core.profiles import ProfileManager
+from core.request_context import reset_current_speaker_profile_id, set_current_speaker_profile_id
 from core.policy_engine import PolicyEngine
 from core.request_context import (
     reset_current_device_id, reset_current_stt_confidence, set_current_command_source_intent,
     set_current_device_id, set_current_stt_confidence,
 )
+from core.risk import RiskLevel
 from core.session_recorder import SessionRecorder
 from core.skill_result import SkillResult
 from core.sync_crypto import Keyring
@@ -1340,6 +1344,107 @@ class ShutdownDrainTests(_JakeCoreTestCase):
         core.shutdown()
 
         self.assertEqual(order, ["companion_server.stop", "drain"])
+
+
+class ProfileTurnIsolationTests(_JakeCoreTestCase):
+    """F2.7: adozione reale senza contaminare il canale predefinito o profili diversi."""
+
+    def setUp(self):
+        super().setUp()
+        self._profile_memories = []
+
+    def tearDown(self):
+        for memory in self._profile_memories:
+            memory.close()
+        super().tearDown()
+
+    def _profiled_core(self):
+        core = self._core()
+        root = Path(self._tmp.name)
+        core.memory_manager = MemoryManager(root / "default.db")
+        self._profile_memories.append(core.memory_manager)
+        core.profile_manager = ProfileManager(root / "profiles")
+        core._profile_turn_lock = threading.RLock()
+        core._active_profile_namespace = None
+        return core
+
+    def test_profile_memory_and_conversation_are_scoped_to_one_turn_then_default_is_restored(self):
+        core = self._profiled_core()
+        namespace = core.profile_manager.create_profile("davide", "Davide")
+        default_path = core.memory_manager.db_path
+        observations = []
+
+        def run_profile_turn(text, raw_text):
+            observations.append((core.memory_manager.db_path, core.conversation_state.get_short_term_history()))
+            core.memory_manager.set_preference("tema", "scuro")
+            core.conversation_state.add_turn("user", text)
+            return "ok"
+
+        core._answer_counted = run_profile_turn
+        token = set_current_speaker_profile_id("davide")
+        try:
+            self.assertEqual(core.answer("ciao"), "ok")
+        finally:
+            reset_current_speaker_profile_id(token)
+
+        self.assertEqual(observations, [(namespace.memory_db_path, [])])
+        self.assertEqual(core.memory_manager.db_path, default_path)
+        self.assertEqual(core.conversation_state.get_short_term_history(), [])
+        self.assertEqual(namespace.conversation.get_short_term_history(), [{"role": "user", "text": "ciao"}])
+        profile_memory = namespace.open_memory()
+        try:
+            self.assertEqual(profile_memory.get_preference("tema"), "scuro")
+        finally:
+            profile_memory.close()
+        self.assertIsNone(core.memory_manager.get_preference("tema"))
+
+    def test_two_profiles_never_see_each_others_history(self):
+        core = self._profiled_core()
+        davide = core.profile_manager.create_profile("davide", "Davide")
+        anna = core.profile_manager.create_profile("anna", "Anna")
+        seen = []
+
+        def run_profile_turn(text, raw_text):
+            seen.append(list(core.conversation_state.get_short_term_history()))
+            core.conversation_state.add_turn("user", text)
+            return "ok"
+
+        core._answer_counted = run_profile_turn
+        for profile_id, phrase in (("davide", "segreto d"), ("anna", "segreto a"), ("davide", "ancora d")):
+            token = set_current_speaker_profile_id(profile_id)
+            try:
+                core.answer(phrase)
+            finally:
+                reset_current_speaker_profile_id(token)
+
+        self.assertEqual(seen[0], [])
+        self.assertEqual(seen[1], [])
+        self.assertEqual(seen[2], [{"role": "user", "text": "segreto d"}])
+        self.assertEqual([t["text"] for t in davide.conversation.get_short_term_history()], ["segreto d", "ancora d"])
+        self.assertEqual([t["text"] for t in anna.conversation.get_short_term_history()], ["segreto a"])
+
+    def test_unknown_profile_fails_closed_to_the_default_namespace(self):
+        core = self._profiled_core()
+        default_path = core.memory_manager.db_path
+        seen = []
+        core._answer_counted = lambda text, raw_text: seen.append(core.memory_manager.db_path) or "ok"
+        token = set_current_speaker_profile_id("inesistente")
+        try:
+            core.answer("ciao")
+        finally:
+            reset_current_speaker_profile_id(token)
+        self.assertEqual(seen, [default_path])
+
+    def test_profile_risk_ceiling_blocks_before_global_policy_can_allow(self):
+        core = self._profiled_core()
+        child = core.profile_manager.create_profile("figlio", "Figlio", max_risk=RiskLevel.LOCAL_REVERSIBLE)
+        core._active_profile_namespace = child
+
+        _, result, reason = core._authorize_command(Command("DELETE_PATH", {"path": "fixture.txt"}))
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.error, "POLICY_BLOCKED")
+        self.assertEqual(reason, "profile_risk_ceiling")
 
 
 if __name__ == "__main__":

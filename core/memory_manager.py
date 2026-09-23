@@ -33,25 +33,55 @@ class MemoryManager:
 
     def __init__(self, db_path: Path | None = None):
         self.db_path = Path(db_path) if db_path else self.DEFAULT_DB_PATH
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self._connection, self.migration_report = self._open_validated_connection(self.db_path)
+
+    @staticmethod
+    def _open_validated_connection(db_path: Path) -> tuple[sqlite3.Connection, object]:
+        """Apre e valida una connessione VERA su `db_path` - stesso identico setup usato da
+        `__init__` e da `switch_database()` (F2.7, isolamento memoria per profilo): estratto qui
+        cosi' i due punti non possano divergere in silenzio (lo stesso principio "due copie
+        parallele" gia' messo in guardia altrove in questo progetto)."""
+        db_path.parent.mkdir(parents=True, exist_ok=True)
         # check_same_thread=False: dalla v3.0 TriggerScheduler legge/scrive workflow_manager e
         # trigger_manager (entrambi backed da questa stessa connessione) da un thread in
         # background - stesso accorgimento gia' usato in ReminderManager per lo stesso motivo.
-        self._connection = sqlite3.connect(self.db_path, check_same_thread=False)
-        self._connection.row_factory = sqlite3.Row
+        connection = sqlite3.connect(db_path, check_same_thread=False)
+        connection.row_factory = sqlite3.Row
         # F5.7.6: senza secure_delete SQLite lascia il contenuto di una riga cancellata nelle pagine libere
         # del file finche' non le riscrive: "cancellato" non sarebbe cancellato. Con questa opzione le pagine
         # liberate vengono azzerate.
-        self._connection.execute("PRAGMA secure_delete = ON")
+        connection.execute("PRAGMA secure_delete = ON")
         # F5.1: schema versionato con migrazioni transazionali e backup prima di toccare dati esistenti.
         try:
-            self.migration_report = ensure_schema(self._connection, self.db_path)
+            migration_report = ensure_schema(connection, db_path)
         except BaseException:
             # un file piu' nuovo del codice, una migrazione fallita: la connessione non deve restare aperta sul
             # file (su Windows lo terrebbe bloccato: nemmeno un ripristino da backup potrebbe sostituirlo)
-            self._connection.close()
+            connection.close()
             raise
+        return connection, migration_report
+
+    def switch_database(self, db_path: Path) -> None:
+        """Ripunta QUESTA STESSA istanza a un altro file SQLite (F2.7, isolamento memoria per
+        profilo: cambiare "chi sta parlando" cambia il database attivo, senza dover ricostruire
+        `WorkflowManager`/`TriggerManager`/`ProcedureManager`/`ContactBook`/le skill di memoria -
+        tutti costruiti con QUESTA identica istanza e tenuti come riferimento fisso dalla loro
+        stessa costruzione, mai riletti da `JakeCore` a ogni chiamata; vedi
+        ROADMAP_EXECUTION.md F2.7 per l'indagine che ha verificato questo prima di scrivere
+        qualunque codice). Sicuro: OGNI metodo pubblico di questa classe gia' passa da
+        `self._lock` (un RLock) prima di leggere o scrivere `self._connection` - verificato
+        metodo per metodo, non assunto - quindi nessun lettore/scrittore in un altro thread puo'
+        mai vedere una connessione a meta' sostituita. La connessione precedente viene chiusa
+        SOLO dopo che la nuova e' stata aperta e validata con successo: un file nuovo corrotto o
+        con una migrazione fallita non lascia mai questa istanza senza alcuna connessione valida."""
+        new_path = Path(db_path)
+        with self._lock:
+            new_connection, migration_report = self._open_validated_connection(new_path)
+            self._connection.close()
+            self._connection = new_connection
+            self.db_path = new_path
+            self.migration_report = migration_report
 
     @staticmethod
     def _now() -> str:

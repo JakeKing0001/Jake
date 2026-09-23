@@ -193,5 +193,37 @@ class PerChannelPendingActionTests(unittest.TestCase):
         self.assertIn("phone1", self.state._pending_actions)
 
 
+class ProfileStateSwapTests(unittest.TestCase):
+    def test_swap_moves_history_entities_searches_and_pending_actions_both_ways(self):
+        active = ConversationStateManager()
+        profile = ConversationStateManager()
+        active.add_turn("user", "turno predefinito")
+        active.remember_entities("OPEN_APP", {"app": "Blocco note"}, {})
+        active.set_last_search_results([{"path": "default.txt"}])
+        active.set_pending_action({"intent": "DELETE_PATH"})
+        profile.add_turn("user", "turno profilo")
+
+        active.swap_state(profile)
+
+        self.assertEqual(active.get_short_term_history()[0]["text"], "turno profilo")
+        self.assertEqual(profile.get_short_term_history()[0]["text"], "turno predefinito")
+        self.assertEqual(active.get_entities(), {})
+        self.assertEqual(profile.get_entities()["app"], "Blocco note")
+        self.assertEqual(active.get_last_search_results(), [])
+        self.assertEqual(profile.get_last_search_results(), [{"path": "default.txt"}])
+        self.assertFalse(active.has_pending_action())
+        self.assertTrue(profile.has_pending_action())
+
+        active.swap_state(profile)
+        self.assertEqual(active.get_short_term_history()[0]["text"], "turno predefinito")
+        self.assertTrue(active.has_pending_action())
+
+    def test_swapping_an_object_with_itself_is_a_no_op(self):
+        state = ConversationStateManager()
+        state.add_turn("user", "resta")
+        state.swap_state(state)
+        self.assertEqual(state.get_short_term_history(), [{"role": "user", "text": "resta"}])
+
+
 if __name__ == "__main__":
     unittest.main()
