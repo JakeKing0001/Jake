@@ -56,6 +56,30 @@ class ConversationStateManager:
         self._last_search_results: list[dict] = []
         self._entities: dict = {}
 
+    def swap_state(self, other: "ConversationStateManager") -> None:
+        """Scambia atomicamente lo stato in RAM con un altro namespace conversazionale.
+
+        F2.7 usa questo metodo per far vedere ai molti collaboratori che conservano un
+        riferimento alla stessa istanza (skill, router e JakeCore) il profilo del singolo turno,
+        senza riassegnare l'oggetto. Il chiamante serializza l'intero turno; l'ordinamento dei
+        lock rende comunque sicuro lo scambio anche se due thread tentano l'operazione insieme.
+        """
+        if other is self:
+            return
+        first, second = sorted((self, other), key=id)
+        with first._pending_action_lock:
+            with second._pending_action_lock:
+                self._pending_actions, other._pending_actions = other._pending_actions, self._pending_actions
+                self._short_term_history, other._short_term_history = (
+                    other._short_term_history,
+                    self._short_term_history,
+                )
+                self._last_search_results, other._last_search_results = (
+                    other._last_search_results,
+                    self._last_search_results,
+                )
+                self._entities, other._entities = other._entities, self._entities
+
     def add_turn(self, role: str, text: str) -> None:
         """Aggiunge un turno al buffer di conversazione a breve termine."""
         self._short_term_history.append({"role": role, "text": text})

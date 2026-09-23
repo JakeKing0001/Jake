@@ -41,9 +41,11 @@ from core.policy_engine import (
     strip_authorization_signals,
 )
 from core.plugin_loader import load_plugins
+from core.profiles import ProfileError, ProfileManager
 from core.request_context import (
     current_action_id, current_command_source_intent, current_device_id, current_session_id,
-    current_stt_confidence, reset_current_command_source_intent, set_current_command_source_intent,
+    current_speaker_profile_id, current_stt_confidence, reset_current_command_source_intent,
+    set_current_command_source_intent,
 )
 from core.taint import wrap_external_content
 from core.response_formatter import format_plan_outcome, format_skill_result
@@ -331,6 +333,20 @@ class JakeCore:
         )
         self.conversation_state = self.skill_registry.conversation_state
         self.memory_manager = self.skill_registry.memory_manager
+        # F2.7 (adozione, seconda fetta - isolamento vero di memoria per profilo): None per
+        # default (opt-in via multi_user_profiles_enabled in config.json), nessun cambio di
+        # comportamento per chi non lo attiva - stesso principio "opt-in, zero impatto" gia'
+        # seguito per ogni altro meccanismo opzionale in questo progetto. Nessun profilo
+        # arruolato esiste finche' l'utente non ne crea uno esplicitamente
+        # (ProfileManager.create_profile, oggi raggiungibile solo da codice/test: nessuna
+        # skill/CLI di gestione profili esiste ancora, gap dichiarato separatamente).
+        self.profile_manager = ProfileManager() if bool(config.get("multi_user_profiles_enabled", False)) else None
+        # MemoryManager e ConversationStateManager sono istanze condivise con molte skill. Lo
+        # stesso oggetto viene quindi ripuntato per il SOLO turno riconosciuto e ripristinato nel
+        # finally; il lock impedisce che una richiesta companion concorrente osservi il profilo
+        # vocale di un'altra persona.
+        self._profile_turn_lock = threading.RLock()
+        self._active_profile_namespace = None
         self.planner_provider = self.skill_registry.planner_provider
         self.plan_executor = self.skill_registry.plan_executor
         self.context_summarizer = ContextSummarizer(model=self.router.primary_provider.model)
@@ -774,6 +790,36 @@ class JakeCore:
         text = self.normalizer.normalize(raw_text)
         if not text:
             return "Non ho sentito nulla."
+        profile_manager = getattr(self, "profile_manager", None)
+        if profile_manager is None:
+            return self._answer_counted(text, raw_text)
+
+        # F2.7: il profilo vale soltanto per questo turno. Anche i turni senza profilo prendono
+        # il lock, così un comando companion non può correre mentre memoria e cronologia condivise
+        # sono temporaneamente ripuntate su una voce riconosciuta.
+        with self._profile_turn_lock:
+            profile_id = current_speaker_profile_id()
+            if profile_id is None:
+                return self._answer_counted(text, raw_text)
+            try:
+                namespace = profile_manager.namespace(profile_id)
+            except ProfileError:
+                return self._answer_counted(text, raw_text)
+
+            default_db_path = self.memory_manager.db_path
+            self.memory_manager.switch_database(namespace.memory_db_path)
+            self.conversation_state.swap_state(namespace.conversation)
+            self._active_profile_namespace = namespace
+            try:
+                return self._answer_counted(text, raw_text)
+            finally:
+                # Ripristino in ordine inverso anche quando il turno solleva: nessun profilo può
+                # contaminare il comando seguente o un altro canale.
+                self.conversation_state.swap_state(namespace.conversation)
+                self.memory_manager.switch_database(default_db_path)
+                self._active_profile_namespace = None
+
+    def _answer_counted(self, text: str, raw_text: str) -> str:
         # F1.8.4 ("drain limitato"): conta questa chiamata come "in corso" da qui a return -
         # incrementato PRIMA di qualunque lavoro vero (skill/agente/piano), decrementato in un
         # finally cosi' shutdown() sa sempre quante chiamate stanno ancora usando i componenti
@@ -945,6 +991,18 @@ class JakeCore:
         # eseguito piu' sotto: il proposal descrive l'intenzione, non sostituisce l'esecuzione.
         proposal = ActionProposal.for_intent(resolved.intent, resolved.parameters, "user")
         validate_action_proposal(proposal)
+        # F2.7.4: la voce seleziona uno spazio dei nomi, non concede privilegi. Il tetto del
+        # profilo può soltanto restringere la policy globale e viene controllato prima di
+        # qualunque prompt o esecuzione. L'attributo esiste soltanto durante il turno profilato,
+        # protetto da _profile_turn_lock; i JakeCore minimali dei test e le installazioni senza
+        # multiutente continuano a non avere alcun comportamento aggiuntivo.
+        profile_namespace = getattr(self, "_active_profile_namespace", None)
+        if profile_namespace is not None and not profile_namespace.permits(risk_of(resolved.intent)):
+            return (
+                resolved,
+                SkillResult(success=False, data={}, error="POLICY_BLOCKED"),
+                "profile_risk_ceiling",
+            )
         decision, policy_reason = self.policy_engine.decide_interactive_with_reason(proposal.intent, proposal.parameters)
         if decision == PolicyDecision.BLOCK:
             return resolved, SkillResult(success=False, data={}, error="POLICY_BLOCKED"), policy_reason

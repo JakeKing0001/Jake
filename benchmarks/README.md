@@ -16,6 +16,11 @@ p50/p95) e due esecuzioni in momenti diversi si possono confrontare senza legger
 | `bench_stt.py` | Latenza di trascrizione di Whisper (`core/voice/stt_provider.py`); con `--tts-corpus` anche il WER su frasi pronunciate da una voce SAPI locale | un file `.wav` reale (`--audio`), oppure una voce italiana SAPI (`--tts-corpus`) |
 | `bench_vad.py` | Falsi accettati/rifiutati e frasi trovate di webrtcvad + segmentatore su un corpus sintetico deterministico (F2.1, vedi [docs/voice-corpus.md](../docs/voice-corpus.md)) | niente |
 
+La procedura obbligatoria per chiudere F2 su microfoni e uscite reali è in
+[`docs/f2-hardware-validation.md`](../docs/f2-hardware-validation.md). Fissa numerosità, soglie,
+matrice dei tre profili, formato del report e pulizia delle registrazioni; i benchmark sintetici
+di questa cartella non la sostituiscono.
+
 ```powershell
 python -m benchmarks.bench_nlu --sample 80 --seed 42
 python -m benchmarks.bench_agent

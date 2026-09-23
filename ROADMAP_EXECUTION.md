@@ -249,7 +249,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F2.4` | Audio Systems (F2.4.1-F2.4.7 affrontati il 21/09/2026 E collegati a WakeWordSession/TTS reali lo stesso giorno - gradino 3: AEC su riferimento reale, BargeInController, `voice_barge_in` di default `off`; riga corretta il 22/09/2026, era stantia; resta solo la prova sulle tre categorie di hardware VERE, per cui il default resta `off`) | `DOING` |
 | `F2.5` | Speech Runtime (F2.5.1-F2.5.7 affrontati il 21/09/2026 E collegati a WakeWordSession/push-to-talk lo stesso giorno per stile/dispositivo/pulizia markdown - gradino 2; riga corretta il 22/09/2026, era stantia; resta solo `ChunkedSpeaker` per-unita' - bloccato su JakeCore che non produce ancora testo in streaming, non un gap lato voce - e la misura dal vivo di "prima emissione < 2 s") | `DOING` |
 | `F2.6` | Conversation Runtime (F2.6.6 collegato a JakeCore/WakeWordSession/push-to-talk il 22/09/2026 - conferma aggiuntiva su bassa confidenza vocale, mai una conferma tolta; F2.6.1/F2.6.3-F2.6.5/F2.6.7 restano a livello libreria per rischio dichiarato - toccherebbero la macchina a stati di conferma piu' centrale del progetto; F2.6.2 solo il lato dati, manca l'HUD; "< 5% dei turni con 'no, intendevo'" non misurabile senza un benchmark di dialoghi) | `DOING` |
-| `F2.7` | Identity and Voice (F2.7.1-F2.7.6 affrontati il 21/09/2026 con un'impronta vocale grossolana; collegata a WakeWordSession/main.py il 22/09/2026 per la SOLA identificazione, opt-in, zero impatto finche' nessuno arruola una voce; isolamento vero di memoria/cronologia per profilo resta una fetta successiva dichiarata - richiede prima MemoryManager multi-database; la firma NON e' un riconoscitore da produzione, vedi sotto) | `DOING` |
+| `F2.7` | Identity and Voice (F2.7.1-F2.7.6 e adozione nel percorso reale affrontati: identificazione opt-in, memoria/cronologia/riferimenti/conferme isolati per il singolo turno, tetto permessi solo restrittivo; firma grossolana non biometrica da produzione; prove hardware ancora richieste - 23/09/2026) | `VERIFY` |
 | `F3.1` | Computer Use Quality (F3.1.1/F3.1.2/F3.1.3/F3.1.4/F3.1.6 chiusi; resta F3.1.5 DPI/multi-monitor - riga aggiornata il 21/09/2026, era stantia) | `DOING` |
 | `F3.2` | Windows Automation (F3.2.1/F3.2.3/F3.2.6/F3.2.7 e, il 21/09/2026, F3.2.2 cache, F3.2.4 eventi, F3.2.5 finestre elevate; resta il criterio "cinque app reali" e il collegamento della cache all'engine) | `DOING` |
 | `F3.3` | Windows Automation (F3.3.1-F3.3.4/F3.3.7 chiusi, F3.3.5 con `SelectorStore` il 21/09/2026; resta F3.3.6 inspector HUD) | `DOING` |
@@ -4977,6 +4977,20 @@ Criterio di uscita: nessuna contaminazione di memoria o permesso tra profili nei
   codice precedente prima della correzione; smoke test verde. Prova: 17 test in
   `tests/test_push_to_talk.py`.
 
+- `F2.7` (adozione, seconda fetta - isolamento reale nel percorso `JakeCore`) — 23/09/2026:
+  `MemoryManager.switch_database()` mantiene la stessa istanza condivisa da skill, workflow,
+  trigger e contatti, ma apre e valida il nuovo database prima di chiudere quello corrente.
+  `ConversationStateManager.swap_state()` fa lo stesso per cronologia breve, entita', risultati
+  recenti e conferme pendenti. Lo switch vale per il SOLO turno riconosciuto: un lock serializza
+  anche richieste testuali/companion concorrenti e un `finally` ripristina sempre database e stato
+  predefiniti, anche su eccezione. Questo corregge il difetto del primo tentativo incompleto, che
+  lasciava globalmente attivo l'ultimo profilo vocale. Il tetto di rischio viene applicato prima
+  della policy globale e puo' soltanto bloccare, mai autorizzare. Test reali verificano due profili
+  distinti, ripristino del default, profilo inesistente fail-closed, tetto di rischio, scambio
+  completo dello stato e collaboratori con riferimento fisso. L'opzione
+  `multi_user_profiles_enabled` resta `false` per default. Qualita' della firma e arruolamento su
+  voci vere restano prove hardware, non vengono dichiarati risolti da segnali sintetici.
+
 ### Passo di integrazione F2 (in corso)
 
 I moduli F2.1-F2.7 nascono come librerie testate con finti. Il collegamento al percorso vocale di produzione
@@ -5063,7 +5077,7 @@ I moduli F2.1-F2.7 nascono come librerie testate con finti. Il collegamento al p
   per intero - vedi il Gate F2 sotto.
 - **Da fare**: `profiles` resta scollegato da `JakeCore` (l'isolamento vero di memoria/cronologia per profilo
   richiede prima che `MemoryManager` sappia ripuntare la propria connessione SQLite in modo sicuro, verificato
-  ancora da fare metodo per metodo - vedi la voce F2.7 sopra); `dialogue`/`language_normalizer` restano scollegati
+  ora isolati per il singolo turno - vedi la voce F2.7 sopra); `dialogue`/`language_normalizer` restano scollegati
   da `JakeCore` (`JakeCore` gestisce da se' azioni in sospeso e `CORRECT_LAST`, mai la correzione/ellissi/ordinali
   della libreria, oltre a `needs_confirmation` gia' collegato - vedi F2.6.6); le prove su hardware vero.
 
@@ -5076,6 +5090,10 @@ I moduli F2.1-F2.7 nascono come librerie testate con finti. Il collegamento al p
 - accessibilità via sottotitoli e testo equivalente.
 
 Stato al 22/09/2026 (onesto, criterio per criterio - riga sui sottotitoli corretta e poi chiusa lo stesso giorno):
+
+Procedura fisica di chiusura aggiunta il 23/09/2026: `docs/f2-hardware-validation.md`, con tre
+profili obbligatori, almeno 20+20 prove per profilo, soglie 95%/300 ms, sessione wake di 24 ore,
+formato del report locale e cancellazione dell'audio grezzo.
 
 | Criterio | Stato |
 |---|---|
@@ -5092,10 +5110,9 @@ dalla misura su hardware fisico che questo ambiente non ha - il codice/gli algor
 entrambi esistono gia' e sono testati su segnali simulati, non c'e' altro lavoro software rimasto per questi
 due criteri. Restano DICHIARATI aperti, separatamente dal gate (non ne fanno parte in senso letterale, ma
 fanno parte dell'output piu' ampio di F2, "conversazione... correggibile"): il collegamento di
-dialogo/correzione (F2.6 oltre F2.6.6) e l'isolamento vero di memoria/cronologia per profilo (F2.7 oltre la
-prima fetta) a `JakeCore` - entrambi deliberatamente non affrettati (vedi le voci datate 22/09/2026 in
-F2.6/F2.7: toccano la macchina a stati di conferma o la memoria persistente piu' sensibili del progetto), non
-bloccati da hardware ma da un rischio architetturale reale che merita un incremento dedicato a se'.
+dialogo/correzione (F2.6 oltre F2.6.6) a `JakeCore` resta deliberatamente non affrettato (tocca la
+macchina a stati di conferma piu' sensibile del progetto), non bloccato da hardware e non parte del
+Gate F2 letterale. L'isolamento vero F2.7 e' invece adottato nel percorso reale dal 23/09/2026.
 
 ## 9. F3 — Computer Use Engine 3.0
 
