@@ -18,7 +18,7 @@ from core.session_recorder import SessionRecorder
 from core.skill_result import SkillResult
 from core.task_risk_budget import TaskRiskBudget
 from core.undo_store import UndoStore, generate_undo_descriptor
-
+from core.turn_cancellation import current_turn_cancelled
 
 @dataclass
 class StepOutcome:
@@ -138,6 +138,27 @@ class PlanExecutor:
             # core/policy_engine.py sul perche' un piano automatico non puo' mai arrivare gia'
             # "confirmed"/"authenticated".
             safe_parameters = strip_authorization_signals(step.parameters)
+            if current_turn_cancelled():
+                outcome.stopped_step = StepOutcome(
+                    step=step,
+                    result=SkillResult(
+                        success=False,
+                        data={},
+                        error="CANCELLED",
+                    ),
+                    attempts=0,
+                )
+
+                if not dry_run:
+                    outcome.rolled_back = self._rollback(
+                        outcome.completed,
+                        policy_engine,
+                        trace_id=trace_id,
+                        requested_by=requested_by,
+                        private=private,
+                    )
+
+                return outcome
             if self.kill_switch.is_active():
                 # F1: controllato SOLO tra un passo e il successivo (vedi core/kill_switch.py).
                 outcome.stopped_step = StepOutcome(

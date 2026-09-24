@@ -157,6 +157,22 @@ class CorrectionPlannerTests(unittest.TestCase):
         params["app"] = "cambiato"
         self.assertEqual(self.p.last_heard()[0].parameters, {"app": "spotify"})
 
+    def test_completed_read_only_action_can_be_rerun_without_undo(self):
+            self.p.record(
+                "u-read",
+                "che ore sono",
+                "GET_TIME",
+                {},
+                RiskLevel.READ_ONLY,
+                "executed",
+                reversible=False,
+            )
+    
+            self.assertEqual(
+                self.p.plan("u-read").action,
+                "rerun",
+            )
+
 
 class LearningGateTests(unittest.TestCase):
     def setUp(self):

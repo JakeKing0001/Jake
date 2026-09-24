@@ -11,10 +11,15 @@ promessa e potendo far propagare un errore non gestito fino a JakeCore."""
 import json
 import tempfile
 import unittest
+import threading
+import time
 from pathlib import Path
 from unittest import mock
 from urllib import error
-
+from core.turn_cancellation import (
+    reset_current_turn_cancel_event,
+    set_current_turn_cancel_event,
+)
 from core.vision_provider import VisionProvider
 
 
@@ -28,7 +33,6 @@ def _fake_response(body_bytes: bytes) -> mock.MagicMock:
 
 def _fake_json_response(payload) -> mock.MagicMock:
     return _fake_response(json.dumps(payload).encode("utf-8"))
-
 
 class _WithImageFile(unittest.TestCase):
     def setUp(self):
@@ -129,6 +133,65 @@ class DescribeDegradesGracefullyTests(_WithImageFile):
         ):
             self.assertIsNone(provider.describe(self.image_path))
 
+
+class DescribeCancellationTests(_WithImageFile):
+    def test_cancellation_abandons_a_blocked_http_request_quickly(self):
+        provider = VisionProvider(timeout=60)
+
+        request_started = threading.Event()
+        release_request = threading.Event()
+        cancel_event = threading.Event()
+
+        def blocking_urlopen(*args, **kwargs):
+            request_started.set()
+
+            # Simula urlopen/Ollama bloccato.
+            release_request.wait(timeout=5)
+
+            return _fake_json_response(
+                {"message": {"content": "risposta tardiva"}}
+            )
+
+        token = set_current_turn_cancel_event(cancel_event)
+
+        def cancel_soon():
+            self.assertTrue(
+                request_started.wait(timeout=1)
+            )
+            cancel_event.set()
+
+        canceller = threading.Thread(
+            target=cancel_soon,
+            daemon=True,
+        )
+
+        try:
+            with mock.patch(
+                "urllib.request.urlopen",
+                side_effect=blocking_urlopen,
+            ):
+                canceller.start()
+
+                start = time.monotonic()
+
+                result = provider.describe(
+                    self.image_path
+                )
+
+                elapsed = time.monotonic() - start
+
+            self.assertIsNone(result)
+
+            # Polling attuale = 0.2 s. Lasciamo un margine
+            # generoso per CI/macchine lente.
+            self.assertLess(elapsed, 1.0)
+
+        finally:
+            cancel_event.set()
+            release_request.set()
+            canceller.join(timeout=1)
+
+            reset_current_turn_cancel_event(token)
 
 if __name__ == "__main__":
     unittest.main()

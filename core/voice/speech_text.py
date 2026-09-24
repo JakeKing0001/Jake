@@ -34,6 +34,15 @@ _UNDERSCORE_EMPHASIS = re.compile(r"(?<!\w)(__|_)(?=\S)(.+?)(?<=\S)\1(?!\w)")
 _INLINE_CODE = re.compile(r"`([^`\n]+)`")
 _HTML_TAG = re.compile(r"</?[a-zA-Z][^>]*>")
 _EMOJI = re.compile("[\U0001F300-\U0001FAFF☀-➿️‍]")
+_PRONUNCIATION_REPLACEMENTS = (
+    (re.compile(r"\bfile\b", re.IGNORECASE), "fàil"),
+)
+
+def normalize_pronunciation(text: str) -> str:
+    """Adatta solo il testo pronunciato, mai quello mostrato all'utente."""
+    for pattern, replacement in _PRONUNCIATION_REPLACEMENTS:
+        text = pattern.sub(replacement, text)
+    return text
 
 
 def clean_for_speech(text: str) -> str:
@@ -182,5 +191,11 @@ def prepare_for_speech(text: str, style: SpeechStyle = STYLES["normal"]) -> str:
     limitate dallo stile (`apply_style`), poi riunite in un unico testo. Il provider riceve UNA sola
     chiamata: quelli che gia' preparano la frase successiva mentre suona la precedente (Edge TTS)
     mantengono la loro fluidita', che una chiamata per unita' interromperebbe."""
-    units = apply_style(split_prosodic(clean_for_speech(text)), style)
+    cleaned = clean_for_speech(text)
+    spoken = normalize_pronunciation(cleaned)
+
+    units = apply_style(
+        split_prosodic(spoken),
+        style,
+    )
     return " ".join(units) if units else ""

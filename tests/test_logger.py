@@ -88,9 +88,36 @@ class LogActionTests(unittest.TestCase):
 
 
 class GetActionLoggerTests(unittest.TestCase):
+    def setUp(self):
+        # "jake.actions" e' un logger globale di processo.
+        # Altri test possono avergli collegato handler prima di arrivare qui:
+        # questo test deve verificare get_action_logger() in isolamento,
+        # senza dipendere dall'ordine della suite.
+        self.logger = logging.getLogger("jake.actions")
+
+        self.original_handlers = list(self.logger.handlers)
+        self.original_level = self.logger.level
+        self.original_propagate = self.logger.propagate
+
+        self.logger.handlers.clear()
+
+    def tearDown(self):
+        # Chiude solo gli handler creati durante QUESTO test.
+        for handler in list(self.logger.handlers):
+            self.logger.removeHandler(handler)
+
+            if handler not in self.original_handlers:
+                handler.close()
+
+        # Ripristina esattamente lo stato globale trovato prima del test.
+        self.logger.handlers.extend(self.original_handlers)
+        self.logger.setLevel(self.original_level)
+        self.logger.propagate = self.original_propagate
+
     def test_returns_the_same_configured_logger_on_repeated_calls(self):
         first = get_action_logger()
         second = get_action_logger()
+
         self.assertIs(first, second)
         self.assertEqual(len(first.handlers), 1)
 

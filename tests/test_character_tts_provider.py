@@ -89,6 +89,91 @@ class SpeakTests(unittest.TestCase):
             provider.speak("ciao")
         play.assert_not_called()
 
+    def test_a_long_response_is_converted_in_multiple_chunks(self):
+        provider, base, server_manager = _provider()
+        server_manager.ensure_running.return_value = True
+        server_manager.client.convert.return_value = b"AUDIO"
+
+        provider._speech_chunks = mock.Mock(
+            return_value=[
+                "Questa e' la prima frase.",
+                "Questa e' la seconda frase.",
+                "Questa e' la terza frase.",
+            ]
+        )
+
+        with mock.patch.object(provider, "_play") as play:
+            provider.speak("Una risposta lunga qualsiasi.")
+
+        self.assertEqual(server_manager.client.convert.call_count, 3)
+        self.assertEqual(play.call_count, 3)
+        base.speak.assert_not_called()
+
+    def test_prewarm_runs_one_discarded_conversion(self):
+        provider, base, server_manager = _provider()
+        server_manager.ensure_running.return_value = True
+        server_manager.client.convert.return_value = b"AUDIO"
+
+        provider.prewarm()
+
+        provider._prewarm_future.result(timeout=2)
+
+        server_manager.client.convert.assert_called_once()
+        base.speak.assert_not_called()
+
+    def test_an_interruption_between_chunks_stops_the_rest(self):
+        provider, base, server_manager = _provider()
+        server_manager.ensure_running.return_value = True
+        server_manager.client.convert.return_value = b"AUDIO"
+        provider.MAX_CHUNK_CHARS = 30
+
+        def play_then_stop(audio):
+            provider._interrupted = True
+
+        with mock.patch.object(provider, "_play", side_effect=play_then_stop) as play:
+            provider.speak(
+                "Prima frase da pronunciare. "
+                "Seconda frase che non deve essere pronunciata."
+            )
+
+        self.assertEqual(play.call_count, 1)
+
+    def test_next_chunk_is_prepared_before_current_playback_finishes(self):
+        provider, base, server_manager = _provider()
+        server_manager.ensure_running.return_value = True
+        server_manager.client.convert.return_value = b"AUDIO"
+
+        provider._speech_chunks = mock.Mock(
+            return_value=[
+                "Prima frase abbastanza lunga.",
+                "Seconda frase abbastanza lunga.",
+            ]
+        )
+
+        states = []
+
+        original_submit = provider._executor.submit
+
+        def submit(fn, *args, **kwargs):
+            states.append(("submit", args[0]))
+            return original_submit(fn, *args, **kwargs)
+
+        provider._executor.submit = submit
+
+        with mock.patch.object(provider, "_play") as play:
+            provider.speak(
+                "Prima frase abbastanza lunga. "
+                "Seconda frase abbastanza lunga."
+            )
+
+        self.assertEqual(play.call_count, 2)
+
+        # Primo chunk + prefetch del secondo.
+        self.assertEqual(
+            server_manager.client.convert.call_count,
+            2,
+        )
+
 
 class SynthesizeToBytesTests(unittest.TestCase):
     def test_the_temporary_file_is_cleaned_up_afterwards(self):

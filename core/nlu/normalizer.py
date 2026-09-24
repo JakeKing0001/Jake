@@ -10,6 +10,9 @@ import re
 from typing import Callable, Match
 from difflib import SequenceMatcher
 from pathlib import Path
+from core.voice.language_normalizer import (
+    join_spoken_acronyms,
+)
 
 LEARNED_VOCABULARY_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "learned_vocabulary.json"
 
@@ -153,6 +156,11 @@ class TranscriptNormalizer:
         if not text:
             return ""
         result = text.strip().lower()
+        # F2.6.5:
+        # "g p t" -> "gpt", "u s b" -> "usb".
+        # Il risultato torna lowercase perché l'intera pipeline
+        # NLU di Jake usa testo normalizzato minuscolo.
+        result = join_spoken_acronyms(result).lower()
         result = result.replace("’", "'").replace("`", "'")
         result = re.sub(r"\s+", " ", result)
         # punteggiatura finale (Whisper chiude quasi ogni frase con un punto)

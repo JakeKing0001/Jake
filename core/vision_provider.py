@@ -1,8 +1,13 @@
 import base64
 import json
+import queue
+import threading
 from pathlib import Path
 from urllib import error, request
 from core.ollama_client import DEFAULT_BASE_URL
+from core.turn_cancellation import (
+    current_turn_cancel_event,
+)
 
 DEFAULT_PROMPT = (
     "Descrivi in italiano, in modo conciso, cosa vedi in questa schermata: layout, "
@@ -44,10 +49,68 @@ class VisionProvider:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
+        cancel_event = current_turn_cancel_event()
+        if cancel_event is not None and cancel_event.is_set():
+            return None
+        def do_request():
+            with request.urlopen(
+                http_request,
+                timeout=self.timeout,
+            ) as response:
+                return response.read()
+
+
+        # Fuori da un turno cancellabile preserviamo il percorso semplice.
+        if cancel_event is None:
+            try:
+                raw_response = do_request()
+            except (error.URLError, TimeoutError):
+                return None
+
+        else:
+            result_queue = queue.Queue(maxsize=1)
+
+            def request_worker():
+                try:
+                    value = ("ok", do_request())
+                except (error.URLError, TimeoutError) as exc:
+                    value = ("error", exc)
+
+                try:
+                    result_queue.put_nowait(value)
+                except queue.Full:
+                    pass
+
+            threading.Thread(
+                target=request_worker,
+                name="jake-vision-http",
+                daemon=True,
+            ).start()
+
+            while True:
+                try:
+                    kind, value = result_queue.get(
+                        timeout=0.2
+                    )
+                except queue.Empty:
+                    if cancel_event.is_set():
+                        return None
+                    continue
+
+                if cancel_event.is_set():
+                    return None
+
+                if kind == "error":
+                    return None
+
+                raw_response = value
+                break
+
         try:
-            with request.urlopen(http_request, timeout=self.timeout) as response:
-                result = json.loads(response.read().decode("utf-8"))
-        except (error.URLError, TimeoutError, json.JSONDecodeError):
+            result = json.loads(
+                raw_response.decode("utf-8")
+            )
+        except json.JSONDecodeError:
             return None
 
         # Riprodotto per davvero: un corpo JSON valido ma non nella forma attesa (es. Ollama

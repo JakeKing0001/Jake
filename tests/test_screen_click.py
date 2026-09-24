@@ -2,9 +2,17 @@
 il ComputerAgent (v3.7, Computer Use Engine: vedi tests/test_computer_agent.py per il controller
 stesso). Nessun vero mouse/schermo."""
 import unittest
-
+import threading
+from core.turn_cancellation import (
+    reset_current_turn_cancel_event,
+    set_current_turn_cancel_event,
+)
+from skills.screen_click import (
+    ClickElementSkill,
+    ClickTextSkill,
+    find_text_on_screen,
+)
 from core.computer_agent import ComputerActionResult
-from skills.screen_click import ClickTextSkill, find_text_on_screen
 
 WORDS = [
     {"text": "Accedi", "line": 0, "x": 100, "y": 200, "w": 60, "h": 20},
@@ -13,6 +21,38 @@ WORDS = [
     {"text": "nome", "line": 1, "x": 100, "y": 240, "w": 45, "h": 20},
 ]
 
+
+class ClickElementCancellationTests(unittest.TestCase):
+    def test_cancelled_turn_never_performs_the_final_click(self):
+        cancel_event = threading.Event()
+        cancel_event.set()
+
+        token = set_current_turn_cancel_event(
+            cancel_event
+        )
+
+        agent = FakeComputerAgent()
+
+        try:
+            skill = ClickElementSkill(
+                vision_provider=object(),
+                computer_agent=agent,
+            )
+
+            result = skill._click(
+                400,
+                300,
+                "pulsante radice quadrata",
+            )
+
+        finally:
+            reset_current_turn_cancel_event(token)
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "CANCELLED")
+
+        # Questa e' la proprietà di sicurezza fondamentale.
+        self.assertEqual(agent.click_calls, [])
 
 class FindTextOnScreenTests(unittest.TestCase):
     def test_exact_single_word_match(self):
