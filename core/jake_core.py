@@ -50,7 +50,14 @@ from core.request_context import (
 from core.taint import wrap_external_content
 from core.response_formatter import format_plan_outcome, format_skill_result
 from core.risk import risk_of
-from core.voice.dialogue import needs_confirmation
+from core.voice.dialogue import (
+    DialogueContext,
+    ReplyKind,
+    classify_reply,
+    needs_confirmation,
+)
+from core.voice.dialogue_runtime import DialogueRuntime
+from core.voice.language_normalizer import resolve_ellipsis, resolve_ordinals
 from core.router import Router
 from core.scheduler import ReminderScheduler
 from core.schema_validation import validate_confirm_envelope
@@ -95,6 +102,8 @@ def _parse_quiet_hours(start: str | None, end: str | None) -> QuietHours | None:
 class JakeCore:
     EXIT_SENTINEL = "l'utente vuole uscire"
     NO_PLAN = "Non so ancora fare questa cosa"
+
+    _NOT_A_FAILURE = {"success", "confirmation_required", "auth_required"}
 
     def __init__(self):
         self.logger = get_logger()
@@ -569,6 +578,8 @@ class JakeCore:
             len(self.example_store.learned()), "attivi" if self.retriever.using_embeddings() else "NON disponibili (fallback lessicale)",
         )
 
+        self.dialogue_runtime = DialogueRuntime()
+
         self.last_exchange = None  # {"text", "command", "response"}
         self.last_response = None
         self.last_route = None
@@ -786,38 +797,107 @@ class JakeCore:
     # ---- API pubblica --------------------------------------------------------------------
 
     def answer(self, text: str) -> str:
-        raw_text = text or ""
-        text = self.normalizer.normalize(raw_text)
-        if not text:
-            return "Non ho sentito nulla."
-        profile_manager = getattr(self, "profile_manager", None)
-        if profile_manager is None:
-            return self._answer_counted(text, raw_text)
+        return self._run_in_current_profile(lambda: self._answer_in_profile(text or ""))
 
-        # F2.7: il profilo vale soltanto per questo turno. Anche i turni senza profilo prendono
-        # il lock, così un comando companion non può correre mentre memoria e cronologia condivise
-        # sono temporaneamente ripuntate su una voce riconosciuta.
+    def _answer_in_profile(self, raw_text: str) -> str:
+
+        # F2.6.4:
+        # una passphrase NON deve attraversare normalizzatore, NLU, memoria,
+        # cronologia, EventBus o logger.
+        pending = self.conversation_state.get_pending_action()
+
+        if pending is not None and pending.get("reason") == "auth_required":
+            return self._answer_auth_turn(raw_text)
+
+        normalized = self.normalizer.normalize(raw_text)
+
+        if not normalized:
+            return "Non ho sentito nulla."
+
+        return self._answer_counted(normalized, raw_text)
+
+
+    def _run_in_current_profile(self, callback):
+        """
+        Esegue callback nello spazio memoria/conversazione del profilo vocale
+        corrente, quando F2.7 multiutente è attivo.
+        """
+        profile_manager = getattr(self, "profile_manager", None)
+
+        if profile_manager is None:
+            return callback()
+
         with self._profile_turn_lock:
             profile_id = current_speaker_profile_id()
+
             if profile_id is None:
-                return self._answer_counted(text, raw_text)
+                return callback()
+
             try:
                 namespace = profile_manager.namespace(profile_id)
             except ProfileError:
-                return self._answer_counted(text, raw_text)
+                return callback()
 
             default_db_path = self.memory_manager.db_path
+
             self.memory_manager.switch_database(namespace.memory_db_path)
             self.conversation_state.swap_state(namespace.conversation)
             self._active_profile_namespace = namespace
+
             try:
-                return self._answer_counted(text, raw_text)
+                return callback()
             finally:
-                # Ripristino in ordine inverso anche quando il turno solleva: nessun profilo può
-                # contaminare il comando seguente o un altro canale.
                 self.conversation_state.swap_state(namespace.conversation)
                 self.memory_manager.switch_database(default_db_path)
                 self._active_profile_namespace = None
+
+
+    def _answer_auth_turn(self, raw_secret: str) -> str:
+        """
+        Percorso speciale per un segreto di autenticazione.
+
+        Il segreto:
+        - non viene normalizzato;
+        - non finisce in conversation_state;
+        - non finisce in MemoryManager;
+        - non viene pubblicato come USER_MESSAGE;
+        - non viene loggato.
+        """
+        with self._in_flight_lock:
+            self._in_flight_answers += 1
+
+        try:
+            action = self.conversation_state.take_pending_action()
+
+            if action is None:
+                return "Non c'è più nessuna autenticazione in attesa."
+
+            # Difesa da una race: non trattare mai come password una pending
+            # che nel frattempo è diventata qualcos'altro.
+            if action.get("reason") != "auth_required":
+                self.conversation_state.set_pending_action(action)
+                return "La richiesta in attesa è cambiata. Ripeti il comando."
+
+            response = self._handle_auth_secret(raw_secret, action)
+
+            if response and response != self.EXIT_SENTINEL:
+                self.last_response = response
+
+                # Pubblica solo la risposta di Jake.
+                # MAI il segreto dell'utente.
+                if not self.private_mode:
+                    self.event_bus.publish(
+                        HudEvent(
+                            EventType.JAKE_MESSAGE,
+                            {"text": response},
+                        )
+                    )
+
+            return response
+
+        finally:
+            with self._in_flight_lock:
+                self._in_flight_answers -= 1
 
     def _answer_counted(self, text: str, raw_text: str) -> str:
         # F1.8.4 ("drain limitato"): conta questa chiamata come "in corso" da qui a return -
@@ -900,79 +980,583 @@ class JakeCore:
         values = ", ".join(f"{k}: {v}" for k, v in parameters.items() if v not in (None, "", False))
         return f"{description[0].lower() + description[1:]}" + (f" ({values})" if values else "")
 
+    def _get_dialogue_runtime(self) -> DialogueRuntime:
+        """Keep dialogue state available on cores constructed without __init__."""
+        runtime = getattr(self, "dialogue_runtime", None)
+        if runtime is None:
+            runtime = DialogueRuntime()
+            self.dialogue_runtime = runtime
+        return runtime
+
+    def _dialogue_scope(self) -> str:
+        """
+        Scope conversazionale per F2.6.
+
+        Un profilo vocale riconosciuto ha priorità sul dispositivo.
+        """
+        profile_id = current_speaker_profile_id()
+
+        if profile_id:
+            return f"profile:{profile_id}"
+
+        device_id = current_device_id()
+
+        if device_id:
+            return f"device:{device_id}"
+
+        return "local"
+
+
+    def _set_dialogue_outcome(
+        self,
+        *,
+        action_id: str,
+        text: str,
+        command: Command,
+        status: str,
+        reversible: bool = False,
+        scope: str | None = None,
+    ) -> None:
+        # CORRECT_LAST è un meta-comando.
+        # Il vero turno corretto viene registrato separatamente.
+        if command.intent == "CORRECT_LAST":
+            return
+
+        effective_scope = scope or self._dialogue_scope()
+
+        existing = self._get_dialogue_runtime().turn(action_id)
+
+        if existing is None:
+            self._get_dialogue_runtime().record_turn(
+                scope=effective_scope,
+                action_id=action_id,
+                heard=text,
+                intent=command.intent,
+                parameters=command.parameters or {},
+                risk=risk_of(command.intent),
+                status=status,
+                reversible=reversible,
+            )
+            return
+
+        self._get_dialogue_runtime().update_turn(
+            action_id,
+            status=status,
+            reversible=reversible,
+        )
+
+
+    def _cancel_dialogue_action(self, action: dict) -> None:
+        action_id = action.get("action_id")
+
+        if not action_id:
+            return
+
+        self._get_dialogue_runtime().update_turn(
+            action_id,
+            status="cancelled",
+        )
+
+        self._finish_correction_learning(
+            action_id,
+            verified=False,
+        )
+
+
+    def _finish_correction_learning(
+        self,
+        action_id: str,
+        *,
+        verified: bool,
+    ) -> None:
+        source_turn, learnable = (
+            self._get_dialogue_runtime().finish_correction_learning(
+                action_id,
+                verified=verified,
+            )
+        )
+
+        if source_turn is None or learnable is None:
+            return
+
+        previous_command = Command(
+            source_turn.intent,
+            dict(source_turn.parameters),
+        )
+
+        corrected_command = Command(
+            learnable.intent,
+            dict(learnable.parameters),
+        )
+
+        self.learning.correct(
+            learnable.heard,
+            previous_command,
+            corrected_command,
+        )
+
+        self.logger.info(
+            "Correzione verificata: %r -> %s %s",
+            learnable.heard,
+            corrected_command.intent,
+            corrected_command.parameters,
+        )
+
+
+    def _execute_corrected_command(
+        self,
+        source_action_id: str,
+        corrected_text: str,
+        command: Command,
+    ) -> str:
+        corrected_action_id = new_action_id()
+
+        source_turn = self._get_dialogue_runtime().turn(source_action_id)
+
+        # Conserva la protezione già esistente:
+        # una frase totalmente diversa non deve insegnare una falsa associazione.
+        related = False
+
+        if source_turn is not None:
+            related = (
+                lexical_similarity(
+                    source_turn.heard,
+                    corrected_text,
+                ) >= 0.25
+                or source_turn.intent
+                in ("UNKNOWN", "CHITCHAT", "ASK_QUESTION")
+            )
+
+        if related:
+            self._get_dialogue_runtime().begin_correction_learning(
+                source_action_id=source_action_id,
+                execution_action_id=corrected_action_id,
+                corrected_text=corrected_text,
+                intent=command.intent,
+                parameters=command.parameters or {},
+            )
+
+        return self._execute_command(
+            corrected_text,
+            command,
+            learn=False,
+            action_id=corrected_action_id,
+        )
+
+
+    def _what_did_you_hear(self) -> str:
+        turn = self._get_dialogue_runtime().last_turn(
+            self._dialogue_scope()
+        )
+
+        if turn is None:
+            return "Non ho ancora un comando precedente da riportarti."
+
+        return f'Ho sentito: "{turn.heard}".'
+
+    def _get_dialogue_runtime(self) -> DialogueRuntime:
+        """Restituisce il runtime F2.6, creandolo lazy se necessario.
+
+        Serve anche ai JakeCore minimali dei test, costruiti con
+        JakeCore.__new__() senza passare da __init__().
+        """
+        runtime = getattr(self, "dialogue_runtime", None)
+
+        if runtime is None:
+            runtime = DialogueRuntime()
+            self.dialogue_runtime = runtime
+
+        return runtime
+
+
+    def _try_ordinal_reference(self, text: str) -> str | None:
+        """
+        F2.6.1:
+        'apri il primo e il terzo' sui risultati dell'ultima ricerca.
+        """
+        first_word = (
+            text.split(maxsplit=1)[0]
+            if text.strip()
+            else ""
+        )
+
+        if first_word not in {
+            "apri",
+            "aprimi",
+            "mostra",
+            "mostrami",
+        }:
+            return None
+
+        results = self.conversation_state.get_last_search_results()
+
+        if not results:
+            return None
+
+        indexes = resolve_ordinals(
+            text,
+            len(results),
+        )
+
+        if indexes is None:
+            return None
+
+        responses: list[str] = []
+
+        for index in indexes:
+            response = self._execute_command(
+                text,
+                Command(
+                    "OPEN_SEARCH_RESULT",
+                    {"index": index + 1},
+                ),
+                learn=False,
+            )
+
+            responses.append(response)
+
+        return "\n".join(
+            response
+            for response in responses
+            if response
+        )
+
     def apply_correction(self, request: str) -> str:
-        """'No, intendevo X': esegue X e impara ad associare la frase precedente a X."""
-        previous = self.last_exchange
-        text = self.normalizer.normalize(request)
-        text = self._resolve_pronouns(text)
-        command = self.router.detect_intent(text)
+        """
+        F2.6.3/F2.6.7.
+
+        La correzione NON viene più eseguita alla cieca.
+
+        Possibili casi:
+        - niente eseguito -> rerun;
+        - READ_ONLY -> rerun;
+        - locale reversibile -> undo + rerun;
+        - esterna/distruttiva/admin/non reversibile -> chiedi.
+        """
+        scope = self._dialogue_scope()
+        runtime = self._get_dialogue_runtime()
+
+        # Compatibilità con sessioni/test creati prima dell'introduzione
+        # del DialogueRuntime: importa lazy l'ultimo exchange se il runtime
+        # non ne conosce ancora nessuno.
+        if runtime.last_turn(scope) is None:
+            previous = getattr(self, "last_exchange", None)
+
+            if previous and previous.get("text"):
+                previous_command = previous.get("command")
+
+                if previous_command is None:
+                    previous_command = Command("UNKNOWN", {})
+
+                previous_action_id = (
+                    previous.get("action_id")
+                    or new_action_id()
+                )
+
+                previous_intent = previous_command.intent
+
+                # Un vecchio UNKNOWN non rappresenta un side effect già avvenuto:
+                # Jake non aveva capito/eseguito il comando, quindi una correzione
+                # può essere eseguita normalmente.
+                if previous_intent == "UNKNOWN":
+                    previous_status = "failed"
+                else:
+                    previous_status = "executed"
+
+                runtime.record_turn(
+                    scope=scope,
+                    action_id=previous_action_id,
+                    heard=previous["text"],
+                    intent=previous_intent,
+                    parameters=previous_command.parameters or {},
+                    risk=risk_of(previous_intent),
+                    status=previous_status,
+                    reversible=False,
+)
+
+                # Migra anche last_exchange alla nuova forma.
+                previous["action_id"] = previous_action_id
+
+        (
+            source_action_id,
+            plan,
+            source_turn,
+        ) = runtime.plan_correction(scope)
+
+        if source_action_id is not None and plan.action == "unknown":
+            return (
+                "Non ho un comando precedente sicuro da "
+                "correggere. Ripeti direttamente la richiesta."
+            )
+
+        if source_turn is not None and plan.action == "ask":
+            return (
+                "Il comando precedente è già stato eseguito "
+                f"ed era un'azione {source_turn.risk.value}. "
+                "Non la ripeto e non provo ad annullarla "
+                "automaticamente. Dimmi esplicitamente cosa "
+                "vuoi fare adesso."
+            )
+
+        corrected_text = self.normalizer.normalize(
+            request
+        )
+
+        corrected_text = self._resolve_pronouns(
+            corrected_text
+        )
+
+        if not corrected_text:
+            return "Dimmi cosa intendevi."
+
+        command = self.router.detect_intent(
+            corrected_text
+        )
+
         if command.intent == "UNKNOWN":
-            agent_response = self._run_agent(text)
+            # Anche il fallback agente puo' eseguire azioni: non deve saltare l'undo.
+            if source_turn is not None and plan.action != "rerun":
+                return "Non ho capito nemmeno la correzione: prova a dirlo in un altro modo."
+            agent_response = self._run_agent(
+                corrected_text
+            )
+
             if agent_response != self.NO_PLAN:
                 return agent_response
-            return "Non ho capito nemmeno la correzione: prova a dirlo in un altro modo."
-        response = self._execute_command(text, command, learn=False)
-        if previous and previous.get("text") and previous["text"] != text:
-            previous_command = previous.get("command")
-            previous_intent = previous_command.intent if previous_command is not None else "UNKNOWN"
-            # Impara solo se la correzione riguarda davvero la frase precedente: stesse parole
-            # chiave, oppure Jake non aveva capito nulla. "apri X" seguito da "no, intendevo che
-            # ore sono" non deve insegnare che "apri X" significa chiedere l'ora.
-            related = lexical_similarity(previous["text"], text) >= 0.25 or previous_intent in ("UNKNOWN", "CHITCHAT", "ASK_QUESTION")
-            if related:
-                self.learning.correct(previous["text"], previous_command, command)
-                self.logger.info("Correzione: %r -> %s %s", previous["text"], command.intent, command.parameters)
-        return response
+
+            return (
+                "Non ho capito nemmeno la correzione: "
+                "prova a dirlo in un altro modo."
+            )
+
+        if (
+            source_action_id is None
+            or source_turn is None
+            or plan.action == "unknown"
+        ):
+            corrected_text = self.normalizer.normalize(request)
+            corrected_text = self._resolve_pronouns(corrected_text)
+
+            command = self.router.detect_intent(corrected_text)
+
+            if command.intent == "UNKNOWN":
+                agent_response = self._run_agent(corrected_text)
+
+                if agent_response != self.NO_PLAN:
+                    return agent_response
+
+                return (
+                    "Non ho capito nemmeno la correzione: "
+                    "prova a dirlo in un altro modo."
+                )
+
+            # Non c'è un turno precedente da correggere:
+            # esegui normalmente, ma ovviamente non imparare
+            # alcuna associazione vecchio -> nuovo.
+            return self._execute_command(
+                corrected_text,
+                command,
+                learn=False,
+            )
+
+        if plan.action == "rerun":
+            return self._execute_corrected_command(
+                source_action_id,
+                corrected_text,
+                command,
+            )
+
+        if plan.action == "undo_then_rerun":
+            descriptor = self.undo_store.get(
+                source_action_id
+            )
+
+            if descriptor is None:
+                return (
+                    "L'azione precedente risulta reversibile, "
+                    "ma il suo undo non è più disponibile. "
+                    "Non eseguo automaticamente la correzione."
+                )
+
+            undo_action_id = new_action_id()
+
+            self.conversation_state.set_pending_action(
+                {
+                    "intent": (
+                        descriptor.compensating_intent
+                    ),
+                    "parameters": dict(
+                        descriptor.compensating_parameters
+                    ),
+                    "reason": "correction_undo",
+
+                    "text": source_turn.heard,
+
+                    "trace_id": new_trace_id(),
+                    "action_id": undo_action_id,
+                    "dialogue_scope": scope,
+
+                    "undo_source_action_id": (
+                        source_action_id
+                    ),
+
+                    "correction_after": {
+                        "source_action_id": (
+                            source_action_id
+                        ),
+                        "corrected_text": (
+                            corrected_text
+                        ),
+                        "intent": command.intent,
+                        "parameters": dict(
+                            command.parameters or {}
+                        ),
+                    },
+                }
+            )
+
+            return (
+                "Ho già eseguito il comando precedente. "
+                "Posso annullarlo e, solo se l'annullamento "
+                "riesce, eseguire la versione corretta. "
+                "Confermi?"
+            )
+
+        # ask
+        return (
+            "Il comando precedente è già stato eseguito "
+            f"ed era un'azione {source_turn.risk.value}. "
+            "Non la ripeto e non provo ad annullarla "
+            "automaticamente. Dimmi esplicitamente cosa "
+            "vuoi fare adesso."
+        )
 
     # ---- pipeline ------------------------------------------------------------------------
 
     def _process(self, text: str) -> str:
-        # F1.8.1: take_pending_action() invece di has_pending_action() + _handle_confirmation()
-        # che la rilegge da sola - due chiamate concorrenti (voce + companion server, che gira
-        # su thread separati per richiesta) potevano altrimenti vedere ENTRAMBE la stessa azione
-        # ancora in sospeso ed eseguirla due volte. Vedi il docstring di
-        # core/conversation_state.py per la riproduzione del buco.
         pending_action = self.conversation_state.take_pending_action()
+
         if pending_action is not None:
-            return self._handle_confirmation(text, pending_action)
+            return self._handle_confirmation(
+                text,
+                pending_action,
+            )
 
         if intent_patterns.is_exit(text):
             return self.EXIT_SENTINEL
 
+        # F2.6.2
+        if intent_patterns.is_heard_query(text):
+            return self._what_did_you_hear()
+
         meta = self._match_meta_command(text)
+
         if meta is not None:
-            self.logger.info("Meta-comando: %s %s", meta.intent, meta.parameters)
-            return self._execute_command(text, meta, learn=False)
+            self.logger.info(
+                "Meta-comando: %s %s",
+                meta.intent,
+                meta.parameters,
+            )
 
-        # Un comando insegnato o corretto dall'utente vince su tutto (anche sulle frasi di
-        # cortesia: "prova jake" potrebbe sembrare un saluto, ma se l'utente lo ha insegnato...).
+            return self._execute_command(
+                text,
+                meta,
+                learn=False,
+            )
+
+        # F2.6.1 — ellissi
+        last_turn = self._get_dialogue_runtime().last_turn(
+            self._dialogue_scope()
+        )
+
+        if (
+            last_turn is not None
+            and last_turn.status == "executed"
+        ):
+            ellipsis = resolve_ellipsis(
+                text,
+                last_turn.intent,
+                last_turn.parameters,
+            )
+
+            if ellipsis is not None:
+                return self._execute_command(
+                    text,
+                    Command(
+                        ellipsis.intent,
+                        ellipsis.parameters,
+                    ),
+                )
+
+        # F2.6.1 — ordinali sui risultati recenti
+        ordinal_response = self._try_ordinal_reference(text)
+
+        if ordinal_response is not None:
+            return ordinal_response
+
         taught = self.example_store.find_exact(text)
-        if taught is not None and taught.source in ("taught", "corrected"):
-            self.last_route = "exact"
-            self.logger.info("Comando insegnato: %s %s", taught.intent, taught.parameters)
-            return self._execute_command(text, Command(taught.intent, dict(taught.parameters)), learn=False)
 
-        # Frasi di cortesia brevi: risposta immediata, nessuna chiamata al modello.
+        if (
+            taught is not None
+            and taught.source in ("taught", "corrected")
+        ):
+            self.last_route = "exact"
+
+            self.logger.info(
+                "Comando insegnato: %s %s",
+                taught.intent,
+                taught.parameters,
+            )
+
+            return self._execute_command(
+                text,
+                Command(
+                    taught.intent,
+                    dict(taught.parameters),
+                ),
+                learn=False,
+            )
+
         if len(text.split()) <= 4:
             quick = chitchat.reply(text)
+
             if quick is not None:
                 self.learning.commit_pending()
-                self._remember_exchange(text, Command("CHITCHAT", {"text": text}), quick)
+
+                self._remember_exchange(
+                    text,
+                    Command(
+                        "CHITCHAT",
+                        {"text": text},
+                    ),
+                    quick,
+                )
+
                 return quick
 
         if intent_patterns.is_multi_step_request(text):
             agent_response = self._run_agent(text)
+
             if agent_response != self.NO_PLAN:
                 return agent_response
-            # l'agente non e' riuscito a fare nulla di utile: ripiega sul routing normale
 
         command = self.router.detect_intent(text)
         self.last_route = self.router.last_route
-        self.logger.info("Instradamento: %s -> %s %s", self.last_route, command.intent, command.parameters)
+
+        self.logger.info(
+            "Instradamento: %s -> %s %s",
+            self.last_route,
+            command.intent,
+            command.parameters,
+        )
 
         if command.intent == "UNKNOWN":
             return self._handle_unknown(text)
-        return self._execute_command(text, command)
+
+        return self._execute_command(
+            text,
+            command,
+        )
 
     def _resolve_pronouns(self, text: str) -> str:
         return intent_patterns.resolve_pronouns(text, self.conversation_state.get_entities())
@@ -1266,91 +1850,278 @@ class JakeCore:
     def _match_meta_command(self, text: str) -> Command | None:
         return intent_patterns.match_meta_command(text, has_last_exchange=self.last_exchange is not None)
 
-    def _execute_command(self, text: str, command: Command, learn: bool = True) -> str:
+    def _execute_command(
+        self,
+        text: str,
+        command: Command,
+        learn: bool = True,
+        *,
+        action_id: str | None = None,
+    ) -> str:
         intent = command.intent
+        action_id = action_id or new_action_id()
+
         trace_id = new_trace_id()
         started = time.monotonic()
-        decision, policy_reason = self.policy_engine.decide_interactive_with_reason(intent, command.parameters)
-        if decision == PolicyDecision.BLOCK:
-            self.logger.warning("Azione bloccata da policy: %s", intent)
-            self._log_action_outcome(
-                trace_id, started, intent, command.parameters, result="blocked_by_policy", policy_reason=policy_reason,
+
+        scope = self._dialogue_scope()
+
+        decision, policy_reason = (
+            self.policy_engine.decide_interactive_with_reason(
+                intent,
+                command.parameters,
             )
-            return f"L'azione {intent} è disabilitata nella configurazione."
+        )
+
+        if decision == PolicyDecision.BLOCK:
+            self.logger.warning(
+                "Azione bloccata da policy: %s",
+                intent,
+            )
+
+            self._set_dialogue_outcome(
+                action_id=action_id,
+                text=text,
+                command=command,
+                status="failed",
+                scope=scope,
+            )
+
+            self._finish_correction_learning(
+                action_id,
+                verified=False,
+            )
+
+            self._log_action_outcome(
+                trace_id,
+                started,
+                intent,
+                command.parameters,
+                result="blocked_by_policy",
+                policy_reason=policy_reason,
+            )
+
+            return (
+                f"L'azione {intent} è disabilitata "
+                "nella configurazione."
+            )
 
         skill = self.skill_registry.get_skill(intent)
+
         if skill is None:
-            self._log_action_outcome(trace_id, started, intent, command.parameters, result="skill_not_found")
+            self._set_dialogue_outcome(
+                action_id=action_id,
+                text=text,
+                command=command,
+                status="failed",
+                scope=scope,
+            )
+
+            self._finish_correction_learning(
+                action_id,
+                verified=False,
+            )
+
+            self._log_action_outcome(
+                trace_id,
+                started,
+                intent,
+                command.parameters,
+                result="skill_not_found",
+            )
+
             return f"Skill non trovata per {intent}"
 
-        # F1.3.4 (adozione - prima fetta): generato PRIMA di eseguire, non solo dopo un successo
-        # come faceva finora l'action_id di correlazione ledger/undo qui sotto, cosi'
-        # SkillRegistry.execute() puo' etichettare con questo id uno snapshot di DELETE_PATH
-        # prima della cancellazione vera. Un'azione bloccata o non ancora confermata non
-        # raggiunge mai skill_registry.execute() (vedi _resolve_and_execute/_authorize_command),
-        # quindi generarlo comunque qui non ha alcun costo osservabile ne' cambia la ricevuta nel
-        # ledger sotto, che continua a ricevere un action_id solo per un successo, esattamente
-        # come prima di questo incremento.
-        action_id = new_action_id()
-        execution = self._resolve_and_execute(command, action_id=action_id)
-        resolved, result, note = execution.command, execution.result, execution.note
-        if result is not None and result.error in ("CONFIRMATION_REQUIRED", "AUTH_REQUIRED"):
-            reason = "auth_required" if result.error == "AUTH_REQUIRED" else "confirmation_required"
-            # F1: buco reale trovato e corretto in questa sessione - chiamava _safe_confirm_envelope
-            # con 3 argomenti posizionali (resolved, result, reason) invece dei 4 richiesti dalla
-            # firma (intent, parameters, result, reason), sollevando un TypeError non catturato qui
-            # ma solo dal try/except generico di answer(): OGNI comando diretto (non passato
-            # dall'agente) che richiedeva conferma o autenticazione falliva con un errore generico
-            # invece di chiedere "Confermi?" - introdotto nel commit df33e9c ("busta di conferma
-            # validata"), mai notato perche' nessun test chiamava _execute_command con un intent
-            # che produce CONFIRMATION_REQUIRED/AUTH_REQUIRED.
-            envelope = self._safe_confirm_envelope(resolved.intent, resolved.parameters, result, reason)
-            self.conversation_state.set_pending_action({
-                "intent": envelope.get("confirm_intent", resolved.intent),
-                "parameters": envelope.get("confirm_parameters", resolved.parameters),
-                "reason": reason,
-                "text": text,
-                "trace_id": trace_id,  # F1: la ricevuta della conferma si correla a questa
-                "policy_reason": execution.policy_reason if envelope.get("confirm_intent", resolved.intent) == resolved.intent else None,
-            })
-            self._remember_exchange(text, resolved, envelope.get("message", ""))
-            self._log_action_outcome(
-                trace_id, started, resolved.intent, resolved.parameters, result=reason, policy_reason=execution.policy_reason,
-            )
-            return envelope.get("message", "Confermi questa azione?")
+        execution = self._resolve_and_execute(
+            command,
+            action_id=action_id,
+        )
 
-        response = format_skill_result(resolved.intent, result, self.skill_registry)
+        resolved = execution.command
+        result = execution.result
+        note = execution.note
+
+        if (
+            result is not None
+            and result.error
+            in ("CONFIRMATION_REQUIRED", "AUTH_REQUIRED")
+        ):
+            reason = (
+                "auth_required"
+                if result.error == "AUTH_REQUIRED"
+                else "confirmation_required"
+            )
+
+            envelope = self._safe_confirm_envelope(
+                resolved.intent,
+                resolved.parameters,
+                result,
+                reason,
+            )
+
+            self.conversation_state.set_pending_action(
+                {
+                    "intent": envelope.get(
+                        "confirm_intent",
+                        resolved.intent,
+                    ),
+                    "parameters": envelope.get(
+                        "confirm_parameters",
+                        resolved.parameters,
+                    ),
+                    "reason": reason,
+                    "text": text,
+                    "trace_id": trace_id,
+                    "policy_reason": (
+                        execution.policy_reason
+                        if envelope.get(
+                            "confirm_intent",
+                            resolved.intent,
+                        )
+                        == resolved.intent
+                        else None
+                    ),
+
+                    # F2.6
+                    "action_id": action_id,
+                    "dialogue_scope": scope,
+                }
+            )
+
+            self._set_dialogue_outcome(
+                action_id=action_id,
+                text=text,
+                command=resolved,
+                status="pending",
+                reversible=False,
+                scope=scope,
+            )
+
+            if resolved.intent != "CORRECT_LAST":
+                self._remember_exchange(
+                    text,
+                    resolved,
+                    envelope.get("message", ""),
+                    action_id=action_id,
+                )
+
+            self._log_action_outcome(
+                trace_id,
+                started,
+                resolved.intent,
+                resolved.parameters,
+                result=reason,
+                policy_reason=execution.policy_reason,
+            )
+
+            return envelope.get(
+                "message",
+                "Confermi questa azione?",
+            )
+
+        response = format_skill_result(
+            resolved.intent,
+            result,
+            self.skill_registry,
+        )
+
         if note:
             response = f"{note} {response}"
+
+        undo_descriptor = None
         correlated_action_id = None
-        if result is not None and result.success:
-            self.conversation_state.remember_entities(resolved.intent, resolved.parameters, result.data or {})
-            # F1.5.2: segnala a answer() che QUESTA risposta puo' contenere contenuto esterno
-            # (core/request_context.py per il perche' - letto una volta li', non qui: un comando
-            # diretto e' l'unico percorso, mai l'agente ne' una conferma, che non passano da qui).
-            set_current_command_source_intent(resolved.intent)
-            # F1.3.5 (adozione - prima fetta): un'azione riuscita il cui intent ha un inverso
-            # naturale (core/execution_safety.py::UNDO_PARAMS_BY_INTENT) genera un vero
-            # UndoDescriptor - None per un intent senza inverso, mai inventato. Lo stesso
-            # action_id gia' generato sopra (prima di eseguire, per l'eventuale snapshot) correla
-            # anche qui la ricevuta nel ledger con il descrittore salvato in self.undo_store.
-            undo_descriptor = generate_undo_descriptor(action_id, resolved.intent, result.data or {})
+
+        success = bool(
+            result is not None
+            and result.success
+        )
+
+        if success:
+            self.conversation_state.remember_entities(
+                resolved.intent,
+                resolved.parameters,
+                result.data or {},
+            )
+
+            set_current_command_source_intent(
+                resolved.intent
+            )
+
+            undo_descriptor = generate_undo_descriptor(
+                action_id,
+                resolved.intent,
+                result.data or {},
+            )
+
             if undo_descriptor is not None:
-                self.undo_store.save(undo_descriptor)
+                self.undo_store.save(
+                    undo_descriptor
+                )
+
             correlated_action_id = action_id
+
+        status = (
+            "executed"
+            if success
+            else "failed"
+        )
+
+        self._set_dialogue_outcome(
+            action_id=action_id,
+            text=text,
+            command=resolved,
+            status=status,
+            reversible=undo_descriptor is not None,
+            scope=scope,
+        )
+
         if learn:
-            self.learning.observe(text, resolved, result, route=self.router.last_route)
-        self._remember_exchange(text, resolved, response)
-        outcome = "success" if (result is not None and result.success) else f"error:{result.error}" if result is not None else "no_result"
+            self.learning.observe(
+                text,
+                resolved,
+                result,
+                route=self.router.last_route,
+            )
+
+        # CORRECT_LAST contiene internamente il vero comando corretto:
+        # non deve sovrascrivere last_exchange dopo che quel comando
+        # ha appena scritto il proprio stato.
+        if resolved.intent != "CORRECT_LAST":
+            self._remember_exchange(
+                text,
+                resolved,
+                response,
+                action_id=action_id,
+            )
+
+        # Se questa era l'esecuzione prodotta da una correzione,
+        # il learning viene risolto SOLO ORA.
+        self._finish_correction_learning(
+            action_id,
+            verified=success,
+        )
+
+        outcome = (
+            "success"
+            if success
+            else (
+                f"error:{result.error}"
+                if result is not None
+                else "no_result"
+            )
+        )
+
         self._log_action_outcome(
-            trace_id, started, resolved.intent, resolved.parameters, result=outcome, policy_reason=execution.policy_reason,
+            trace_id,
+            started,
+            resolved.intent,
+            resolved.parameters,
+            result=outcome,
+            policy_reason=execution.policy_reason,
             action_id=correlated_action_id,
         )
-        return response
 
-    # Un esito che non e' un vero fallimento da poter far ripartire (una conferma in attesa non
-    # e' un bug), ne' un successo: session_recorder.record_failure() li ignora entrambi.
-    _NOT_A_FAILURE = {"success", "confirmation_required", "auth_required"}
+        return response
 
     def _safe_confirm_envelope(self, intent: str, parameters: dict | None, result: SkillResult, reason: str) -> dict:
         """Valida la busta CONFIRMATION_REQUIRED/AUTH_REQUIRED di una skill (F1, vedi
@@ -1459,67 +2230,140 @@ class JakeCore:
         self._remember_exchange(text, Command("PLAN", {"steps": len(plan.steps)}), response)
         return response
 
-    def _handle_confirmation(self, text: str, action: dict | None = None) -> str:
-        # F1.8.1: `action` e' iniettabile (usato da _process(), che l'ha gia' consumata
-        # atomicamente con take_pending_action() - vedi sopra) per evitare una SECONDA lettura
-        # separata qui, che riaprirebbe la stessa finestra di gara. None (il default) preserva
-        # il comportamento per chi chiama questo metodo direttamente con un'azione gia'
-        # impostata altrove (es. i test): la prende da sola, stesso principio.
+    def _handle_confirmation(
+        self,
+        text: str,
+        action: dict | None = None,
+    ) -> str:
         if action is None:
-            action = self.conversation_state.take_pending_action()
+            action = (
+                self.conversation_state.take_pending_action()
+            )
+
         if action is None:
             return self._process(text)
-        # Una domanda di chiarimento dell'agente non e' un si'/no: qualunque risposta la
-        # prosegue (anche "si"/"no" sono risposte legittime, es. "hai salvato le modifiche?").
-        if action.get("reason") == "agent_question":
-            return self._continue_agent(action, text)
 
-        # v5.4/5.5: un'azione ADMIN con l'autenticazione attiva aspetta la passphrase, non un
-        # si'/no. Un solo tentativo per turno (come per le conferme normali, che si annullano
-        # su qualunque risposta che non sia si'/no): niente tentativi ripetuti in loop.
-        if action.get("reason") == "auth_required":
-            # F1.4.3: un lockout attivo (troppi tentativi falliti consecutivi, vedi
-            # core/auth_gate.py) va segnalato con un messaggio diverso da "passphrase errata" -
-            # non e' che QUESTO tentativo sia sbagliato, e' che nessun tentativo verra' nemmeno
-            # controllato finche' il lockout non scade. Controllato sia PRIMA di check() (un
-            # lockout gia' aperto da un turno precedente: check() lo saprebbe gia' rifiutare da
-            # solo, ma senza chiamarlo non sappiamo quale messaggio mostrare) sia DOPO (questo
-            # stesso tentativo puo' essere quello che fa scattare la soglia). Stesso codice
-            # "denied_auth" nel ledger in entrambi i casi (e' comunque un diniego di
-            # autenticazione): il messaggio all'utente e' l'unica differenza visibile.
-            if self.auth_gate.is_locked_out():
-                self._log_denied_action(action, result="denied_auth")
-                return self._lockout_message()
-            if self.auth_gate.check(text):
-                return self._finalize_pending_action(action, text)
-            self._log_denied_action(action, result="denied_auth")
-            if self.auth_gate.is_locked_out():
-                return self._lockout_message()
-            return "Passphrase errata: azione annullata."
+        reason = action.get("reason")
 
-        if intent_patterns.is_positive_answer(text):
-            return self._finalize_pending_action(action, text)
-        if intent_patterns.is_negative_answer(text):
-            # F7.1.2: un "no" a un pairing non deve solo restare senza effetto (il comportamento
-            # generico sotto) - deve anche dirlo esplicitamente a pairing_service, cosi' il
-            # companion in attesa vede "rejected" al prossimo poll invece di aspettare i 5 minuti
-            # della scadenza naturale. Nessun'altra azione ADMIN ha bisogno di un callback simile
-            # (un "no" qualunque non ha un secondo sistema a cui riportare l'esito), quindi resta
-            # un caso a se', non un meccanismo generico.
+        # F2.6.4 — chiarimento dell'agente
+        if reason == "agent_question":
+            reply = classify_reply(
+                text,
+                DialogueContext(
+                    awaiting_clarification=True,
+                ),
+            )
+
+            if (
+                reply.kind
+                == ReplyKind.CLARIFICATION_ANSWER
+            ):
+                return self._continue_agent(
+                    action,
+                    reply.text,
+                )
+
+            # L'utente ha cambiato intenzione.
+            return self._process(
+                reply.text or text
+            )
+
+        # Difesa per chiamate dirette/test.
+        # Il percorso normale passa da answer() col testo GREZZO.
+        if reason == "auth_required":
+            return self._handle_auth_secret(
+                text,
+                action,
+            )
+
+        reply = classify_reply(
+            text,
+            DialogueContext(
+                pending_confirmation=True,
+            ),
+        )
+
+        if reply.kind == ReplyKind.CONFIRM_YES:
+            return self._finalize_pending_action(
+                action,
+                reply.text,
+            )
+
+        if reply.kind == ReplyKind.CONFIRM_NO:
             if action.get("intent") == "APPROVE_PAIRING":
-                challenge_id = (action.get("parameters") or {}).get("challenge_id")
+                challenge_id = (
+                    action.get("parameters") or {}
+                ).get("challenge_id")
+
                 if challenge_id:
-                    self.pairing_service.reject(challenge_id)
-            self._log_denied_action(action, result="denied_confirmation")
-            # F6.3/F6.7: stesso principio del "si'" in _finalize_pending_action - un "no" chiude il
-            # compito che il ponte stava seguendo, se ce n'era uno (no-op altrimenti).
-            self._publish_task_event(lambda: self.task_bridge.resolve_decision(
-                action.get("trace_id"), message="annullato", success=False,
-            ))
+                    self.pairing_service.reject(
+                        challenge_id
+                    )
+
+            self._cancel_dialogue_action(action)
+
+            self._log_denied_action(
+                action,
+                result="denied_confirmation",
+            )
+
+            self._publish_task_event(
+                lambda: self.task_bridge.resolve_decision(
+                    action.get("trace_id"),
+                    message="annullato",
+                    success=False,
+                )
+            )
+
             return "Va bene, annullato."
-        # Ne' si' ne' no: l'utente e' passato ad altro. L'azione e' gia' stata consumata sopra
-        # (take_pending_action()/il default di questo metodo), quindi qui basta procedere.
-        return self._process(text)
+
+        # Qualunque frase non sia un sì/no INTERO
+        # è un nuovo comando.
+        #
+        # "sì ma prima apri Spotify" arriva qui.
+        self._cancel_dialogue_action(action)
+
+        return self._process(
+            reply.text or text
+        )
+
+    def _handle_auth_secret(
+        self,
+        secret: str,
+        action: dict,
+    ) -> str:
+        """
+        Gestisce un segreto di autenticazione senza loggarlo
+        o mandarlo al resto della pipeline.
+        """
+        if self.auth_gate.is_locked_out():
+            self._cancel_dialogue_action(action)
+
+            self._log_denied_action(
+                action,
+                result="denied_auth",
+            )
+
+            return self._lockout_message()
+
+        if self.auth_gate.check(secret):
+            # NON passare il secret come fallback_text.
+            return self._finalize_pending_action(
+                action,
+                "[autenticazione]",
+            )
+
+        self._cancel_dialogue_action(action)
+
+        self._log_denied_action(
+            action,
+            result="denied_auth",
+        )
+
+        if self.auth_gate.is_locked_out():
+            return self._lockout_message()
+
+        return "Passphrase errata: azione annullata."
 
     def _lockout_message(self) -> str:
         remaining = int(self.auth_gate.lockout_remaining_seconds()) + 1
@@ -1558,76 +2402,343 @@ class JakeCore:
             private=self.private_mode,
         )
 
-    def _finalize_pending_action(self, action: dict, fallback_text: str) -> str:
-        """Rivaluta la policy ed esegue il bersaglio esatto appena approvato (F1.2.5).
+    def _finalize_pending_action(
+        self,
+        action: dict,
+        fallback_text: str,
+    ) -> str:
+        trace_id = (
+            action.get("trace_id")
+            or new_trace_id()
+        )
 
-        I marcatori della busta non sono prove: il consenso e l'identita' derivano dalla
-        risposta controllata da _handle_confirmation. Nessun rewrite o fallback dopo il si'.
+        action_id = (
+            action.get("action_id")
+            or new_action_id()
+        )
 
-        F1: fino a questa correzione, l'azione VERA - quella confermata, spesso la piu'
-        rischiosa (DESTRUCTIVE/ADMIN, altrimenti non avrebbe mai chiesto conferma) - non
-        produceva ne' un record in jake_actions.jsonl (F0) ne' una ricevuta nel ledger (F1):
-        solo la richiesta di conferma iniziale veniva registrata, non l'esecuzione dopo il si'/
-        la passphrase. Scoperto verificando davvero un DELETE_PATH confermato end-to-end (non
-        leggendo il codice), non un'ipotesi. trace_id viene dall'azione in sospeso (impostato da
-        chi ha chiesto la conferma, vedi _execute_command/_run_agent/_handle_unknown) cosi' la
-        ricevuta della conferma si correla a quella della richiesta originale nel ledger."""
-        trace_id = action.get("trace_id") or new_trace_id()
+        scope = (
+            action.get("dialogue_scope")
+            or self._dialogue_scope()
+        )
+
         started = time.monotonic()
-        parameters = {**strip_authorization_signals(action["parameters"]), "confirmed": True}
+
+        if action.get("correction_after") is not None:
+            descriptor = self.undo_store.get(action.get("undo_source_action_id"))
+            if descriptor is None:
+                self._cancel_dialogue_action(action)
+                return "L'undo non è più disponibile. Non eseguo la versione corretta."
+
+        parameters = {
+            **strip_authorization_signals(
+                action["parameters"]
+            ),
+            "confirmed": True,
+        }
+
         if action.get("reason") == "auth_required":
-            parameters.update(authenticated=True, authenticated_via="passphrase")
-        command, result, policy_reason = self._authorize_command(Command(action["intent"], parameters))
-        if result is None:
-            # F1.3.4 (adozione - seconda fetta, il percorso di conferma - DESTRUCTIVE/ADMIN come
-            # DELETE_PATH passano quasi sempre da qui, non da _resolve_and_execute, vedi il
-            # docstring del metodo): action_id generato solo per etichettare un eventuale
-            # snapshot catturato da SkillRegistry.execute() prima della cancellazione vera - non
-            # ancora collegato al ledger ne' a UndoStore su questo percorso (nessuno dei due
-            # correla oggi un'azione confermata qui, un gap preesistente e diverso da questo
-            # incremento, non toccato).
-            action_id = new_action_id()
-            result = self.skill_registry.execute(
-                command.intent, command.parameters, policy_engine=self.policy_engine,
-                action_id=action_id, private=self.private_mode,
+            parameters.update(
+                authenticated=True,
+                authenticated_via="passphrase",
             )
-        # Una conferma puo' chiederne un'altra (CREATE_SKILL: "provo a imparare?" -> codice
-        # scritto -> "lo attivo?"): stessa gestione del percorso normale.
-        if result is not None and result.error in ("CONFIRMATION_REQUIRED", "AUTH_REQUIRED"):
-            reason = "auth_required" if result.error == "AUTH_REQUIRED" else "confirmation_required"
-            envelope = self._safe_confirm_envelope(command.intent, command.parameters, result, reason)
-            self.conversation_state.set_pending_action({
-                "intent": envelope.get("confirm_intent", command.intent),
-                "parameters": envelope.get("confirm_parameters", command.parameters),
+
+        command, result, policy_reason = (
+            self._authorize_command(
+                Command(
+                    action["intent"],
+                    parameters,
+                )
+            )
+        )
+
+        if result is None:
+            result = self.skill_registry.execute(
+                command.intent,
+                command.parameters,
+                policy_engine=self.policy_engine,
+                action_id=action_id,
+                private=self.private_mode,
+            )
+
+        # Può servire un secondo gradino di conferma/auth.
+        if (
+            result is not None
+            and result.error
+            in ("CONFIRMATION_REQUIRED", "AUTH_REQUIRED")
+        ):
+            reason = (
+                "auth_required"
+                if result.error == "AUTH_REQUIRED"
+                else "confirmation_required"
+            )
+
+            envelope = self._safe_confirm_envelope(
+                command.intent,
+                command.parameters,
+                result,
+                reason,
+            )
+
+            pending = {
+                "intent": envelope.get(
+                    "confirm_intent",
+                    command.intent,
+                ),
+                "parameters": envelope.get(
+                    "confirm_parameters",
+                    command.parameters,
+                ),
                 "reason": reason,
                 "text": action.get("text", ""),
                 "trace_id": trace_id,
-                "policy_reason": policy_reason if envelope.get("confirm_intent", command.intent) == command.intent else None,
-            })
-            self._log_action_outcome(
-                trace_id, started, command.intent, command.parameters, result=reason, policy_reason=policy_reason,
+                "policy_reason": (
+                    policy_reason
+                    if envelope.get(
+                        "confirm_intent",
+                        command.intent,
+                    )
+                    == command.intent
+                    else None
+                ),
+
+                # conserva identità logica
+                "action_id": action_id,
+                "dialogue_scope": scope,
+            }
+
+            # Se siamo nel mezzo di:
+            # undo -> correzione,
+            # NON perdere il continuation.
+            for key in (
+                "correction_after",
+                "undo_source_action_id",
+            ):
+                if key in action:
+                    pending[key] = action[key]
+
+            self.conversation_state.set_pending_action(
+                pending
             )
-            return envelope.get("message", "Confermi questa azione?")
-        outcome = "success" if (result is not None and result.success) else f"error:{result.error}" if result is not None else "no_result"
-        self._log_action_outcome(
-            trace_id, started, command.intent, command.parameters, result=outcome, policy_reason=policy_reason,
+
+            if action.get("correction_after") is None:
+                self._set_dialogue_outcome(
+                    action_id=action_id,
+                    text=action.get(
+                        "text",
+                        fallback_text,
+                    ),
+                    command=command,
+                    status="pending",
+                    scope=scope,
+                )
+
+            self._log_action_outcome(
+                trace_id,
+                started,
+                command.intent,
+                command.parameters,
+                result=reason,
+                policy_reason=policy_reason,
+            )
+
+            return envelope.get(
+                "message",
+                "Confermi questa azione?",
+            )
+
+        success = bool(
+            result is not None
+            and result.success
         )
-        response = format_skill_result(command.intent, result, self.skill_registry)
-        if result is not None and result.success:
-            self.conversation_state.remember_entities(command.intent, command.parameters, result.data or {})
-        if action.get("reason") in ("confirmation_required", "auth_required") and action.get("text"):
-            self.learning.observe(action["text"], command, result, route="llm" if self.last_route == "llm" else "confirmed")
-        self._remember_exchange(action.get("text", fallback_text), command, response)
-        # F6.3/F6.7: se questa conferma apparteneva a un compito che il ponte stava seguendo
-        # (decision_required, vedi _run_agent) e si risolve QUI (non con una nuova richiesta di
-        # conferma, gia' gestita sopra), il compito e' concluso - resolve_decision() e' un no-op
-        # sicuro per ogni altra conferma (es. DELETE_PATH da un comando diretto) che il ponte non
-        # aveva mai tracciato.
-        self._publish_task_event(lambda: self.task_bridge.resolve_decision(trace_id, message=response, success=result is not None and result.success))
+
+        outcome = (
+            "success"
+            if success
+            else (
+                f"error:{result.error}"
+                if result is not None
+                else "no_result"
+            )
+        )
+
+        self._log_action_outcome(
+            trace_id,
+            started,
+            command.intent,
+            command.parameters,
+            result=outcome,
+            policy_reason=policy_reason,
+            action_id=(
+                action_id
+                if success
+                else None
+            ),
+        )
+
+        response = format_skill_result(
+            command.intent,
+            result,
+            self.skill_registry,
+        )
+
+        undo_descriptor = None
+
+        if success:
+            self.conversation_state.remember_entities(
+                command.intent,
+                command.parameters,
+                result.data or {},
+            )
+
+            # FIX importante:
+            # anche il percorso POST-CONFERMA ora genera UndoDescriptor.
+            undo_descriptor = generate_undo_descriptor(
+                action_id,
+                command.intent,
+                result.data or {},
+            )
+
+            if undo_descriptor is not None:
+                self.undo_store.save(
+                    undo_descriptor
+                )
+
+        # Un undo interno alla correzione non è un nuovo
+        # comando pronunciato dall'utente.
+        if action.get("correction_after") is None:
+            self._set_dialogue_outcome(
+                action_id=action_id,
+                text=action.get(
+                    "text",
+                    fallback_text,
+                ),
+                command=command,
+                status=(
+                    "executed"
+                    if success
+                    else "failed"
+                ),
+                reversible=undo_descriptor is not None,
+                scope=scope,
+            )
+
+        if (
+            action.get("reason")
+            in (
+                "confirmation_required",
+                "auth_required",
+            )
+            and action.get("text")
+        ):
+            self.learning.observe(
+                action["text"],
+                command,
+                result,
+                route=(
+                    "llm"
+                    if self.last_route == "llm"
+                    else "confirmed"
+                ),
+            )
+
+        if action.get("correction_after") is None:
+            self._remember_exchange(
+                action.get(
+                    "text",
+                    fallback_text,
+                ),
+                command,
+                response,
+                action_id=action_id,
+            )
+
+        self._finish_correction_learning(
+            action_id,
+            verified=success,
+        )
+
+        self._publish_task_event(
+            lambda: self.task_bridge.resolve_decision(
+                trace_id,
+                message=response,
+                success=success,
+            )
+        )
+
+        correction_after = action.get(
+            "correction_after"
+        )
+
+        if correction_after is not None:
+            if not success:
+                return (
+                    f"{response} "
+                    "Non eseguo la versione corretta perché "
+                    "non sono riuscito ad annullare in sicurezza "
+                    "l'azione precedente."
+                )
+
+            source_action_id = action.get(
+                "undo_source_action_id"
+            )
+
+            if source_action_id:
+                self.undo_store.mark_used(
+                    source_action_id
+                )
+
+            corrected_command = Command(
+                correction_after["intent"],
+                dict(
+                    correction_after.get(
+                        "parameters"
+                    )
+                    or {}
+                ),
+            )
+
+            corrected_response = (
+                self._execute_corrected_command(
+                    correction_after[
+                        "source_action_id"
+                    ],
+                    correction_after[
+                        "corrected_text"
+                    ],
+                    corrected_command,
+                )
+            )
+
+            return (
+                f"{response} "
+                f"{corrected_response}"
+            ).strip()
+
         return response
 
-    def _remember_exchange(self, text: str, command: Command, response: str) -> None:
-        self.last_exchange = {"text": text, "command": command, "response": response}
+    def _remember_exchange(
+        self,
+        text: str,
+        command: Command,
+        response: str,
+        *,
+        action_id: str | None = None,
+    ) -> None:
+        if action_id is None:
+            # Anche UNKNOWN/chitchat/agente devono sostituire l'ultimo turno:
+            # correggere una frase non capita non deve correggere un'azione piu' vecchia.
+            action_id = new_action_id()
+            self._set_dialogue_outcome(
+                action_id=action_id, text=text, command=command,
+                status="failed" if command.intent == "UNKNOWN" else "executed",
+            )
+        self.last_exchange = {
+            "text": text,
+            "command": command,
+            "response": response,
+            "action_id": action_id,
+        }
 
     # ---- kill switch -----------------------------------------------------------------------
 
