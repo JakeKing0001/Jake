@@ -175,16 +175,47 @@ class CorrectionPlanner:
         return list(self._turns.values())[-count:][::-1]
 
     def plan(self, utterance_id: str) -> CorrectionPlan:
-        """Cosa fare se l'utente corregge il turno `utterance_id` (F2.6.3). L'azione gia' AVVENUTA non
-        si ripete mai da sola: se e' reversibile si propone di annullarla prima, altrimenti si chiede."""
+        """Decide cosa fare quando l'utente corregge un turno precedente."""
         turn = self._turns.get(utterance_id)
+
         if turn is None:
-            return CorrectionPlan("unknown", "turno non trovato: chiedi all'utente di ripetere")
+            return CorrectionPlan(
+                "unknown",
+                "turno non trovato: chiedi all'utente di ripetere",
+            )
+
+        # Nulla è realmente avvenuto: si può eseguire la versione corretta.
         if turn.status in ("pending", "failed", "cancelled"):
-            return CorrectionPlan("rerun", f"nulla e' stato eseguito ({turn.status}): si puo' rieseguire con il testo corretto")
-        if turn.reversible and turn.risk in (RiskLevel.READ_ONLY, RiskLevel.LOCAL_REVERSIBLE):
-            return CorrectionPlan("undo_then_rerun", "azione locale gia' eseguita e reversibile: annullala, poi esegui la versione corretta")
-        return CorrectionPlan("ask", f"azione {turn.risk.value} gia' eseguita e non annullabile in sicurezza: chiedi all'utente cosa vuole fare")
+            return CorrectionPlan(
+                "rerun",
+                f"nulla e' stato eseguito ({turn.status}): "
+                "si puo' eseguire la versione corretta",
+            )
+
+        # Una lettura non ha side effect da annullare.
+        if turn.risk == RiskLevel.READ_ONLY:
+            return CorrectionPlan(
+                "rerun",
+                "il turno precedente era di sola lettura: "
+                "la versione corretta puo' essere eseguita",
+            )
+
+        # Per azioni locali realmente reversibili:
+        # undo PRIMA, rerun DOPO.
+        if turn.reversible and turn.risk == RiskLevel.LOCAL_REVERSIBLE:
+            return CorrectionPlan(
+                "undo_then_rerun",
+                "azione locale gia' eseguita e reversibile: "
+                "annullala e poi esegui la versione corretta",
+            )
+
+        # External/destructive/admin o locale non reversibile:
+        # mai ripetere automaticamente.
+        return CorrectionPlan(
+            "ask",
+            f"azione {turn.risk.value} gia' eseguita e non annullabile "
+            "automaticamente in sicurezza",
+        )
 
     def propose_learning(self, utterance_id: str, corrected_text: str, intent: str, parameters: dict) -> bool:
         """Registra che la correzione POTREBBE diventare un esempio: non lo diventa finche' l'esito

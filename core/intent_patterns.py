@@ -42,6 +42,18 @@ QUESTION_PATTERN = re.compile(
     r"spiegami|dimmi|raccontami|consigliami|suggeriscimi|aiutami|scrivimi|inventa|descrivi|riassumi|"
     r"sai|sapresti|potresti|puoi dirmi|mi dici|mi spieghi|secondo te)\b|\?$"
 )
+HEARD_QUERY_PATTERN = re.compile(
+    r"^(?:"
+    r"cosa hai sentito|"
+    r"che cosa hai sentito|"
+    r"cosa hai capito|"
+    r"che cosa hai capito|"
+    r"cosa ho detto|"
+    r"che cosa ho detto|"
+    r"cosa avevi sentito|"
+    r"che avevi sentito"
+    r")$"
+)
 _REQUEST_VERBS = (
     "apri|aprimi|aprire|avvia|avviare|lancia|lanciare|cerca|cercare|vai|crea|creare|elimina|cancella|"
     "trova|chiudi|chiudere|termina|spegni|spegnere|riavvia|blocca|sospendi|alza|alzare|abbassa|abbassare|"
@@ -88,6 +100,8 @@ _PRONOUN_DELETE = re.compile(r"^(?:elimina|eliminalo|eliminala|cancella|cancella
 def is_exit(text: str) -> bool:
     return text in EXIT_WORDS or text.startswith(EXIT_PREFIXES)
 
+def is_heard_query(text: str) -> bool:
+    return bool(HEARD_QUERY_PATTERN.match((text or "").strip()))
 
 def is_multi_step_request(text: str) -> bool:
     """Vero se il testo va instradato al planner/agente invece che al classificatore a
