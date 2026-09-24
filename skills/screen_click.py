@@ -9,7 +9,7 @@ pyautogui.FAILSAFE resta attivo: portare il mouse in un angolo interrompe tutto.
 import json
 import re
 from difflib import SequenceMatcher
-
+from core.turn_cancellation import current_turn_cancelled
 from core.skill_result import SkillResult
 
 
@@ -67,6 +67,12 @@ class ClickTextSkill:
         self.computer_agent = computer_agent or ComputerAgent()
 
     def execute(self, parameters: dict = None):
+        if current_turn_cancelled():
+            return SkillResult(
+                success=False,
+                data={},
+                error="CANCELLED",
+            )
         parameters = parameters or {}
         text = (parameters.get("text") or "").strip()
         button = (parameters.get("button") or "left").strip().lower()
@@ -144,6 +150,12 @@ class ClickElementSkill:
             f"con il centro dell'elemento in pixel dell'immagine, oppure {{\"found\": false}} se non c'e'."
         )
         answer = self.vision_provider.describe(path, question=question)
+        if current_turn_cancelled():
+            return SkillResult(
+                success=False,
+                data={"description": description},
+                error="CANCELLED",
+            )
         if not answer:
             return SkillResult(success=False, data={"description": description}, error="VISION_UNAVAILABLE")
         match = re.search(r"\{.*\}", answer, flags=re.DOTALL)
@@ -160,13 +172,36 @@ class ClickElementSkill:
         return self._click(x, y, description)
 
     def _click(self, x: int, y: int, description: str):
-        result = self.computer_agent.click_point(x, y, matched=description)
+        if current_turn_cancelled():
+            return SkillResult(
+                success=False,
+                data={"description": description},
+                error="CANCELLED",
+            )
+
+        result = self.computer_agent.click_point(
+            x,
+            y,
+            matched=description,
+        )
+
         if not result.success:
-            return SkillResult(success=False, data={"description": description}, error=result.error)
-        return SkillResult(success=True, data={
-            "description": description, "x": x, "y": y,
-            "screen_changed": result.verified, "change_ratio": result.change_ratio,
-        })
+            return SkillResult(
+                success=False,
+                data={"description": description},
+                error=result.error,
+            )
+
+        return SkillResult(
+            success=True,
+            data={
+                "description": description,
+                "x": x,
+                "y": y,
+                "screen_changed": result.verified,
+                "change_ratio": result.change_ratio,
+            },
+        )
 
 
 class ScrollSkill:

@@ -42,6 +42,10 @@ class CleanForSpeechTests(unittest.TestCase):
         self.assertNotIn("import", cleaned)
         self.assertIn(CODE_OMITTED, cleaned)
 
+    def test_file_gets_an_english_pronunciation_hint(self):
+        spoken = prepare_for_speech("Apri il file.")
+        self.assertEqual(spoken, "Apri il fail.")
+
     def test_inline_code_keeps_its_content_without_backticks(self):
         self.assertEqual(clean_for_speech("Usa il comando `git status` per vedere"), "Usa il comando git status per vedere")
 

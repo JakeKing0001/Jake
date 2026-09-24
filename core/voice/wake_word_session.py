@@ -20,6 +20,10 @@ from core.voice.speaker_profile import SpeakerProfileStore, extract_features, id
 from core.voice.speech_text import STYLES, prepare_for_speech
 from core.voice.streaming_stt import TranscriptEvent, to_hud_event
 from core.voice.vad_listener import VadListener
+from core.turn_cancellation import (
+    reset_current_turn_cancel_event,
+    set_current_turn_cancel_event,
+)
 
 # Varianti di riferimento: Whisper a volte trascrive male "Jake" (nome poco comune in italiano).
 # Il confronto vero e proprio (_is_close_to_wake_word) usa la distanza di edit da queste, cosi'
@@ -29,7 +33,18 @@ WAKE_WORD_MAX_DISTANCE = 1
 
 STOP_DICTATION_PATTERN = re.compile(r"\b(fine|stop|basta|termina|chiudi)\s+(la\s+)?dettatura\b|\bsmetti di scrivere\b|\bbasta dettare\b")
 WAKE_UP_PATTERN = re.compile(r"\b(svegliati|riprendi|torna|ci sei|ascolta)\b")
-
+STOP_CURRENT_TASK_PATTERN = re.compile(
+    r"\b("
+    r"basta|"
+    r"fermati|"
+    r"annulla|"
+    r"smettila|"
+    r"lascia stare|"
+    r"stop"
+    r")\b"
+    r"|\bsmetti\s+di\s+(?:fare|eseguire|lavorare)\b",
+    re.IGNORECASE,
+)
 
 def _edit_distance(a: str, b: str) -> int:
     if a == b:
@@ -152,6 +167,9 @@ class WakeWordSession:
             self.vad_listener.on_utterance_end = self._on_utterance_end
         self.last_confidence = None
         self._lock = threading.Lock()
+        self._command_lock = threading.Lock()
+        self._command_thread = None
+        self._command_cancel_event = None
         self._attach_hooks()
 
     # ---- alias storici degli stati di ascolto (F2.3.3) -------------------------------
@@ -573,6 +591,32 @@ class WakeWordSession:
             self._logger.info("Ignorata: ripetizione identica ravvicinata")
             return
 
+        # F2.8A: mentre Jake sta ancora elaborando una richiesta, il listener
+        # resta attivo. Un comando di stop non passa da NLU: cancella
+        # direttamente il turno in corso.
+        if self._command_busy():
+            remainder = self._match_wake_word(text)
+
+            stop_text = (
+                remainder
+                if remainder is not None
+                else text
+            )
+
+            if STOP_CURRENT_TASK_PATTERN.search(stop_text):
+                if self._cancel_current_command():
+                    print("Jake > Va bene, annullo.")
+                    self._respond("Va bene, annullo.")
+                return
+
+            # Non lanciamo una seconda answer() concorrente.
+            # Per ora i nuovi comandi durante un task vengono ignorati.
+            self._logger.info(
+                "Ignorato comando mentre un task e' ancora in corso: %s",
+                text,
+            )
+            return
+
         # F2.4.5: la frase arriva da un barge-in. "basta"/"no" da soli = fermati e basta; "no, intendevo X" e una
         # nuova richiesta = si esegue il testo utile (senza wake word: l'utente parlava gia' con Jake).
         if self._interrupted_turn is not None:
@@ -641,17 +685,18 @@ class WakeWordSession:
         if self.state in ("transcribing", "listening"):
             self._set_state("idle", "")
 
-    def _identify_speaker_token(self):
+    def _identify_speaker_token(self, audio=None):
         """F2.7 (adozione, prima fetta): None (il caso normale) se non c'e' uno speaker_store, se
         l'audio dell'utterance non e' disponibile, se il riconoscimento fallisce, o se la
         confidenza non e' "high" - un riconoscimento incerto non deve MAI etichettare il turno
         con un profilo indovinato (vedi core/voice/speaker_profile.py::SpeakerHint). Un errore
         qui non deve mai impedire a Jake di rispondere: stesso principio gia' applicato a
         echo_guard/repeat_guard/barge-in in questo stesso file."""
-        if self.speaker_store is None or self._last_utterance_audio is None:
+        audio = self._last_utterance_audio if audio is None else audio
+        if self.speaker_store is None or audio is None:
             return None
         try:
-            features = extract_features(self._last_utterance_audio)
+            features = extract_features(audio)
             hint = identify(features, self.speaker_store.profiles())
         except Exception:
             self._logger.exception("Errore identificando la voce")
@@ -660,31 +705,138 @@ class WakeWordSession:
             return None
         return set_current_speaker_profile_id(hint.profile_id)
 
+    def _command_busy(self) -> bool:
+        with self._command_lock:
+            return (
+                self._command_thread is not None
+                and self._command_thread.is_alive()
+            )
+
+
+    def _cancel_current_command(self) -> bool:
+        with self._command_lock:
+            thread = self._command_thread
+            cancel_event = self._command_cancel_event
+
+            if (
+                thread is None
+                or not thread.is_alive()
+                or cancel_event is None
+            ):
+                return False
+
+            cancel_event.set()
+
+        # Se nel frattempo Jake sta anche parlando, ferma pure la voce.
+        self._interrupt_speech()
+
+        self.listening.command_consumed()
+        self._set_state("cancelling", "")
+        self._logger.info("Cancellazione richiesta per il task vocale corrente")
+        return True
+
     def _process_command(self, command: str) -> None:
+        if self._command_busy():
+            self._logger.info(
+                "Comando non avviato: un task vocale e' gia' in corso"
+            )
+            return
+
         self.listening.command_consumed()
         print(f"Tu > {command}")
         self._set_state("thinking", command)
-        speaker_token = self._identify_speaker_token()
-        # F2.6.6: self.last_confidence e' la confidenza VERA gia' riportata da _transcribe()
-        # (None per un provider che non la riporta - mai un valore inventato qui). JakeCore la
-        # legge per decidere se aggiungere una conferma quando Jake non era sicuro di aver capito
-        # bene, vedi core/request_context.py::current_stt_confidence.
-        confidence_token = set_current_stt_confidence(self.last_confidence) if self.last_confidence is not None else None
-        try:
-            response = self.jake_core.answer(command)
-        finally:
-            if speaker_token is not None:
-                reset_current_speaker_profile_id(speaker_token)
-            if confidence_token is not None:
-                reset_current_stt_confidence(confidence_token)
-        print(f"Jake > {response}")
 
-        if response == self.jake_core.EXIT_SENTINEL:
-            print("Chiusura...")
-            self._set_state("exit", "")
-            self._running = False
-            return
-        self._respond(response)
+        cancel_event = threading.Event()
+
+        # Questi valori appartengono a QUESTA utterance.
+        # Devono essere catturati prima che il listener possa sovrascriverli.
+        utterance_audio = (
+            self._last_utterance_audio.copy()
+            if isinstance(self._last_utterance_audio, np.ndarray)
+            else None
+        )
+        confidence = self.last_confidence
+
+        def run_command() -> None:
+            try:
+                cancellation_token = set_current_turn_cancel_event(
+                    cancel_event
+                )
+
+                speaker_token = self._identify_speaker_token(
+                    utterance_audio
+                )
+
+                confidence_token = (
+                    set_current_stt_confidence(confidence)
+                    if confidence is not None
+                    else None
+                )
+
+                try:
+                    response = self.jake_core.answer(command)
+                except Exception:
+                    self._logger.exception(
+                        "Errore nel worker del comando vocale"
+                    )
+                    response = (
+                        "Mi dispiace, si è verificato un errore "
+                        "durante l'esecuzione."
+                    )
+                finally:
+                    if speaker_token is not None:
+                        reset_current_speaker_profile_id(
+                            speaker_token
+                        )
+
+                    if confidence_token is not None:
+                        reset_current_stt_confidence(
+                            confidence_token
+                        )
+
+                    reset_current_turn_cancel_event(
+                        cancellation_token
+                    )
+
+                # Il lavoro potrebbe essere terminato DOPO che l'utente
+                # ha detto basta. In quel caso il risultato e' vecchio:
+                # non deve parlare ne' riaprire il follow-up.
+                if cancel_event.is_set():
+                    self._logger.info(
+                        "Risposta del task cancellato scartata"
+                    )
+
+                    if self.state in ("thinking", "cancelling"):
+                        self._set_state("idle", "")
+
+                    return
+
+                print(f"Jake > {response}")
+
+                if response == self.jake_core.EXIT_SENTINEL:
+                    print("Chiusura...")
+                    self._set_state("exit", "")
+                    self._running = False
+                    return
+
+                self._respond(response)
+            finally:
+                with self._command_lock:
+                    if self._command_cancel_event is cancel_event:
+                        self._command_thread = None
+                        self._command_cancel_event = None
+
+        worker = threading.Thread(
+            target=run_command,
+            name="jake-voice-command",
+            daemon=True,
+        )
+
+        with self._command_lock:
+            self._command_cancel_event = cancel_event
+            self._command_thread = worker
+
+        worker.start()
 
     def _respond(self, response: str) -> None:
         if not response:

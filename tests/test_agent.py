@@ -261,6 +261,48 @@ class KillSwitchStopsTheRunTests(unittest.TestCase):
         self.assertEqual(registry.calls, [])
 
 
+class TurnCancellationDuringModelCallTests(unittest.TestCase):
+    def test_turn_cancellation_abandons_a_pending_model_call(self):
+        import threading
+        import time
+
+        from core.turn_cancellation import (
+            reset_current_turn_cancel_event,
+            set_current_turn_cancel_event,
+        )
+
+        release_event = threading.Event()
+        self.addCleanup(release_event.set)
+
+        client = SlowOllamaClient(release_event)
+        registry = FakeRegistry()
+        agent = _agent(registry, client)
+        agent._MODEL_CALL_POLL_SECONDS = 0.02
+
+        cancel_event = threading.Event()
+        token = set_current_turn_cancel_event(cancel_event)
+
+        def cancel_soon():
+            time.sleep(0.05)
+            cancel_event.set()
+
+        try:
+            threading.Thread(
+                target=cancel_soon,
+                daemon=True,
+            ).start()
+
+            started = time.monotonic()
+            outcome = agent.run("fai qualcosa di lento")
+            elapsed = time.monotonic() - started
+
+        finally:
+            reset_current_turn_cancel_event(token)
+
+        self.assertEqual(outcome.error, "CANCELLED")
+        self.assertLess(elapsed, 2.0)
+        self.assertFalse(agent.kill_switch.is_active())
+
 class SlowOllamaClient:
     """F1.8.3 ("propagare cancellazione dal kill switch a... modello"): chat() resta BLOCCATA
     finche' `release_event` non viene impostato (o 5s, un tetto di sicurezza per non far restare

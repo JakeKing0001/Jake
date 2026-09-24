@@ -19,9 +19,96 @@ from core.voice.tts_provider import TtsProvider
 from core.voice.utterance_segmenter import UtteranceSegmenter
 from core.voice.vad_listener import VadListener
 from core.voice.wake_word_session import WakeWordSession
+from core.turn_cancellation import current_turn_cancel_event
 
 FRAME = VadListener.FRAME_SAMPLES
 
+class CurrentTaskCancellationTests(unittest.TestCase):
+    def test_stop_is_heard_while_answer_is_still_running(self):
+        core = _core()
+        started = threading.Event()
+
+        def blocked_answer(command):
+            cancel_event = current_turn_cancel_event()
+            self.assertIsNotNone(cancel_event)
+
+            started.set()
+
+            # Simula un task lungo ma cooperativo.
+            self.assertTrue(cancel_event.wait(timeout=2))
+            return "Questa risposta non deve essere pronunciata."
+
+        core.answer.side_effect = blocked_answer
+
+        session, _, _ = _session(core=core)
+        session.stt_provider.transcribe.return_value = "Jake basta"
+
+        with mock.patch.object(session, "_respond") as respond:
+            session._process_command("fai un'operazione lunga")
+
+            self.assertTrue(
+                started.wait(timeout=1),
+                "answer() non e' partito",
+            )
+
+            # Il listener deve poter processare questa frase anche se
+            # answer() e' ancora attivo sul worker.
+            session._handle_utterance(
+                np.zeros(FRAME, dtype=np.float32)
+            )
+
+            worker = session._command_thread
+            if worker is not None:
+                worker.join(timeout=2)
+
+        core.answer.assert_called_once_with(
+            "fai un'operazione lunga"
+        )
+
+        # Solo il messaggio immediato di cancellazione.
+        respond.assert_called_once_with(
+            "Va bene, annullo."
+        )
+
+        self.assertEqual(session.state, "idle")
+
+
+    def test_a_second_command_does_not_start_concurrently(self):
+        core = _core()
+
+        started = threading.Event()
+        release = threading.Event()
+
+        def blocked_answer(command):
+            started.set()
+            release.wait(timeout=2)
+            return "Fatto."
+
+        core.answer.side_effect = blocked_answer
+
+        session, _, _ = _session(core=core)
+
+        with mock.patch.object(session, "_respond"):
+            session._process_command("primo comando")
+
+            self.assertTrue(
+                started.wait(timeout=1),
+                "Il primo comando non e' partito",
+            )
+
+            session._process_command("secondo comando")
+
+            # Il secondo non deve entrare nel core mentre il primo gira.
+            self.assertEqual(core.answer.call_count, 1)
+            core.answer.assert_called_once_with(
+                "primo comando"
+            )
+
+            release.set()
+
+            worker = session._command_thread
+            if worker is not None:
+                worker.join(timeout=2)
 
 class ReferenceSinkTests(unittest.TestCase):
     def test_edge_publishes_exactly_what_it_plays(self):
@@ -387,6 +474,10 @@ class InterruptionOutcomeTests(unittest.TestCase):
         session.stt_provider.transcribe.return_value = text
         with mock.patch.object(session, "_respond") as respond:
             session._handle_utterance(object())
+            worker = session._command_thread
+
+            if worker is not None:
+                worker.join(timeout=2)
         return session, respond
 
     def test_a_bare_stop_stops_and_executes_nothing(self):

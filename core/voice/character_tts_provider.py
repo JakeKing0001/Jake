@@ -2,7 +2,9 @@ import io
 import os
 import tempfile
 import wave
-
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from core.voice.speech_text import split_prosodic
 from core.voice.rvc_client import RvcError
 from core.voice.tts_provider import TtsProvider, scale_pcm
 
@@ -11,6 +13,61 @@ class CharacterTtsProvider(TtsProvider):
     """Sintetizza con una voce di base (es. Cosimo) e converte il timbro con un modello RVC
     (es. "Jake il Cane"), riproducendo il risultato. Se il server RVC non e' raggiungibile,
     ripiega sulla voce di base invece di restare muto."""
+
+    FIRST_CHUNK_MAX_CHARS = 75
+    MAX_CHUNK_CHARS = 150
+    MIN_CHUNK_CHARS = 45
+
+    @classmethod
+    def _speech_chunks(cls, text: str) -> list[str]:
+        chunks = split_prosodic(
+            text,
+            max_chars=cls.MAX_CHUNK_CHARS,
+            min_chars=cls.MIN_CHUNK_CHARS,
+        )
+
+        if not chunks:
+            return []
+
+        first = chunks[0]
+
+        if len(first) <= cls.FIRST_CHUNK_MAX_CHARS:
+            return chunks
+
+        first_parts = split_prosodic(
+            first,
+            max_chars=cls.FIRST_CHUNK_MAX_CHARS,
+            min_chars=20,
+        )
+
+        return first_parts + chunks[1:]
+
+    def _begin_generation(self) -> int:
+        with self._state_lock:
+            self._generation += 1
+            self._interrupted = False
+            return self._generation
+
+
+    def _is_current(self, generation: int) -> bool:
+        with self._state_lock:
+            return generation == self._generation and not self._interrupted
+
+    def _prepare_chunk(self, text: str, generation: int,) -> bytes | None:
+        source_bytes = self._synthesize_to_bytes(text)
+        # Stop arrivato mentre il TTS base stava sintetizzando:
+        # non iniziare nemmeno la conversione RVC.
+        if not self._is_current(generation):
+            return None
+
+        converted_bytes = self.server_manager.client.convert(source_bytes)
+
+        # Stop arrivato durante RVC: il risultato ormai prodotto
+        # non deve essere riprodotto.
+        if not self._is_current(generation):
+            return None
+
+        return converted_bytes
 
     def __init__(self, base_tts_provider, server_manager, consent_check=None):
         """`consent_check` (F2.5.6): callable() -> bool, richiamata a OGNI frase. Se torna False la
@@ -26,29 +83,94 @@ class CharacterTtsProvider(TtsProvider):
         # questo flag, un'interruzione arrivata durante quella finestra non avrebbe alcun
         # effetto (stop() agiva solo a riproduzione gia' avviata) e Jake parlerebbe comunque.
         self._interrupted = False
+        self._executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="jake-rvc-prefetch",
+        )
+        self._state_lock = threading.Lock()
+        self._generation = 0
+        self._prewarm_future = None
+
+    def prewarm(self) -> None:
+        """Scalda anche TTS + prima inferenza RVC, senza riprodurre audio."""
+        if self._prewarm_future is not None and not self._prewarm_future.done():
+            return
+
+        self._prewarm_future = self._executor.submit(self._prewarm_pipeline)
+
+
+    def _prewarm_pipeline(self) -> bool:
+        if self.consent_check is not None and not self.consent_check():
+            return False
+
+        if not self.server_manager.ensure_running():
+            return False
+
+        try:
+            source_bytes = self._synthesize_to_bytes("Ciao.")
+            self.server_manager.client.convert(source_bytes)
+            return True
+        except Exception:
+            return False
 
     def speak(self, text: str) -> None:
-        self._interrupted = False
+        generation = self._begin_generation()
+
         if self.consent_check is not None and not self.consent_check():
             self.base_tts_provider.speak(text)
             return
+
         if not self.server_manager.ensure_running():
             self.base_tts_provider.speak(text)
             return
 
-        source_bytes = self._synthesize_to_bytes(text)
-        if self._interrupted:
+        chunks = self._speech_chunks(text)
+
+        if not chunks:
             return
 
-        try:
-            converted_bytes = self.server_manager.client.convert(source_bytes)
-        except RvcError:
-            self.base_tts_provider.speak(text)
-            return
-        if self._interrupted:
-            return
+        # Prepara il primo chunk.
+        future = self._executor.submit(
+            self._prepare_chunk,
+            chunks[0],
+            generation,
+        )
 
-        self._play(converted_bytes)
+        for index, _chunk in enumerate(chunks):
+            try:
+                converted_bytes = future.result()
+            except RvcError:
+                if self._is_current(generation):
+                    # I chunk precedenti sono già stati pronunciati:
+                    # fallback soltanto sul resto.
+                    remaining = " ".join(chunks[index:])
+                    self.base_tts_provider.speak(remaining)
+                return
+
+            if converted_bytes is None:
+                return
+            
+            if not self._is_current(generation):
+                return
+
+            # Punto fondamentale:
+            # prepara il PROSSIMO pezzo PRIMA di iniziare a riprodurre
+            # quello appena completato.
+            next_future = None
+
+            if index + 1 < len(chunks):
+                next_future = self._executor.submit(
+                    self._prepare_chunk,
+                    chunks[index + 1],
+                    generation,
+                )
+
+            self._play(converted_bytes)
+
+            if not self._is_current(generation):
+                return
+
+            future = next_future
 
     def set_speech_params(self, volume: float = 1.0, rate_delta_percent: int = 0) -> bool:
         self.volume = min(1.0, max(0.0, volume))
@@ -90,8 +212,14 @@ class CharacterTtsProvider(TtsProvider):
             self._playing = False
 
     def stop(self) -> None:
-        self._interrupted = True
+        with self._state_lock:
+            self._interrupted = True
+
+            # Invalida anche eventuali conversioni ancora in background.
+            self._generation += 1
+
         if self._playing:
             import sounddevice as sd
             sd.stop()
+
         self.base_tts_provider.stop()

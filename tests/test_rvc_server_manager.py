@@ -119,6 +119,48 @@ class StopTests(unittest.TestCase):
         manager.stop()
         process.terminate.assert_not_called()
 
+class PrewarmTests(unittest.TestCase):
+    def test_prewarm_calls_ensure_running_in_background(self):
+        manager = RvcServerManager("jake_the_dog")
+
+        with mock.patch.object(
+            manager,
+            "ensure_running",
+            return_value=True,
+        ) as ensure:
+            manager.prewarm()
+
+            manager._prewarm_thread.join(timeout=2)
+
+        ensure.assert_called_once()
+
+    def test_two_prewarm_calls_do_not_start_two_threads(self):
+        manager = RvcServerManager("jake_the_dog")
+
+        gate = __import__("threading").Event()
+
+        def wait():
+            gate.wait(1)
+            return True
+
+        with mock.patch.object(
+            manager,
+            "ensure_running",
+            side_effect=wait,
+        ) as ensure:
+            manager.prewarm()
+            first = manager._prewarm_thread
+
+            manager.prewarm()
+            second = manager._prewarm_thread
+
+            self.assertIs(first, second)
+
+            gate.set()
+            first.join(timeout=2)
+
+        ensure.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

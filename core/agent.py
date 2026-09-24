@@ -14,7 +14,7 @@ import queue
 import threading
 import time
 from dataclasses import dataclass, field
-
+from core.turn_cancellation import current_turn_cancelled
 from core.action_contracts import ActionError, validate_action_error
 from core.action_ledger import (
     ActionLedger, ActionReceipt, authorization_of, idempotency_key_of, new_action_id,
@@ -419,7 +419,7 @@ class TaskAgent:
             try:
                 kind, value = result_queue.get(timeout=self._MODEL_CALL_POLL_SECONDS)
             except queue.Empty:
-                if self.kill_switch.is_active():
+                if self.kill_switch.is_active() or current_turn_cancelled():
                     raise _ModelCallAbandoned() from None
                 continue
             if kind == "error":
@@ -465,6 +465,17 @@ class TaskAgent:
         risk_budget = TaskRiskBudget(max_authorized_risk=RiskLevel.READ_ONLY)
 
         for step_index in range(1, self.MAX_STEPS + 1):
+            if current_turn_cancelled():
+                outcome.error = "CANCELLED"
+
+                if self.logger:
+                    self.logger.info(
+                        "Agente: turno cancellato dopo %d passi per: %s",
+                        len(outcome.steps),
+                        request,
+                    )
+
+                break
             if self.kill_switch.is_active():
                 # F1: controllato SOLO tra un passo e il successivo, mai a meta' (vedi
                 # core/kill_switch.py sul perche' non e' un abort violento a livello di thread).
@@ -486,11 +497,16 @@ class TaskAgent:
                 # del modello - stesso esito degli altri due punti di controllo sopra, non un
                 # MODEL_ERROR (il modello non ha fatto nulla di sbagliato, semplicemente non si
                 # e' piu' aspettata la sua risposta).
-                outcome.error = "KILLED"
+                if self.kill_switch.is_active():
+                    outcome.error = "KILLED"
+                else:
+                    outcome.error = "CANCELLED"
                 if self.logger:
-                    self.logger.warning(
-                        "Agente: kill switch attivo durante la chiamata al modello, fermato dopo %d passi per: %s",
-                        len(outcome.steps), request,
+                    self.logger.info(
+                        "Agente interrotto durante la chiamata al modello"
+                        "dopo %d passi per: %s",
+                        len(outcome.steps),
+                        request,
                     )
                 break
             except (OllamaError, KeyError, ValueError, TypeError, json.JSONDecodeError) as exc:

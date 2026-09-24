@@ -129,14 +129,23 @@ def _build_tts_provider(config=None):
 CHARACTER_ALIASES = {"jake": "jake_the_dog", "jake_the_dog": "jake_the_dog"}
 
 
-def _character_name_from_args() -> str | None:
-    if "--character" not in sys.argv:
+def _character_name_from_args(config=None) -> str | None:
+    if "--character" in sys.argv:
+        index = sys.argv.index("--character")
+
+        if index + 1 >= len(sys.argv):
+            return None
+
+        raw_name = sys.argv[index + 1]
+        return CHARACTER_ALIASES.get(raw_name, raw_name)
+
+    configured = config.get("voice_character") if config else None
+
+    if not configured:
         return None
-    index = sys.argv.index("--character")
-    if index + 1 >= len(sys.argv):
-        return None
-    raw_name = sys.argv[index + 1]
-    return CHARACTER_ALIASES.get(raw_name, raw_name)
+
+    configured = str(configured)
+    return CHARACTER_ALIASES.get(configured, configured)
 
 
 def _build_character_tts_provider(base_tts_provider, character_name: str):
@@ -199,9 +208,13 @@ def _setup_voice(core=None):
         )
 
     server_manager = None
-    character_name = _character_name_from_args()
+    character_name = _character_name_from_args(config)
     if character_name:
         tts_provider, server_manager = _build_character_tts_provider(tts_provider, character_name)
+
+    if server_manager is not None and hasattr(tts_provider, "prewarm"):
+        print("Riscaldo la pipeline vocale RVC in background...")
+        tts_provider.prewarm()
 
     print("Carico il modello vocale locale (puo' richiedere un download al primo avvio)...")
     hotwords = core.skill_registry.app_names()[:80] if core is not None else None
