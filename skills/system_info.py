@@ -2,9 +2,9 @@ import json
 import platform
 import socket
 import time
-from urllib import error, request
+from urllib import error
 
-from core.network import is_online
+from core.network import is_online, read_url
 from core.skill_result import SkillResult
 
 
@@ -150,8 +150,7 @@ class GetPublicIpSkill:
         if not is_online():
             return SkillResult(success=False, data={}, error="NETWORK_UNAVAILABLE")
         try:
-            with request.urlopen("https://api.ipify.org?format=json", timeout=self.timeout) as response:
-                payload = json.loads(response.read().decode("utf-8"))
+            payload = json.loads(read_url("https://api.ipify.org?format=json", self.timeout).decode("utf-8"))
         except (error.URLError, TimeoutError, json.JSONDecodeError):
             return SkillResult(success=False, data={}, error="NETWORK_UNAVAILABLE")
         # F1: stesso buco sistemico corretto in questa sessione per altri consumatori diretti di

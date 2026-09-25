@@ -2,6 +2,7 @@ import subprocess
 
 from core.command_safety import check_command_safety
 from core.skill_result import SkillResult
+from core.turn_cancellation import current_turn_cancel_event, current_turn_cancelled
 
 MAX_OUTPUT_CHARS = 1500
 COMMAND_TIMEOUT_SECONDS = 30
@@ -91,7 +92,7 @@ class RunCommandSkill:
                 error="CONFIRMATION_REQUIRED",
             )
 
-        if self.kill_switch is None:
+        if self.kill_switch is None and current_turn_cancel_event() is None:
             try:
                 result = subprocess.run(
                     command, shell=True, capture_output=True, timeout=COMMAND_TIMEOUT_SECONDS,
@@ -121,8 +122,11 @@ class RunCommandSkill:
                 stdout, stderr = process.communicate(timeout=KILL_SWITCH_POLL_SECONDS)
                 return self._build_result(command, process.returncode, stdout, stderr)
             except subprocess.TimeoutExpired:
-                if self.kill_switch.is_active():
+                if self.kill_switch is not None and self.kill_switch.is_active():
                     return self._kill_and_abandon(process, command, "KILLED", job)
+                if current_turn_cancelled():
+                    # "Jake, basta" sul solo turno vocale: si ferma questo comando, non il kill switch.
+                    return self._kill_and_abandon(process, command, "CANCELLED", job)
                 elapsed += KILL_SWITCH_POLL_SECONDS
                 if elapsed >= COMMAND_TIMEOUT_SECONDS:
                     return self._kill_and_abandon(process, command, "TIMEOUT", job)

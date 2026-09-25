@@ -10,6 +10,8 @@ import json
 import os
 from urllib import error, request
 
+from core.turn_cancellation import cancellable_call
+
 DEFAULT_BASE_URL = (
     os.environ.get("JAKE_OLLAMA_URL")
     or (f"http://{os.environ['OLLAMA_HOST']}" if os.environ.get("OLLAMA_HOST", "").count(":") == 1
@@ -50,6 +52,13 @@ class OllamaClient:
 
     # ---- basso livello -------------------------------------------------------------
 
+    @staticmethod
+    def _read(target, timeout: float) -> bytes:
+        # Dentro un turno vocale annullabile gira su un thread a parte (cancellable_call): "Jake,
+        # basta" smette di aspettare il modello subito, la risposta tardiva viene scartata.
+        with request.urlopen(target, timeout=timeout) as response:
+            return response.read()
+
     def _post(self, path: str, payload: dict, timeout: float | None = None) -> dict:
         body = json.dumps(payload).encode("utf-8")
         http_request = request.Request(
@@ -57,8 +66,7 @@ class OllamaClient:
             headers={"Content-Type": "application/json"}, method="POST",
         )
         try:
-            with request.urlopen(http_request, timeout=timeout or self.timeout) as response:
-                parsed = json.loads(response.read().decode("utf-8"))
+            parsed = json.loads(cancellable_call(self._read, http_request, timeout or self.timeout, name="jake-ollama-http").decode("utf-8"))
         except error.HTTPError as exc:
             detail = ""
             try:
@@ -80,8 +88,7 @@ class OllamaClient:
 
     def _get(self, path: str, timeout: float | None = None) -> dict:
         try:
-            with request.urlopen(f"{self.base_url}{path}", timeout=timeout or self.timeout) as response:
-                parsed = json.loads(response.read().decode("utf-8"))
+            parsed = json.loads(cancellable_call(self._read, f"{self.base_url}{path}", timeout or self.timeout, name="jake-ollama-http").decode("utf-8"))
         except error.HTTPError as exc:
             raise OllamaResponseError(f"HTTP {exc.code}") from exc
         except (error.URLError, TimeoutError, ConnectionError, OSError) as exc:

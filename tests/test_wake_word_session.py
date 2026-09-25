@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from core.voice.wake_word_session import WakeWordSession, _edit_distance
+from tests.voice_session_support import VoiceSessionTestCase, track
 
 
 class FakeSttProvider:
@@ -47,13 +48,13 @@ class FakeJakeCore:
 
 
 def _session(text: str) -> WakeWordSession:
-    return WakeWordSession(
+    return track(WakeWordSession(
         FakeJakeCore(), FakeSttProvider(text), FakeTtsProvider(),
         vad_listener=SimpleNamespace(on_level=None, muted=False, SAMPLE_RATE=16000),
-    )
+    ))
 
 
-class MatchWakeWordTests(unittest.TestCase):
+class MatchWakeWordTests(VoiceSessionTestCase):
     def test_wake_word_at_start_returns_remainder(self):
         session = _session("")
         self.assertEqual(session._match_wake_word("Jake apri spotify"), "apri spotify")
@@ -71,7 +72,7 @@ class MatchWakeWordTests(unittest.TestCase):
         self.assertEqual(session._match_wake_word("geek che tempo fa"), "che tempo fa")
 
 
-class ContainsWakeWordAnywhereTests(unittest.TestCase):
+class ContainsWakeWordAnywhereTests(VoiceSessionTestCase):
     def test_true_when_wake_word_is_in_the_middle(self):
         session = _session("")
         self.assertTrue(session._contains_wake_word_anywhere("scusa jake torna operativo", session._is_close_to_wake_word))
@@ -85,7 +86,7 @@ class ContainsWakeWordAnywhereTests(unittest.TestCase):
         self.assertFalse(session._contains_wake_word_anywhere("continua pure", session._is_close_to_wake_word))
 
 
-class PauseWakeUpTests(unittest.TestCase):
+class PauseWakeUpTests(VoiceSessionTestCase):
     def test_wakes_up_when_wake_word_is_not_the_first_word(self):
         """Prima del v4.1 il risveglio richiedeva 'Jake' come prima parola: 'scusa se ti
         disturbo, Jake, svegliati' non funzionava."""
@@ -126,10 +127,10 @@ def _mock_session(**kwargs):
     stt_provider = kwargs.pop("stt_provider", None) or mock.MagicMock()
     tts_provider = kwargs.pop("tts_provider", None) or mock.MagicMock()
     vad_listener = kwargs.pop("vad_listener", None) or mock.MagicMock(on_level=None)
-    return WakeWordSession(jake_core, stt_provider, tts_provider, vad_listener=vad_listener, **kwargs)
+    return track(WakeWordSession(jake_core, stt_provider, tts_provider, vad_listener=vad_listener, **kwargs))
 
 
-class EditDistanceTests(unittest.TestCase):
+class EditDistanceTests(VoiceSessionTestCase):
     def test_identical_strings_have_zero_distance(self):
         self.assertEqual(_edit_distance("jake", "jake"), 0)
 
@@ -146,7 +147,7 @@ class EditDistanceTests(unittest.TestCase):
         self.assertGreater(_edit_distance("jake", "pizza"), 1)
 
 
-class MatchWakeWordEdgeCaseTests(unittest.TestCase):
+class MatchWakeWordEdgeCaseTests(VoiceSessionTestCase):
     def test_the_wake_word_alone_returns_an_empty_remainder(self):
         session = _mock_session()
         self.assertEqual(session._match_wake_word("Jake"), "")
@@ -168,7 +169,7 @@ class MatchWakeWordEdgeCaseTests(unittest.TestCase):
         self.assertIsNone(session._match_wake_word("ehi"))
 
 
-class TypeDictationTests(unittest.TestCase):
+class TypeDictationTests(VoiceSessionTestCase):
     def test_spoken_punctuation_is_converted_to_symbols(self):
         with mock.patch("keyboard.write") as write:
             WakeWordSession._type_dictation("ciao virgola come stai punto interrogativo")
@@ -188,7 +189,7 @@ class TypeDictationTests(unittest.TestCase):
         self.assertEqual(written_text, "scrivi questo testo normale ")
 
 
-class PauseResumeTests(unittest.TestCase):
+class PauseResumeTests(VoiceSessionTestCase):
     def test_pause_listening_sets_a_future_deadline(self):
         session = _mock_session()
         before = time.time()
@@ -204,7 +205,7 @@ class PauseResumeTests(unittest.TestCase):
         self.assertEqual(session.state, "idle")
 
 
-class HandleUtteranceTests(unittest.TestCase):
+class HandleUtteranceTests(VoiceSessionTestCase):
     def test_an_empty_transcription_is_ignored(self):
         session = _mock_session()
         session.stt_provider.transcribe.return_value = "   "
@@ -253,6 +254,7 @@ class HandleUtteranceTests(unittest.TestCase):
         session.jake_core.answer.return_value = "Sono le dieci."
         with mock.patch.object(session, "_respond") as respond:
             session._handle_utterance(object())
+            self.assertTrue(session.wait_for_commands(2))
         session.jake_core.answer.assert_called_once_with("che ore sono")
         respond.assert_called_once_with("Sono le dieci.")
 
@@ -270,6 +272,7 @@ class HandleUtteranceTests(unittest.TestCase):
         session.jake_core.answer.return_value = "Sono le dieci."
         with mock.patch.object(session, "_respond") as respond:
             session._handle_utterance(object())
+            self.assertTrue(session.wait_for_commands(2))
         session.jake_core.answer.assert_called_once_with("che ore sono")
         respond.assert_called_once_with("Sono le dieci.")
 
@@ -288,13 +291,14 @@ class HandleUtteranceTests(unittest.TestCase):
         session.jake_core.answer.assert_not_called()
 
 
-class ProcessCommandTests(unittest.TestCase):
+class ProcessCommandTests(VoiceSessionTestCase):
     def test_the_exit_sentinel_stops_the_session(self):
         session = _mock_session()
         session._running = True
         session.jake_core.answer.return_value = "ESCI"
         with mock.patch.object(session, "_respond") as respond:
             session._process_command("esci")
+            self.assertTrue(session.wait_for_commands(2))
         self.assertFalse(session._running)
         self.assertEqual(session.state, "exit")
         respond.assert_not_called()
@@ -304,10 +308,11 @@ class ProcessCommandTests(unittest.TestCase):
         session.jake_core.answer.return_value = "Fatto."
         with mock.patch.object(session, "_respond") as respond:
             session._process_command("fai una cosa")
+            self.assertTrue(session.wait_for_commands(2))
         respond.assert_called_once_with("Fatto.")
 
 
-class IdentifySpeakerTokenTests(unittest.TestCase):
+class IdentifySpeakerTokenTests(VoiceSessionTestCase):
     """F2.7 (adozione, prima fetta - identificazione): _identify_speaker_token() e' il pezzo
     nuovo, isolato dal resto di _process_command cosi' da poterlo provare senza dover costruire
     audio vero (extract_features/identify sono patchati al punto in cui wake_word_session.py li
@@ -366,7 +371,7 @@ class IdentifySpeakerTokenTests(unittest.TestCase):
             self.assertIsNone(session._identify_speaker_token())
 
 
-class ProcessCommandSpeakerIdentificationTests(unittest.TestCase):
+class ProcessCommandSpeakerIdentificationTests(VoiceSessionTestCase):
     """F2.7 (adozione, prima fetta): il profilo riconosciuto e' visibile SOLO durante la chiamata
     a core.answer(), mai prima ne' dopo - lo stesso identico contratto gia' provato per gli altri
     contextvar di request_context.py (F1.2.3/F1.5.2/F1.3.4)."""
@@ -389,25 +394,42 @@ class ProcessCommandSpeakerIdentificationTests(unittest.TestCase):
              mock.patch("core.voice.wake_word_session.extract_features", return_value=object()), \
              mock.patch("core.voice.wake_word_session.identify", return_value=hint):
             session._process_command("che ore sono")
+            self.assertTrue(session.wait_for_commands(2))
 
         self.assertEqual(seen_during_answer, ["davide"])
         self.assertIsNone(current_speaker_profile_id())
 
     def test_a_failing_answer_still_clears_the_recognized_profile(self):
         """finally, non solo il percorso felice: un'eccezione da core.answer() non deve lasciare
-        il profilo riconosciuto visibile a un turno futuro scollegato sullo stesso thread."""
+        il profilo riconosciuto visibile a un turno futuro. Dal worker asincrono l'eccezione
+        non esce piu' dal listener: diventa una risposta di errore parlata, e il turno
+        successivo (non riconosciuto) non vede il profilo del precedente."""
         from core.request_context import current_speaker_profile_id
         from core.voice.speaker_profile import SpeakerHint
 
         session = _mock_session(speaker_store=mock.MagicMock())
         session._last_utterance_audio = object()
-        session.jake_core.answer.side_effect = RuntimeError("boom")
-        hint = SpeakerHint(profile_id="davide", confidence="high")
-        with mock.patch("core.voice.wake_word_session.extract_features", return_value=object()), \
-             mock.patch("core.voice.wake_word_session.identify", return_value=hint):
-            with self.assertRaises(RuntimeError):
-                session._process_command("che ore sono")
+        seen = []
 
+        def failing_then_recording(text):
+            seen.append(current_speaker_profile_id())
+            if len(seen) == 1:
+                raise RuntimeError("boom")
+            return "Fatto."
+
+        session.jake_core.answer.side_effect = failing_then_recording
+        with mock.patch.object(session, "_respond") as respond, \
+             mock.patch("core.voice.wake_word_session.extract_features", return_value=object()), \
+             mock.patch("core.voice.wake_word_session.identify",
+                        side_effect=[SpeakerHint(profile_id="davide", confidence="high"),
+                                     SpeakerHint(profile_id=None, confidence="none")]):
+            session._process_command("che ore sono")
+            self.assertTrue(session.wait_for_commands(2))
+            session._process_command("e domani?")
+            self.assertTrue(session.wait_for_commands(2))
+
+        self.assertEqual(seen, ["davide", None])
+        self.assertIn("errore", respond.call_args_list[0].args[0])
         self.assertIsNone(current_speaker_profile_id())
 
     def test_without_a_speaker_store_the_context_var_stays_none(self):
@@ -427,7 +449,7 @@ class ProcessCommandSpeakerIdentificationTests(unittest.TestCase):
         self.assertEqual(seen_during_answer, [None])
 
 
-class RespondTests(unittest.TestCase):
+class RespondTests(VoiceSessionTestCase):
     def test_an_empty_response_opens_a_follow_up_window_without_speaking(self):
         session = _mock_session()
         with mock.patch.object(session, "_speak_async") as speak_async:
@@ -442,7 +464,7 @@ class RespondTests(unittest.TestCase):
         speak_async.assert_called_once_with("Fatto.")
 
 
-class RunReleasesTheMicrophoneTests(unittest.TestCase):
+class RunReleasesTheMicrophoneTests(VoiceSessionTestCase):
     """F1.8.4 ("gestire shutdown con... release dei device"): run() non aveva alcuna copertura
     diretta, ne' un test aveva mai verificato per davvero se il microfono viene rilasciato quando
     la sessione si ferma - solo letto a tavolino (VadListener.listen_for_utterances() apre lo
@@ -488,7 +510,7 @@ class RunReleasesTheMicrophoneTests(unittest.TestCase):
         jake_core = mock.MagicMock(EXIT_SENTINEL="ESCI")
         jake_core.conversation_state.has_pending_action.return_value = False
         jake_core.answer.return_value = "ESCI"
-        session = WakeWordSession(jake_core, FakeSttProvider("jake esci"), FakeTtsProvider(), vad_listener=vad_listener)
+        session = track(WakeWordSession(jake_core, FakeSttProvider("jake esci"), FakeTtsProvider(), vad_listener=vad_listener))
 
         stream_holder: dict = {}
         with mock.patch("sounddevice.InputStream", side_effect=self._fake_input_stream_factory(
@@ -517,7 +539,7 @@ class RunReleasesTheMicrophoneTests(unittest.TestCase):
 
         jake_core = mock.MagicMock(EXIT_SENTINEL="ESCI")
         jake_core.conversation_state.has_pending_action.return_value = False
-        session = WakeWordSession(jake_core, FakeSttProvider(""), FakeTtsProvider(), vad_listener=vad_listener)
+        session = track(WakeWordSession(jake_core, FakeSttProvider(""), FakeTtsProvider(), vad_listener=vad_listener))
 
         stream_holder: dict = {}
 
@@ -550,7 +572,7 @@ class RunReleasesTheMicrophoneTests(unittest.TestCase):
         stream_holder["stream"].__exit__.assert_called_once()
 
 
-class ListeningIntegrationTests(unittest.TestCase):
+class ListeningIntegrationTests(VoiceSessionTestCase):
     """Collegamento di core/voice/listening_state.py (F2.3.3-F2.3.5) al ciclo reale: gli stati di ascolto
     sono ora una macchina esplicita dietro gli alias storici, e le protezioni da eco/cooldown/replay e
     l'indicatore del microfono girano DENTRO WakeWordSession."""
@@ -663,8 +685,10 @@ class ListeningIntegrationTests(unittest.TestCase):
         session.stt_provider.transcribe.side_effect = ["Jake che ore sono", "Jake apri spotify"]
         with mock.patch.object(session, "_respond"):
             session._handle_utterance(object())
+            self.assertTrue(session.wait_for_commands(2))
             clock["t"] += 2.0
             session._handle_utterance(object())
+            self.assertTrue(session.wait_for_commands(2))
         self.assertEqual(session.jake_core.answer.call_count, 2)
 
     def test_the_replay_guard_is_off_by_default(self):
@@ -694,7 +718,7 @@ class ListeningIntegrationTests(unittest.TestCase):
         self.assertGreater(session._follow_up_until, time.time() + 25)
 
 
-class SpeechPreparationIntegrationTests(unittest.TestCase):
+class SpeechPreparationIntegrationTests(VoiceSessionTestCase):
     """F2.5.1/F2.5.4/F2.5.7 dentro WakeWordSession: cosa arriva DAVVERO al motore TTS."""
 
     LONG = "Prima frase abbastanza lunga qui. Seconda frase altrettanto lunga qui. Terza frase ancora piu' lunga qui."

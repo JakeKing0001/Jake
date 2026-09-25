@@ -23,6 +23,7 @@ from core.execution_safety import ActionExecution
 from core.hud_protocol import EventType, HudEvent
 from core.identity import current_windows_user
 from core.kill_switch import KillSwitch
+from core.turn_cancellation import TurnCancelled, current_turn_cancelled
 from core.learning_manager import LearningManager
 from core.logger import get_logger, log_action, new_trace_id
 from core.nlu import chitchat
@@ -920,12 +921,22 @@ class JakeCore:
         source_intent_token = set_current_command_source_intent(None)
         try:
             response = self._process(text)
+        except TurnCancelled:
+            reset_current_command_source_intent(source_intent_token)
+            raise
         except Exception:
             # Nessuna eccezione imprevista deve mai far crashare Jake: viene registrata nel log
             # e riportata all'utente con un messaggio comprensibile invece di terminare il processo.
             self.logger.exception("Errore imprevisto elaborando: %s", text)
             response = "Mi dispiace, si è verificato un errore imprevisto. L'ho registrato nel log."
             self.event_bus.publish(HudEvent(EventType.ERROR, {"detail": "errore imprevisto"}))
+        if current_turn_cancelled():
+            # "Jake, basta" arrivato mentre il turno lavorava: la sua risposta e' vecchia. Non entra
+            # in cronologia/memoria/HUD (il prossimo turno non deve riferirsi a qualcosa che l'utente
+            # non ha mai sentito) e non parte il riassunto della cronologia (una chiamata al modello).
+            reset_current_command_source_intent(source_intent_token)
+            self.logger.info("Turno annullato dall'utente: risposta scartata (%s)", text)
+            raise TurnCancelled()
 
         if response is None:
             response = ""

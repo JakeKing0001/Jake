@@ -1,6 +1,7 @@
 import json
 from urllib import error, request
 from core.ollama_client import DEFAULT_BASE_URL
+from core.network import read_url
 
 
 class EmbeddingProvider:
@@ -25,8 +26,7 @@ class EmbeddingProvider:
             method="POST",
         )
         try:
-            with request.urlopen(http_request, timeout=self.timeout) as response:
-                payload = json.loads(response.read().decode("utf-8"))
+            payload = json.loads(read_url(http_request, self.timeout).decode("utf-8"))
         except (error.URLError, TimeoutError, json.JSONDecodeError):
             return None
 

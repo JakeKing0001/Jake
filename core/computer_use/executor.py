@@ -124,6 +124,7 @@ comtypes.client.GetModule("UIAutomationCore.dll")
 from comtypes.gen import UIAutomationClient as UIA  # noqa: E402 (deve seguire GetModule)
 
 from core.computer_use.ui_automation_adapter import _CONTROL_TYPE_NAMES  # noqa: E402 (deve seguire GetModule)
+from core.turn_cancellation import raise_if_cancelled  # noqa: E402
 
 # UIA_ScrollPatternNoScroll (documentato da Microsoft come -1, non una costante nominata nel
 # type library generato da comtypes): passato a SetScrollPercent() per l'asse che non si vuole
@@ -339,6 +340,9 @@ class ActionExecutor:
         return receipt
 
     def _receipt(self, action: str, pattern_name: str, element) -> ElementActionReceipt:
+        # Ogni azione costruisce la ricevuta subito prima della chiamata al pattern: e' l'ultimo
+        # punto in cui un turno annullato ("Jake, basta") puo' ancora impedire l'effetto.
+        raise_if_cancelled()
         name, automation_id, control_type = _element_identity(element)
         return ElementActionReceipt(
             action=action, pattern=pattern_name,

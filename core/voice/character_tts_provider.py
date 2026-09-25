@@ -3,7 +3,7 @@ import os
 import tempfile
 import wave
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from core.voice.speech_text import split_prosodic
 from core.voice.rvc_client import RvcError
 from core.voice.tts_provider import TtsProvider, scale_pcm
@@ -83,8 +83,11 @@ class CharacterTtsProvider(TtsProvider):
         # questo flag, un'interruzione arrivata durante quella finestra non avrebbe alcun
         # effetto (stop() agiva solo a riproduzione gia' avviata) e Jake parlerebbe comunque.
         self._interrupted = False
+        # Due worker: una frase nuova (es. "Va bene, annullo.") non deve aspettare in coda la
+        # sintesi/conversione ormai inutile della frase interrotta, che non si puo' abortire a
+        # meta' ma il cui risultato viene comunque scartato (_is_current).
         self._executor = ThreadPoolExecutor(
-            max_workers=1,
+            max_workers=2,
             thread_name_prefix="jake-rvc-prefetch",
         )
         self._state_lock = threading.Lock()
@@ -138,7 +141,7 @@ class CharacterTtsProvider(TtsProvider):
 
         for index, _chunk in enumerate(chunks):
             try:
-                converted_bytes = future.result()
+                converted_bytes = self._await_chunk(future, generation)
             except RvcError:
                 if self._is_current(generation):
                     # I chunk precedenti sono già stati pronunciati:
@@ -171,6 +174,19 @@ class CharacterTtsProvider(TtsProvider):
                 return
 
             future = next_future
+
+    POLL_SECONDS = 0.05
+
+    def _await_chunk(self, future: Future, generation: int) -> bytes | None:
+        """Attende il chunk preparato, ma smette appena arriva stop(): speak() deve tornare
+        subito, altrimenti il thread vocale resta vivo (microfono in mute) finche' la
+        conversione RVC in corso non finisce."""
+        while True:
+            try:
+                return future.result(timeout=self.POLL_SECONDS)
+            except TimeoutError:
+                if not self._is_current(generation):
+                    return None
 
     def set_speech_params(self, volume: float = 1.0, rate_delta_percent: int = 0) -> bool:
         self.volume = min(1.0, max(0.0, volume))

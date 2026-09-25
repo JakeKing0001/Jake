@@ -1,6 +1,7 @@
 import re
 import threading
 import time
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -21,6 +22,7 @@ from core.voice.speech_text import STYLES, prepare_for_speech
 from core.voice.streaming_stt import TranscriptEvent, to_hud_event
 from core.voice.vad_listener import VadListener
 from core.turn_cancellation import (
+    TurnCancelled,
     reset_current_turn_cancel_event,
     set_current_turn_cancel_event,
 )
@@ -46,6 +48,11 @@ STOP_CURRENT_TASK_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+def _is_bare_stop(command: str) -> bool:
+    """La frase e' SOLO una richiesta di fermarsi ("basta", "fermati", "annulla"...)."""
+    return STOP_CURRENT_TASK_PATTERN.fullmatch(command.strip(" .,!?").lower()) is not None
+
+
 def _edit_distance(a: str, b: str) -> int:
     if a == b:
         return 0
@@ -60,6 +67,22 @@ def _edit_distance(a: str, b: str) -> int:
             ))
         previous_row = current_row
     return previous_row[-1]
+
+
+@dataclass
+class _VoiceTurn:
+    """Un comando vocale diretto a `JakeCore.answer()`, con tutto cio' che appartiene a QUELLA frase
+    (audio per l'identificazione del parlante, confidenza STT) catturato prima che il listener lo
+    sovrascriva con la frase successiva."""
+
+    command: str
+    audio: np.ndarray | None
+    confidence: float | None
+    cancel_event: threading.Event = field(default_factory=threading.Event)
+    queued_at: float = field(default_factory=time.monotonic)
+    # Vero da quando la risposta e' stata accettata per la consegna: da quel momento "basta" ferma
+    # la voce ma non puo' piu' dichiarare annullato un lavoro gia' finito.
+    delivered: bool = False
 
 
 class _SessionSpeaker:
@@ -94,6 +117,10 @@ class WakeWordSession:
     COMMAND_WAIT_SECONDS = 8.0
     FOLLOW_UP_SECONDS = 6.0
     CONFIRMATION_WAIT_SECONDS = 20.0
+    # Un comando detto subito dopo "Jake, basta" aspetta (coda di UNO) che il turno annullato
+    # finisca di chiudersi: mai due answer() insieme. Se il vecchio turno impiega piu' di cosi'
+    # (una chiamata non interrompibile), il comando in coda non parte a sorpresa molto dopo.
+    PENDING_COMMAND_MAX_AGE_SECONDS = 15.0
 
     def __init__(self, jake_core, stt_provider, tts_provider, vad_listener: VadListener = None,
                  wake_words=None, on_state=None, on_level=None, follow_up_seconds: float = None,
@@ -170,6 +197,8 @@ class WakeWordSession:
         self._command_lock = threading.Lock()
         self._command_thread = None
         self._command_cancel_event = None
+        self._active_turn: _VoiceTurn | None = None
+        self._pending_turn: _VoiceTurn | None = None
         self._attach_hooks()
 
     # ---- alias storici degli stati di ascolto (F2.3.3) -------------------------------
@@ -441,12 +470,15 @@ class WakeWordSession:
             finally:
                 # Piccolo margine: la coda dell'audio puo' ancora rimbombare nel microfono.
                 time.sleep(0.25)
-                self.vad_listener.muted = False
-                if self.follow_up_seconds > 0:
-                    self._open_follow_up()
-                self._update_mic(True, self.listening.state.value)
-                if self.state == "speaking":
-                    self._set_state("dictation" if self.dictation_active else "idle", "")
+                # Se una frase piu' nuova ha gia' preso il posto di questa (stop lento del
+                # provider oltre il join), microfono e stato ormai appartengono a lei.
+                if self._tts_thread is threading.current_thread():
+                    self.vad_listener.muted = False
+                    if self.follow_up_seconds > 0:
+                        self._open_follow_up()
+                    self._update_mic(True, self.listening.state.value)
+                    if self.state == "speaking":
+                        self._set_state("dictation" if self.dictation_active else "idle", "")
 
         self._tts_thread = threading.Thread(target=run, daemon=True)
         self._tts_thread.start()
@@ -591,31 +623,24 @@ class WakeWordSession:
             self._logger.info("Ignorata: ripetizione identica ravvicinata")
             return
 
-        # F2.8A: mentre Jake sta ancora elaborando una richiesta, il listener
-        # resta attivo. Un comando di stop non passa da NLU: cancella
-        # direttamente il turno in corso.
+        # Mentre Jake elabora una richiesta il listener resta attivo. Un comando di stop non passa
+        # da NLU: annulla direttamente il turno in corso (mai il KillSwitch globale). Dopo uno stop,
+        # finche' il vecchio turno si sta ancora chiudendo, un nuovo comando segue il percorso
+        # normale e _process_command lo mette in coda: nessuna answer() concorrente.
         if self._command_busy():
             remainder = self._match_wake_word(text)
-
-            stop_text = (
-                remainder
-                if remainder is not None
-                else text
-            )
-
+            stop_text = remainder if remainder is not None else text
             if STOP_CURRENT_TASK_PATTERN.search(stop_text):
                 if self._cancel_current_command():
                     print("Jake > Va bene, annullo.")
                     self._respond("Va bene, annullo.")
+                else:
+                    # La risposta era gia' pronta: resta solo da non pronunciarla oltre.
+                    self._interrupt_speech()
                 return
-
-            # Non lanciamo una seconda answer() concorrente.
-            # Per ora i nuovi comandi durante un task vengono ignorati.
-            self._logger.info(
-                "Ignorato comando mentre un task e' ancora in corso: %s",
-                text,
-            )
-            return
+            if not self._command_cancelling():
+                self._logger.info("Ignorato comando mentre un task e' ancora in corso: %s", text)
+                return
 
         # F2.4.5: la frase arriva da un barge-in. "basta"/"no" da soli = fermati e basta; "no, intendevo X" e una
         # nuova richiesta = si esegue il testo utile (senza wake word: l'utente parlava gia' con Jake).
@@ -671,6 +696,10 @@ class WakeWordSession:
                 self._set_state("listening", "")
                 return
             self._process_command(remainder)
+            if _is_bare_stop(remainder):
+                # "Jake, basta" e' un annullamento esplicito: il comando che l'utente dira' subito
+                # dopo non deve cadere nel cooldown anti-doppia-attivazione.
+                self.wake_cooldown.reset()
             return
 
         if speaking:
@@ -712,131 +741,160 @@ class WakeWordSession:
                 and self._command_thread.is_alive()
             )
 
+    def wait_for_commands(self, timeout: float | None = None) -> bool:
+        """Attende che il turno vocale in corso, e quello eventualmente in coda dietro di lui, sia
+        finito. Vero se non resta nessun turno attivo entro `timeout`."""
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while True:
+            with self._command_lock:
+                thread = self._command_thread
+            if thread is None or thread is threading.current_thread():
+                return True
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                return False
+            thread.join(remaining)
+
+    def _command_cancelling(self) -> bool:
+        """Il turno in corso e' gia' stato annullato e sta solo finendo di chiudersi."""
+        with self._command_lock:
+            turn = self._active_turn
+            return turn is not None and turn.cancel_event.is_set()
 
     def _cancel_current_command(self) -> bool:
         with self._command_lock:
+            turn = self._active_turn
             thread = self._command_thread
-            cancel_event = self._command_cancel_event
-
-            if (
-                thread is None
-                or not thread.is_alive()
-                or cancel_event is None
-            ):
+            if turn is None or thread is None or not thread.is_alive() or turn.delivered:
                 return False
-
-            cancel_event.set()
+            turn.cancel_event.set()
+            # Anche un comando gia' in coda dietro il turno annullato: "basta" vale per tutto.
+            self._pending_turn = None
 
         # Se nel frattempo Jake sta anche parlando, ferma pure la voce.
         self._interrupt_speech()
 
         self.listening.command_consumed()
+        self.wake_cooldown.reset()
         self._set_state("cancelling", "")
         self._logger.info("Cancellazione richiesta per il task vocale corrente")
         return True
 
     def _process_command(self, command: str) -> None:
-        if self._command_busy():
-            self._logger.info(
-                "Comando non avviato: un task vocale e' gia' in corso"
-            )
-            return
-
-        self.listening.command_consumed()
-        print(f"Tu > {command}")
-        self._set_state("thinking", command)
-
-        cancel_event = threading.Event()
-
-        # Questi valori appartengono a QUESTA utterance.
-        # Devono essere catturati prima che il listener possa sovrascriverli.
-        utterance_audio = (
-            self._last_utterance_audio.copy()
-            if isinstance(self._last_utterance_audio, np.ndarray)
-            else None
+        # Questi valori appartengono a QUESTA utterance: catturati prima che il listener possa
+        # sovrascriverli con la frase successiva.
+        turn = _VoiceTurn(
+            command=command,
+            audio=(
+                self._last_utterance_audio.copy()
+                if isinstance(self._last_utterance_audio, np.ndarray)
+                else None
+            ),
+            confidence=self.last_confidence,
         )
-        confidence = self.last_confidence
+        with self._command_lock:
+            active = self._active_turn
+            busy = self._command_thread is not None and self._command_thread.is_alive()
+            if not busy:
+                self._launch_locked(turn)
+                return
+            if active is None or not active.cancel_event.is_set():
+                self._logger.info("Comando non avviato: un task vocale e' gia' in corso")
+                return
+            # Il turno precedente e' stato annullato ma non ha ancora finito di chiudersi: questo
+            # comando parte appena ha finito (coda di UNO, l'ultimo detto vince).
+            self._pending_turn = turn
+        self.listening.command_consumed()
+        self._logger.info("Comando in coda dietro il turno annullato: %s", command)
 
-        def run_command() -> None:
-            try:
-                cancellation_token = set_current_turn_cancel_event(
-                    cancel_event
-                )
-
-                speaker_token = self._identify_speaker_token(
-                    utterance_audio
-                )
-
-                confidence_token = (
-                    set_current_stt_confidence(confidence)
-                    if confidence is not None
-                    else None
-                )
-
-                try:
-                    response = self.jake_core.answer(command)
-                except Exception:
-                    self._logger.exception(
-                        "Errore nel worker del comando vocale"
-                    )
-                    response = (
-                        "Mi dispiace, si è verificato un errore "
-                        "durante l'esecuzione."
-                    )
-                finally:
-                    if speaker_token is not None:
-                        reset_current_speaker_profile_id(
-                            speaker_token
-                        )
-
-                    if confidence_token is not None:
-                        reset_current_stt_confidence(
-                            confidence_token
-                        )
-
-                    reset_current_turn_cancel_event(
-                        cancellation_token
-                    )
-
-                # Il lavoro potrebbe essere terminato DOPO che l'utente
-                # ha detto basta. In quel caso il risultato e' vecchio:
-                # non deve parlare ne' riaprire il follow-up.
-                if cancel_event.is_set():
-                    self._logger.info(
-                        "Risposta del task cancellato scartata"
-                    )
-
-                    if self.state in ("thinking", "cancelling"):
-                        self._set_state("idle", "")
-
-                    return
-
-                print(f"Jake > {response}")
-
-                if response == self.jake_core.EXIT_SENTINEL:
-                    print("Chiusura...")
-                    self._set_state("exit", "")
-                    self._running = False
-                    return
-
-                self._respond(response)
-            finally:
-                with self._command_lock:
-                    if self._command_cancel_event is cancel_event:
-                        self._command_thread = None
-                        self._command_cancel_event = None
-
+    def _launch_locked(self, turn: _VoiceTurn) -> None:
+        """Avvia il worker del turno. Da chiamare con `_command_lock` gia' preso: il thread e'
+        registrato E avviato prima che il lock venga rilasciato, cosi' nessun altro thread puo'
+        vedere lo slot libero nel mezzo e lanciare una seconda answer()."""
+        self.listening.command_consumed()
+        print(f"Tu > {turn.command}")
+        self._set_state("thinking", turn.command)
         worker = threading.Thread(
-            target=run_command,
+            target=self._run_turn,
+            args=(turn,),
             name="jake-voice-command",
             daemon=True,
         )
-
-        with self._command_lock:
-            self._command_cancel_event = cancel_event
-            self._command_thread = worker
-
+        self._active_turn = turn
+        self._command_thread = worker
+        self._command_cancel_event = turn.cancel_event
         worker.start()
+
+    def _answer_turn(self, turn: _VoiceTurn) -> tuple[str, bool]:
+        """`JakeCore.answer()` nel contesto del turno: evento di cancellazione, parlante e
+        confidenza STT valgono SOLO per questa chiamata e vengono sempre ripuliti."""
+        cancellation_token = set_current_turn_cancel_event(turn.cancel_event)
+        speaker_token = self._identify_speaker_token(turn.audio)
+        confidence_token = (
+            set_current_stt_confidence(turn.confidence)
+            if turn.confidence is not None
+            else None
+        )
+        try:
+            return self.jake_core.answer(turn.command), False
+        except TurnCancelled:
+            return "", True
+        except Exception:
+            self._logger.exception("Errore nel worker del comando vocale")
+            return "Mi dispiace, si è verificato un errore durante l'esecuzione.", False
+        finally:
+            if speaker_token is not None:
+                reset_current_speaker_profile_id(speaker_token)
+            if confidence_token is not None:
+                reset_current_stt_confidence(confidence_token)
+            reset_current_turn_cancel_event(cancellation_token)
+
+    def _run_turn(self, turn: _VoiceTurn) -> None:
+        cancelled = True
+        try:
+            response, cancelled = self._answer_turn(turn)
+            with self._command_lock:
+                # Deciso sotto lock: o "basta" arriva prima e la risposta e' scartata, o la
+                # risposta e' consegnata e "basta" ferma soltanto la voce.
+                cancelled = cancelled or turn.cancel_event.is_set()
+                turn.delivered = not cancelled
+            if cancelled:
+                # Il lavoro e' finito DOPO che l'utente ha detto basta: il risultato e' vecchio,
+                # non deve parlare ne' riaprire il follow-up.
+                self._logger.info("Risposta del task cancellato scartata")
+                return
+
+            print(f"Jake > {response}")
+
+            if response == self.jake_core.EXIT_SENTINEL:
+                print("Chiusura...")
+                self._set_state("exit", "")
+                self._running = False
+                return
+
+            self._respond(response)
+        finally:
+            self._finish_turn(turn, cancelled)
+
+    def _finish_turn(self, turn: _VoiceTurn, cancelled: bool) -> None:
+        stale = None
+        with self._command_lock:
+            if self._active_turn is not turn:
+                return
+            self._active_turn = None
+            self._command_thread = None
+            self._command_cancel_event = None
+            pending, self._pending_turn = self._pending_turn, None
+            if pending is not None:
+                if time.monotonic() - pending.queued_at <= self.PENDING_COMMAND_MAX_AGE_SECONDS:
+                    self._launch_locked(pending)
+                    return
+                stale = pending
+            if cancelled and self.state in ("thinking", "cancelling"):
+                self._set_state("idle", "")
+        if stale is not None:
+            self._logger.warning("Comando in coda scartato: il turno annullato ha impiegato troppo a chiudersi")
+            self._respond("Il compito precedente ha impiegato troppo a fermarsi: ripeti la richiesta.")
 
     def _respond(self, response: str) -> None:
         if not response:

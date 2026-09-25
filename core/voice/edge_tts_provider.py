@@ -50,7 +50,9 @@ class EdgeTtsProvider(TtsProvider):
         self._interrupted = False
         self._playing = False
         self._lock = threading.Lock()
-        self._executor = ThreadPoolExecutor(max_workers=1)
+        # Due worker: dopo stop() la frase nuova non aspetta in coda la sintesi di rete, non
+        # abortibile, della frase interrotta (il cui risultato viene scartato).
+        self._executor = ThreadPoolExecutor(max_workers=2)
         self._logger = get_logger()
         self._consecutive_failures = 0
 
@@ -138,7 +140,9 @@ class EdgeTtsProvider(TtsProvider):
             sentences = _split_sentences(text)
             future = self._executor.submit(self._synthesize, sentences[0])
             for index, _sentence in enumerate(sentences):
-                mp3 = future.result()
+                mp3 = self._await_synthesis(future)
+                if self._interrupted:
+                    return
                 if index + 1 < len(sentences):
                     future = self._executor.submit(self._synthesize, sentences[index + 1])
                 if self._interrupted:
@@ -158,6 +162,18 @@ class EdgeTtsProvider(TtsProvider):
                 self._play(pcm)
                 if self._interrupted:
                     return
+
+    POLL_SECONDS = 0.05
+
+    def _await_synthesis(self, future):
+        """Attende la sintesi di rete, ma torna subito dopo stop(): speak() tiene `_lock`, e una
+        frase nuova non deve restare bloccata dietro una richiesta Edge lenta ormai inutile."""
+        while True:
+            try:
+                return future.result(timeout=self.POLL_SECONDS)
+            except TimeoutError:
+                if self._interrupted:
+                    return None
 
     def _speak_fallback(self, text: str) -> None:
         if self.fallback is not None and not self._interrupted:

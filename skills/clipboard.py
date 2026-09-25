@@ -3,6 +3,7 @@ from urllib import error, request
 
 from core.skill_result import SkillResult
 from core.ollama_client import DEFAULT_BASE_URL
+from core.network import read_url
 
 
 class ClipboardReadSkill:
@@ -129,8 +130,7 @@ class TranslateClipboardSkill:
             f"{self.base_url}/api/chat", data=body, headers={"Content-Type": "application/json"}, method="POST",
         )
         try:
-            with request.urlopen(http_request, timeout=self.timeout) as response:
-                result = json.loads(response.read().decode("utf-8"))
+            result = json.loads(read_url(http_request, self.timeout).decode("utf-8"))
             return result["message"]["content"].strip() or None
         except (error.URLError, TimeoutError, json.JSONDecodeError, KeyError, TypeError):
             # F1: buco reale trovato e corretto in questa sessione (insieme allo stesso in

@@ -1,13 +1,9 @@
 import base64
 import json
-import queue
-import threading
 from pathlib import Path
 from urllib import error, request
 from core.ollama_client import DEFAULT_BASE_URL
-from core.turn_cancellation import (
-    current_turn_cancel_event,
-)
+from core.turn_cancellation import TurnCancelled, cancellable_call
 
 DEFAULT_PROMPT = (
     "Descrivi in italiano, in modo conciso, cosa vedi in questa schermata: layout, "
@@ -49,62 +45,20 @@ class VisionProvider:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        cancel_event = current_turn_cancel_event()
-        if cancel_event is not None and cancel_event.is_set():
-            return None
-        def do_request():
-            with request.urlopen(
-                http_request,
-                timeout=self.timeout,
-            ) as response:
+        def do_request() -> bytes:
+            with request.urlopen(http_request, timeout=self.timeout) as response:
                 return response.read()
 
-
-        # Fuori da un turno cancellabile preserviamo il percorso semplice.
-        if cancel_event is None:
-            try:
-                raw_response = do_request()
-            except (error.URLError, TimeoutError):
-                return None
-
-        else:
-            result_queue = queue.Queue(maxsize=1)
-
-            def request_worker():
-                try:
-                    value = ("ok", do_request())
-                except (error.URLError, TimeoutError) as exc:
-                    value = ("error", exc)
-
-                try:
-                    result_queue.put_nowait(value)
-                except queue.Full:
-                    pass
-
-            threading.Thread(
-                target=request_worker,
-                name="jake-vision-http",
-                daemon=True,
-            ).start()
-
-            while True:
-                try:
-                    kind, value = result_queue.get(
-                        timeout=0.2
-                    )
-                except queue.Empty:
-                    if cancel_event.is_set():
-                        return None
-                    continue
-
-                if cancel_event.is_set():
-                    return None
-
-                if kind == "error":
-                    return None
-
-                raw_response = value
-                break
+        # Dentro un turno vocale annullabile la richiesta gira su un thread a parte: "Jake, basta"
+        # smette di aspettare il modello di visione subito e una risposta tardiva viene scartata
+        # (None, come ogni altro fallimento: la skill chiamante ricontrolla l'annullamento prima
+        # di qualunque click).
+        try:
+            raw_response = cancellable_call(do_request, name="jake-vision-http")
+        except TurnCancelled:
+            return None
+        except (error.URLError, TimeoutError, OSError):
+            return None
 
         try:
             result = json.loads(

@@ -73,6 +73,8 @@ di ignorare silenziosamente l'intento del chiamante di voler bloccare la risorsa
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable
 
+from core.turn_cancellation import raise_if_cancelled
+
 if TYPE_CHECKING:
     from core.resource_lock import ResourceLockManager
 
@@ -145,6 +147,7 @@ def _run_ladder(
     attempts: list[FallbackAttempt] = []
     for entry in strategies:
         strategy_name, action, unsafe_after_failure = entry if len(entry) == 3 else (*entry, False)
+        raise_if_cancelled()  # "Jake, basta": nessuna strategia successiva, nemmeno la prima
         try:
             action()
         except Exception as exc:

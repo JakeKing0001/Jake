@@ -10,7 +10,7 @@ import re
 import webbrowser
 from urllib import parse, request
 
-from core.network import is_online
+from core.network import is_online, read_url
 from core.skill_result import SkillResult
 
 SITE_SEARCH_URLS = {
@@ -161,8 +161,7 @@ class PlayMediaSkill:
         primo videoId: senza API key, senza dipendenze."""
         http_request = request.Request(results_url, headers={"User-Agent": self.USER_AGENT, "Accept-Language": "it-IT,it;q=0.9"})
         try:
-            with request.urlopen(http_request, timeout=self.timeout) as response:
-                html = response.read().decode("utf-8", errors="replace")
+            html = read_url(http_request, self.timeout).decode("utf-8", errors="replace")
         except Exception:
             return None, None
         match = re.search(r'"videoRenderer":\{"videoId":"([\w-]{11})".*?"title":\{"runs":\[\{"text":"(.*?)"\}', html, flags=re.DOTALL)

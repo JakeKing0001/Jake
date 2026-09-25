@@ -23,6 +23,7 @@ from core.policy_engine import POLICY_REASONS
 from core.request_context import current_device_id
 from core.risk import RiskLevel, risk_of
 from core.skill_result import SkillResult
+from core.turn_cancellation import TurnCancelled, cancellation_suspended, current_turn_cancelled
 
 RETRYABLE_ERRORS = {"OPERATION_FAILED", "NETWORK_UNAVAILABLE"}
 MAX_ATTEMPTS = 2
@@ -106,8 +107,17 @@ def execute_action_with_retry(
     execution = ActionExecution(Command(intent, parameters), None)
     max_attempts = MAX_ATTEMPTS if is_safe_to_auto_retry(intent) else 1
     while attempts < max_attempts:
+        if attempts and current_turn_cancelled():
+            break  # "Jake, basta" tra un tentativo e l'altro: nessun nuovo tentativo
         attempts += 1
-        returned = execute_fn(intent, parameters)
+        try:
+            returned = execute_fn(intent, parameters)
+        except TurnCancelled:
+            # Annullato DENTRO la skill (attesa del modello, click bloccato): esito CANCELLED, cosi'
+            # agente e piano fermano il compito e compensano i passi gia' fatti come per un arresto
+            # tra un passo e l'altro.
+            execution = replace(execution, result=SkillResult(success=False, data={}, error="CANCELLED"))
+            break
         execution = returned if isinstance(returned, ActionExecution) else ActionExecution(Command(intent, parameters), returned)
         result = execution.result
         if result is None:
@@ -580,7 +590,10 @@ def rollback_effect(
     if policy_engine is None or compensating_intent in policy_engine.blocked_intents:
         return False
     try:
-        entry.rollback.handler(registry, data, policy_engine)
+        # Un compito annullato con "Jake, basta" deve poter rimettere a posto cio' che aveva gia'
+        # fatto: la compensazione non e' un'azione nuova del turno annullato.
+        with cancellation_suspended():
+            entry.rollback.handler(registry, data, policy_engine)
         succeeded = True
     except Exception:
         succeeded = False

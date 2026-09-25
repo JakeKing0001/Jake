@@ -187,6 +187,11 @@ class WakeCooldown:
     def register(self) -> None:
         self._last = self._clock()
 
+    def reset(self) -> None:
+        """Dopo un annullamento esplicito ("Jake, basta") il comando successivo e' voluto: nessun
+        cooldown residuo deve farlo perdere."""
+        self._last = -1e18
+
 
 class RepeatGuard:
     """Una frase identica sentita due volte in `window_s` secondi non l'ha detta una persona che

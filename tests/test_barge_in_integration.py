@@ -19,11 +19,12 @@ from core.voice.tts_provider import TtsProvider
 from core.voice.utterance_segmenter import UtteranceSegmenter
 from core.voice.vad_listener import VadListener
 from core.voice.wake_word_session import WakeWordSession
+from tests.voice_session_support import VoiceSessionTestCase, track
 from core.turn_cancellation import current_turn_cancel_event
 
 FRAME = VadListener.FRAME_SAMPLES
 
-class CurrentTaskCancellationTests(unittest.TestCase):
+class CurrentTaskCancellationTests(VoiceSessionTestCase):
     def test_stop_is_heard_while_answer_is_still_running(self):
         core = _core()
         started = threading.Event()
@@ -110,7 +111,7 @@ class CurrentTaskCancellationTests(unittest.TestCase):
             if worker is not None:
                 worker.join(timeout=2)
 
-class ReferenceSinkTests(unittest.TestCase):
+class ReferenceSinkTests(VoiceSessionTestCase):
     def test_edge_publishes_exactly_what_it_plays(self):
         provider = EdgeTtsProvider()
         provider.set_speech_params(0.5, 0)
@@ -186,7 +187,7 @@ class ReferenceSinkTests(unittest.TestCase):
         self.assertIsNone(TtsProvider.reference_sink)
 
 
-class SeekTests(unittest.TestCase):
+class SeekTests(VoiceSessionTestCase):
     def test_seek_moves_the_microphone_position(self):
         canceller = EchoCanceller()
         canceller.seek(1000)
@@ -197,7 +198,7 @@ class SeekTests(unittest.TestCase):
         self.assertEqual(canceller._pos, 0)
 
 
-class SegmenterSeedTests(unittest.TestCase):
+class SegmenterSeedTests(VoiceSessionTestCase):
     def test_a_seeded_utterance_includes_the_preroll_and_ends_on_silence(self):
         segmenter = UtteranceSegmenter(silence_frames_needed=2, max_frames=100)
         segmenter.seed([np.full((FRAME, 1), 500, dtype=np.int16)] * 3)
@@ -253,7 +254,7 @@ def _continue(n):
     return check
 
 
-class VadListenerSpeakingFramesTests(unittest.TestCase):
+class VadListenerSpeakingFramesTests(VoiceSessionTestCase):
     def test_frames_while_muted_are_offered_to_the_callback_but_never_yield_an_utterance(self):
         speech = np.full((FRAME, 1), 3000, dtype=np.int16)
         listener = _make_listener([True, True, True])
@@ -369,7 +370,7 @@ def _session(barge_in="on", **kwargs):
     vad = kwargs.pop("vad", None) or FakeVad()
     core = kwargs.pop("core", None) or _core()
     stt = kwargs.pop("stt", None) or mock.MagicMock()
-    session = WakeWordSession(core, stt, tts, vad_listener=vad, barge_in=barge_in, **kwargs)
+    session = track(WakeWordSession(core, stt, tts, vad_listener=vad, barge_in=barge_in, **kwargs))
     return session, tts, vad
 
 
@@ -384,7 +385,7 @@ def _frame(level=0.2):
     return (np.full(FRAME, level * 32768, dtype=np.float32)).astype(np.int16)
 
 
-class BargeInSessionTests(unittest.TestCase):
+class BargeInSessionTests(VoiceSessionTestCase):
     def tearDown(self):
         pass
 
@@ -466,7 +467,7 @@ class BargeInSessionTests(unittest.TestCase):
         session._interrupt_speech()
 
 
-class InterruptionOutcomeTests(unittest.TestCase):
+class InterruptionOutcomeTests(VoiceSessionTestCase):
     def _interrupted(self, text):
         session, tts, vad = _session()
         session._interrupted_turn = SimpleNamespace(turn_id=2)

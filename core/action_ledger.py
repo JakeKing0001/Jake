@@ -177,6 +177,8 @@ _KNOWN_RESULT_CATEGORIES: dict[str, str] = {
     # Il kill switch e' un comando esplicito dell'utente ("ferma tutto"), non un errore del
     # sistema: un passo interrotto da li' e' un annullamento voluto, non un fallimento da capire.
     "KILLED": ERROR_CATEGORY_USER_CANCELLED,
+    # "Jake, basta" sul solo turno corrente (core/turn_cancellation.py): stesso significato.
+    "CANCELLED": ERROR_CATEGORY_USER_CANCELLED,
 
     # F1.1.7 ("migrare tutti gli intent per dominio"): censiti i codici bespoke REALMENTE usati
     # dalle skill (`grep -rhoE 'error="[A-Z_]+"' skills/*.py`, non ipotizzati), un codice alla

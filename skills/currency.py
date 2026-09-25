@@ -1,7 +1,7 @@
 import json
-from urllib import error, request
+from urllib import error
 
-from core.network import is_online
+from core.network import is_online, read_url
 from core.skill_result import SkillResult
 
 
@@ -36,8 +36,7 @@ class ConvertCurrencySkill:
 
         url = f"https://open.er-api.com/v6/latest/{from_currency}"
         try:
-            with request.urlopen(url, timeout=self.timeout) as response:
-                payload = json.loads(response.read().decode("utf-8"))
+            payload = json.loads(read_url(url, self.timeout).decode("utf-8"))
         except (error.URLError, TimeoutError, json.JSONDecodeError):
             return SkillResult(success=False, data={}, error="NETWORK_UNAVAILABLE")
 

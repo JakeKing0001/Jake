@@ -28,6 +28,7 @@ from core.resource_lock import ResourceLockManager
 from core.sandboxed_skill_worker import SandboxedSkillWorker
 from core.action_snapshot import capture_snapshot, SnapshotStore
 from core.skill_result import SkillResult
+from core.turn_cancellation import current_turn_cancelled
 from copy import deepcopy
 from pathlib import Path
 import contextlib
@@ -276,6 +277,10 @@ class SkillRegistry:
             return None
         if policy_engine is None or intent in policy_engine.blocked_intents:
             return SkillResult(success=False, data={}, error="POLICY_BLOCKED")
+        # "Jake, basta": un turno vocale annullato non avvia piu' nessuna skill (le compensazioni
+        # di rollback girano con core.turn_cancellation.cancellation_suspended()).
+        if current_turn_cancelled():
+            return SkillResult(success=False, data={}, error="CANCELLED")
 
         # Percorsi "parlati" (v3.0): "desktop\note.txt", "download" -> percorso reale.
         if parameters:
@@ -299,11 +304,15 @@ class SkillRegistry:
         if intent in self._forged_intents:
             if lock_keys:
                 with self._acquire_all_writes(lock_keys):
+                    if current_turn_cancelled():  # annullato mentre si aspettava il lock
+                        return SkillResult(success=False, data={}, error="CANCELLED")
                     return self._execute_forged(intent, parameters or {})
             return self._execute_forged(intent, parameters or {})
 
         if lock_keys:
             with self._acquire_all_writes(lock_keys):
+                if current_turn_cancelled():  # annullato mentre si aspettava il lock
+                    return SkillResult(success=False, data={}, error="CANCELLED")
                 self._maybe_capture_snapshot(intent, parameters, action_id, private)
                 return skill.execute(parameters)
         self._maybe_capture_snapshot(intent, parameters, action_id, private)

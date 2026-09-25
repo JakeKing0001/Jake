@@ -1,7 +1,7 @@
 import json
-from urllib import error, parse, request
+from urllib import error, parse
 
-from core.network import is_online
+from core.network import is_online, read_url
 from core.skill_result import SkillResult
 
 
@@ -42,8 +42,7 @@ class WebSearchSkill:
         url = f"https://api.duckduckgo.com/?{params}"
 
         try:
-            with request.urlopen(url, timeout=self.timeout) as response:
-                payload = json.loads(response.read().decode("utf-8"))
+            payload = json.loads(read_url(url, self.timeout).decode("utf-8"))
         except (error.URLError, TimeoutError, json.JSONDecodeError):
             return SkillResult(success=False, data={"query": query}, error="NETWORK_UNAVAILABLE")
 

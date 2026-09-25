@@ -125,6 +125,8 @@ costruisce oggi per ogni altro intent, non un formato nuovo inventato per questo
 import time
 from dataclasses import dataclass, replace
 
+from core.turn_cancellation import raise_if_cancelled
+
 POST_ACTION_SETTLE_SECONDS = 0.4
 
 # F3.4.6 ("evitare doppia esecuzione sui retry"): finestra entro cui un `idempotency_key` ripetuto
@@ -280,6 +282,9 @@ class ComputerAgent:
         except Exception:
             before = None
 
+        # Il bersaglio puo' essere stato cercato per secondi (OCR/visione): se nel frattempo
+        # l'utente ha detto "Jake, basta", il click non parte (TurnCancelled non e' un Exception).
+        raise_if_cancelled()
         try:
             import pyautogui
             if button == "double":
@@ -430,6 +435,7 @@ class ComputerAgent:
 
         def _pixel_click() -> None:
             import pyautogui
+            raise_if_cancelled()
             pyautogui.click(center_x, center_y)
             action_performed[0] = True
 
@@ -525,6 +531,7 @@ class ComputerAgent:
 
         def _pixel_type() -> None:
             import pyautogui
+            raise_if_cancelled()
             pyautogui.click(center_x, center_y)
             # Ctrl+A poi scrivi, MAI scrivere direttamente sul campo com'e' - buco reale trovato
             # verificando questo metodo, non ipotizzato (vedi ROADMAP_EXECUTION.md): SetValue

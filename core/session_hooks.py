@@ -4,6 +4,7 @@ Alcuni comandi non riguardano il PC ma Jake stesso: "zitto" (interrompi la voce)
 ascoltare per 10 minuti", "scrivi sotto dettatura". Il core li riconosce, ma chi li puo'
 eseguire e' la sessione vocale/HUD. La sessione registra qui i suoi callback; in modalita'
 testo restano None e le skill rispondono che serve la voce."""
+from core.turn_cancellation import current_turn_cancelled
 
 
 class SessionHooks:
@@ -19,6 +20,11 @@ class SessionHooks:
         return callable(getattr(self, name, None))
 
     def call(self, name: str, *args, **kwargs):
+        # Un turno vocale annullato ("Jake, basta") puo' ancora girare per qualche istante: non
+        # deve parlare, cambiare lo stato dell'HUD, mettere in pausa l'ascolto o avviare una
+        # dettatura dopo che l'utente l'ha fermato.
+        if current_turn_cancelled():
+            return None
         handler = getattr(self, name, None)
         if callable(handler):
             try:

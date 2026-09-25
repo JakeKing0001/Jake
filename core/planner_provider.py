@@ -3,6 +3,7 @@ from urllib import error, request
 
 from core.planner import Plan, PlanStep
 from core.ollama_client import DEFAULT_BASE_URL
+from core.network import read_url
 
 
 class PlannerProvider:
@@ -151,8 +152,7 @@ class PlannerProvider:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with request.urlopen(http_request, timeout=self.timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
+        return json.loads(read_url(http_request, self.timeout).decode("utf-8"))
 
     def _parse_response(self, response: dict) -> dict:
         content = response["message"]["content"]

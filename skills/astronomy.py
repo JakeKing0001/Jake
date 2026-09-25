@@ -1,8 +1,8 @@
 import json
 from datetime import date, datetime
-from urllib import error, parse, request
+from urllib import error, parse
 
-from core.network import is_online
+from core.network import is_online, read_url
 from core.skill_result import SkillResult
 
 _MOON_PHASE_NAMES = [
@@ -32,8 +32,7 @@ class GetSunriseSunsetSkill:
     def _geocode(self, city: str):
         params = parse.urlencode({"name": city, "count": 1, "language": "it"})
         url = f"https://geocoding-api.open-meteo.com/v1/search?{params}"
-        with request.urlopen(url, timeout=self.timeout) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+        payload = json.loads(read_url(url, self.timeout).decode("utf-8"))
         results = payload.get("results") or []
         return (results[0]["latitude"], results[0]["longitude"]) if results else None
 
@@ -55,8 +54,7 @@ class GetSunriseSunsetSkill:
                 "latitude": latitude, "longitude": longitude, "daily": "sunrise,sunset", "timezone": "auto",
             })
             url = f"https://api.open-meteo.com/v1/forecast?{params}"
-            with request.urlopen(url, timeout=self.timeout) as response:
-                forecast = json.loads(response.read().decode("utf-8"))
+            forecast = json.loads(read_url(url, self.timeout).decode("utf-8"))
             # F1: stesso buco sistemico corretto in questa sessione per altri consumatori diretti
             # di API esterne - riprodotto per davvero: un corpo JSON valido ma non nella forma
             # attesa faceva sollevare AttributeError (da payload.get in _geocode, mai catturato)

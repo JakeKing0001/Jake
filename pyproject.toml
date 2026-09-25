@@ -17,6 +17,7 @@ select = ["E9", "F", "B", "ISC", "C4", "RET"]
 # e la lista cresce quando un altro modulo viene passato in rassegna, invece di disattivare tutto
 # o accettare un run rumoroso che nessuno legge davvero.
 files = [
+    "core/turn_cancellation.py",
     "core/event_bus.py",
     "core/device_registry.py",
     "core/device_identity.py",

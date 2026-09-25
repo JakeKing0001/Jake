@@ -11,6 +11,7 @@ from core.event_bus import EventBus
 from core.voice.streaming_stt import KIND_FINAL, KIND_PARTIAL, TranscriptEvent
 from core.voice.vad_listener import VadListener
 from core.voice.wake_word_session import WakeWordSession
+from tests.voice_session_support import VoiceSessionTestCase, track
 
 FRAME = VadListener.FRAME_SAMPLES
 TIMEOUT = 5.0
@@ -74,7 +75,7 @@ def _session(partials="on", stt=None, **kwargs):
     core = kwargs.pop("core", None) or _core()
     vad = FakeVad()
     stt = stt or ScriptedStt()
-    session = WakeWordSession(core, stt, FakeTts(), vad_listener=vad, partials=partials, **kwargs)
+    session = track(WakeWordSession(core, stt, FakeTts(), vad_listener=vad, partials=partials, **kwargs))
     queue_ = core.event_bus.subscribe()
     return session, vad, queue_, core
 
@@ -93,7 +94,7 @@ def _speech_frames(vad, seconds):
         vad.on_utterance_frame(np.full(FRAME, 1000, dtype=np.int16))
 
 
-class WiringTests(unittest.TestCase):
+class WiringTests(VoiceSessionTestCase):
     def test_partials_are_off_by_default_and_the_listener_is_not_hooked(self):
         session, vad, _, _ = _session(partials="off")
         self.assertIsNone(session.live_transcriber)
@@ -124,7 +125,7 @@ class WiringTests(unittest.TestCase):
         self.assertFalse(worker.is_alive())
 
 
-class PartialDeliveryTests(unittest.TestCase):
+class PartialDeliveryTests(VoiceSessionTestCase):
     def _wait_for_partial(self, queue_, session, predicate=lambda events: bool(events)):
         collected = []
         deadline = time.time() + TIMEOUT
@@ -198,7 +199,7 @@ class PartialDeliveryTests(unittest.TestCase):
         self.assertTrue(self._wait_for_partial(queue_, session))  # il bus l'ha ricevuto lo stesso
 
 
-class FinalTranscriptTests(unittest.TestCase):
+class FinalTranscriptTests(VoiceSessionTestCase):
     def test_a_final_event_is_published_for_an_addressed_phrase_with_real_confidence(self):
         session, _, queue_, core = _session(partials="off", stt=ScriptedStt("jake che ore sono", detailed=True))
         with mock.patch.object(session, "_respond"):
@@ -256,7 +257,7 @@ class FinalTranscriptTests(unittest.TestCase):
         self.assertEqual(held, [True])
 
 
-class InterruptionSeedsThePartialsTests(unittest.TestCase):
+class InterruptionSeedsThePartialsTests(VoiceSessionTestCase):
     def test_a_barge_in_starts_a_live_utterance_from_the_preroll(self):
         session, vad, _, _ = _session(barge_in="on")
         self.addCleanup(session.stop)
@@ -270,7 +271,7 @@ class InterruptionSeedsThePartialsTests(unittest.TestCase):
         self.assertEqual(seeded, [FRAME, FRAME])
 
 
-class VadListenerUtteranceCallbacksTests(unittest.TestCase):
+class VadListenerUtteranceCallbacksTests(VoiceSessionTestCase):
     @staticmethod
     def _listener(sequence):
         fake = mock.MagicMock()

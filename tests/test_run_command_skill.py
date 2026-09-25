@@ -126,6 +126,27 @@ class KillSwitchCancellationTests(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertLess(elapsed, 1.5, "il comando ha ignorato il kill switch (bloccato per l'intera durata)")
 
+    def test_a_voice_turn_cancellation_stops_the_command_without_the_kill_switch(self):
+        """"Jake, basta" su un comando lungo: il comando si ferma (CANCELLED) e il kill switch
+        globale resta spento - automazioni e scheduler non vengono toccati."""
+        from core.turn_cancellation import reset_current_turn_cancel_event, set_current_turn_cancel_event
+
+        skill = RunCommandSkill()
+        skill.kill_switch = KillSwitch()
+        cancel_event = threading.Event()
+        token = set_current_turn_cancel_event(cancel_event)
+        threading.Thread(target=lambda: (time.sleep(0.3), cancel_event.set()), daemon=True).start()
+        try:
+            start = time.time()
+            result = skill.execute({"command": self.LONG_SLEEP_COMMAND, "confirmed": True})
+            elapsed = time.time() - start
+        finally:
+            reset_current_turn_cancel_event(token)
+
+        self.assertEqual(result.error, "CANCELLED")
+        self.assertLess(elapsed, 1.5)
+        self.assertFalse(skill.kill_switch.is_active())
+
     def test_without_a_kill_switch_a_long_command_is_not_cancellable(self):
         """Comportamento invariato quando nessun kill switch e' stato iniettato (self.kill_switch
         resta None: contesti di test o percorsi che non lo passano ancora) - stesso
