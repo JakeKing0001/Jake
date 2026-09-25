@@ -570,6 +570,7 @@ class JakeCore:
         run_computer_procedure_skill = self.skill_registry.get_skill("RUN_COMPUTER_PROCEDURE")
         if run_computer_procedure_skill is not None:
             run_computer_procedure_skill.policy_engine = self.policy_engine
+            run_computer_procedure_skill.event_bus = self.event_bus  # F3.3.6: diagnosi dell'inspector
 
         # F3.4.3 (adozione nelle skill di input): un click/tasto dichiarato sensibile ("effect":
         # send/submit/upload/delete/purchase, core/computer_use/sensitive_ui.py) consulta la policy

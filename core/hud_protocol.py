@@ -54,6 +54,11 @@ class EventType(str, Enum):
     # es. mentre Jake parla - non e' "spento"), "reason": str, "since": float}. Vedi
     # core/voice/listening_state.py::MicIndicator, che pubblica solo quando qualcosa cambia.
     MIC_STATE = "MIC_STATE"
+    # F3.3.6: diagnosi dell'inspector del selettore per un passo di Computer Use non riuscito
+    # (core/computer_use/inspector.py). Payload: {"procedure": str, "step": int, "error": str,
+    # "inspection": {"verdict", "reason", "chosen", "alternatives": [{name, control_type,
+    # automation_id, score, reason}]}}. Solo metadati UI, mai testo scritto dall'utente.
+    SELECTOR_INSPECTION = "SELECTOR_INSPECTION"
 
 
 # Traduce gli stati gia' in uso da WakeWordSession/SessionHooks.set_state (stringhe libere,

@@ -47,6 +47,7 @@ class RunComputerProcedureSkill:
         self.procedure_manager = procedure_manager
         self.computer_agent = computer_agent or ComputerAgent()
         self.policy_engine = policy_engine
+        self.event_bus = None  # iniettato da JakeCore: la diagnosi dell'inspector arriva all'HUD
         self._last_runs: dict = {}
 
     def _adapter(self):
@@ -128,13 +129,30 @@ class RunComputerProcedureSkill:
         if run.completed:
             self._last_runs[name] = run
         last = run.results[-1] if run.results else None
+        inspection = getattr(last, "inspection", None) if last is not None and not last.success else None
+        if inspection is not None:
+            self._publish_inspection(name, len(run.results), last.error, inspection)
         return SkillResult(success=not run.drift and run.completed == len(procedure.steps), data={
+            "inspection": inspection,
             "name": name, "version": procedure.version, "completed_steps": run.completed,
             "total_steps": len(procedure.steps),
             "last_error": last.error if last is not None and not last.success else None,
             "likely_drift": run.drift is not None, "suspended": run.drift is not None, "drift": run.drift,
             "undo_steps": len(run.undo_plan), "not_undoable": list(run.not_undoable),
         })
+
+
+    def _publish_inspection(self, name: str, step: int, error: str | None, inspection: dict) -> None:
+        publish = getattr(self.event_bus, "publish", None)
+        if not callable(publish):
+            return
+        from core.hud_protocol import EventType, HudEvent
+
+        try:
+            publish(HudEvent(EventType.SELECTOR_INSPECTION,
+                             {"procedure": name, "step": step, "error": error, "inspection": inspection}))
+        except Exception:
+            pass  # la diagnosi e' comunque nel risultato: un bus guasto non cambia l'esito
 
 
 class RecordComputerProcedureSkill:

@@ -91,3 +91,39 @@ class RuntimeWiringTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class InspectionEventTests(unittest.TestCase):
+    def test_a_failed_procedure_step_publishes_the_inspection_to_the_hud_bus(self):
+        import tempfile
+        from pathlib import Path
+
+        from core.computer_agent import ComputerActionResult
+        from core.computer_use.procedure import ACTION_CLICK, RecordedStep
+        from core.event_bus import EventBus
+        from core.hud_protocol import EventType
+        from core.memory_manager import MemoryManager
+        from core.procedure_manager import ProcedureManager
+        from skills.computer_procedure import RunComputerProcedureSkill
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        memory = MemoryManager(db_path=Path(tmp.name) / "m.db")
+        self.addCleanup(memory.close)
+        manager = ProcedureManager(memory)
+        manager.create("p", [RecordedStep(action=ACTION_CLICK, selector=ElementSelector(name="Aggiugni", window_title_contains="F"))])
+        inspection = inspect(TREE, ElementSelector(name="Aggiugni", control_type="Button")).to_dict()
+        skill = RunComputerProcedureSkill(manager, computer_agent=mock.MagicMock())
+        bus = EventBus()
+        queue = bus.subscribe()
+        skill.event_bus = bus
+        failed = ComputerActionResult(success=False, error="NOT_FOUND", inspection=inspection)
+        with mock.patch.object(skill, "_adapter"),              mock.patch("core.computer_use.procedure_lifecycle.replay_step", return_value=failed):
+            result = skill.execute({"name": "p"})
+
+        self.assertEqual(result.data["inspection"]["verdict"], "no_match")
+        event = queue.get_nowait()
+        self.assertEqual(event.type, EventType.SELECTOR_INSPECTION)
+        self.assertEqual(event.payload["error"], "NOT_FOUND")
+        self.assertEqual(event.payload["inspection"]["alternatives"][0]["automation_id"], "w.add")
+
