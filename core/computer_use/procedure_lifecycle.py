@@ -45,6 +45,9 @@ class Procedure:
     approved_capabilities: tuple[str, ...] = ()
     status: str = STATUS_ACTIVE
     suspended_reason: str | None = None
+    # F3.3.5 adottato: scheletro strutturale della finestra al momento della dimostrazione
+    # (core/computer_use/selector_store.py::structure_tokens). Vuoto = nessun confronto.
+    structure: tuple[str, ...] = ()
 
     def defaults_dict(self) -> dict[str, str]:
         return dict(self.defaults)
@@ -57,6 +60,7 @@ class Procedure:
             "defaults": dict(self.defaults),
             "approval": {"risk": self.approved_risk, "capabilities": list(self.approved_capabilities)},
             "status": self.status, "suspended_reason": self.suspended_reason,
+            "structure": list(self.structure),
         }
 
     @classmethod
@@ -76,6 +80,7 @@ class Procedure:
             approved_risk=approval.get("risk", BASE_RISK.value),
             approved_capabilities=tuple(approval.get("capabilities") or ()),
             status=data.get("status", STATUS_ACTIVE), suspended_reason=data.get("suspended_reason"),
+            structure=tuple(data.get("structure") or ()),
         )
 
 
@@ -179,6 +184,34 @@ def check_app(adapter, procedure: Procedure) -> str | None:
     return None
 
 
+def check_structure(adapter, procedure: Procedure) -> str | None:
+    """Drift se la struttura della finestra si e' allontanata da quella dimostrata (prima di agire)."""
+    if not procedure.structure or not procedure.steps:
+        return None
+    from core.computer_use.selector_store import DEFAULT_SIMILARITY_THRESHOLD, structure_similarity, structure_tokens
+    from core.computer_use.ui_automation_adapter import WindowNotFoundError
+
+    try:
+        window = adapter.find_window_by_title_containing(procedure.steps[0].selector.window_title_contains, timeout_seconds=5.0)
+    except WindowNotFoundError:
+        return None  # lo segnalera' il primo passo con WINDOW_NOT_FOUND
+    similarity = structure_similarity(frozenset(procedure.structure), structure_tokens(adapter.describe_tree(window, 12)))
+    if similarity < DEFAULT_SIMILARITY_THRESHOLD:
+        return f"la struttura della finestra e' cambiata (somiglianza {similarity:.2f} < {DEFAULT_SIMILARITY_THRESHOLD})"
+    return None
+
+
+def window_structure(adapter, window_title_contains: str) -> tuple[str, ...]:
+    from core.computer_use.selector_store import structure_tokens
+    from core.computer_use.ui_automation_adapter import WindowNotFoundError
+
+    try:
+        window = adapter.find_window_by_title_containing(window_title_contains, timeout_seconds=5.0)
+    except WindowNotFoundError:
+        return ()
+    return tuple(sorted(structure_tokens(adapter.describe_tree(window, 12))))
+
+
 def process_name_of(pid: int | None) -> str | None:
     if not pid:
         return None
@@ -210,7 +243,7 @@ def run_procedure(agent, adapter, procedure: Procedure, parameters: dict[str, st
                   timeout_seconds: float = 5.0) -> ProcedureRun:
     """Esegue i passi fermandosi al primo fallimento; raccoglie il piano di annullamento."""
     run = ProcedureRun()
-    app_drift = check_app(adapter, procedure)
+    app_drift = check_app(adapter, procedure) or check_structure(adapter, procedure)
     if app_drift:
         run.drift = app_drift
         return run

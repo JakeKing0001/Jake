@@ -190,7 +190,8 @@ class RecordComputerProcedureSkill:
         if not name:
             return SkillResult(success=False, data={"window": self._window}, error="MISSING_PARAMETERS")
         from core.computer_use.demonstration import describe_steps, generalize
-        from core.computer_use.procedure_lifecycle import process_name_of, process_version_of
+        from core.computer_use.procedure_lifecycle import process_name_of, process_version_of, window_structure
+        from core.computer_use.ui_automation_adapter import UIAutomationAdapter
 
         sampler, window = self._sampler, self._window
         self._sampler = self._window = None
@@ -201,6 +202,7 @@ class RecordComputerProcedureSkill:
         pid = getattr(sampler, "_pid", None)
         procedure = self.procedure_manager.create(
             name, steps, defaults=defaults, app_process=process_name_of(pid), app_version=process_version_of(pid),
+            structure=window_structure(UIAutomationAdapter(), window),
         )
         return SkillResult(success=True, data={
             "name": name, "version": procedure.version, "steps": describe_steps(list(procedure.steps), defaults),

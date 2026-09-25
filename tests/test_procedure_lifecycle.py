@@ -149,3 +149,43 @@ class ProcedureManagerLifecycleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StructuralDriftTests(unittest.TestCase):
+    """F3.3.5 adottato: la struttura della finestra dimostrata e' confrontata PRIMA di agire."""
+
+    def _procedure(self, structure):
+        return Procedure(name="p", steps=(_step(ACTION_CLICK, "Aggiungi"),), structure=tuple(structure))
+
+    def test_a_very_different_window_suspends_before_any_step(self):
+        from unittest import mock
+
+        from core.computer_use.procedure_lifecycle import run_procedure
+        from core.computer_use.ui_automation_adapter import ElementInfo
+
+        def info(name, control_type, children=()):
+            return ElementInfo(name, "", control_type, (0, 0, 1, 1), True, None, None, False, tuple(children))
+
+        demonstrated = info("F", "Window", [info("Aggiungi", "Button"), info("Rimuovi", "Button"), info("Lista", "List")])
+        different = info("F", "Window", [info("Stampa", "Button"), info("Esporta", "MenuItem")])
+        from core.computer_use.selector_store import structure_tokens
+
+        adapter = mock.MagicMock()
+        adapter.describe_tree.return_value = different
+        agent = mock.MagicMock()
+        run = run_procedure(agent, adapter, self._procedure(sorted(structure_tokens(demonstrated))))
+        self.assertIn("struttura", run.drift)
+        agent.click_element.assert_not_called()
+        agent.type_into_element.assert_not_called()
+
+        adapter.describe_tree.return_value = demonstrated
+        with mock.patch("core.computer_use.procedure_lifecycle.replay_step") as replay:
+            replay.return_value = mock.MagicMock(success=True)
+            run = run_procedure(agent, adapter, self._procedure(sorted(structure_tokens(demonstrated))))
+        self.assertIsNone(run.drift)
+        replay.assert_called_once()
+
+    def test_the_structure_survives_the_round_trip(self):
+        procedure = self._procedure(("Button:Aggiungi", "Window"))
+        self.assertEqual(Procedure.from_dict(procedure.to_dict()).structure, ("Button:Aggiungi", "Window"))
+

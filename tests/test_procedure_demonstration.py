@@ -120,6 +120,7 @@ class ProcedureSurvivesRestartResizeAndDataTests(_FixtureCase):
         self.assertEqual(saved.data["app"].lower(), "python.exe")
         self.assertIsNotNone(saved.data["app_version"])
         (parameter,) = saved.data["parameters"]
+        self.assertGreater(len(self.manager.load_procedure("aggiungi voce").structure), 5, "scheletro della finestra salvato")
         self.assertTrue(any("predefinito: 'primo dato'" in line for line in saved.data["steps"]), saved.data["steps"])
 
         # riavvio dell'app, finestra ridimensionata e spostata, dati diversi

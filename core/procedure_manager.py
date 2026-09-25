@@ -61,14 +61,15 @@ class ProcedureManager:
         return Procedure.from_dict(json.loads(results[0]["value"]), name=name)
 
     def create(self, name: str, steps: list[RecordedStep], *, defaults: dict[str, str] | None = None,
-               app_process: str | None = None, app_version: str | None = None) -> Procedure:
+               app_process: str | None = None, app_version: str | None = None,
+               structure: tuple[str, ...] = ()) -> Procedure:
         """Una procedura nuova, approvata dall'utente che la salva (versione 1). Sovrascrivendo un nome
         esistente la versione sale e l'approvazione precedente resta: se i passi nuovi chiedono di piu',
         la prossima esecuzione chiedera' una nuova approvazione (F3.8.7)."""
         previous = self.load_procedure(name)
         procedure = Procedure(
             name=name, steps=tuple(steps), defaults=tuple(sorted((defaults or {}).items())),
-            app_process=app_process, app_version=app_version, version=0,
+            app_process=app_process, app_version=app_version, version=0, structure=tuple(structure),
         )
         if previous is None:
             procedure = approve(procedure)
