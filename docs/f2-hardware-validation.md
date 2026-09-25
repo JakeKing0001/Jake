@@ -42,38 +42,54 @@ Da PowerShell nella radice del progetto:
 Annotare modello di PC, CPU/GPU, RAM, versione di Windows, microfono, uscita, driver, modello STT,
 provider TTS e nomi/indici mostrati da `sounddevice`. I report sintetici sono solo baseline.
 
-In `config/settings.json` impostare temporaneamente, conservando tutte le altre chiavi:
+Non serve modificare `config/settings.json`: il runner della prova forza `voice_barge_in` e
+`voice_partials` a `on` soltanto per la durata della sessione e misura la configurazione vocale
+reale (se `voice_character` è impostato, la voce di personaggio RVC, non la voce di base).
 
-```json
-"voice_barge_in": "on",
-"voice_partials": "on"
+Per un riferimento dei tempi della sola pipeline vocale (TTS di base, RVC, primo campione, pause fra
+chunk, `answer()`), senza microfono né altoparlanti:
+
+```powershell
+.\.venv\Scripts\python.exe -m benchmarks.bench_voice_pipeline --repeats 5 --with-core
 ```
-
-`on` è intenzionale per la prova; al termine si torna a `off` finché il gate non è tutto verde.
 
 ## 2. Prova per ciascun profilo hardware
 
-Selezionare in Windows microfono e uscita del profilo, quindi avviare:
+Selezionare in Windows microfono e uscita del profilo, quindi avviare la sessione strumentata
+(stessa voce continua di `main.py --voice --wake-word`):
 
 ```powershell
-.\.venv\Scripts\python.exe main.py --voice --wake-word
+.\.venv\Scripts\python.exe -m benchmarks.f2_hardware_session run --profile headphones
+.\.venv\Scripts\python.exe -m benchmarks.f2_hardware_session run --profile laptop
+.\.venv\Scripts\python.exe -m benchmarks.f2_hardware_session run --profile bluetooth
 ```
 
-Per 20 volte chiedere una risposta abbastanza lunga e, circa un secondo dopo l'inizio del TTS,
-pronunciare un nuovo comando. Registrare `rilevata sì/no` e la latenza. La misura consigliata è
-una registrazione locale temporanea con Audacity/OBS contenente microfono e loopback di sistema:
-la latenza è la distanza tra l'inizio della forma d'onda dell'utente e la fine del TTS. Non serve
-conservare o condividere la registrazione dopo aver estratto i millisecondi.
+Durante la sessione:
 
-Poi lasciare completare 20 risposte senza parlare: almeno 10 in stanza normale e almeno 10 con
-TV o parlato di sottofondo. Contare separatamente falsi stop e falsi comandi. Il limite noto della
-TV non va escluso: se produce falsi barge-in, il profilo fallisce.
+1. per 20 volte chiedere una risposta abbastanza lunga e, circa un secondo dopo l'inizio del TTS,
+   pronunciare un nuovo comando (contare mentalmente i tentativi);
+2. lasciare completare 20 risposte senza parlare: almeno 10 in stanza normale e almeno 10 con TV o
+   parlato di sottofondo; contare i falsi stop e i comandi eseguiti partendo dalla voce di Jake.
+
+Jake misura da sé, senza salvare audio né testo: interruzioni riconosciute e latenza voce→stop,
+prima emissione TTS (dalla fine della voce dell'utente), latenza del primo partial, finali
+duplicati, attivazioni wake ed eco ignorate. Alla chiusura (Ctrl+C o "Jake, esci") il runner chiede
+i conteggi che solo chi fa la prova conosce e salva `benchmarks/results/f2_hardware_<profilo>_<data>.json`
+(cartella ignorata da Git).
+
+La latenza di stop misurata da Jake è un limite inferiore: comprende la finestra di riconoscimento
+e lo stop del provider, non la latenza d'ingresso della scheda audio. Se il p95 interno supera i
+250 ms, oppure per una verifica a campione, registrare localmente microfono e loopback di sistema
+con Audacity/OBS e misurare la distanza tra l'inizio della forma d'onda dell'utente e la fine del
+TTS; usare quella misura nel report al posto della stima interna. Non conservare la registrazione
+dopo aver estratto i millisecondi. Il limite noto della TV non va escluso: se produce falsi
+barge-in, il profilo fallisce.
 
 Per STT/WER registrare, con consenso, almeno 20 frasi note per profilo in WAV PCM e lanciare per
 ogni file:
 
 ```powershell
-.\.venv\Scripts\python.exe -m benchmarks.bench_stt --audio D:\corpus-f2\frase-01.wav --device cpu --repeats 3
+.\.venv\Scripts\python.exe -m benchmarks.bench_stt --audio D:\corpus-f2rase-01.wav --device cpu --repeats 3
 ```
 
 Tenere i WAV in una cartella dedicata fuori da `Jake`. Seguire
@@ -81,45 +97,34 @@ Tenere i WAV in una cartella dedicata fuori da `Jake`. Seguire
 
 ## 3. Sessione wake-word di 24 ore
 
-Lasciare Jake in voce continua nell'ambiente reale. Nel foglio di prova annotare ora, condizione
-(silenzio/TV/musica/conversazione), frase che ha causato ogni falso wake e ogni crash. Eseguire i
-20 wake intenzionali durante la stessa sessione, alle tre distanze indicate. Non occorre
-conservare audio per contare gli eventi.
-
-## 4. Report locale minimo
-
-Creare `benchmarks/results/f2_hardware_<data>.json` (cartella ignorata da Git) per ciascun profilo:
-
-```json
-{
-  "method_version": 1,
-  "hardware": {"pc": "...", "input": "...", "output": "...", "driver": "..."},
-  "software": {"windows": "...", "stt_model": "...", "stt_device": "cpu|cuda", "tts": "..."},
-  "barge_in": {
-    "attempts": 20, "detected": 0, "latency_ms": [],
-    "no_interruption_trials": 20, "false_stops": 0, "echo_commands": 0
-  },
-  "streaming": {"partial_latency_ms": [], "duplicate_finals": 0},
-  "tts": {"first_emission_ms": []},
-  "wake": {"hours": 0, "false_wakes": 0, "intentional": 20, "missed": 0},
-  "raw_audio_retained": false,
-  "notes": ""
-}
-```
-
-Calcolare il p95 con lo stesso helper del progetto:
+Lasciare Jake in voce continua nell'ambiente reale, anche in più sessioni:
 
 ```powershell
-.\.venv\Scripts\python.exe -c "from benchmarks._report import latency_stats; print(latency_stats([INCOLLA, QUI, I, MILLISECONDI]))"
+.\.venv\Scripts\python.exe -m benchmarks.f2_hardware_session run --profile wake --notes "silenzio, TV, musica"
 ```
 
-Il report finale può sommare le ore wake, ma i risultati barge-in devono restare separati: una
-media buona non può nascondere un dispositivo che fallisce.
+Il runner registra le ore e l'ora di ogni attivazione accettata; nel foglio di prova annotare la
+condizione (silenzio/TV/musica/conversazione) e la frase che ha causato ogni falso wake. Eseguire i
+20 wake intenzionali distribuiti tra circa 0,5 m, 3 m e 6 m e riportare alla chiusura quanti non
+sono stati sentiti.
+
+## 4. Verdetto
+
+```powershell
+.\.venv\Scripts\python.exe -m benchmarks.f2_hardware_session evaluate
+```
+
+Il comando legge tutti i report, applica le soglie di questo documento per ciascun profilo (vale
+l'ultimo report di ogni profilo: una prova migliore non cancella un fallimento successivo) e somma
+le ore wake. Ogni criterio è `PASS`, `FAIL` oppure `VERIFY` quando mancano dati: il gate è verde
+solo con tutti i profili e il wake in `PASS`. Il p95 usa lo stesso helper dei benchmark del
+progetto (`benchmarks/_report.py::percentile`).
 
 ## 5. Chiusura e pulizia
 
-1. Ripristinare `voice_barge_in` a `off` se anche una sola cella non è verde; abilitarlo di default
-   soltanto dopo tre profili verdi.
+1. Il default del progetto (`config/settings.example.json`) resta `voice_barge_in: "off"` finché
+   `evaluate` non restituisce `PASS`; se nel proprio `config/settings.json` lo si è attivato a mano,
+   riportarlo a `off` quando anche una sola cella non è verde.
 2. Cancellare il corpus consensuale con
    `.\.venv\Scripts\python.exe -m benchmarks.voice_corpus purge D:\corpus-f2`.
 3. Conservare i JSON locali e la matrice riassuntiva, mai WAV o tracce OBS/Audacity.

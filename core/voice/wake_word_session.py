@@ -17,6 +17,7 @@ from core.voice.listening_state import (
     EchoGuard, ListeningState, ListeningStateMachine, MicIndicator, RepeatGuard, WakeCooldown,
 )
 from core.voice.playback_aec import PlaybackAec
+from core.voice.session_metrics import SessionMetrics
 from core.voice.speaker_profile import SpeakerProfileStore, extract_features, identify
 from core.voice.speech_text import STYLES, prepare_for_speech
 from core.voice.streaming_stt import TranscriptEvent, to_hud_event
@@ -126,10 +127,13 @@ class WakeWordSession:
                  wake_words=None, on_state=None, on_level=None, follow_up_seconds: float = None,
                  replay_window_seconds: float = 0.0, speech_style: str = "normal",
                  output_device_name: str | None = None, barge_in: str = "off", partials: str = "off",
-                 on_transcript=None, speaker_store: SpeakerProfileStore | None = None):
+                 on_transcript=None, speaker_store: SpeakerProfileStore | None = None,
+                 metrics: SessionMetrics | None = None):
         self.jake_core = jake_core
         self.stt_provider = stt_provider
         self.tts_provider = tts_provider
+        # Gate hardware F2: tempi e conteggi misurati dal vivo (mai audio ne' testo). None = spento.
+        self.metrics = metrics
         # F2.7 (adozione, prima fetta - identificazione): None (il default) preserva il
         # comportamento di sempre, nessun profilo arruolato viene mai cercato. Quando presente,
         # SOLO un riconoscimento ad alta confidenza per la frase appena trascritta imposta
@@ -243,8 +247,15 @@ class WakeWordSession:
 
     def _attach_reference_sink(self) -> None:
         """Il provider TTS, se riproduce da se', pubblica cio' che manda agli altoparlanti (AEC)."""
+        sink = self.playback_aec.push_reference
+        if self.metrics is not None:
+            metrics, push = self.metrics, self.playback_aec.push_reference
+
+            def sink(samples, rate):
+                metrics.audio_started()
+                push(samples, rate)
         try:
-            self.tts_provider.reference_sink = self.playback_aec.push_reference
+            self.tts_provider.reference_sink = sink
         except Exception:
             self._logger.debug("Il provider TTS non accetta un reference_sink: nessuna AEC")
 
@@ -289,6 +300,9 @@ class WakeWordSession:
         self._interrupted_deadline = time.time() + 12.0
         self.listening.arm_command()  # la frase che segue e' per Jake: niente wake word
         self._set_state("listening", "")
+        if self.metrics is not None:
+            detection_window_s = self.barge_in.detector.min_frames * VadListener.FRAME_MS / 1000
+            self.metrics.barge_in(detection_window_s, self.barge_in.last_stop_latency_s)
         if self.live_transcriber is not None:
             self.live_transcriber.start_utterance()
             self._live_active = True
@@ -308,6 +322,11 @@ class WakeWordSession:
         companion server trasmette ai client; la dettatura non si pubblica (puo' contenere qualunque cosa)."""
         if not self._transcript_is_addressed(event.text):
             return
+        if self.metrics is not None:
+            if event.kind == "partial":
+                self.metrics.partial()
+            else:
+                self.metrics.final(event.utterance_id)
         bus = getattr(self.jake_core, "event_bus", None)
         publish = getattr(bus, "publish", None)
         if callable(publish):
@@ -337,6 +356,8 @@ class WakeWordSession:
         live = self.live_transcriber
         if live is None:
             return
+        if self.metrics is not None:
+            self.metrics.utterance_frame()
         if not self._live_active:
             live.start_utterance()
             self._live_active = True
@@ -601,6 +622,9 @@ class WakeWordSession:
         # (nessuna cattura audio in piu') - letta da _process_command sotto, che e' l'unico punto
         # in cui questa frase diventa davvero un comando per core.answer().
         self._last_utterance_audio = utterance
+        if self.metrics is not None:
+            frames = getattr(self.vad_listener, "silence_frames_needed", 0)
+            self.metrics.utterance_end(hangover_s=frames * VadListener.FRAME_MS / 1000 if isinstance(frames, int) else 0.0)
 
         text = self._transcribe(utterance)
         if not text:
@@ -616,6 +640,8 @@ class WakeWordSession:
         # identica ripetuta a ridosso (se il controllo e' attivo) e' un loop, non una persona.
         if self.echo_guard.is_echo(text):
             self._logger.info("Ignorata: eco della voce di Jake")
+            if self.metrics is not None:
+                self.metrics.echo()
             if self.state in ("transcribing", "listening"):
                 self._set_state("idle", "")
             return
@@ -690,6 +716,8 @@ class WakeWordSession:
                 self._logger.info("Ignorata: attivazione entro il cooldown")
                 return
             self.wake_cooldown.register()
+            if self.metrics is not None:
+                self.metrics.wake()
             self._interrupt_speech()  # "Jake" detto mentre stava ancora parlando: interrompilo
             if not remainder:
                 self.listening.arm_command()
@@ -814,6 +842,8 @@ class WakeWordSession:
         self.listening.command_consumed()
         print(f"Tu > {turn.command}")
         self._set_state("thinking", turn.command)
+        if self.metrics is not None:
+            self.metrics.command()
         worker = threading.Thread(
             target=self._run_turn,
             args=(turn,),
@@ -872,6 +902,8 @@ class WakeWordSession:
                 self._running = False
                 return
 
+            if self.metrics is not None:
+                self.metrics.response_ready()
             self._respond(response)
         finally:
             self._finish_turn(turn, cancelled)
