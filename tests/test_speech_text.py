@@ -43,8 +43,13 @@ class CleanForSpeechTests(unittest.TestCase):
         self.assertIn(CODE_OMITTED, cleaned)
 
     def test_file_gets_an_english_pronunciation_hint(self):
+        # Correzione scelta ascoltando la voce italiana reale: "fàil" (accento sulla a) suona
+        # come l'inglese "file"; "fail" veniva letto all'italiana.
         spoken = prepare_for_speech("Apri il file.")
-        self.assertEqual(spoken, "Apri il fail.")
+        self.assertEqual(spoken, "Apri il fàil.")
+
+    def test_pronunciation_hint_never_touches_words_that_merely_contain_file(self):
+        self.assertEqual(prepare_for_speech("Controlla profile e filetto."), "Controlla profile e filetto.")
 
     def test_inline_code_keeps_its_content_without_backticks(self):
         self.assertEqual(clean_for_speech("Usa il comando `git status` per vedere"), "Usa il comando git status per vedere")

@@ -1154,21 +1154,6 @@ class JakeCore:
 
         return f'Ho sentito: "{turn.heard}".'
 
-    def _get_dialogue_runtime(self) -> DialogueRuntime:
-        """Restituisce il runtime F2.6, creandolo lazy se necessario.
-
-        Serve anche ai JakeCore minimali dei test, costruiti con
-        JakeCore.__new__() senza passare da __init__().
-        """
-        runtime = getattr(self, "dialogue_runtime", None)
-
-        if runtime is None:
-            runtime = DialogueRuntime()
-            self.dialogue_runtime = runtime
-
-        return runtime
-
-
     def _try_ordinal_reference(self, text: str) -> str | None:
         """
         F2.6.1:
@@ -2036,7 +2021,7 @@ class JakeCore:
             and result.success
         )
 
-        if success:
+        if success and result is not None:
             self.conversation_state.remember_entities(
                 resolved.intent,
                 resolved.parameters,
