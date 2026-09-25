@@ -1,51 +1,43 @@
-"""Riesegue una procedura di Computer Use (F3.8, "Learn by demonstration") salvata in precedenza
-con un nome (`core/procedure_manager.py`) - l'esatto analogo di `skills/workflow.py::
-RunWorkflowSkill` per una sequenza di `RecordedStep` (click/scritture su un `ElementSelector`,
-F3.8.1) invece che di `PlanStep` (intent/parametri di skill).
+"""Procedure di Computer Use dimostrate dall'utente (F3.8, "Learn by demonstration").
 
-`policy_engine` (F1, stesso principio "iniettato DOPO la costruzione" gia' usato da
-`RunWorkflowSkill` - JakeCore lo popola solo a valle, `core/skill_registry.py` costruisce le
-skill prima che `PolicyEngine` esista): riassegnato all'oggetto `ComputerAgent` interno a ogni
-`execute()`, non solo salvato come attributo inerte - il vero controllo (F3.4.3, "richiedere
-policy prima di upload, submit, send, delete e purchase") avviene DENTRO `ComputerAgent.
-click_element`/`type_into_element`, chiamato da `replay_step`/`dry_run_step` per ogni singolo
-passo che dichiara un `risk_intent` - questa skill non decide nulla da sola, riassegna solo il
-motore al componente che gia' sa come usarlo (stesso principio "eredita il rischio dei passi"
-gia' scelto per `RUN_WORKFLOW` in `core/risk.py`, qui applicato a passi di computer use)."""
+- `RECORD_COMPUTER_PROCEDURE`: "osserva come faccio" avvia la registrazione nella finestra indicata
+  (o in primo piano); "salva la procedura come X" la ferma, generalizza i testi scritti in parametri,
+  salva la procedura (versione, app e versione dell'app, approvazione) e la mostra all'utente in
+  parole. Solo selettori semantici, solo nella finestra bersaglio, mai il contenuto di un campo
+  password (core/computer_use/demonstration.py).
+- `RUN_COMPUTER_PROCEDURE`: la riesegue. Una procedura SOSPESA per drift non viene eseguita finche'
+  un dry-run completo non la riattiva; se rischio o capability sono aumentati rispetto
+  all'approvazione serve una nuova conferma; un drift durante l'esecuzione la sospende invece di
+  improvvisare; l'ultima esecuzione si puo' annullare (valori precedenti dei campi, passi di
+  annullamento dichiarati), e cio' che non e' annullabile viene detto.
+
+`policy_engine` viene iniettato da JakeCore dopo la costruzione (stesso schema di RUN_WORKFLOW) e
+riassegnato a `ComputerAgent` a ogni esecuzione: la policy dei passi che dichiarano un rischio resta
+decisa dentro `ComputerAgent.click_element`/`type_into_element`."""
 from core.skill_result import SkillResult
 
 
 class RunComputerProcedureSkill:
-    """Analogo di `RunWorkflowSkill` (`skills/workflow.py`) - vedi il docstring del modulo."""
-
     metadata = {
         "intent": "RUN_COMPUTER_PROCEDURE",
         "description": "Esegue una procedura di azioni sullo schermo (click/scritture su un'app) "
         "precedentemente registrata e salvata con un nome, dato il suo nome.",
         "parameters": {
-            "name": {
-                "type": "string",
-                "required": True,
-                "description": "Nome della procedura salvata da eseguire.",
-            },
+            "name": {"type": "string", "required": True, "description": "Nome della procedura salvata da eseguire."},
             "parameters": {
-                "type": "object",
-                "required": False,
-                "description": (
-                    "Valori per gli eventuali segnaposto ${nome} nei passi di scrittura della "
-                    "procedura (F3.8.2) - solo se la procedura ne dichiara."
-                ),
+                "type": "object", "required": False,
+                "description": "Valori per i segnaposto ${nome} dei passi di scrittura (altrimenti i predefiniti dimostrati).",
             },
             "dry_run": {
-                "type": "boolean",
-                "required": False,
-                "description": (
-                    "Se vero, verifica solo che i passi risolverebbero contro lo stato attuale "
-                    "dell'app senza eseguire alcuna azione reale ('mostrami prima cosa farebbe'). "
-                    "Usalo se l'utente chiede un'anteprima, una prova o di 'vedere cosa farebbe' "
-                    "la procedura."
-                ),
+                "type": "boolean", "required": False,
+                "description": "Se vero verifica solo che i passi risolverebbero, senza eseguire nulla "
+                "('mostrami prima cosa farebbe', 'provala').",
             },
+            "reactivate": {
+                "type": "boolean", "required": False,
+                "description": "Riattiva una procedura sospesa, solo se un dry-run completo riesce.",
+            },
+            "undo": {"type": "boolean", "required": False, "description": "Annulla l'ultima esecuzione della procedura."},
         },
     }
 
@@ -55,50 +47,171 @@ class RunComputerProcedureSkill:
         self.procedure_manager = procedure_manager
         self.computer_agent = computer_agent or ComputerAgent()
         self.policy_engine = policy_engine
+        self._last_runs: dict = {}
+
+    def _adapter(self):
+        from core.computer_use.ui_automation_adapter import UIAutomationAdapter
+
+        return UIAutomationAdapter()
 
     def execute(self, parameters: dict = None):
-        from core.computer_use.procedure import dry_run_steps, is_likely_drift, replay_steps
-        from core.computer_use.ui_automation_adapter import UIAutomationAdapter
+        from core.computer_use.procedure import dry_run_steps
+        from core.computer_use.procedure_lifecycle import (
+            STATUS_SUSPENDED,
+            approve,
+            needs_reapproval,
+            reactivate,
+            run_procedure,
+            suspend,
+            undo_run,
+        )
 
         parameters = parameters or {}
         name = (parameters.get("name") or "").strip()
         if not name:
             return SkillResult(success=False, data={}, error="MISSING_PARAMETERS")
-
-        steps = self.procedure_manager.load(name)
-        if steps is None:
+        procedure = self.procedure_manager.load_procedure(name)
+        if procedure is None:
             return SkillResult(success=False, data={"name": name}, error="NOT_FOUND")
-        if not steps:
+        if not procedure.steps:
             return SkillResult(success=False, data={"name": name}, error="EMPTY_PROCEDURE")
 
-        # Vedi il docstring del modulo: riassegnato ADESSO, non solo all'__init__, cosi' un
-        # collegamento successivo di JakeCore (`skill.policy_engine = self.policy_engine`, dopo
-        # che PolicyEngine esiste) raggiunge davvero il componente che lo usa per decidere.
         self.computer_agent.policy_engine = self.policy_engine
-        substitution_parameters = parameters.get("parameters") or {}
-        adapter = UIAutomationAdapter()
+        adapter = self._adapter()
 
-        if bool(parameters.get("dry_run")):
-            results = dry_run_steps(
-                adapter, steps, parameters=substitution_parameters, agent=self.computer_agent,
-            )
-            all_would_succeed = all(result.would_succeed for result in results)
-            return SkillResult(success=all_would_succeed, data={
-                "name": name, "dry_run": True, "total_steps": len(steps),
-                "steps": [{"would_succeed": r.would_succeed, "error": r.error} for r in results],
+        if parameters.get("undo"):
+            run = self._last_runs.get(name)
+            if run is None:
+                return SkillResult(success=False, data={"name": name}, error="NOTHING_TO_UNDO")
+            results = undo_run(self.computer_agent, adapter, run)
+            undone = sum(1 for r in results if r.success)
+            self._last_runs.pop(name, None)
+            return SkillResult(success=undone == len(run.undo_plan), data={
+                "name": name, "undone_steps": undone, "undo_steps": len(run.undo_plan),
+                "not_undoable": list(run.not_undoable),
             })
 
-        results = replay_steps(self.computer_agent, adapter, steps, parameters=substitution_parameters)
-        completed_steps = sum(1 for result in results if result.success)
-        last_result = results[-1] if results else None
-        last_failed = last_result is not None and not last_result.success
-        return SkillResult(success=completed_steps == len(steps), data={
-            "name": name, "completed_steps": completed_steps, "total_steps": len(steps),
-            "last_error": last_result.error if last_failed else None,
-            # F3.8.6 (prima fetta - "rilevare drift"): un chiamante (es. la HUD, F4, non ancora
-            # collegata) puo' usare questo segnale per distinguere "l'app e' probabilmente
-            # cambiata struttura" (suggerisce ri-registrare la procedura) da un fallimento di
-            # altro genere (bloccato da policy, parametro mancante) - vedi core/computer_use/
-            # procedure.py::is_likely_drift.
-            "likely_drift": is_likely_drift(last_result) if last_failed else False,
+        values = {**procedure.defaults_dict(), **(parameters.get("parameters") or {})}
+        if parameters.get("dry_run") or parameters.get("reactivate"):
+            results = dry_run_steps(adapter, list(procedure.steps), parameters=values, agent=self.computer_agent)
+            all_ok = all(result.would_succeed for result in results)
+            data = {
+                "name": name, "dry_run": True, "total_steps": len(procedure.steps), "version": procedure.version,
+                "status": procedure.status,
+                "steps": [{"would_succeed": r.would_succeed, "error": r.error} for r in results],
+            }
+            if parameters.get("reactivate") and procedure.status == STATUS_SUSPENDED and all_ok:
+                self.procedure_manager.save_procedure(reactivate(procedure))
+                data["status"] = "active"
+            return SkillResult(success=all_ok, data=data)
+
+        if procedure.status == STATUS_SUSPENDED:
+            return SkillResult(success=False, data={
+                "name": name, "reason": procedure.suspended_reason,
+                "message": "La procedura e' sospesa perche' l'app e' cambiata: provala con un dry-run per riattivarla.",
+            }, error="PROCEDURE_SUSPENDED")
+
+        reasons = needs_reapproval(procedure)
+        if reasons:
+            if not parameters.get("confirmed"):
+                return SkillResult(success=False, data={
+                    "message": f"La procedura «{name}» ora richiede piu' di quanto avevi approvato ({'; '.join(reasons)}). "
+                    "La riapprovi?",
+                    "confirm_parameters": {**parameters, "confirmed": True},
+                }, error="CONFIRMATION_REQUIRED")
+            procedure = approve(procedure)
+            self.procedure_manager.save_procedure(procedure)
+
+        run = run_procedure(self.computer_agent, adapter, procedure, parameters=values)
+        if run.drift:
+            self.procedure_manager.save_procedure(suspend(procedure, run.drift))
+        if run.completed:
+            self._last_runs[name] = run
+        last = run.results[-1] if run.results else None
+        return SkillResult(success=not run.drift and run.completed == len(procedure.steps), data={
+            "name": name, "version": procedure.version, "completed_steps": run.completed,
+            "total_steps": len(procedure.steps),
+            "last_error": last.error if last is not None and not last.success else None,
+            "likely_drift": run.drift is not None, "suspended": run.drift is not None, "drift": run.drift,
+            "undo_steps": len(run.undo_plan), "not_undoable": list(run.not_undoable),
         })
+
+
+class RecordComputerProcedureSkill:
+    metadata = {
+        "intent": "RECORD_COMPUTER_PROCEDURE",
+        "description": "Impara una procedura guardando l'utente: 'start' inizia a osservare i click e le "
+        "scritture in una finestra ('osserva come faccio'), 'stop' smette e la salva con un nome "
+        "('salva la procedura come ...'). Registra solo elementi semantici, mai lo schermo.",
+        "parameters": {
+            "action": {"type": "string", "required": True, "description": "'start' oppure 'stop'."},
+            "window": {
+                "type": "string", "required": False,
+                "description": "Parte del titolo della finestra da osservare (con 'start'; predefinita: quella in primo piano).",
+            },
+            "name": {"type": "string", "required": False, "description": "Nome con cui salvare la procedura (con 'stop')."},
+        },
+    }
+
+    def __init__(self, procedure_manager, sampler_factory=None, foreground_title=None):
+        self.procedure_manager = procedure_manager
+        self._sampler_factory = sampler_factory
+        self._foreground_title = foreground_title
+        self._sampler = None
+        self._window = None
+
+    def execute(self, parameters: dict = None):
+        parameters = parameters or {}
+        action = (parameters.get("action") or "").strip().lower()
+        if action == "start":
+            return self._start((parameters.get("window") or "").strip())
+        if action == "stop":
+            return self._stop((parameters.get("name") or "").strip())
+        return SkillResult(success=False, data={"action": action}, error="MISSING_PARAMETERS")
+
+    def _start(self, window: str) -> SkillResult:
+        if self._sampler is not None:
+            return SkillResult(success=False, data={"window": self._window}, error="ALREADY_RECORDING")
+        if not window:
+            window = (self._foreground_title or _foreground_window_title)() or ""
+        if not window:
+            return SkillResult(success=False, data={}, error="WINDOW_NOT_FOUND")
+        from core.computer_use.demonstration import UiaDemonstrationSampler
+
+        sampler = (self._sampler_factory or UiaDemonstrationSampler)(window)
+        if not sampler.start():
+            return SkillResult(success=False, data={"window": window, "reason": sampler.error}, error="WINDOW_NOT_FOUND")
+        self._sampler, self._window = sampler, window
+        return SkillResult(success=True, data={"recording": True, "window": window})
+
+    def _stop(self, name: str) -> SkillResult:
+        if self._sampler is None:
+            return SkillResult(success=False, data={}, error="NOT_RECORDING")
+        if not name:
+            return SkillResult(success=False, data={"window": self._window}, error="MISSING_PARAMETERS")
+        from core.computer_use.demonstration import describe_steps, generalize
+        from core.computer_use.procedure_lifecycle import process_name_of, process_version_of
+
+        sampler, window = self._sampler, self._window
+        self._sampler = self._window = None
+        steps = sampler.stop()
+        if not steps:
+            return SkillResult(success=False, data={"window": window}, error="NOTHING_RECORDED")
+        steps, defaults = generalize(steps)
+        pid = getattr(sampler, "_pid", None)
+        procedure = self.procedure_manager.create(
+            name, steps, defaults=defaults, app_process=process_name_of(pid), app_version=process_version_of(pid),
+        )
+        return SkillResult(success=True, data={
+            "name": name, "version": procedure.version, "steps": describe_steps(list(procedure.steps), defaults),
+            "parameters": sorted(defaults), "app": procedure.app_process, "app_version": procedure.app_version,
+        })
+
+
+def _foreground_window_title() -> str | None:
+    try:
+        import win32gui
+
+        return win32gui.GetWindowText(win32gui.GetForegroundWindow()) or None
+    except Exception:
+        return None

@@ -244,6 +244,7 @@ INTENT_EFFECT_CLASS: dict[str, str] = {
     "ROLL_DICE": EFFECT_CLASS_READ,
     "RUN_COMMAND": EFFECT_CLASS_EXTERNAL,
     "RUN_COMPUTER_PROCEDURE": EFFECT_CLASS_EXTERNAL,  # esegue passi salvati in precedenza, non ispezionati qui
+    "RECORD_COMPUTER_PROCEDURE": EFFECT_CLASS_CREATE,  # crea una procedura salvata (selettori osservati)
     "RUN_PYTHON_SCRIPT": EFFECT_CLASS_EXTERNAL,
     "RUN_WORKFLOW": EFFECT_CLASS_EXTERNAL,  # esegue passi salvati in precedenza, non ispezionati qui
     "SAVE_CONTACT": EFFECT_CLASS_CREATE,

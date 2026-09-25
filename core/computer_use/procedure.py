@@ -124,6 +124,10 @@ class RecordedStep:
     selector: ElementSelector
     text: str | None = None
     risk_intent: str | None = None
+    # F3.8.5: il passo che annulla QUESTO passo, se l'utente/la registrazione lo conosce (es. il
+    # click su "Rimuovi" per un click su "Aggiungi"). Un solo livello: un passo di annullamento non
+    # ha a sua volta un annullamento. None = nessun annullamento noto (dichiarato, mai inventato).
+    undo: "RecordedStep | None" = None
 
     def __post_init__(self) -> None:
         if self.action not in _KNOWN_ACTIONS:
@@ -134,6 +138,8 @@ class RecordedStep:
             raise ValueError("RecordedStep con action='type' richiede 'text'")
         if self.action == ACTION_CLICK and self.text is not None:
             raise ValueError("RecordedStep con action='click' non deve avere 'text' (un click non scrive nulla)")
+        if self.undo is not None and self.undo.undo is not None:
+            raise ValueError("un passo di annullamento non puo' avere a sua volta un annullamento")
 
     def to_dict(self) -> dict:
         """Come `ElementSelector.to_dict` (F3.3.4): un dict semplice, agnostico rispetto a DOVE/
@@ -143,6 +149,8 @@ class RecordedStep:
             result["text"] = self.text
         if self.risk_intent is not None:
             result["risk_intent"] = self.risk_intent
+        if self.undo is not None:
+            result["undo"] = self.undo.to_dict()
         return result
 
     @classmethod
@@ -150,7 +158,7 @@ class RecordedStep:
         """L'inverso di `to_dict` - stesso principio "rifiuta invece di indovinare" gia' seguito
         da `ElementSelector.from_dict`: una chiave sconosciuta solleva `ValueError` invece di
         essere ignorata silenziosamente."""
-        unknown_keys = set(data) - {"action", "selector", "text", "risk_intent"}
+        unknown_keys = set(data) - {"action", "selector", "text", "risk_intent", "undo"}
         if unknown_keys:
             raise ValueError(f"RecordedStep.from_dict: chiavi sconosciute {sorted(unknown_keys)}")
         if "action" not in data or "selector" not in data:
@@ -159,6 +167,7 @@ class RecordedStep:
             action=data["action"], selector=ElementSelector.from_dict(data["selector"]),
             risk_intent=data.get("risk_intent"),
             text=data.get("text"),
+            undo=cls.from_dict(data["undo"]) if data.get("undo") is not None else None,
         )
 
 

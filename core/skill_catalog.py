@@ -56,7 +56,7 @@ from skills.notes import AddNoteSkill, ListNotesSkill, SearchNotesSkill, ExportN
 from skills.todo import AddTodoSkill, ListTodosSkill, CompleteTodoSkill, DeleteTodoSkill
 
 from skills.workflow import SaveWorkflowSkill, RunWorkflowSkill
-from skills.computer_procedure import RunComputerProcedureSkill
+from skills.computer_procedure import RecordComputerProcedureSkill, RunComputerProcedureSkill
 from skills.trigger import SetTriggerSkill, ListTriggersSkill, DeleteTriggerSkill
 from skills.reminder import SetReminderSkill, ListRemindersSkill
 from skills.reminders_extra import (
@@ -232,6 +232,7 @@ def build_automation_skills(
         "SAVE_WORKFLOW": SaveWorkflowSkill(planner_provider, workflow_manager),
         "RUN_WORKFLOW": RunWorkflowSkill(workflow_manager, plan_executor),
         "RUN_COMPUTER_PROCEDURE": RunComputerProcedureSkill(procedure_manager),
+        "RECORD_COMPUTER_PROCEDURE": RecordComputerProcedureSkill(procedure_manager),
         "SET_TRIGGER": SetTriggerSkill(trigger_manager),
         "LIST_TRIGGERS": ListTriggersSkill(trigger_manager),
         "DELETE_TRIGGER": DeleteTriggerSkill(trigger_manager),

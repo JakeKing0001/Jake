@@ -137,6 +137,8 @@ SKILL_RISK: dict[str, RiskLevel] = {
     # dei passi" si' - ogni passo con un risk_intent proprio resta comunque gated singolarmente
     # da PolicyEngine dentro ComputerAgent (F3.4.3), non ispezionato qui.
     "RUN_COMPUTER_PROCEDURE": RiskLevel.EXTERNAL_ACTION,
+    # osserva click/scritture in UNA finestra e salva selettori (mai schermo ne' password)
+    "RECORD_COMPUTER_PROCEDURE": RiskLevel.LOCAL_REVERSIBLE,
     # F1.8.4: riprende un compito composto interrotto rieseguendo l'agente - stesso principio di
     # RUN_WORKFLOW sopra, i passi che l'agente ripreso decide di fare non sono ispezionati qui
     # (ma restano comunque gated singolarmente da PolicyEngine come qualunque altro passo).

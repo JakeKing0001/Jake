@@ -17,6 +17,7 @@ stessa protezione da zero."""
 import json
 
 from core.computer_use.procedure import RecordedStep
+from core.computer_use.procedure_lifecycle import Procedure, approve
 
 
 class ProcedureManager:
@@ -44,11 +45,40 @@ class ProcedureManager:
         la STESSA distinzione "onesto None" gia' seguita da `WorkflowManager.load()`: una
         procedura VUOTA salvata davvero (`steps=[]`) e nessuna procedura salvata affatto sono due
         fatti diversi, non lo stesso caso."""
+        procedure = self.load_procedure(name)
+        return None if procedure is None else list(procedure.steps)
+
+    def save_procedure(self, procedure: Procedure) -> None:
+        """F3.8.5: salva la procedura completa (versione, app, predefiniti, approvazione, stato)."""
+        self.memory_manager.remember(procedure.name, json.dumps(procedure.to_dict(), ensure_ascii=False), category=self.CATEGORY)
+
+    def load_procedure(self, name: str) -> Procedure | None:
+        """La procedura completa; una salvata nel formato storico (solo lista di passi) viene letta
+        come versione 1 approvata al rischio che i suoi passi dichiarano."""
         results = self.memory_manager.recall(key=name, category=self.CATEGORY, limit=1)
         if not results:
             return None
-        steps_data = json.loads(results[0]["value"])
-        return [RecordedStep.from_dict(step) for step in steps_data]
+        return Procedure.from_dict(json.loads(results[0]["value"]), name=name)
+
+    def create(self, name: str, steps: list[RecordedStep], *, defaults: dict[str, str] | None = None,
+               app_process: str | None = None, app_version: str | None = None) -> Procedure:
+        """Una procedura nuova, approvata dall'utente che la salva (versione 1). Sovrascrivendo un nome
+        esistente la versione sale e l'approvazione precedente resta: se i passi nuovi chiedono di piu',
+        la prossima esecuzione chiedera' una nuova approvazione (F3.8.7)."""
+        previous = self.load_procedure(name)
+        procedure = Procedure(
+            name=name, steps=tuple(steps), defaults=tuple(sorted((defaults or {}).items())),
+            app_process=app_process, app_version=app_version, version=0,
+        )
+        if previous is None:
+            procedure = approve(procedure)
+        else:
+            from dataclasses import replace
+
+            procedure = replace(procedure, version=previous.version + 1, approved_risk=previous.approved_risk,
+                                approved_capabilities=previous.approved_capabilities)
+        self.save_procedure(procedure)
+        return procedure
 
     def list_names(self) -> list[str]:
         results = self.memory_manager.recall(category=self.CATEGORY, limit=self.MAX_PROCEDURES)
