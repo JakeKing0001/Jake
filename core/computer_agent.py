@@ -160,6 +160,9 @@ class ComputerActionResult:
     # la diagnosi resta visibile anche quando l'azione e' riuscita solo in parte.
     strategy: str | None = None
     attempts: tuple = ()
+    # F3.3.6: per NOT_FOUND/AMBIGUOUS_MATCH, candidato scelto, alternative, punteggi e motivo
+    # (core/computer_use/inspector.py) - la diagnosi visibile di un selettore che non ha funzionato.
+    inspection: dict | None = None
 
 
 def _describe_attempts(outcome) -> tuple:
@@ -233,6 +236,11 @@ class ComputerAgent:
         self._idempotency_ttl_seconds = idempotency_ttl_seconds
         self._idempotency_cache: dict[str, tuple[float, ComputerActionResult]] = {}
         self.policy_engine = policy_engine
+        # F3.2.2: albero UIA della finestra bersaglio in cache (TTL + invalidato dopo ogni azione),
+        # usato per osservare e per l'inspector - mai per agire (per agire servono elementi vivi).
+        from core.computer_use.uia_cache import TreeCache
+
+        self.tree_cache = TreeCache(adapter=None, ttl_s=3.0)
 
     def _check_policy(
         self, risk_intent: str | None, policy_parameters: dict | None, automated: bool,
@@ -359,6 +367,7 @@ class ComputerAgent:
                 evidence = EVIDENCE_PIXEL_DIFF
             except Exception:
                 pass
+        self.tree_cache.invalidate()  # un click puo' aver cambiato qualunque finestra
         return ComputerActionResult(
             success=True, x=x, y=y, matched=matched, verified=verified, change_ratio=round(ratio, 4),
             evidence=evidence,
@@ -401,9 +410,9 @@ class ComputerAgent:
         try:
             element = engine.wait_for_unique_element(window, selector, timeout_seconds=timeout_seconds)
         except NoMatchError:
-            return ComputerActionResult(success=False, error="NOT_FOUND")
+            return ComputerActionResult(success=False, error="NOT_FOUND", inspection=self._inspect(adapter, window, selector))
         except AmbiguousSelectionError:
-            return ComputerActionResult(success=False, error="AMBIGUOUS_MATCH")
+            return ComputerActionResult(success=False, error="AMBIGUOUS_MATCH", inspection=self._inspect(adapter, window, selector))
 
         info = adapter.describe_element(element)
         if info is None:
@@ -411,6 +420,22 @@ class ComputerAgent:
         left, top, width, height = info.bounds
         center_x, center_y = left + width // 2, top + height // 2
         return adapter, element, center_x, center_y
+
+    def observe_window(self, window, adapter, max_depth: int = 12):
+        """L'albero descritto (immutabile) della finestra `window`, dalla cache se ancora valido."""
+        try:
+            hwnd = int(window.CurrentNativeWindowHandle) or id(window)
+        except Exception:
+            hwnd = id(window)
+        return self.tree_cache.get_tree(window, hwnd, max_depth=max_depth, adapter=adapter)
+
+    def _inspect(self, adapter, window, selector) -> dict | None:
+        from core.computer_use.inspector import inspect
+
+        try:
+            return inspect(self.observe_window(window, adapter), selector).to_dict()
+        except Exception:
+            return None
 
     def click_element(
         self, *, window_title: str | None = None, root=None, name: str | None = None,
@@ -517,6 +542,7 @@ class ComputerAgent:
             evidence=EVIDENCE_PIXEL_DIFF if before is not None else EVIDENCE_NONE,
             strategy=_last_performed_strategy(outcome), attempts=attempts,
         )
+        self.tree_cache.invalidate()  # l'azione puo' aver cambiato la finestra
         self._remember_action_result(idempotency_key, result)
         return result
 
@@ -636,5 +662,6 @@ class ComputerAgent:
             verified=outcome.succeeded, change_ratio=round(last_ratio[0], 4),
             evidence=evidence[0], strategy=_last_performed_strategy(outcome), attempts=attempts,
         )
+        self.tree_cache.invalidate()  # l'azione puo' aver cambiato la finestra
         self._remember_action_result(idempotency_key, result)
         return result

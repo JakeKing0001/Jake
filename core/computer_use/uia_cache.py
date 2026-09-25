@@ -50,8 +50,11 @@ class TreeCache:
 
     # ---- lettura --------------------------------------------------------------------------------------
 
-    def get_tree(self, element, hwnd: int, max_depth: int = 8) -> ElementInfo | None:
-        """L'albero di `element` (la finestra `hwnd`): dalla cache se ancora valido, altrimenti riletto."""
+    def get_tree(self, element, hwnd: int, max_depth: int = 8, adapter=None) -> ElementInfo | None:
+        """L'albero di `element` (la finestra `hwnd`): dalla cache se ancora valido, altrimenti riletto.
+
+        `adapter`: quello del thread chiamante (COM e' legato al thread: un adapter creato altrove
+        non va usato qui). La cache in se' contiene solo `ElementInfo` immutabili, condivisibili."""
         key = (hwnd, max_depth)
         with self._lock:
             entry = self._entries.get(key)
@@ -66,7 +69,7 @@ class TreeCache:
                 self.hits += 1
                 return entry.tree
             self.misses += 1
-        tree = self._adapter.describe_tree(element, max_depth)  # fuori dal lock: e' lenta
+        tree = (adapter or self._adapter).describe_tree(element, max_depth)  # fuori dal lock: e' lenta
         with self._lock:
             self._entries[key] = _Entry(tree, self._clock(), generation)
         return tree
