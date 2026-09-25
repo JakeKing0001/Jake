@@ -193,6 +193,11 @@ class ComputerAgent:
         un'istanza costruita altrove (tipicamente `JakeCore.policy_engine`) assegnata post-
         costruzione o passata qui, mai un singleton di modulo (che questo progetto non usa da
         nessuna parte per `PolicyEngine`, verificato non assunto)."""
+        # Prima di qualunque import di pyautogui: vedi core/win_dpi.py (i click calcolati dalle
+        # coordinate UI Automation devono restare giusti anche su monitor con DPI diversi).
+        from core.win_dpi import ensure_dpi_aware
+
+        ensure_dpi_aware()
         self._idempotency_ttl_seconds = idempotency_ttl_seconds
         self._idempotency_cache: dict[str, tuple[float, ComputerActionResult]] = {}
         self.policy_engine = policy_engine

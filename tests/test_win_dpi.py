@@ -80,3 +80,25 @@ class EnsureDpiAwareTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EffectiveAwarenessTests(unittest.TestCase):
+    def test_a_successful_call_on_a_process_that_is_still_unaware_is_not_reported_as_success(self):
+        with mock.patch.object(ctypes.windll.user32, "SetProcessDpiAwarenessContext", return_value=1),              mock.patch("core.win_dpi.current_dpi_awareness", return_value=0):
+            self.assertFalse(ensure_dpi_aware())
+
+    def test_computer_agent_keeps_the_process_per_monitor_aware_even_after_pyautogui(self):
+        """Processo pulito: senza la chiamata anticipata, `import pyautogui` porta il processo da
+        per-monitor (2) a system aware (1) - misurato su questa macchina a 125%."""
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        code = (
+            "from core.computer_agent import ComputerAgent; ComputerAgent(); import pyautogui; "
+            "from core.win_dpi import current_dpi_awareness; print(current_dpi_awareness())"
+        )
+        root = Path(__file__).resolve().parent.parent
+        output = subprocess.run([sys.executable, "-c", code], cwd=root, capture_output=True, text=True, timeout=60)
+        self.assertEqual(output.stdout.strip(), "2", output.stderr[-500:])
+

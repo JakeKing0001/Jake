@@ -28,6 +28,11 @@ def _force_utf8_console() -> None:
 
 def main():
     _force_utf8_console()
+    # Per-monitor DPI aware PRIMA di qualunque import di pyautogui (che degraderebbe il processo a
+    # "system aware"): in ogni modalita', non solo nell'HUD - vedi core/win_dpi.py.
+    from core.win_dpi import ensure_dpi_aware
+
+    ensure_dpi_aware()
     # Prima di questo fix, un errore alla costruzione di JakeCore (plugin rotto, config
     # corrotta, ecc.) o dentro la sessione non veniva mai intercettato: in modalita' HUD/tray
     # non c'e' una console visibile (avvio da collegamento/avvio automatico), quindi il
