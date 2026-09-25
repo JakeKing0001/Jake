@@ -139,6 +139,9 @@ IDEMPOTENCY_TTL_SECONDS = 30.0
 # F3.5.5: vocabolario chiuso per ComputerActionResult.evidence - vedi il docstring del modulo.
 EVIDENCE_PIXEL_DIFF = "pixel_diff"
 EVIDENCE_NONE = "none"
+# Prova FORTE: la proprieta' dell'elemento riletta via UI Automation dopo l'azione (es. il testo
+# del campo e' davvero quello scritto). A differenza del pixel diff dimostra l'effetto.
+EVIDENCE_UIA_PROPERTY = "uia_property"
 
 
 @dataclass
@@ -153,6 +156,21 @@ class ComputerActionResult:
     # F3.5.5: EVIDENCE_NONE quando nessun controllo e' stato possibile (es. la cattura schermo
     # iniziale e' fallita) - mai EVIDENCE_PIXEL_DIFF per un controllo che non e' davvero avvenuto.
     evidence: str = EVIDENCE_NONE
+    # F3.5.2: quale strategia ha prodotto l'effetto e, per ogni tentativo, esito e motivo -
+    # la diagnosi resta visibile anche quando l'azione e' riuscita solo in parte.
+    strategy: str | None = None
+    attempts: tuple = ()
+
+
+def _describe_attempts(outcome) -> tuple:
+    """(strategia, riuscita, motivo) per ogni tentativo della scala: la diagnosi del fallimento."""
+    return tuple((a.strategy_name, a.succeeded, a.reason) for a in outcome.attempts)
+
+
+def _last_performed_strategy(outcome) -> str | None:
+    """La strategia verificata, altrimenti l'ultima tentata (quella il cui effetto non e' stato
+    confermato): mai None se qualcosa e' stato eseguito."""
+    return outcome.successful_strategy or (outcome.attempts[-1].strategy_name if outcome.attempts else None)
 
 
 class ComputerAgent:
@@ -361,7 +379,7 @@ class ComputerAgent:
         self, *, window_title: str | None = None, root=None, name: str | None = None,
         control_type: str | None = None, automation_id: str | None = None, timeout_seconds: float = 5.0,
         idempotency_key: str | None = None, risk_intent: str | None = None,
-        policy_parameters: dict | None = None, automated: bool = False,
+        policy_parameters: dict | None = None, automated: bool = False, idempotent: bool = False,
     ) -> ComputerActionResult:
         """F3.4.2: trova un elemento per nome/ruolo/automation_id dentro `window_title` (o dentro
         `root`, un elemento gia' risolto - F3.6, un browser non ha un titolo di finestra
@@ -384,7 +402,15 @@ class ComputerAgent:
         DOPO la cache di idempotenza (un cache HIT restituisce un'azione GIA' avvenuta ed e' gia'
         stata autorizzata a suo tempo, ricontrollare la policy per un'azione che non sta per
         accadere non avrebbe senso) - vedi `_check_policy` per i dettagli. `risk_intent=None` (il
-        default) lascia il comportamento IDENTICO a prima di F3.4.3."""
+        default) lascia il comportamento IDENTICO a prima di F3.4.3.
+
+        `idempotent` (F3.4.6/F3.5.4): un Invoke ESEGUITO (nessuna eccezione) ha gia' premuto il
+        bottone; se il pixel diff non vede un cambiamento non e' una prova che non sia successo
+        nulla (e' un'evidenza debole, F3.5.5). Ripiegare su un click pixel vorrebbe dire premere
+        DUE volte "Aggiungi"/"Invia". Di default quindi la scala si ferma (azione eseguita, effetto
+        non verificato, diagnosi nei tentativi); solo il chiamante che sa che una seconda pressione
+        e' innocua (selezionare una voce, aprire un menu gia' aperto) passa `idempotent=True` e
+        riottiene il ripiego pixel per i controlli dove Invoke non ha effetto reale (Qt)."""
         cached = self._cached_action_result(idempotency_key)
         if cached is not None:
             return cached
@@ -440,16 +466,18 @@ class ComputerAgent:
             action_performed[0] = True
 
         outcome = try_strategies_in_order(
-            [("uia_invoke", _uia_invoke), ("pixel_click", _pixel_click)],
+            [("uia_invoke", _uia_invoke, not idempotent), ("pixel_click", _pixel_click)],
             verify=_verify,
         )
 
+        attempts = _describe_attempts(outcome)
         if not action_performed[0]:
-            return ComputerActionResult(success=False, error="OPERATION_FAILED")
+            return ComputerActionResult(success=False, error="OPERATION_FAILED", attempts=attempts)
         result = ComputerActionResult(
             success=True, x=center_x, y=center_y, matched=name,
             verified=outcome.succeeded, change_ratio=round(last_ratio[0], 4),
             evidence=EVIDENCE_PIXEL_DIFF if before is not None else EVIDENCE_NONE,
+            strategy=_last_performed_strategy(outcome), attempts=attempts,
         )
         self._remember_action_result(idempotency_key, result)
         return result
@@ -513,8 +541,17 @@ class ComputerAgent:
             before = None
         last_ratio = [0.0]
         action_performed = [False]
+        evidence = [EVIDENCE_PIXEL_DIFF if before is not None else EVIDENCE_NONE]
 
         def _verify() -> bool:
+            # Prova forte prima: il campo contiene davvero il testo (Value riletto). Il pixel diff
+            # su tutto lo schermo non vede un campo piccolo e farebbe riscrivere per niente.
+            try:
+                if _adapter.read_value(element) == text:
+                    evidence[0] = EVIDENCE_UIA_PROPERTY
+                    return True
+            except Exception:
+                pass
             if before is None:
                 return False
             try:
@@ -552,12 +589,13 @@ class ComputerAgent:
             verify=_verify,
         )
 
+        attempts = _describe_attempts(outcome)
         if not action_performed[0]:
-            return ComputerActionResult(success=False, error="OPERATION_FAILED")
+            return ComputerActionResult(success=False, error="OPERATION_FAILED", attempts=attempts)
         result = ComputerActionResult(
             success=True, x=center_x, y=center_y, matched=name,
             verified=outcome.succeeded, change_ratio=round(last_ratio[0], 4),
-            evidence=EVIDENCE_PIXEL_DIFF if before is not None else EVIDENCE_NONE,
+            evidence=evidence[0], strategy=_last_performed_strategy(outcome), attempts=attempts,
         )
         self._remember_action_result(idempotency_key, result)
         return result

@@ -225,10 +225,28 @@ class ClickElementTests(unittest.TestCase):
             result = ComputerAgent().click_element(window_title="Jake Computer Use Fixture", name="Aggiungi")
 
         self.assertTrue(MockExecutor.return_value.invoke.called)
-        # Senza verifica, la scala tenta anche il ripiego pixel (verify() fallisce dopo invoke).
-        click.assert_called_once_with(130, 210)
+        # F3.5.4: il pixel diff che non vede nulla NON prova che Invoke non abbia premuto il
+        # bottone - un secondo click pixel premerebbe "Aggiungi" due volte. La scala si ferma.
+        click.assert_not_called()
         self.assertTrue(result.success)
         self.assertFalse(result.verified)
+        self.assertEqual(result.strategy, "uia_invoke")
+        self.assertEqual(result.attempts[0][0], "uia_invoke")
+        self.assertIn("scala interrotta", result.attempts[0][2])
+
+    def test_an_idempotent_click_may_still_fall_back_to_the_pixel_click(self):
+        """Solo quando il chiamante dichiara che una seconda pressione e' innocua (selezionare una
+        voce, aprire un menu) il ripiego pixel resta disponibile per i controlli Qt dove Invoke
+        non ha un effetto reale."""
+        same = Image.new("RGB", (10, 10), (0, 0, 0))
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter,              mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine,              mock.patch("core.computer_use.executor.ActionExecutor"),              mock.patch("core.vision.screen.capture_screenshot_image", side_effect=[same, same.copy(), same.copy()]),              mock.patch("pyautogui.click") as click, mock.patch("time.sleep"):
+            self._mocked_adapter_and_engine(MockAdapter, MockEngine)
+            result = ComputerAgent().click_element(window_title="Jake Computer Use Fixture", name="Riga 3", idempotent=True)
+
+        click.assert_called_once_with(130, 210)
+        self.assertTrue(result.success)
+        self.assertEqual(result.strategy, "pixel_click")
+        self.assertEqual([a[0] for a in result.attempts], ["uia_invoke", "pixel_click"])
 
     def test_invoke_failing_falls_back_to_a_pixel_click_at_the_same_coordinates(self):
         """`invoke()` che SOLLEVA non chiama mai `verify()` per quel tentativo (F3.5.3, "verify()
@@ -325,6 +343,22 @@ class TypeIntoElementTests(unittest.TestCase):
         write.assert_not_called()
         self.assertFalse(result.success)
         self.assertEqual(result.error, "NOT_FOUND")
+
+    def test_a_value_read_back_is_strong_evidence_and_nothing_is_typed_again(self):
+        """F3.5.5: il campo riletto via UI Automation contiene il testo -> prova forte; il pixel
+        diff (che su tutto lo schermo non vede un campo piccolo) non fa riscrivere niente."""
+        same = Image.new("RGB", (10, 10), (0, 0, 0))
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter,              mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine,              mock.patch("core.computer_use.executor.ActionExecutor") as MockExecutor,              mock.patch("core.vision.screen.capture_screenshot_image", return_value=same),              mock.patch("pyautogui.write") as write, mock.patch("pyautogui.click") as click, mock.patch("time.sleep"):
+            adapter, _engine = self._mocked_adapter_and_engine(MockAdapter, MockEngine)
+            adapter.read_value.return_value = "ciao"
+            result = ComputerAgent().type_into_element("ciao", window_title="Jake Computer Use Fixture", name="Campo")
+
+        MockExecutor.return_value.set_value.assert_called_once()
+        write.assert_not_called()
+        click.assert_not_called()
+        self.assertTrue(result.verified)
+        self.assertEqual(result.evidence, "uia_property")
+        self.assertEqual(result.strategy, "uia_set_value")
 
     def test_a_successful_set_value_with_a_visible_change_reports_verified(self):
         before = Image.new("RGB", (10, 10), (0, 0, 0))
