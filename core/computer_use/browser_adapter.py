@@ -101,6 +101,7 @@ alla volta" di questa sessione):
 - trovare l'eseguibile del browser SOLO su Edge, un percorso fisso (`_CANDIDATE_EDGE_PATHS`) -
   Chrome/Firefox non ancora supportati, ne' un rilevamento piu' robusto del browser predefinito
   dell'utente."""
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -158,6 +159,7 @@ class IsolatedBrowserProcess:
         mai l'inverso, cancellare un profilo ancora in uso da Edge fallirebbe silenziosamente su
         Windows (file bloccati dal processo)."""
         import shutil
+        import time
 
         self.process.terminate()
         try:
@@ -165,7 +167,45 @@ class IsolatedBrowserProcess:
         except subprocess.TimeoutExpired:
             self.process.kill()
             self.process.wait()
-        shutil.rmtree(self.user_data_dir, ignore_errors=True)
+        # Buco reale trovato dal gate delle app reali: i processi FIGLI di Edge (renderer, GPU,
+        # utility) sopravvivono qualche istante al processo principale e tengono bloccati i file
+        # del profilo; rmtree(ignore_errors) falliva in silenzio (230 profili trovati in %TEMP%).
+        # Si aspetta che nessun processo usi piu' il profilo (terminandoli se serve), poi si
+        # cancella riprovando.
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            holders = self._profile_processes()
+            if not holders:
+                break
+            if time.monotonic() > deadline:
+                for holder in holders:
+                    try:
+                        holder.kill()
+                    except Exception:
+                        pass
+                time.sleep(0.5)
+                break
+            time.sleep(0.2)
+        for _ in range(20):
+            shutil.rmtree(self.user_data_dir, ignore_errors=True)
+            if not os.path.exists(self.user_data_dir):
+                return
+            time.sleep(0.25)
+
+    def _profile_processes(self) -> list:
+        """I processi che usano ancora il profilo temporaneo di QUESTA istanza (mai altri Edge)."""
+        try:
+            import psutil
+        except ImportError:
+            return []
+        holders = []
+        for proc in psutil.process_iter(["name", "cmdline"]):
+            try:
+                if any(self.user_data_dir in arg for arg in (proc.info.get("cmdline") or [])):
+                    holders.append(proc)
+            except Exception:
+                continue
+        return holders
 
 
 def launch_isolated_browser(url: str) -> IsolatedBrowserProcess:

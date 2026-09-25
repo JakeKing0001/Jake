@@ -5,6 +5,7 @@ per il rischio di privacy gia' trovato e la ragione dei flag di isolamento). Sal
 esplicitamente se Edge non e' installato in questo ambiente (`BrowserNotFoundError`), non fatto
 fallire - lo stesso principio gia' seguito per l'OCR (F3.5.1, `core/vision/screen.py::
 ocr_available`)."""
+import time
 import unittest
 from pathlib import Path
 
@@ -323,3 +324,33 @@ class RealBrowserFixtureTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class IsolatedProfileCleanupTests(unittest.TestCase):
+    """Bug trovato dal gate delle app reali: i processi figli di Edge tenevano bloccato il profilo
+    temporaneo dopo la chiusura del processo principale e rmtree(ignore_errors) falliva in
+    silenzio (230 profili jake_edge_* trovati in %TEMP%). Qui un processo "figlio" vero tiene un
+    file aperto nel profilo: la pulizia deve attenderlo/terminarlo e cancellare davvero la cartella."""
+
+    def test_a_process_still_holding_the_profile_is_stopped_and_the_folder_removed(self):
+        import subprocess
+        import sys
+        import tempfile
+
+        from core.computer_use.browser_adapter import IsolatedBrowserProcess
+
+        profile = tempfile.mkdtemp(prefix="jake_edge_test_")
+        holder = subprocess.Popen([sys.executable, "-c",
+                                   "import sys, time; f = open(sys.argv[1] + '/lock', 'w'); time.sleep(60)", profile])
+        self.addCleanup(lambda: holder.kill() if holder.poll() is None else None)
+        main = subprocess.Popen([sys.executable, "-c", "pass"])
+        for _ in range(50):  # il file bloccato deve esistere prima della pulizia
+            if Path(profile, "lock").exists():
+                break
+            time.sleep(0.1)
+
+        IsolatedBrowserProcess(main, profile).terminate_and_cleanup(timeout_seconds=1.0)
+
+        self.assertFalse(Path(profile).exists())
+        self.assertIsNotNone(holder.poll(), "il processo che teneva il profilo non deve restare vivo")
+
