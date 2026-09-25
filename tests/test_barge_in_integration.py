@@ -441,6 +441,23 @@ class BargeInSessionTests(VoiceSessionTestCase):
                 break
         self.assertEqual(len(vad2.begun), 1)
 
+    def test_auto_mode_detects_the_default_windows_output_when_none_is_configured(self):
+        """F2.5.7: senza `voice_output_device` il nome dell'uscita predefinita di Windows decide;
+        prima restava "unknown" e il barge-in "auto" non riconosceva mai le cuffie."""
+        with mock.patch("core.voice.wake_word_session.detect_output_device_name", return_value="Cuffie (Realtek USB Audio)"):
+            session, tts, vad = _speaking_session(barge_in="auto")
+            for _ in range(12):
+                vad.on_speaking_frame(_frame(), True, 0.2)
+                if tts.stopped.is_set():
+                    break
+        self.assertEqual(len(vad.begun), 1)
+        with mock.patch("core.voice.wake_word_session.detect_output_device_name", return_value="Altoparlanti (Realtek)"):
+            session, _, vad = _speaking_session(barge_in="auto")
+            for _ in range(30):
+                vad.on_speaking_frame(_frame(), True, 0.2)
+        self.assertEqual(vad.begun, [])
+        session._tts_thread.join(0.01)
+
     def test_an_unknown_mode_falls_back_to_off(self):
         session, _, _ = _session(barge_in="sempre")
         self.assertEqual(session.barge_in_mode, "off")

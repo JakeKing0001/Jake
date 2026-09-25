@@ -10,7 +10,7 @@ from core.request_context import (
     reset_current_speaker_profile_id, reset_current_stt_confidence, set_current_speaker_profile_id,
     set_current_stt_confidence,
 )
-from core.voice.audio_profile import apply_to_provider, classify_output_device
+from core.voice.audio_profile import apply_to_provider, classify_output_device, detect_output_device_name
 from core.voice.barge_in import BargeInController, classify_interruption
 from core.voice.live_transcriber import LiveTranscriber
 from core.voice.listening_state import (
@@ -154,6 +154,9 @@ class WakeWordSession:
         # uscita per regolare volume e ritmo. Uno stile sconosciuto ricade su "normal".
         self.speech_style = STYLES.get(speech_style, STYLES["normal"])
         self.output_device_name = output_device_name
+        # Uscita usata dalla risposta in corso: quella configurata o, se manca, quella predefinita
+        # di Windows rilevata a ogni risposta (cuffie collegate/scollegate nel frattempo).
+        self._active_output_device = output_device_name
         self._tts_thread = None
         self._running = False
         self._logger = get_logger()
@@ -263,7 +266,7 @@ class WakeWordSession:
         if self.barge_in_mode == "on":
             return True
         if self.barge_in_mode == "auto":
-            return classify_output_device(self.output_device_name) == "headphones"
+            return classify_output_device(self._active_output_device) == "headphones"
         return False
 
     def _speaking(self) -> bool:
@@ -473,7 +476,8 @@ class WakeWordSession:
         if not text:
             return
         self._interrupt_speech()
-        apply_to_provider(self.tts_provider, self.speech_style, self.output_device_name)
+        self._active_output_device = self.output_device_name or detect_output_device_name()
+        apply_to_provider(self.tts_provider, self.speech_style, self._active_output_device)
 
         def run():
             self.vad_listener.muted = True

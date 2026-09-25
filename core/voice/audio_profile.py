@@ -46,6 +46,20 @@ def classify_output_device(device_name: str | None) -> str:
     return "unknown"
 
 
+def detect_output_device_name() -> str | None:
+    """Nome dell'uscita audio predefinita di Windows (PortAudio), None se non rilevabile. Serve
+    quando `voice_output_device` non e' configurato: senza, ogni uscita risultava "unknown" e il
+    barge-in "auto" non riconosceva mai le cuffie."""
+    try:
+        import sounddevice as sd
+
+        device = sd.query_devices(kind="output")
+    except Exception:
+        return None
+    name = device.get("name") if isinstance(device, dict) else None
+    return name if isinstance(name, str) and name.strip() else None
+
+
 def profile_for_device(device_name: str | None) -> OutputProfile:
     return PROFILES[classify_output_device(device_name)]
 
