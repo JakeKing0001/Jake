@@ -34,6 +34,7 @@ from core.computer_use.vscode_adapter import (
     close_vscode_window,
     find_code_executable,
     find_vscode_window,
+    isolated_launch_environment,
     launch_isolated_vscode,
 )
 from core.computer_use.ui_automation_adapter import UIAutomationAdapter
@@ -49,6 +50,20 @@ def _code_available() -> bool:
         return True
     except CodeNotFoundError:
         return False
+
+
+class IsolatedLaunchEnvironmentTests(unittest.TestCase):
+    """Bug trovato eseguendo la suite dentro VS Code: l'istanza "isolata" ereditava le variabili del
+    processo VS Code ospite e non apriva mai la propria finestra (o poteva inoltrare la richiesta
+    all'istanza dell'utente)."""
+
+    def test_variables_of_a_hosting_vscode_process_are_never_inherited(self):
+        env = isolated_launch_environment({
+            "PATH": "C:/Windows", "ELECTRON_RUN_AS_NODE": "1", "VSCODE_IPC_HOOK_CLI": "pipe",
+            "VSCODE_ESM_ENTRYPOINT": "vs/workbench/api/node/extensionHostProcess", "vscode_pid": "1",
+            "USERPROFILE": "C:/Users/x",
+        })
+        self.assertEqual(env, {"PATH": "C:/Windows", "USERPROFILE": "C:/Users/x"})
 
 
 @unittest.skipUnless(_code_available(), "Visual Studio Code non e' installato in questo ambiente")

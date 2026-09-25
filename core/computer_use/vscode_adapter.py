@@ -71,6 +71,7 @@ alla volta" di questa sessione):
   chiuso/gestito automaticamente da questo modulo;
 - qualunque azione (digitare, salvare, eseguire un comando) - solo apertura/localizzazione/
   chiusura in questa prima fetta."""
+import os
 import shutil
 import subprocess
 import tempfile
@@ -119,6 +120,20 @@ class IsolatedVSCodeProcess:
         shutil.rmtree(self.extensions_dir, ignore_errors=True)
 
 
+def isolated_launch_environment(base: dict[str, str] | None = None) -> dict[str, str]:
+    """L'ambiente per lanciare l'istanza isolata, senza le variabili di un processo VS Code gia'
+    in esecuzione. Trovato eseguendo i test dentro VS Code (terminale/estensione): un processo
+    figlio di VS Code eredita `ELECTRON_RUN_AS_NODE` e `VSCODE_*` (`VSCODE_ESM_ENTRYPOINT`,
+    `VSCODE_IPC_HOOK`, `VSCODE_PID`...), e `Code.exe` lanciato con quelle variabili non avvia la
+    finestra ma si comporta da processo ausiliario - o, con `VSCODE_IPC_HOOK_CLI`, inoltra la
+    richiesta all'istanza dell'utente gia' aperta, proprio cio' che l'isolamento deve evitare."""
+    source = os.environ if base is None else base
+    return {
+        key: value for key, value in source.items()
+        if not key.upper().startswith("VSCODE_") and key.upper() != "ELECTRON_RUN_AS_NODE"
+    }
+
+
 def launch_isolated_vscode(path: Path) -> IsolatedVSCodeProcess:
     """Lancia VS Code su `path` (un file o una cartella) con un profilo temporaneo ISOLATO (mai
     il profilo/le estensioni reali dell'utente - vedi il docstring del modulo per la verifica di
@@ -135,7 +150,7 @@ def launch_isolated_vscode(path: Path) -> IsolatedVSCodeProcess:
     launcher = subprocess.Popen([
         str(executable), "--new-window", f"--user-data-dir={user_data_dir}",
         f"--extensions-dir={extensions_dir}", "--disable-workspace-trust", str(path),
-    ], shell=True)
+    ], shell=True, env=isolated_launch_environment())
     try:
         launcher.wait(timeout=5.0)
     except subprocess.TimeoutExpired:
