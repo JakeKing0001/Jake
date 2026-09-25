@@ -1,3 +1,4 @@
+from core.computer_use.sensitive_ui import EFFECT_PARAMETER, gate_sensitive_ui_action
 from core.skill_result import SkillResult
 
 # Nomi "parlati" o italiani dei tasti -> nomi riconosciuti da pyautogui.
@@ -23,14 +24,19 @@ class TypeTextSkill:
                 "required": True,
                 "description": "Testo da digitare, con le stesse parole dell'utente.",
             },
+            "effect": EFFECT_PARAMETER,
         },
     }
+    policy_engine = None  # iniettato da JakeCore: serve alle azioni dichiarate sensibili
 
     def execute(self, parameters: dict = None):
         parameters = parameters or {}
         text = parameters.get("text") or ""
         if not text:
             return SkillResult(success=False, data={}, error="MISSING_PARAMETERS")
+        gated = gate_sensitive_ui_action(parameters, self.policy_engine, "il campo attivo")
+        if gated is not None:
+            return gated
 
         try:
             # keyboard.write gestisce anche accenti e caratteri unicode (pyautogui.write no:
@@ -53,8 +59,10 @@ class PressKeySkill:
                 "required": True,
                 "description": "Tasto o combinazione separata da '+', es. 'ctrl+s', 'enter', 'ctrl+shift+t', 'win+.'.",
             },
+            "effect": EFFECT_PARAMETER,
         },
     }
+    policy_engine = None  # iniettato da JakeCore: serve alle azioni dichiarate sensibili
 
     def execute(self, parameters: dict = None):
         import pyautogui
@@ -63,6 +71,9 @@ class PressKeySkill:
         keys = (parameters.get("keys") or "").strip().lower()
         if not keys:
             return SkillResult(success=False, data={}, error="MISSING_PARAMETERS")
+        gated = gate_sensitive_ui_action(parameters, self.policy_engine, keys)
+        if gated is not None:
+            return gated
 
         if keys == "+":
             key_sequence = ["+"]

@@ -10,6 +10,7 @@ import json
 import re
 from difflib import SequenceMatcher
 from core.turn_cancellation import current_turn_cancelled
+from core.computer_use.sensitive_ui import EFFECT_PARAMETER, gate_sensitive_ui_action
 from core.skill_result import SkillResult
 
 
@@ -58,8 +59,10 @@ class ClickTextSkill:
         "parameters": {
             "text": {"type": "string", "required": True, "description": "La scritta da cliccare, cosi' come appare (es. 'Accedi', 'Salva con nome')."},
             "button": {"type": "string", "required": False, "description": "'left' (default), 'right' o 'double'."},
+            "effect": EFFECT_PARAMETER,
         },
     }
+    policy_engine = None  # iniettato da JakeCore: serve alle azioni dichiarate sensibili
 
     def __init__(self, computer_agent=None):
         from core.computer_agent import ComputerAgent
@@ -78,6 +81,9 @@ class ClickTextSkill:
         button = (parameters.get("button") or "left").strip().lower()
         if not text:
             return SkillResult(success=False, data={}, error="MISSING_PARAMETERS")
+        gated = gate_sensitive_ui_action(parameters, self.policy_engine, text)
+        if gated is not None:
+            return gated
 
         try:
             words = self.computer_agent.observe()
@@ -107,8 +113,10 @@ class ClickElementSkill:
         "usando il modello di visione. Se l'elemento ha una scritta leggibile preferisci CLICK_TEXT.",
         "parameters": {
             "description": {"type": "string", "required": True, "description": "Descrizione dell'elemento da cliccare."},
+            "effect": EFFECT_PARAMETER,
         },
     }
+    policy_engine = None  # iniettato da JakeCore: serve alle azioni dichiarate sensibili
 
     MAX_WIDTH = 1280
 
@@ -125,6 +133,9 @@ class ClickElementSkill:
         description = (parameters.get("description") or "").strip()
         if not description:
             return SkillResult(success=False, data={}, error="MISSING_PARAMETERS")
+        gated = gate_sensitive_ui_action(parameters, self.policy_engine, description)
+        if gated is not None:
+            return gated
 
         # Primo tentativo economico: la descrizione contiene una scritta presente sullo schermo?
         try:

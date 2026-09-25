@@ -1,3 +1,4 @@
+from core.computer_use.sensitive_ui import EFFECT_PARAMETER, gate_sensitive_ui_action
 from core.skill_result import SkillResult
 
 
@@ -18,8 +19,10 @@ class ClickMouseSkill:
                 "required": False,
                 "description": "'left' (default), 'right' o 'double' per doppio click.",
             },
+            "effect": EFFECT_PARAMETER,
         },
     }
+    policy_engine = None  # iniettato da JakeCore: serve alle azioni dichiarate sensibili
 
     def execute(self, parameters: dict = None):
         import pyautogui
@@ -30,6 +33,9 @@ class ClickMouseSkill:
         button = (parameters.get("button") or "left").strip().lower()
         if x is None or y is None:
             return SkillResult(success=False, data={}, error="MISSING_PARAMETERS")
+        gated = gate_sensitive_ui_action(parameters, self.policy_engine, f"il punto ({x}, {y})")
+        if gated is not None:
+            return gated
 
         try:
             if button == "double":

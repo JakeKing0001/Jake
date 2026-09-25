@@ -349,9 +349,23 @@ def needs_central_auth(intent: str) -> bool:
     return risk_of(intent) == RiskLevel.ADMIN and intent not in SELF_CONFIRMING_INTENTS
 
 
+# Effetti DICHIARATI di un'azione su un'app qualsiasi (core/computer_use/sensitive_ui.py): non sono
+# skill, sono il rischio che chi chiama attribuisce a un click/tasto ("questo invia", "questo elimina").
+# Tenuti fuori da SKILL_RISK, che censisce solo skill reali.
+DECLARED_UI_EFFECT_RISK: dict[str, RiskLevel] = {
+    "UI_SEND": RiskLevel.EXTERNAL_ACTION,
+    "UI_SUBMIT": RiskLevel.EXTERNAL_ACTION,
+    "UI_UPLOAD": RiskLevel.EXTERNAL_ACTION,
+    "UI_DELETE": RiskLevel.DESTRUCTIVE,
+    "UI_PURCHASE": RiskLevel.DESTRUCTIVE,  # spende denaro: irreversibile
+}
+
+
 def risk_of(intent: str) -> RiskLevel:
     """Livello di rischio di un intent. Una skill non ancora censita qui (un plugin di terze
     parti, o una skill scritta dalla Skill Forge) ricade su ADMIN per difetto: e' la scelta
     piu' prudente finche' un umano non la classifica esplicitamente, invece di trattare per
     errore qualcosa di potenzialmente pericoloso come se fosse a sola lettura."""
-    return SKILL_RISK.get(intent, RiskLevel.ADMIN)
+    if intent in SKILL_RISK:
+        return SKILL_RISK[intent]
+    return DECLARED_UI_EFFECT_RISK.get(intent, RiskLevel.ADMIN)

@@ -571,6 +571,14 @@ class JakeCore:
         if run_computer_procedure_skill is not None:
             run_computer_procedure_skill.policy_engine = self.policy_engine
 
+        # F3.4.3 (adozione nelle skill di input): un click/tasto dichiarato sensibile ("effect":
+        # send/submit/upload/delete/purchase, core/computer_use/sensitive_ui.py) consulta la policy
+        # PRIMA di muovere mouse/tastiera. Stessa iniezione post-costruzione di sopra.
+        for input_intent in ("CLICK_MOUSE", "TYPE_TEXT", "PRESS_KEY", "CLICK_TEXT", "CLICK_ELEMENT"):
+            input_skill = self.skill_registry.get_skill(input_intent)
+            if input_skill is not None:
+                input_skill.policy_engine = self.policy_engine
+
         # Indici del recupero semantico: costruiti dopo che TUTTE le skill sono registrate.
         self.retriever.refresh()
         self.logger.info(
