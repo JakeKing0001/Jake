@@ -688,12 +688,14 @@ class VoiceSessionCancellationTests(VoiceSessionTestCase):
     def test_a_stale_tts_thread_does_not_unmute_or_reset_the_newer_speech(self):
         core = _BlockingCore()
         stuck = threading.Event()
+        first_inside = threading.Event()
         self.addCleanup(stuck.set)
 
         class StuckTts(_QuietTts):
             def speak(self, text):
                 super().speak(text)
                 if text.startswith("Prima"):
+                    first_inside.set()
                     stuck.wait(5)  # uno stop() che non ferma subito il provider
 
         session, stt, _ = self._session(core)
@@ -701,6 +703,9 @@ class VoiceSessionCancellationTests(VoiceSessionTestCase):
         with mock.patch.object(session, "_interrupt_speech"):
             session._speak_async("Prima frase molto lunga.")
             first = session._tts_thread
+            # Il primo thread deve essere DENTRO il provider prima di sostituire speak (su una CI
+            # lenta arrivava dopo e finiva nella funzione della seconda frase).
+            self.assertTrue(first_inside.wait(5))
             second_started = threading.Event()
             original = session.tts_provider.speak
 
