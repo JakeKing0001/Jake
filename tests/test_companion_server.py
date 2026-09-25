@@ -333,13 +333,16 @@ class EventStreamTests(CompanionServerTestCase):
 
         def _read_stream():
             req = request.Request(f"{self.base_url}/events", headers={"Last-Event-ID": "1"})
-            with request.urlopen(req, timeout=5) as response:
-                for _ in range(10):
-                    line = response.readline().decode("utf-8").strip()
-                    if line.startswith("data: "):
-                        received.append(json.loads(line[len("data: "):]))
-                        if len(received) == 2:
-                            return
+            try:
+                with request.urlopen(req, timeout=5) as response:
+                    for _ in range(10):
+                        line = response.readline().decode("utf-8").strip()
+                        if line.startswith("data: "):
+                            received.append(json.loads(line[len("data: "):]))
+                            if len(received) == 2:
+                                return
+            except TimeoutError:
+                return  # lo stream resta aperto: le asserzioni sotto dicono se e' arrivato tutto
 
         reader = threading.Thread(target=_read_stream, daemon=True)
         reader.start()

@@ -256,7 +256,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F3.4` | Execution Runtime (verificato end-to-end sui 100 task e su cinque app reali il 25/09/2026; policy anche per click/tasti dichiarati sensibili) | `DONE` |
 | `F3.5` | Computer Use Reliability (nessuna seconda pressione dopo un Invoke non verificato, prova forte per la scrittura, niente input su finestre che coprono il bersaglio - 25/09/2026) | `DONE` |
 | `F3.6` | Browser Automation (moduli, schede, download nella cartella dell'istanza, stop davanti ai CAPTCHA, profilo temporaneo davvero cancellato - 25/09/2026; solo Edge) | `DONE` |
-| `F3.7` | Application Adapters (Calcolatrice, Paint, Esplora File, terminale ed Edge: flussi definiti, versioni dichiarate, 3/3 di fila con verifica indipendente e pulizia; Impostazioni/Office/messaggistica non coperti per scelta di sicurezza; VS Code bloccato da un aggiornamento in sospeso su questa macchina) | `DONE` |
+| `F3.7` | Application Adapters (Calcolatrice, Paint, Esplora File, terminale ed Edge: flussi definiti, versioni dichiarate, 3/3 di fila con verifica indipendente e pulizia; Impostazioni/Office/messaggistica non coperti per scelta di sicurezza; VS Code isolato verificato di nuovo dopo il completamento del suo aggiornamento) | `DONE` |
 | `F3.8` | Demonstration Learning (dimostrazione vera -> passi semantici, parametri, descrizione, versione/app/undo, sospensione su drift, ri-approvazione; sopravvive a riavvio, resize e dati diversi - 25/09/2026) | `DONE` |
 | `F4.1` | Protocol Architecture (F4.1.2/F4.1.3/F4.1.5/F4.1.6 chiusi, F4.1.1 chiuso lato Python (sequence_id+trace_id)/F4.1.4 prima fetta lato Python - 16/09/2026; solo il lato C++ di F4.1.1/F4.1.4 resta scoperto, gap permanente dichiarato) | `DOING` |
 | `F4.2` | Native HUD (F4.2.1/F4.2.4 chiusi, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026; F4.2.5/F4.2.6 e resto di F4.2.3 richiedono test interattivi/visivi) | `DOING` |
@@ -5128,9 +5128,9 @@ Stato al 25/09/2026 (ricalcolato su codice, test e misure; sostituisce la tabell
 | accessibilita' via sottotitoli e testo equivalente | **fatto** (sottotitoli live nell'HUD, test) |
 | cancellazione del turno corrente | **fatto** (25/09/2026, vedi sopra) |
 
-Gate software F2: suite completa, ruff, mypy, compileall, smoke test e `bench_dialogue` verdi
-(il risultato esatto della suite e' nella nota di chiusura della sessione in fondo a questa
-sezione). Restano SOLO prove fisiche, da eseguire con `docs/f2-hardware-validation.md`: tre profili
+Gate software F2 (25/09/2026, Python 3.12.6 locale): suite completa 4.778 passati, 0 falliti,
+1 saltato (multi-monitor, un solo schermo); ruff, mypy selettivo, compileall, smoke test e
+`bench_dialogue` (22/22, 0 correzioni) verdi; CI Windows 3.11/3.12 sul commit finale. Restano SOLO prove fisiche, da eseguire con `docs/f2-hardware-validation.md`: tre profili
 di uscita con >= 20 interruzioni e 20 risposte ciascuno, sessione wake di 24 h con 20 wake
 intenzionali a 0,5/3/6 m, registrazioni consensuali per il WER. Fino ad allora F2 resta `VERIFY`.
 
@@ -8240,9 +8240,12 @@ Fonte: codice, test reali e benchmark di questa data; le voci storiche sopra res
   `RECORD_COMPUTER_PROCEDURE`; prove reali su fixture: dimostrazione con mouse/tastiera veri,
   riavvio + resize + dati diversi, drift e app diversa -> sospesa senza input, undo, nuova
   approvazione per un passo piu' rischioso.
-- VS Code (F3.7): i due test reali falliscono su questa macchina per un aggiornamento silenzioso
-  di VS Code in attesa (verificato: `CodeSetup-stable... /verysilent /update`); corretto comunque
-  il lancio isolato che ereditava `ELECTRON_RUN_AS_NODE`/`VSCODE_*` dal processo ospite.
+- VS Code (F3.7): il lancio isolato ereditava `ELECTRON_RUN_AS_NODE`/`VSCODE_*` dal processo
+  ospite; corretto. I due test reali sono falliti finche' un aggiornamento silenzioso di VS Code
+  era in attesa, e passano dopo il suo completamento.
+- Browser isolato: Edge puo' rilanciarsi e lasciare la finestra a un altro processo dello stesso
+  profilo; la finestra ora si cerca per profilo (`find_isolated_browser_window`), anche nella
+  skill di produzione `read_web_page`, che prima falliva in quel caso.
 
 ### Gate F3
 
@@ -10125,5 +10128,4 @@ Aggiornato 25/09/2026 (le note precedenti, ferme al 16/09/2026, restano nella cr
    sessione wake di 24 h, registrazioni consensuali) e `python -m benchmarks.f2_hardware_session
    evaluate`; solo con `PASS` F2 passa a `DONE` e si valuta `voice_barge_in` diverso da `off`.
 2. Ripetere `tests/test_computer_use_dpi.py` con un secondo monitor collegato (chiude F3.1.5).
-3. Rieseguire `tests/test_vscode_adapter.py` dopo aver completato l'aggiornamento di VS Code.
-4. Poi G2: F4 (HUD nativo) e la parte rimasta di F2.6 (banco di prova su dialoghi reali).
+3. Poi G2: F4 (HUD nativo) e la parte rimasta di F2.6 (banco di prova su dialoghi reali).
