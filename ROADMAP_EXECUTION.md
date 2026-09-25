@@ -232,8 +232,8 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F0.1` | Platform Reliability | `DONE` |
 | `F0.2` | Release Engineering | `DONE` |
 | `F0.3` | Architecture | `VERIFY` |
-| `F0.4` | Quality Engineering | `BLOCKED` |
-| `F0.5` | Performance Engineering | `BLOCKED` |
+| `F0.4` | Quality Engineering (dipendenza F0.1 `DONE` dall'11/09: `BLOCKED` era stantio; parti esistono - contract test degli eventi HUD, molti fault test - ma nessuna matrice pubblicata) | `DOING` |
+| `F0.5` | Performance Engineering (dipendenza F0.1 `DONE`: `BLOCKED` era stantio; baseline esistenti per NLU, STT, VAD, barge-in, pipeline vocale e 100 task Computer Use; manca il corpus audio consensuale e le soglie in CI) | `DOING` |
 | `F0.6` | Release Engineering | `DOING` |
 | `F1.1` | Trust Core | `DONE` |
 | `F1.2` | Security Architecture | `DONE` |
@@ -243,21 +243,21 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F1.6` | Sandbox Runtime | `DONE` |
 | `F1.7` | Observability | `DONE` |
 | `F1.8` | Runtime Reliability | `DONE` |
-| `F2.1` | Voice Quality (F2.1.1-F2.1.6 affrontati il 21/09/2026: harness sintetico + VAD/WER offline + documento privacy; mancano solo registrazioni consensuali vere, gap dichiarato) | `DOING` |
-| `F2.2` | Speech Runtime (F2.2.1-F2.2.7 affrontati e collegati a WakeWordSession il 21/09/2026: partial su thread proprio, privacy dei sottotitoli, evento TRANSCRIPT; "partial p95 < 1 s" non misurabile senza GPU/hardware vero) | `DOING` |
-| `F2.3` | Voice Quality (F2.3.1-F2.3.7 affrontati il 21/09/2026 E collegati a WakeWordSession lo stesso giorno - "passo di integrazione F2", gradino 1: ListeningStateMachine/EchoGuard/WakeCooldown/RepeatGuard/MicIndicator; riga corretta il 22/09/2026, era stantia; resta solo F2.3.7 [elezione da satelliti reali, dipende da F7] e la misura "falso wake <= 1/24 h" su ascolto vero) | `DOING` |
-| `F2.4` | Audio Systems (F2.4.1-F2.4.7 affrontati il 21/09/2026 E collegati a WakeWordSession/TTS reali lo stesso giorno - gradino 3: AEC su riferimento reale, BargeInController, `voice_barge_in` di default `off`; riga corretta il 22/09/2026, era stantia; resta solo la prova sulle tre categorie di hardware VERE, per cui il default resta `off`) | `DOING` |
-| `F2.5` | Speech Runtime (F2.5.1-F2.5.7 affrontati il 21/09/2026 E collegati a WakeWordSession/push-to-talk lo stesso giorno per stile/dispositivo/pulizia markdown - gradino 2; riga corretta il 22/09/2026, era stantia; resta solo `ChunkedSpeaker` per-unita' - bloccato su JakeCore che non produce ancora testo in streaming, non un gap lato voce - e la misura dal vivo di "prima emissione < 2 s") | `DOING` |
-| `F2.6` | Conversation Runtime (F2.6.6 collegato a JakeCore/WakeWordSession/push-to-talk il 22/09/2026 - conferma aggiuntiva su bassa confidenza vocale, mai una conferma tolta; F2.6.1/F2.6.3-F2.6.5/F2.6.7 restano a livello libreria per rischio dichiarato - toccherebbero la macchina a stati di conferma piu' centrale del progetto; F2.6.2 solo il lato dati, manca l'HUD; "< 5% dei turni con 'no, intendevo'" non misurabile senza un benchmark di dialoghi) | `DOING` |
-| `F2.7` | Identity and Voice (F2.7.1-F2.7.6 e adozione nel percorso reale affrontati: identificazione opt-in, memoria/cronologia/riferimenti/conferme isolati per il singolo turno, tetto permessi solo restrittivo; firma grossolana non biometrica da produzione; prove hardware ancora richieste - 23/09/2026) | `VERIFY` |
-| `F3.1` | Computer Use Quality (F3.1.1/F3.1.2/F3.1.3/F3.1.4/F3.1.6 chiusi; resta F3.1.5 DPI/multi-monitor - riga aggiornata il 21/09/2026, era stantia) | `DOING` |
-| `F3.2` | Windows Automation (F3.2.1/F3.2.3/F3.2.6/F3.2.7 e, il 21/09/2026, F3.2.2 cache, F3.2.4 eventi, F3.2.5 finestre elevate; resta il criterio "cinque app reali" e il collegamento della cache all'engine) | `DOING` |
-| `F3.3` | Windows Automation (F3.3.1-F3.3.4/F3.3.7 chiusi, F3.3.5 con `SelectorStore` il 21/09/2026; resta F3.3.6 inspector HUD) | `DOING` |
-| `F3.4` | Execution Runtime (F3.4.1-F3.4.7 affrontati, vedi la sezione F3.4) | `VERIFY` |
-| `F3.5` | Computer Use Reliability (F3.5.1-F3.5.7 affrontati, vedi la sezione F3.5) | `VERIFY` |
-| `F3.6` | Browser Automation (avviata: solo Edge; vedi la sezione F3.6 per cio' che resta) | `DOING` |
-| `F3.7` | Application Adapters (Esplora File/browser/VS Code/terminale; Impostazioni/Office/media/messaggistica non affrontati) | `DOING` |
-| `F3.8` | Demonstration Learning (RecordedStep/replay/dry-run/parametri/ProcedureManager costruiti; restano versione/app target/undo, sospensione, ri-approvazione) | `DOING` |
+| `F2.1` | Voice Quality (harness sintetico, VAD/WER offline e baseline CPU/GPU; mancano solo registrazioni consensuali vere - vedi Gate F2) | `VERIFY` |
+| `F2.2` | Speech Runtime (partial/final/confidenza/degrado collegati al percorso reale; "partial p95 < 1 s" misurato dal runner hardware del 25/09/2026, non ancora eseguito su hardware) | `VERIFY` |
+| `F2.3` | Voice Quality (stati, guardie, cooldown - azzerato dopo un annullamento esplicito il 25/09/2026 - e indicatore collegati; restano la sessione wake di 24 h e F2.3.7 satelliti, che dipende da F7) | `VERIFY` |
+| `F2.4` | Audio Systems (AEC/barge-in collegati, `voice_barge_in` di default `off`; manca la prova sui tre profili hardware) | `VERIFY` |
+| `F2.5` | Speech Runtime (uscita predefinita rilevata, cache delle conferme RVC, pipeline di produzione misurata il 25/09/2026: primo campione p95 1,2-1,5 s, pause tra chunk < 1 ms; manca "prima emissione < 2 s" dalla fine della voce su hardware) | `VERIFY` |
+| `F2.6` | Conversation Runtime (dialogo/correzione/ellissi/ordinali collegati a JakeCore nel commit a4a2685 - la riga precedente "libreria non collegata" era stantia; bench_dialogue 22/22 senza correzioni, un banco di prova su dialoghi reali resta aperto) | `VERIFY` |
+| `F2.7` | Identity and Voice (profili opt-in, isolamento per turno, arruolamento CLI corretto e testato il 25/09/2026; qualita' della firma da ritarare su voci vere) | `VERIFY` |
+| `F3.1` | Computer Use Quality (benchmark unico dei 100 task: 96/100 in due esecuzioni consecutive, i fallimenti sono i 4 limiti dichiarati; DPI verificato a quattro scale il 25/09/2026; manca solo la prova con due monitor fisici) | `VERIFY` |
+| `F3.2` | Windows Automation (cache collegata al percorso reale; dump verificati e flussi su cinque app reali il 25/09/2026) | `DONE` |
+| `F3.3` | Windows Automation (inspector con candidato/alternative/punteggio/motivo nei risultati, CLI ed evento HUD; invalidazione strutturale collegata alle procedure - 25/09/2026; il disegno del pannello nell'HUD e' F4.5) | `DONE` |
+| `F3.4` | Execution Runtime (verificato end-to-end sui 100 task e su cinque app reali il 25/09/2026; policy anche per click/tasti dichiarati sensibili) | `DONE` |
+| `F3.5` | Computer Use Reliability (nessuna seconda pressione dopo un Invoke non verificato, prova forte per la scrittura, niente input su finestre che coprono il bersaglio - 25/09/2026) | `DONE` |
+| `F3.6` | Browser Automation (moduli, schede, download nella cartella dell'istanza, stop davanti ai CAPTCHA, profilo temporaneo davvero cancellato - 25/09/2026; solo Edge) | `DONE` |
+| `F3.7` | Application Adapters (Calcolatrice, Paint, Esplora File, terminale ed Edge: flussi definiti, versioni dichiarate, 3/3 di fila con verifica indipendente e pulizia; Impostazioni/Office/messaggistica non coperti per scelta di sicurezza; VS Code bloccato da un aggiornamento in sospeso su questa macchina) | `DONE` |
+| `F3.8` | Demonstration Learning (dimostrazione vera -> passi semantici, parametri, descrizione, versione/app/undo, sospensione su drift, ri-approvazione; sopravvive a riavvio, resize e dati diversi - 25/09/2026) | `DONE` |
 | `F4.1` | Protocol Architecture (F4.1.2/F4.1.3/F4.1.5/F4.1.6 chiusi, F4.1.1 chiuso lato Python (sequence_id+trace_id)/F4.1.4 prima fetta lato Python - 16/09/2026; solo il lato C++ di F4.1.1/F4.1.4 resta scoperto, gap permanente dichiarato) | `DOING` |
 | `F4.2` | Native HUD (F4.2.1/F4.2.4 chiusi, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026; F4.2.5/F4.2.6 e resto di F4.2.3 richiedono test interattivi/visivi) | `DOING` |
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
@@ -4500,7 +4500,7 @@ non una conseguenza meccanica del gate - riportata all'utente.
 
 ## 8. F2 — Voice Natural 3.0
 
-- Stato: `DOING` (avviato il 21/09/2026 - vedi le voci datate sotto F2.1/F2.2; G1 superato il 16/09/2026)
+- Stato: `VERIFY` (25/09/2026: gate software verde, gate hardware da eseguire - vedi "Audit 25/09/2026" e Gate F2; G1 superato il 16/09/2026)
 - Priorità: `P1`
 - Output: conversazione vocale full-duplex, rapida, correggibile e misurata.
 
@@ -5081,6 +5081,34 @@ I moduli F2.1-F2.7 nascono come librerie testate con finti. Il collegamento al p
   da `JakeCore` (`JakeCore` gestisce da se' azioni in sospeso e `CORRECT_LAST`, mai la correzione/ellissi/ordinali
   della libreria, oltre a `needs_confirmation` gia' collegato - vedi F2.6.6); le prove su hardware vero.
 
+### Audit e chiusura software di F2 — 25/09/2026
+
+Fonte: codice, test e misure reali di questa data; le voci storiche sopra restano come contesto.
+
+- **Bug "Jake, basta" poi il comando successivo non parte** (riprodotto dai test prima del fix,
+  7 dei 9 test di sessione falliscono sul codice precedente). Cause: cancellazione solo
+  cooperativa (chiamate al modello, planner, riassunto, embedding non la guardavano: il worker
+  restava in `answer()` e il comando nuovo veniva scartato), hook di sessione di un turno
+  annullato ancora attivi, thread TTS obsoleto che rimetteva mute/stato, Character/Edge bloccati
+  su `future.result()` dopo `stop()`. Correzione: `core/turn_cancellation.py` (attese
+  interrompibili, `TurnCancelled` non inghiottita dai ripieghi, guardie prima di ogni effetto,
+  compensazioni sotto `cancellation_suspended`), una sola `answer()` vocale con coda di UNO dopo
+  lo stop, cooldown azzerato, KillSwitch globale invariato. Prova: `tests/test_turn_cancellation.py`.
+- Conferma "Va bene, annullo." con voce RVC: prima ~1 s di sintesi+conversione con microfono in
+  mute, ora frase in cache riscaldata al prewarm (consenso ricontrollato a ogni frase).
+- Pipeline di produzione misurata (`benchmarks/bench_voice_pipeline.py`, Edge `it-IT-DiegoNeural`
+  + RVC `jake_the_dog`, riproduzione simulata): TTS base p50 650-710 ms/chunk, RVC p50 400-500
+  ms/chunk, primo campione p95 1,2-1,5 s, pausa tra chunk p95 0,4 ms; `answer("che ore sono")` <
+  3 ms, domanda aperta p50 1,7 s (p95 12,7 s a modello freddo).
+- Arruolamento vocale (`core/voice/speaker_enroll.py`): un microfono muto bloccava il terminale
+  e un id non valido lasciava un'impronta senza profilo; ora tentativi limitati e id validato
+  prima di registrare (test dedicati). Uscita audio predefinita rilevata se non configurata.
+- Gate hardware strumentato: `benchmarks/f2_hardware_session.py run|evaluate` e
+  `core/voice/session_metrics.py` (solo tempi e conteggi); procedura aggiornata in
+  `docs/f2-hardware-validation.md`.
+- CI di master era rossa (mypy, test di pronuncia rimasto a "fail" invece di "fàil", 5 test di
+  sessione scritti per `answer()` sincrona): corretto.
+
 ### Gate F2
 
 - benchmark audio pubblicato localmente;
@@ -5089,65 +5117,27 @@ I moduli F2.1-F2.7 nascono come librerie testate con finti. Il collegamento al p
 - fallback push-to-talk/offline funzionante;
 - accessibilità via sottotitoli e testo equivalente.
 
-Stato al 22/09/2026 (onesto, criterio per criterio - riga sui sottotitoli corretta e poi chiusa lo stesso giorno):
-
-Procedura fisica di chiusura aggiunta il 23/09/2026: `docs/f2-hardware-validation.md`, con tre
-profili obbligatori, almeno 20+20 prove per profilo, soglie 95%/300 ms, sessione wake di 24 ore,
-formato del report locale e cancellazione dell'audio grezzo.
+Stato al 25/09/2026 (ricalcolato su codice, test e misure; sostituisce la tabella del 22/09):
 
 | Criterio | Stato |
 |---|---|
-| benchmark audio pubblicato localmente | **fatto in parte**: harness, corpus sintetico deterministico, VAD/WER/barge-in offline con report locali e baseline CPU/GPU separate; mancano registrazioni consensuali vere |
-| full-duplex e barge-in stabili su almeno tre profili hardware | **NON soddisfatto**: algoritmi e integrazione ci sono, provati solo su segnali simulati (cuffie/portatile/Bluetooth 4/4 senza falsi; TV in sottofondo = falso barge-in anche con AEC, limite fissato da test). Default `voice_barge_in=off` finche' non si prova su hardware vero |
-| buffer audio volatile verificato | **fatto** per le parti in codice del progetto (segmentatore, buffer dei partial, pre-roll, calibrazione del rumore: solo RAM, svuotati dopo l'uso, con test); il buffer interno di Whisper/ctranslate2 non e' verificabile da qui |
-| fallback push-to-talk/offline funzionante | **fatto**: push-to-talk indipendente da wake word/VAD (test in processo pulito), voce offline con lo stesso contenuto (test) |
-| accessibilita' via sottotitoli e testo equivalente | **fatto**: `core/gui/hud/app.py::JarvisApp` collega `WakeWordSession.on_state`/`on_level` (gia' presente) E ORA anche `on_transcript` (nuovo `Bridge.transcript` Signal, 22/09/2026) a un vero `QLabel` (`core/gui/hud/overlay.py`/`widgets.py`) - il sottotitolo si aggiorna ora PAROLA PER PAROLA mentre l'utente sta ancora parlando (`TranscriptEvent.text`, LocalAgreement-2), non solo a frase completa come prima di questo incremento. Lo stato (ascolto/trascrizione/risposta/parlato/pausa/dettatura) resta visibile tramite `hud.set_state()`, l'equivalente sostanziale di un indicatore microfono anche se non e' l'evento `MIC_STATE` specifico dal bus. Prova: 3 nuovi test in `tests/test_hud_app.py::LiveTranscriptTests`/`InitTests`, verificati FALLIRE contro il codice precedente (`git stash` di `core/gui/hud/app.py`); smoke test verde. |
+| benchmark audio pubblicato localmente | **software fatto**: corpus sintetico, VAD/WER/barge-in offline, pipeline TTS/RVC reale misurata; **hardware VERIFY**: registrazioni consensuali e runner `f2_hardware_session` non ancora eseguiti |
+| full-duplex e barge-in su tre profili hardware | **VERIFY**: integrazione e strumentazione pronte, provate solo su segnali simulati; `voice_barge_in` resta `off` di default |
+| buffer audio volatile verificato | **fatto** per il codice del progetto (test); il buffer interno di Whisper/ctranslate2 non e' verificabile da qui |
+| fallback push-to-talk/offline funzionante | **fatto** (test in processo pulito, voce offline con lo stesso contenuto) |
+| accessibilita' via sottotitoli e testo equivalente | **fatto** (sottotitoli live nell'HUD, test) |
+| cancellazione del turno corrente | **fatto** (25/09/2026, vedi sopra) |
 
-**Il gate letteralmente NON e' superato, ma per l'unico motivo ammesso esplicitamente dall'utente**: dei
-cinque criteri, tre sono `fatto` (buffer volatile, fallback push-to-talk/offline, sottotitoli) e i restanti
-due (benchmark hardware pubblicato, full-duplex/barge-in su tre profili VERI) sono bloccati ESCLUSIVAMENTE
-dalla misura su hardware fisico che questo ambiente non ha - il codice/gli algoritmi/l'integrazione per
-entrambi esistono gia' e sono testati su segnali simulati, non c'e' altro lavoro software rimasto per questi
-due criteri. Restano DICHIARATI aperti, separatamente dal gate (non ne fanno parte in senso letterale, ma
-fanno parte dell'output piu' ampio di F2, "conversazione... correggibile"): il collegamento di
-dialogo/correzione (F2.6 oltre F2.6.6) a `JakeCore` resta deliberatamente non affrettato (tocca la
-macchina a stati di conferma piu' sensibile del progetto), non bloccato da hardware e non parte del
-Gate F2 letterale. L'isolamento vero F2.7 e' invece adottato nel percorso reale dal 23/09/2026.
+Gate software F2: suite completa, ruff, mypy, compileall, smoke test e `bench_dialogue` verdi
+(il risultato esatto della suite e' nella nota di chiusura della sessione in fondo a questa
+sezione). Restano SOLO prove fisiche, da eseguire con `docs/f2-hardware-validation.md`: tre profili
+di uscita con >= 20 interruzioni e 20 risposte ciascuno, sessione wake di 24 h con 20 wake
+intenzionali a 0,5/3/6 m, registrazioni consensuali per il WER. Fino ad allora F2 resta `VERIFY`.
 
 ## 9. F3 — Computer Use Engine 3.0
 
-- Stato: `DOING` (G1 superato il 16/09/2026, vedi Gate G1 sopra - riga NON aggiornata dal 19/09/2026
-  fino al 20/09/2026, quando questo incremento l'ha ricalcolata leggendo l'intera sezione invece di
-  fidarsi del riepilogo stantio: F3.1.1 chiusa per intero; F3.1.2 CHIUSA per intero, 100/100 task
-  dichiarati dal criterio di uscita ("arrivare progressivamente a 100") - vedi le voci datate
-  20/09/2026 nella sua sezione per il dettaglio di ognuno, incluso Task 3 ("espandi categoria"),
-  l'unico dei 10 iniziali risolto per CONCLUSIONE (bloccato da un limite Qt reale, ExpandCollapse
-  senza effetto, nessuna strategia di ripiego trovata) invece che per dimostrazione diretta -
-  questa riga di riepilogo restera' probabilmente stantia anche lei, come le precedenti: fidarsi
-  sempre delle voci datate nella sezione F3.1.2, non di questo paragrafo; F3.1.5 (DPI/multi-monitor
-  - "tema" ora coperto da F3.3.7) non affrontata; F3.1.6 (controlli ambigui/disabilitati/dinamici)
-  CHIUSO per intero; F3.2 [criterio "cinque app reali" soddisfatto - Calcolatrice/Paint/Esplora
-  File/Edge/terminale, VS Code investigato e trovato NON idoneo, F3.2.6 (scope/privacy) e F3.2.7
-  (benchmark) chiusi con verifica reale - resta aperto solo F3.2.2 meta' (cache)/F3.2.4 (eventi,
-  dipende dalla cache)/F3.2.5 (finestre elevate, mai testato)];
-  F3.3 [F3.3.1 CHIUSO per intero (window/app-process, resta solo "ancestor", un incremento a se'),
-  F3.3.2/F3.3.3/F3.3.4/F3.3.7 CHIUSI per intero (resize/move + reorder + tema + traduzione), resta
-  solo F3.3.5 (invalidazione - nessuna cache di selettori esiste ancora, dipende da F3.2.2)/F3.3.6
-  (inspector HUD, fuori scope per lavoro backend)]; F3.4 chiusa per intero (F3.4.1-F3.4.7 tutti
-  affrontati, F3.4.3 collegato a policy_engine con risk_intent esplicito - 19/09/2026); F3.5 chiusa
-  per intero (F3.5.1-F3.5.7 tutti affrontati); F3.6
-  avviata (F3.6.1/F3.6.2 resto/F3.6.3 prima fetta e "upload"/F3.6.4/F3.6.5/F3.6.7 CHIUSI per
-  intero, resta solo F3.6.3 resto (form/tab/download - "upload" risolto via `element_from_handle`,
-  F3.1.2 Task 13)/F3.6.6 (deliberatamente non collegata a policy - inferire rischio dal contenuto
-  violerebbe il principio "rischio dichiarato dal chiamante, mai indovinato" gia' stabilito per
-  questo progetto), solo Edge - F3.8 ha inoltre verificato empiricamente che le procedure
-  funzionano gia' contro una pagina browser); F3.7 avviata (Esplora File/browser/VS
-  Code/terminale fatti,
-  Impostazioni/Office/media rimandati per un rischio verificato o una privacy non autorizzata,
-  messaggistica non affrontata); F3.8 CHIUDE IL CERCHIO (RecordedStep/replay/dry-run/parametri/
-  ProcedureManager/RunComputerProcedureSkill/is_likely_drift tutti costruiti, resta F3.8.5 resto -
-  versione/app target/undo, F3.8.6 resto - sospendere la routine, F3.8.7 resto - ri-approvazione -
-  vedi le sezioni sotto per i dettagli e le date esatte di ogni incremento)
+- Stato: `VERIFY` (25/09/2026: Gate F3 soddisfatto con prove reali - vedi "Audit e chiusura di F3" e
+  Gate F3; resta solo la prova multi-monitor di F3.1.5, che richiede un secondo schermo fisico)
 - Priorità: `P1`
 - Output: Jake controlla Windows per semantica, verifica il risultato e usa i pixel come fallback.
 
@@ -8217,6 +8207,43 @@ Criterio di uscita: una procedura dimostrata sopravvive a riavvio, resize e dati
   attraverso la skill vera produce `likely_drift=True`) + il test gia' esistente per un blocco di
   policy esteso con `likely_drift=False`. 3.141/3.141 test, ruff verde.
 
+### Audit e chiusura di F3 — 25/09/2026
+
+Fonte: codice, test reali e benchmark di questa data; le voci storiche sopra restano come contesto.
+
+- F3.1: `benchmarks/bench_computer_use_tasks.py` + registro `benchmarks/computer_use_tasks.py`
+  (100 task, ognuno in isolamento con fixture nuova; `limitation` contato come fallito):
+  96/100 in due esecuzioni consecutive. Non riusciti: 39 tooltip, 42 tristato, 69 spunta da tastiera, 94 terza voce spuntabile
+  (limiti Qt/UIA gia' documentati). Task 29 era instabile (lettura prima che "Annulla" fosse
+  elaborato): test corretto. DPI: Jake restava "system aware" dopo `import pyautogui`; ora
+  per-monitor in ogni modalita', prova reale a scale 1,0/1,25/1,5/2,0. Multi-monitor: un solo
+  schermo qui, test saltato con il motivo (VERIFY).
+- F3.2/F3.3: `TreeCache` nel percorso reale (ComputerAgent, invalidata dopo ogni azione) per
+  l'inspector (`core/computer_use/inspector.py`, `tools/selector_inspector.py`,
+  `EventType.SELECTOR_INSPECTION`); invalidazione strutturale (F3.3.5) collegata alle procedure.
+- F3.4/F3.5: `click_element` premeva due volte un bottone quando il pixel diff non vedeva l'effetto
+  di Invoke: ora la scala si ferma (ripiego solo con `idempotent=True`); `type_into_element` usa
+  una prova forte (Value riletto). **Incidente reale**: una fixture comparsa dietro l'editor ha
+  ricevuto click e testo di un test dentro un file del progetto aperto (ripristinato da git): ora
+  ogni azione pixel mirata verifica con hit-test UIA che nel punto ci sia il processo bersaglio,
+  altrimenti nessun input; nei test una guardia rifiuta ogni input fuori dalla fixture.
+  Click/tasti dichiarati sensibili (`effect`: send/submit/upload/download/delete/purchase)
+  passano da policy e conferma prima di qualunque input.
+- F3.6: download nella cartella dell'istanza isolata (prima finivano nella cartella Download
+  personale), schede, moduli con policy, stop davanti ai CAPTCHA; il profilo temporaneo non
+  veniva cancellato (230 profili trovati in %TEMP%, rimossi).
+- F3.7: `benchmarks/bench_real_apps.py`, 5/5 app verdi 3/3 di fila con dump UIA verificato:
+  Calcolatrice 11.2607.0.0 (17+25 -> display 42), Paint 11.2605.81.0 (pixel del file salvato),
+  Esplora File 10.0.26100.9549 (cartella su disco), terminale cmd 10.0.26100.9549 (file scritto),
+  Edge 153.0.4234.48 profilo temporaneo (voce nella pagina).
+- F3.8: `core/computer_use/demonstration.py`, `procedure_lifecycle.py`, skill
+  `RECORD_COMPUTER_PROCEDURE`; prove reali su fixture: dimostrazione con mouse/tastiera veri,
+  riavvio + resize + dati diversi, drift e app diversa -> sospesa senza input, undo, nuova
+  approvazione per un passo piu' rischioso.
+- VS Code (F3.7): i due test reali falliscono su questa macchina per un aggiornamento silenzioso
+  di VS Code in attesa (verificato: `CodeSetup-stable... /verysilent /update`); corretto comunque
+  il lancio isolato che ereditava `ELECTRON_RUN_AS_NODE`/`VSCODE_*` dal processo ospite.
+
 ### Gate F3
 
 - ≥ 90% su 100 task fixture;
@@ -8224,6 +8251,16 @@ Criterio di uscita: una procedura dimostrata sopravvive a riavvio, resize e dati
 - nessuna doppia azione nei retry;
 - diagnosi e strategia visibili per ogni fallimento;
 - almeno cinque app reali coperte con adapter o UIA verificata.
+
+Stato al 25/09/2026:
+
+| Criterio | Stato | Prova |
+|---|---|---|
+| ≥ 90% su 100 task fixture | **fatto** | 96/100 in due esecuzioni consecutive con `bench_computer_use_tasks` (limiti contati come falliti) |
+| 100% azioni sensibili sottoposte a policy | **fatto** per ogni azione dichiarata sensibile | `tests/test_sensitive_ui.py` (5 skill x 6 effetti), `risk_intent` di ComputerAgent/procedure, test reali su Edge; un click non dichiarato resta `LOCAL_REVERSIBLE` (il rischio non si deduce dal testo del bottone) |
+| nessuna doppia azione nei retry | **fatto** | scala che si ferma dopo un Invoke eseguito, idempotency key, `execute_with_retry` solo per intent sicuri, nessun retry dopo un annullamento |
+| diagnosi e strategia visibili per ogni fallimento | **fatto** | `ComputerActionResult.strategy/attempts/inspection`, diagnosi nel report dei 100 task |
+| almeno cinque app reali | **fatto** | `bench_real_apps`: 5/5 app 3/3 di fila con verifica indipendente e pulizia |
 
 ## 10. F4 — HUD Engine 2.0
 
@@ -10082,672 +10119,11 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 16/09/2026. Sessione lunga con 97 incrementi completati e verificati (PR #28-#123), la
-maggior parte buchi reali riprodotti empiricamente prima del fix (non ipotizzati leggendo il
-codice), un paio funzionalita' NUOVE scelte come fette verticali strette, un paio VERIFICHE (non
-fix - il codice era gia' corretto, mancava solo la prova) - vedi le singole voci datate
-12-13/09/2026 nelle rispettive sezioni F1.2/F1.4/F1.7/F1.8 per i dettagli completi di ciascuno. I
-piu' rilevanti: `F1.8.1` (doppia esecuzione di un'azione DESTRUCTIVE/ADMIN in sospeso da due
-canali concorrenti - voce + companion server), `F1.8.2` (QUATTRO strutture condivise tra thread
-senza sincronizzazione: centro notifiche con oltre il 98% di notifiche perse, crash riproducibile
-in `SkillRegistry.list_capabilities()`, `ExampleStore` con oltre il 60% di esempi imparati persi),
-`F1.7.5` (bypass completo dell'autorizzazione in `tools/replay_session.py --replay`),
-`F1.4.1`/`F1.7.1` (scritture non atomiche - config e ledger - che un crash a meta' avrebbe potuto
-corrompere), `F1.4.3` (canale laterale temporale sulla passphrase admin), `F1.8.5` (i quattro
-scheduler in background non segnalavano MAI se il proprio thread restava bloccato oltre il
-timeout di arresto), `F1.8.7` (due buchi da check-then-act non atomico su piu' chiamate:
-`DeviceRegistry.claim()` senza lock e `TriggerManager.mark_fired()` con lettura e scrittura come
-due chiamate separate a `MemoryManager` - entrambi corsa reale ma a bassa probabilita' con lo
-scheduler standard, riprodotti in modo affidabile solo forzando deliberatamente l'intreccio esatto
-tra lettura e scrittura), `F1.2.2` seconda fetta (un piano automatico/`RUN_WORKFLOW`/trigger
-poteva mutare un percorso FUORI dalle radici filesystem consentite, perche' `decide_automated()`
-non riceveva affatto `parameters` - la capability proteggeva solo un comando diretto), `F1.2.2`
-terza fetta (la capability filesystem lasciava comunque Jake libero di LEGGERE qualunque file
-fuori dal recinto - solo le mutazioni erano coperte, ora anche FIND_FILE/GET_FILE_INFO/
-READ_FILE_TEXT), `F1.2.1` percorso 6 (`rollback_effect()` con `policy_engine=None` eseguiva un
-rollback senza controllare `blocked_intents` - non gia' sfruttabile in produzione, che collega
-sempre un `policy_engine` vero, ma un default fail-open pericoloso per chiunque altro), e `F1.2.1`
-percorso 7 - chiusura finale (`SkillRegistry.execute()`, il dispatcher grezzo, non controllava MAI
-la policy da solo; stesso principio "nega per default", ma con uno scope di correzione molto piu'
-ampio del previsto una volta iniziato - ha richiesto rifornire `policy_engine` a due call site di
-`JakeCore`, tre handler di rollback interni, `PlanExecutor._execute_step`, il ripiego di default
-di `TaskAgent`, `tools/replay_session.py`, e aggiornare ~18 classi `FakeRegistry` di test in 9
-file diversi che altrimenti avrebbero sollevato `TypeError` sul nuovo parametro). Le
-funzionalita' nuove: `F1.2.2` prima fetta (prima capability vera - radici filesystem
-consentite), `F1.7.4` prima fetta (redazione strutturata per tipo di dato - percorso/URL/email invece del
-generico "<str:N caratteri>"), `F1.7.4` seconda fetta (redazione per NOME del parametro - un
-parametro `password`/`pin`/`token`/etc ora ottiene sempre un placeholder fisso senza lunghezza ne'
-valore, chiudendo anche il caso di un valore non-stringa che prima passava invariato), e
-`F1.2.3`/`F1.8.1` fondamenta (identita' del dispositivo companion propagata per thread via
-`contextvars` fino ai quattro chokepoint del ledger - decisione esplicita dell'utente su come
-identificare un canale, ancora senza alcuna decisione di policy basata su di essa), e `F1.8.1`
-chiusura (lo stesso identificatore riusato per dare a `ConversationStateManager` uno slot di
-azione in sospeso PER CANALE invece di uno globale - due dispositivi companion con una propria
-richiesta di conferma nello stesso istante non si sovrascrivono piu' a vicenda; decisione esplicita
-dell'utente, "anzi fai tutte e due", su cosa costruire per primo sopra le fondamenta), e `F1.2.3`
-prima capability - dispositivo (`device_blocked_intents`, simmetrico a `blocked_intents` ma per
-canale - la seconda meta' di "tutte e due", un intent bloccato per un dispositivo companion si
-ferma sempre per quel dispositivo senza toccare la voce locale o altri dispositivi), e `F1.2.2`
-seconda capability - dominio web (`allowed_web_domains` su OPEN_URL, stessa fetta verticale
-stretta di `allowed_filesystem_roots`, con lo stesso principio di sottodominio-copre-dominio gia'
-usato per le radici filesystem), e `F1.2.2` terza/quarta capability - app e contatto
-(`allowed_apps`/`allowed_contacts` su OPEN_APP/SEND_WHATSAPP/SEND_EMAIL - a differenza delle
-precedenti, controllano la stringa GREZZA non risolta da AppResolver/ContactBook, un limite
-dichiarato apertamente e accettato dall'utente come compromesso deliberato), e `F1.2.2` quinta
-capability - device Home Assistant (`allowed_smart_devices` su CONTROL_SMART_DEVICE, stessa forma
-esatta di app/contatto - `ControlSmartDeviceSkill` risolve per somiglianza DENTRO la skill, quindi
-stesso limite sulla stringa grezza, applicato qui senza bisogno di richiedere una nuova decisione
-perche' e' la stessa capability gia' autorizzata), e `F1.7.2` chiusura - ricevuta per l'undo
-(`rollback_effect()` non produceva MAI una propria `ActionReceipt` - un rollback riuscito lasciava
-il ledger indistinguibile da un'azione mai annullata; ora scrive una ricevuta con l'intent
-compensatorio VERO, correlata per trace_id all'azione originale, sia per un successo sia per un
-fallimento del rollback stesso), e `F1.7.6` chiusura - rollback rate nella dashboard (chiuso
-l'ultimo pezzo lasciato esplicitamente NON disponibile in F1.7.6: ora che un rollback scrive un
-evento distinto anche in `data/jake_actions.jsonl` con `result` a prefisso `"rollback_"`, la
-dashboard calcola una vera percentuale invece di ometterla; trovato e corretto nello stesso
-passaggio un buco laterale - contare `"rollback_success"` come un fallimento perche' diverso dalla
-stringa esatta `"success"` avrebbe gonfiato "fallimenti"/error rate per skill con l'esito CORRETTO
-di un errore altrove), e `F1.7.3` (retention: **verifica**, non fix, per log operativo -
-gia' limitato per dimensione da `RotatingFileHandler` - e memoria - `purge_expired()` gia'
-automatico per scadenza esplicita, `purge_history_older_than()` deliberatamente MAI automatico,
-principio scoperto rileggendo il suo stesso docstring prima di introdurre per errore una
-regressione; **funzionalita' nuova**, non fix, per l'audit di sicurezza - `tools/archive_ledger.py`,
-uno strumento in sola lettura sul ledger che copia le voci vecchie in un archivio separato senza
-mai troncare l'originale, la rimozione vera resta una decisione esplicita dell'utente), e `F1.7.4`
-terza fetta - IP e telefono per contenuto (funzionalita' nuova: un IPv4/IPv6 riconosciuto mostra
-solo la versione, un numero di telefono solo il prefisso internazionale se presente, mai il
-contenuto vero; convalida STRUTTURALE per IPv6 - non solo "cifre e due punti" - cosi' un orario
-come "14:30:00" non viene scambiato per un indirizzo; "identificatore di dispositivo",
-il terzo tipo gia' citato nel gap, lasciato deliberatamente fuori scope per essere troppo vago,
-senza un formato standard riconoscibile), e `F1.2.1` percorso 7 - chiusura finale
-(`SkillRegistry.execute()` fail-closed di default come i percorsi 3/6, con uno scope di
-correzione molto piu' ampio del previsto: due call site di `JakeCore`, tre handler di rollback
-interni, `PlanExecutor._execute_step`, il ripiego di default di `TaskAgent`,
-`tools/replay_session.py`, e ~18 classi `FakeRegistry` di test in 9 file diversi aggiornate per
-accettare il nuovo parametro senza sollevare `TypeError` - con questo, tutti e tre i "percorso N"
-dichiarati aperti in F1.2.1 sono chiusi), e `F1.4.1` chiusura - classe `SecretsVault` versionata
-(funzionalita' nuova: il blob cifrato porta ora un tag di versione esplicito
-`"dpapi:<versione>:<base64>"`, `unprotect()` legge ancora il vecchio formato senza versione per
-sempre, un nuovo `needs_migration()` fa ricifrare sul posto - con la stessa scrittura atomica gia'
-in F1.4.1 - anche un segreto GIA' cifrato in formato legacy, non solo uno ancora in chiaro; `Config`
-ora tiene e usa un'istanza `SecretsVault` invece delle funzioni libere di prima), e `F1.3.2`
-esteso alle finestre (buco reale, stesso pattern gia' trovato due volte per i processi - CLOSE_
-WINDOW/il ramo "gentile" di CLOSE_APP dichiaravano l'effetto avvenuto subito dopo
-`win32gui.PostMessage(WM_CLOSE)`, fire-and-forget, senza aspettare che la finestra fosse DAVVERO
-sparita; nuovo helper condiviso `_wait_until_window_closed`, CLOSE_WINDOW ha anche un
-verificatore indipendente in `INTENT_SAFETY_REGISTRY`), e `F1.3.8` chiusura - eventi UNDO/
-VERIFICATION per HUD/companion (funzionalita' nuova: deliberatamente NON iniettato un
-`event_bus` in `TaskAgent`/`PlanExecutor` come inizialmente temuto - `AgentOutcome`/`PlanOutcome`
-gia' portano tutto il necessario fino a `JakeCore`, che gia' possiede `self.event_bus`; nuovo
-campo `AgentStep.verified`/`StepOutcome.verified`, `None` - non `"unverified"` - quando l'intent
-non ha un verificatore indipendente, per non pubblicare rumore su ogni passo), e `F1.4.2` prima
-fetta - identita' Windows/dispositivo (funzionalita' nuova, ma preceduta da un'investigazione che
-ha ridimensionato lo scope PRIMA di scrivere codice: "profilo Jake" e "speaker profile", le altre
-due dimensioni della voce originale, non hanno alcuna infrastruttura esistente - decisione
-esplicita dell'utente, dopo aver visto questi fatti, di procedere solo con identita' Windows +
-dispositivo; nuovo `core/identity.py::current_windows_user()`, ortogonale a `current_device_id()`
-- costante per processo, nessun contextvar necessario - nuovo campo `ActionReceipt.windows_user`
-agli stessi 5 chokepoint di `device_id`, nuova capability simmetrica `windows_user_blocked_
-intents` in `PolicyEngine`), e `F1.8.1` investigazione sul contesto condiviso tra canali (VERIFICA,
-nessun codice cambiato - cronologia/entita'/ultimi risultati di ricerca in
-`ConversationStateManager` sono condivisi da tutti i canali, a differenza delle azioni in
-sospeso; chiesto esplicitamente all'utente PRIMA di scrivere codice se fosse un buco o il
-comportamento voluto - confermato voluto, "Jake e' un solo assistente"), e `F1.1.7` primo pezzo
-(via libera esplicito dell'utente su un lavoro grande finora rifiutato - investigato PRIMA di
-scrivere codice: nessuna delle ~200 skill costruisce o dovrebbe mai costruire `ActionProposal`/
-`ActionError` da sola, sono i CHOKEPOINT a farlo da dati che gia' possiedono; estesa la stessa
-sostituzione a rischio quasi nullo del pilota F1.1.6 - `error_category_of()` diretto ->
-`ActionError.from_result()` validato - a `TaskAgent`/`PlanExecutor`, i due chokepoint rimasti:
-ora tutti e tre costruiscono il tipo condiviso), e `F1.6` fondamenta - worker persistente
-sandboxato (l'altro lavoro grande autorizzato: un Job Object si applica a un processo, non a una
-chiamata dentro il processo di Jake, quindi contenere l'esecuzione ONGOING di una skill forgiata
-richiede eseguirla altrove - decisione esplicita dell'utente di un worker PERSISTENTE invece di
-un processo usa-e-getta per chiamata; nuovo `core/forge_worker.py`/`core/sandboxed_skill_worker.py`,
-Low Integrity + Job Object via pipe create a mano, verificato con prove empiriche isolate PRIMA
-di scrivere l'implementazione e poi con test reali che spawnano processi veri), e `F1.6`
-collegamento vero - chiusura (`SkillRegistry.execute()` instrada davvero un intent forgiato verso
-il worker invece di eseguirlo in processo, verificato confrontando `os.getpid()` dentro la skill
-- deve differire da quello del processo di test, prova che l'esecuzione sia DAVVERO avvenuta
-altrove; il worker si avvia pigramente e si invalida da solo quando una nuova skill forgiata
-arriva dopo che gia' esiste, `JakeCore.shutdown()` lo ferma esplicitamente), e `F1.4.3`
-chiusura - rate limiting/lockout sulla passphrase admin (l'ultimo pezzo dichiarato
-esplicitamente "non ancora affrontato" quando il confronto a tempo costante fu corretto:
-`_handle_confirmation()` gia' cancellava l'intera azione ADMIN dopo un solo tentativo
-sbagliato, ma nulla impediva di far ripartire da capo una nuova azione ADMIN via l'API
-companion e ritentare una passphrase diversa a ogni giro, senza alcun limite di frequenza;
-`AuthGate.check()` ora conta i tentativi falliti CONSECUTIVI - azzerati da un successo - e,
-raggiunta una soglia, blocca ulteriori tentativi per un periodo fisso SENZA nemmeno
-confrontare, cosi' anche una passphrase corretta viene rifiutata durante il blocco; messaggio
-distinto in `_handle_confirmation()` per non far credere all'utente che l'ULTIMO tentativo
-fosse sbagliato quando in realta' e' il lockout a bloccarlo), e `F1.5.3` chiusura - verifica del
-percorso piano/`PlanExecutor` (il limite dichiarato quando la prima fetta fu chiusa - "copre solo
-il percorso TaskAgent" - investigato e chiuso senza scrivere nuovo codice: `PlanExecutor.execute()`
-gia' toglie "confirmed"/"authenticated" da OGNI passo di OGNI piano incondizionatamente, prima
-ancora di sapere quale skill verra' eseguita, una protezione piu' forte di quella dell'agente e
-gia' testata a fondo con la skill `DeletePathSkill` VERA - semplicemente mai collegata
-esplicitamente a questa voce della roadmap finora), e `F1.1.5` chiusura (il versionamento dello
-schema esisteva gia' da `F1.1.3`/`F1.1.8`, 11/09/2026; la "migrazione" resta deliberatamente non
-costruita - non c'e' mai stata una seconda versione dello schema da cui migrare, sarebbe codice
-morto speculativo - ma la "compatibilita' per record precedenti" era gia' vera per costruzione
-(`read_all()`/`by_*` non validano mai una riga letta da disco) e ora e' anche verificata con 2
-nuovi test che scrivono a mano una riga priva di `schema_version`), e `F1.8.7` chiusura -
-correzione di stato, non nuovo lavoro (i cinque elementi del testo - reminder, trigger, handoff,
-conferma, undo - erano gia' TUTTI stati esaminati in due incrementi precedenti del 13/09/2026,
-ma la voce era rimasta segnata "parzialmente" perche' "undo non ancora testabile" sembrava un
-lavoro rimandato; e' in realta' un fatto architetturale permanente - `UndoDescriptor` (F1.3.5) e'
-solo un contratto dati, non esiste ancora nessuno store con stato condiviso da annullare su cui
-una race potrebbe avvenire - non qualcosa che resta "da fare" finche' quello store non esistera'.
-Nessun codice cambiato, solo la classificazione dello stato), e `F1.6.3` (limite sul numero di
-processi nel Job Object - `JOB_OBJECT_LIMIT_ACTIVE_PROCESS`/`ActiveProcessLimit`, con una svolta
-empirica degna di nota: il primo tentativo, `max_processes=1` "solo il worker", ha rotto DAVVERO
-l'avvio del worker in questo stesso ambiente di sviluppo - il `python.exe` di questo venv `uv` e'
-un launcher che rilancia l'interprete vero come processo figlio, 2 processi solo per partire, non
-1 - scoperto isolando `CreateProcess`+Job Object da soli DOPO che l'intera suite del modulo ha
-iniziato a fallire; corretto con un tetto generoso, `max_processes=32`, e un test che spawna
-DAVVERO piu' processi finche' uno non viene negato invece di assumere un numero fisso), e
-`F1.6.7` chiusura (era gia' vero per costruzione e gia' provato indirettamente da un test
-preesistente - un pid diverso da questo processo; aggiunta la prova DIRETTA che il testo della
-voce chiede: una spia il cui `execute()` solleva se mai venisse chiamata, registrata accanto a un
-intent forgiato, con `assert_not_called()` a confermare che l'oggetto skill live in processo non
-viene mai toccato), e `F1.4.8` chiusura (VERIFICA - "profilo Windows differente" e "backup" si
-riducono allo STESSO percorso di codice, DPAPI che rifiuta di decifrare un blob cifrato da
-un'identita' diversa dalla propria, gia' esercitato da un test esistente il cui commento
-dichiarava gia' di simulare esattamente "un backup parziale"; un secondo account Windows vero
-resta infeasible in CI ma e' un limite dell'infrastruttura di test, non un buco funzionale -
-nessun codice nuovo), e `F1.1.7` chiusura - 15/09/2026 (chiesto all'utente cosa fare dopo aver
-scoperto che l'opzione "migrare tutti gli intent" presentata come possibile lavoro meccanico non
-lo era davvero: i tre chokepoint costruiscono gia' `ActionError`, i 35 codici bespoke erano gia'
-migrati, e l'unico pezzo dichiarato ancora aperto - `effect_class`/`preconditions`/
-`expected_effect` - e' informazione che il codice stesso rifiuta di inventare senza una decisione
-di prodotto skill per skill; **decisione esplicita dell'utente** di chiudere la voce cosi' com'e'
-invece di forzare quel giudizio senza una richiesta reale dietro), e `F1.6.5` chiusura - gate
-applicativo su percorsi file (indagine su un token ristretto via `CreateRestrictedToken` -
-`pywin32` LO espone, a differenza di AppContainer, ma `CreateProcessAsUser` con quel token fallisce
-con `ERROR_PRIVILEGE_NOT_HELD`, un problema Windows non risolto senza tempo indefinito da
-investire; **decisione esplicita dell'utente** di procedere comunque con un gate a livello
-applicativo su `builtins.open`/`os.open` in `core/forge_worker.py`, dichiarato onestamente come
-NON kernel-enforced - una skill forgiata e' codice nello stesso processo, potrebbe in teoria
-aggirarlo con `ctypes`/un sottoprocesso esterno; verificato con un worker VERO spawnato, non solo
-in-process; insidia scoperta e corretta prima di committare - i test esistenti chiamavano `main()`
-IN PROCESSO con la suite stessa, lasciando il gate installato per davvero sul processo di test
-senza un ripristino esplicito), e `F1.6.6` chiusura - stesso gate esteso alla rete (stessa
-decisione, non una nuova richiesta: il tentativo precedente di una regola del Windows Firewall
-per F1.6.6 era gia' stato bloccato dal classificatore di sicurezza di questo ambiente; il
-`MANIFEST` guadagna `allowed_hosts`, `socket.socket.connect`/`connect_ex` sostituiti per
-controllare host/porta prima di ogni connessione TCP vera, verificato con un worker VERO e un
-listener TCP VERO su una porta scelta dal SO; limiti dichiarati - non copre UDP ne' la
-risoluzione DNS stessa; stessa insidia di leak del gate sul processo di test trovata e corretta
-per lo stesso motivo), e `F1.6.3` chiusura - watchdog wall-clock (investigato PRIMA di scrivere
-codice: Job Object non ha affatto un tipo di limite wall-clock, solo CPU - l'unico modo reale e'
-un watchdog esterno che termini il processo; **buco reale trovato indagandolo**, non solo
-teorico - un timeout non terminava mai il worker rimasto indietro, la cui risposta in ritardo
-restava nella coda condivisa pronta per essere consumata dalla chiamata SUCCESSIVA, per un intent
-completamente diverso - riprodotto per davvero con una skill lenta seguita da una veloce sullo
-stesso worker; corretto forzando `stop()` su un timeout, con una seconda scoperta empirica mentre
-si scriveva il test - `TerminateProcess` puo' impiegare fino a un secondo per riflettersi in
-`is_alive()`, `stop()` ora lo aspetta esplicitamente invece di fidarsi che sia immediato). Con
-questo, **F1.6 e' chiusa nella sua interezza**, e `F1.2.5` chiusura - sotto-azioni di workflow
-(investigato prima di scrivere codice: gia' vero per costruzione - `RunWorkflowSkill` instrada
-sempre verso `PlanExecutor.execute()`, che applica gia' la policy a ogni passo - mancava solo una
-prova end-to-end letterale con il `PlanExecutor` VERO invece del solo cablaggio gia' provato;
-trovata anche e corretta una frase "in attesa di CI" rimasta stale nello Stato della sezione da
-giorni, per un lavoro gia' unito in `master`), e `F1.2.3` riconoscimento - "skill"/"utente" erano
-gia' coperti (rilettura attenta prima di richiedere di nuovo chiarimenti sull'ultima dimensione
-ambigua: "skill" e' gia' il primissimo controllo di `PolicyEngine`, `blocked_intents`, il
-meccanismo piu' vecchio del modulo; "utente" e' gia' `windows_user_blocked_intents`, F1.4.2 -
-stessa identita', mai incrociata esplicitamente con questa voce. QUATTRO delle cinque dimensioni
-sono quindi gia' intersecate; resta genuinamente aperta solo "sessione", non indovinata per lo
-stesso motivo di "durata" in F1.2.2 - nessuna infrastruttura di identita' di sessione esiste nel
-progetto), e `F1.2.2` chiusura - ottava capability: durata/finestra oraria (**decisione esplicita
-dell'utente**, presentata con candidati concreti: un intent permesso solo in certe ore del giorno,
-`time_restricted_intents`, stesso principio "nega per default"; diversa dalle altre capability -
-dipende dal momento, non dai parametri - nuovo `now_provider` iniettabile; una finestra malformata
-solleva alla costruzione, fail loud invece di un fail-open silenzioso). Con questo, `F1.2.2` e'
-**chiuso** nella sua interezza, e `F1.2.3` chiusura - quinta capability: sessione (**decisione
-esplicita dell'utente**, presentata con candidati concreti: l'id di una CONNESSIONE companion,
-distinto dal device_id persistente - un dispositivo che si disconnette/riconnette e' una sessione
-NUOVA, anche per lo stesso device_id di prima. `DeviceRegistry.claim()` genera ora un session_id
-nuovo a ogni chiamata - cambio di firma da `str | None` a `tuple[str | None, str]`, l'unico
-chiamante di produzione aggiornato; restituito da `/devices/<id>/claim`, rimandabile dal client in
-`/command`; nuovo `current_session_id()` in `core/request_context.py`, stesso meccanismo di
-`current_device_id`; nuova capability `session_blocked_intents` in `PolicyEngine`, simmetrica a
-`device_blocked_intents`. Deliberatamente non esteso al ledger in questo incremento - fetta
-stretta). Con questo, `F1.2.3` e' **chiuso** nella sua interezza (tutte e cinque le dimensioni), e
-`F1.2.4` chiusura - il percorso agente era gia' coperto (il limite dichiarato "il controllo
-per-intent non e' applicato a `TaskAgent._schema()`" investigato prima di scrivere codice: l'agente
-ha gia' un filtro per-intent, costruito per F1.5.3 ("parametri: solo quelli della capacita', senza
-vuoti"), riga per riga equivalente nello scopo a `_known_parameters_by_intent()` del planner -
-semplicemente mai testato esplicitamente per lo scenario GENERALE, non solo confirmed/
-authenticated; il percorso planner/workflow/trigger era gia' coperto per intero, ogni piano passa
-sempre da `_plan_from_payload()` prima di raggiungere `PlanExecutor`. Nessun codice di produzione
-cambiato, solo un test in piu'). Con questo, `F1.2.4` e' **chiuso** nella sua interezza, e `F1.2.8`
-chiusura - il percorso 7 era gia' stato chiuso (la precondizione dichiarata - "finche' F1.2.1 non
-gli aggiunge un controllo proprio" - era gia' soddisfatta da un incremento successivo a quella
-voce, che aveva gia' scritto il test di bypass mancante, `PolicyGateTests` - mai ricollegato
-esplicitamente a questa voce ne' incluso nella riga di Stato in cima alla sezione, che non
-menzionava affatto `F1.2.8`; correzione anche di un residuo stale nell'elenco "il resto" qui
-sotto, che menzionava ancora `F1.2.6` - chiuso da giorni - come se fosse ancora aperto). **Con
-questo, l'intera sezione F1.2 (Policy kernel e capability) e' chiusa,** e `F1.3.7` ("gestire
-effetti parziali e rollback parziale con spiegazione leggibile") - buco reale trovato indagando,
-riprodotto per davvero: un passo completato ma senza un inverso noto (es. `KILL_PROCESS_BY_PORT`)
-non entra mai in `outcome.rolled_back`, ma `format_plan_outcome()` elencava solo cio' che era
-stato annullato, senza mai dire che un ALTRO effetto gia' avvenuto restava silenziosamente
-attivo - un utente poteva credere "i passi precedenti" (plurale) tutti ripristinati, quando solo
-alcuni lo erano. Corretto con una riga simmetrica ("questi effetti restano invece attivi...") che
-usa `StepOutcome.rolled_back` gia' esistente; nuovo `tests/test_response_formatter.py` (nessuna
-suite dedicata esisteva, il modulo era sempre mockato altrove), 6 test - e lo STESSO identico buco
-trovato anche sul percorso AGENTE (`TaskAgent._rollback()`, `core/agent.py`, stesso schema, causa
-identica, messaggio costruito in un punto diverso perche' l'agente non passa da
-`response_formatter.py`): corretto con la stessa simmetria, usando `id()` per confrontare i passi
-invece dell'uguaglianza per valore (`AgentStep` non ha gia' un campo `rolled_back` proprio come
-`StepOutcome`), 2 nuovi test con un vero `TaskAgent`/registry/client scriptato. Il resto:
-`F1.8.3` (kill switch propagato a RUN_COMMAND, con due buchi ulteriori trovati
-verificando il fix), `F1.8.4` (tre punti di visibilita' sui fallimenti: shutdown, `on_step`
-dell'agente, chiusura HUD), `F1.8.6` (verifica, non un fix), `F1.7.8` (CHIUSO -
-verifica end-to-end che la modalita' privata non scrive nulla in nessuno dei tre chokepoint).
-`master` e' pulito, 2.564/2.564 test, ruff/mypy/compileall verdi (`mypy tools/dashboard.py` con 8
-errori preesistenti invariati e `mypy tools/replay_session.py` con 3 errori preesistenti
-invariati, nessuno dei due coperto da "mypy selettivo" in CI - 80 file nella lista selettiva,
-invariata: nessun file nuovo in questo incremento). `G1` resta aperto.
+Aggiornato 25/09/2026 (le note precedenti, ferme al 16/09/2026, restano nella cronologia Git).
 
-Nota di metodo da `F1.8.7` (`DeviceRegistry` e `TriggerManager`): la tecnica standard di questa
-sessione (`sys.setswitchinterval()` abbassato + `threading.Barrier`, senza altro aiuto) NON
-riproduce ogni race reale in modo affidabile - solo quelle con una finestra abbastanza larga da
-contenere una chiamata o un ciclo intermedio in cui il GIL possa cedere il controllo. Un
-check-then-act di poche istruzioni/chiamate adiacenti puo' restare a 0 (o quasi 0) riproduzioni su
-centinaia di prove pur essendo comunque un vero buco: va confermato o forzando artificialmente un
-ritardo tra le due meta' dell'operazione (un `time.sleep()` breve iniettato via un seam privato
-dedicato o monkeypatching mirato, come per `DeviceRegistry`), o - meglio quando possibile, perche'
-deterministico invece di probabilistico - orchestrando l'esatto intreccio con due
-`threading.Event` (uno che segnala "letto", uno che sblocca "procedi a scrivere"), come per
-`TriggerManager.mark_fired()`. Un risultato negativo con la sola tecnica standard non e' prova
-sufficiente di sicurezza su finestre strette.
-
-**Aggiornamento 13-14/09/2026**: l'utente ha dato il via libera esplicito su ENTRAMBI i lavori
-grandi sopra, dopo un'investigazione di scoping dedicata (vedi F1.1.7 e F1.6 nelle rispettive
-sezioni). `F1.1.7` e' ora chiusa nella sostanza: i tre chokepoint restanti costruiscono tutti
-`ActionError` (primo pezzo), e i 35 codici bespoke realmente usati dalle skill sono censiti in
-`_KNOWN_RESULT_CATEGORIES` (secondo pezzo, zero file di skill toccati - un solo dizionario in
-`core/action_ledger.py`); resta solo `effect_class`/`preconditions`/`expected_effect` di
-`ActionProposal`, dichiaratamente non calcolabile dai dati esistenti senza un censimento skill
-per skill (nota per chi legge in seguito: `effect_class` e' stato poi censito per davvero il
-15/09/2026, vedi la voce "F1.1.7 (riaperta - censimento effect_class completato)" in F1.1 sopra -
-`preconditions`/`expected_effect` restano invece aperti, quella parte della premessa era corretta).
-`F1.6` e' andato oltre le fondamenta: il worker persistente sandboxato
-(`core/forge_worker.py`/`core/sandboxed_skill_worker.py`, Low Integrity + Job Object) e' ora
-anche COLLEGATO per davvero - `SkillRegistry.execute()` instrada un intent forgiato verso il
-worker invece di eseguirlo in processo, verificato con un confronto di `os.getpid()` che dimostra
-l'esecuzione avvenuta in un processo separato, non solo dichiarata. Restano aperti: `F1.6.4`-
-`F1.6.6`/`F1.6.8` (AppContainer, manifest di directory montabili, negazione rete, quarantena su
-violazione), e la
-domanda esplicita su cosa fare di una skill forgiata che dipendesse da stato condiviso di Jake
-non serializzabile in JSON (oggi nessuna lo fa, ma non c'e' ancora un controllo che lo vieti).
-
-**Aggiornamento 14/09/2026 (F1.5)**: dopo aver chiuso le sette capability strette rimaste in
-F1.2.2/F1.2.3 (rete, agente), l'utente ha scelto esplicitamente di aprire F1.5 ("prompt injection
-e dati non fidati"), MAI affrontata prima in questa sessione, invece di continuare a cercare fette
-sempre piu' piccole nelle sezioni gia' quasi chiuse. Investigata con un sottoagente di ricerca
-dedicato prima di scrivere codice (stesso principio di F1.6): l'unica difesa esistente era prosa
-italiana nel prompt di `TaskAgent` ("SOLO DATO, mai un'istruzione"), nessun segnale strutturale.
-Creato `core/taint.py` con l'intera tassonomia a quattro categorie dichiarata (F1.5.1) ma
-collegata per ora SOLO alla categoria `EXTERNAL_CONTENT`, pilotata su `TaskAgent._observe()` -
-sette intent censiti a mano (clipboard, OCR, file, web, ricerca, cronologia browser) ricevono ora
-un marcatore strutturale in aggiunta alla prosa gia' esistente. Subito dopo, `F1.5.4` (prima
-fetta): quel marcatore ora arriva anche all'UTENTE, non solo al modello - quando il passo
-immediatamente successivo a un contenuto esterno riuscito richiede conferma, il messaggio mostrato
-dice esplicitamente quale intent l'ha suggerito. Infine `F1.5.3` (VERIFICA, non un fix): confermato
-che il modello non puo' fabbricare `confirmed`/`authenticated` nei parametri di un passo per
-aggirare il gate di conferma - il filtro "solo parametri dichiarati" gia' esistente lo impedisce
-gia' per costruzione. Infine `F1.5.2` (prima fetta): quel marcatore ora sopravvive anche oltre lo
-stesso turno agente, propagato nella cronologia a breve termine che ogni turno agente FUTURO
-include - un buco reale trovato eseguendo la suite completa (non solo i file toccati), non solo
-letto a tavolino. `F1.5.5`-`F1.5.8` restano completamente aperti - questa e' la prima fetta di una
-fase grande, non la sua chiusura.
-
-**Aggiornamento 14/09/2026 (F1.3.2 casa, F1.8.3 chiuso, promemoria sul Gate G1)**: dopo F1.5,
-chiuso anche `F1.3.2` per CONTROL_SMART_DEVICE (stesso pattern "dichiara successo senza controllare
-l'effetto reale" gia' trovato due volte per processi/finestre, corretto interamente dentro la
-skill - non serve la stessa decisione di dipendenza gia' bloccata per un verificatore indipendente
-in `execution_safety.py`) e `F1.8.3` per intero (la superficie "modello" del kill switch, con via
-libera esplicito dell'utente dopo aver segnalato la tensione con il docstring di
-`core/kill_switch.py`, che dichiara deliberato il controllo "solo tra un passo e il successivo" -
-la correzione non e' un abort violento, solo smettere di ASPETTARE una risposta gia' in corso).
-Promemoria per chi riprende: la sezione "## 7. F1" ha un **Gate G1** esplicito (sezione "Gate G1 -
-Nucleo fidato") con 7 criteri di uscita letterali - "ogni percorso usa Action Contract 2.0 e
-PolicyEngine", "tutte le azioni ad alto impatto hanno prova e audit", "capability applicate ad
-agenti, skill e device", "prompt-injection suite verde", "plugin ostile contenuto dalla sandbox",
-"kill switch interrompe attivita' e figli entro il budget definito", "modalita' privata non lascia
-contenuti nei nuovi store" - utile come bussola concreta per capire cosa CONTA davvero come
-"F1 abbastanza fatto da sbloccare F2/F3/F4/F8", invece di continuare a cercare fette sempre piu'
-piccole senza un criterio. Ad oggi: il quinto criterio (sandbox) ha le fondamenta e la quarantena
-(F1.6.8); AppContainer (F1.6.4) e' stato valutato e scartato per ora (pywin32 non lo supporta
-affatto, servirebbero bindings ctypes da zero) - manifest di directory (F1.6.5) e negazione rete
-(F1.6.6, con un'alternativa piu' semplice suggerita - una regola del Windows Firewall scoped al
-worker, invece di AppContainer) restano aperti; il secondo (prova e audit per le azioni ad alto
-impatto) copre da 15/09/2026 11 dei 20 intent DESTRUCTIVE/ADMIN (CREATE_PATH/RENAME_PATH/MOVE_PATH/
-DELETE_PATH/KILL_PROCESS_BY_PORT/EXTRACT_ARCHIVE/CREATE_SKILL/DELETE_CREATED_SKILL/
-RESTART_EXPLORER/EMPTY_RECYCLE_BIN, piu' CLOSE_WINDOW che non e' DESTRUCTIVE/ADMIN ma ha comunque
-un verificatore) - vedi le voci datate in F1.3 sopra per quali dei restanti 9 sono stati scartati
-con motivazione (sei store interni gia' auto-verificati, CLOSE_APP per complessita' della busta
-dati, CLEAR_TEMP_FILES perche' un controllo "e' vuota" darebbe falsi negativi con processi che
-ricreano file nel frattempo, SYSTEM_POWER intrinsecamente non verificabile) - nessun candidato
-rimasto sembra avere la stessa fetta stretta e meccanica degli undici gia' chiusi; il quarto
-(prompt-injection) ha F1.5.1-F1.5.4
-piu' un piccolo corpus mirato multi-sorgente/multilingue (F1.5.6, il significato letterale di
-"corpus" per un attacco dal vivo contro un modello vero resta un esercizio di red-team manuale
-separato) e da 15/09/2026 anche F1.5.7 parziale (nomi file: censimento
-`EXTERNAL_CONTENT_INTENTS` esteso da 7 a 13 intent - FIND_FILE/FIND_LARGE_FILES/
-LIST_RECENT_FILES/SEARCH_FILES/HYBRID_SEARCH_FILES/SEMANTIC_SEARCH_FILES, questi ultimi tre piu'
-seri perche' restituiscono anche uno snippet del contenuto reale del file, non solo il nome -
-PDF/commenti di codice/testo su immagini restano fuori, nessun formato oltre il testo grezzo e'
-oggi parsato da Jake); il sesto (kill switch) e' ora
-chiuso per le quattro superfici dichiarate, e da 15/09/2026 anche con kill dell'intero process
-tree per RUN_COMMAND (Job Object riutilizzando F1.6.3, gia' costruito nel frattempo - vedi la voce
-datata in F1.8 sopra; resta il limite HTTP gia' dichiarato per la superficie "modello", natura
-diversa, nessun processo li' da contenere); nota anche che F1.6.5/F1.6.6 (manifest di
-directory/negazione rete) descritti "aperti" qui sopra sono in realta' gia' stati chiusi in un
-passo successivo a quando questo paragrafo e' stato scritto (14/09/2026) - vedi le rispettive voci
-datate in F1.6; il quinto criterio del Gate G1 (sandbox) e' quindi piu' avanti di quanto questo
-paragrafo, mai aggiornato dopo, lasci intendere; il
-settimo (modalita' privata) e' verificato chiuso (F1.7.8); gli altri tre restano parzialmente
-aperti come dettagliato nelle rispettive sezioni sopra.
-
-Ritmo per chi riprende: un incremento alla volta, ciascuno con test reali (non solo letti a tavolino),
-riprova empirica quando possibile (riprodurre il buco con il codice vecchio prima di dichiararlo
-risolto, idealmente con una tecnica di forzatura reale come `sys.setswitchinterval()` abbassato o
-una `threading.Barrier` - molti buchi di questa sessione non si manifestavano affatto senza),
-aggiornamento di questo file, e commit/PR separati invece di un unico commit enorme.
-
-Candidati piccoli ancora aperti in F1: `F1.2.1` e' ora CHIUSO per intero (i tre "percorso N" -
-piano automatico, rollback, dispatch grezzo - sono tutti fail-closed). Il resto di `F1.2.2` (resta
-aperta solo l'ultima capability - "durata", non
-ancora chiaro a quale intent/parametro mappi con precisione; le altre sei - filesystem/
-dominio web/app/contatto/device Home Assistant/rete - sono ora complete, con i rispettivi gap noti
-gia' dichiarati - FIND_FILE senza `path` esplicito, LIST_SMART_DEVICES escluso, app/contatto/
-device/rete su stringa grezza non risolta),
-`F1.2.3` (resto: prima e seconda capability chiuse - `device_blocked_intents`/
-`agent_blocked_intents` - ma l'intersezione con skill/sessione resta aperta), il resto di `F1.3.2` (processi, finestre e casa
-sono ora coperti - CLOSE_WINDOW ha anche un verificatore indipendente, CLOSE_APP resta corretto
-solo a livello di skill per la complessita' della sua busta dati, CONTROL_SMART_DEVICE resta
-corretto solo a livello di skill (un verificatore indipendente in `INTENT_SAFETY_REGISTRY`
-richiederebbe comunque iniettare un client Home Assistant in `verify_effect()`, oggi una funzione
-libera senza dipendenze esterne - il blocco dichiarato resta); solo browser resta aperto), il resto di `F1.4`
-(`F1.4.1` e `F1.4.2` sono ora CHIUSI/chiusi quanto deciso dall'utente - `SecretsVault` versionata,
-identita' Windows+dispositivo con "profilo Jake"/"speaker profile" dichiaratamente fuori scope;
-`F1.4.7` e' ora CHIUSO (verifica: nessuna infrastruttura di speaker verification esiste, quindi
-"non usarla come unico fattore" e' banalmente soddisfatto); restano `F1.4.4`-`F1.4.6`, ciascuno un
-pezzo di prodotto a se' - passkey/WebAuthn, pairing QR, rotazione token - non fette strette come
-`F1.4.1`/`F1.4.2`), il resto di `F1.7` (`F1.7.2`, `F1.7.3` e
-`F1.7.6` sono ora CHIUSI (o chiusi quanto possibile senza una decisione di rimozione attiva) -
-l'undo scrive una ricevuta propria correlata per trace_id, la dashboard mostra un vero rollback
-rate, e le tre categorie di retention sono verificate/coperte (log operativo e memoria gia'
-adeguati, audit di sicurezza ora con uno strumento di archiviazione in sola lettura); `F1.7.4` e'
-ora chiuso quanto ha senso chiudere per contenuto - percorso/URL/email/IP/telefono riconosciuti,
-classificazione per nome del parametro chiusa, "identificatore di dispositivo" deliberatamente
-fuori scope per essere troppo vago (nessun formato standard); `F1.7.8` e' chiuso), il resto di
-`F1.8` (il resto di `F1.8.1` - lo slot
-per canale e' ora chiuso, il contesto conversazionale condiviso tra canali e' stato investigato e
-confermato VOLUTO dall'utente (non un buco); "una coda per azioni concorrenti" non legate a una
-conferma e' stata poi costruita per davvero il 16/09/2026 come `ResourceLockManager` - vedi la
-voce "fase 7 del piano" in F1.4 sopra, meccanismo costruito e testato ma non ancora collegato a
-un chokepoint di produzione, vedi la nota di stato onesto alla fine della fase 10;
-`F1.8.4` e' ora CHIUSO per intero (visibilita' fallimenti, rilascio device audio, drain limitato,
-checkpoint da cui riprendere - tutti e quattro coperti); il resto di `F1.8.5` - diagnosi di un deadlock vero su un lock applicativo, non solo un
-thread esterno lento; il resto di `F1.8.7` - undo, non ancora testabile per race finche' non
-esiste uno store con stato condiviso da annullare, vedi `F1.7.2`; reminder e conferma gia'
-verificati al sicuro, handoff e trigger gia' corretti). Vale la pena anche un altro giro di ricerca mirata di race
-condition non ancora trovate in strutture condivise tra thread non ancora esaminate (es.
-`core/learning_manager.py` - trovato un `_pending` a slot singolo con lo stesso pattern, ma
-l'effetto peggiore e' un doppio apprendimento innocuo, non una perdita/corruzione - deciso di non
-aprire un incremento dedicato solo per quello), visto quante ne sono emerse in questa sola
-sessione con la stessa tecnica (`sys.setswitchinterval()` abbassato per forzare la
-sovrapposizione reale).
-
-**Nota di correzione (18/09/2026)**: il paragrafo "Candidati piccoli ancora aperti in F1" appena
-sopra (14/09/2026) non e' mai stato aggiornato dopo, e oggi descrive come aperti diversi punti
-chiusi in incrementi successivi - stesso genere di scollamento gia' segnalato altrove in questo
-documento per F1.6.5/F1.6.6. Per chi legge oggi: `F1.2.2` ("durata") e' chiuso per intero dal
-15/09/2026 (ottava e ultima capability, vedi la voce datata in F1.2.2); `F1.2.3` (intersezione
-skill/sessione) e' chiuso per intero dal 15/09/2026 (vedi la voce datata "quinta e ultima
-capability: sessione"); `F1.4.4`-`F1.4.6` (passkey/WebAuthn, pairing QR, rotazione token) sono
-chiusi dal 16/09/2026 come parte del piano in 10 fasi (vedi "decisione di prodotto completa" in
-F1.4); `F1.8.5` e `F1.8.7` risultano gia' **chiusi** in una voce anche PIU' vecchia di questo
-stesso paragrafo (13/09/2026, vedi lo Stato in cima a F1.8) - la chiusura di F1.8.7 per "undo"
-era pero' per DISPOSIZIONE (esaminato e dichiarato non ancora testabile, non rimandato: al 13/09
-`UndoDescriptor` - F1.3.5 - era solo un contratto dati, nessuno store condiviso da race-testare
-esisteva ancora). Quella precondizione e' cambiata il giorno dopo: `core/undo_store.py::UndoStore`
-(costruito il 16/09/2026, vedi F1.3.5 sopra) e' oggi un vero store condiviso tra thread, con un
-proprio test di concorrenza reale (100 thread, `tests/test_undo_store.py::
-test_concurrent_saves_and_reads_from_real_threads_never_corrupt_the_store`) - la copertura esiste
-gia', semplicemente non e' mai stata ricollegata esplicitamente alla chiusura dichiarata di
-F1.8.7. F1.5.8 (risk budget) e' chiuso e adottato dal 18/09/2026 (vedi la voce datata sopra).
-L'unico gap REALE rimasto tra i candidati elencati sopra e' la coda letterale di `F1.5.7`
-(injection dentro PDF/commenti di codice) - dichiarato esplicitamente "un gap architetturale
-diverso: serve un parser nuovo, non solo un censimento" (vedi la voce datata 16/09/2026 in F1.5) -
-Jake non estrae oggi testo da un PDF ne' distingue un commento di codice dal resto di un file in
-NESSUN percorso, quindi chiuderlo davvero significherebbe prima costruire una capacita' di
-lettura che oggi non esiste, non semplicemente aggiungere un intent a un insieme gia' pronto come
-per gli altri punti di F1.5 - una decisione di prodotto (vuole Jake un parser PDF? per quale
-scopo, oltre alla sicurezza?) piu' che un incremento di sicurezza stretto, riportata all'utente
-invece di essere decisa qui.
-
-**Aggiornamento 15/09/2026 (F1.8.2, risolutore app)**: quel "altro giro di ricerca mirata" ha
-trovato un buco vero in `core/app_resolver.py::AppResolver.resolve()` - non incluso nell'elenco
-degli store gia' chiusi da F1.8.2 (mai esaminato prima). Prima di arrivarci, due candidati diversi
-sono stati investigati e SCARTATI con motivazione, non implementati: un verificatore indipendente
-per le sei skill che cancellano un elemento da uno store interno (`FORGET`/`CLEAR_NOTES`/
-`DELETE_TODO`/`DELETE_TRIGGER`/`DELETE_REMINDER`/`FORGET_LEARNED`) avrebbe richiesto la stessa
-iniezione di dipendenza esterna in `verify_effect()` gia' rifiutata per Home Assistant, e comunque
-non avrebbe controllato nulla di indipendente (il `bool` di successo di ciascuna skill e' gia'
-derivato da `cursor.rowcount`/una SELECT reale, non da un'API fire-and-forget come
-CONTROL_SMART_DEVICE); un rilevatore di deadlock generico per il resto di `F1.8.5` e' stato
-scartato per mancanza di un solo scenario reale di lock annidati fra i 14 store con lock di
-`core/` (avrebbe prodotto infrastruttura morta). Il buco vero: `resolve()` catturava gia' `sources`
-sotto lock in una variabile locale, ma il tie-break finale e il nome visualizzato rileggevano
-`self._sources`/`self._display_names` dal vivo, FUORI dal lock - un `refresh()` concorrente
-(sostituisce interi dizionari sotto lock, mai una mutazione sul posto) completato esattamente in
-quella finestra fa rileggere dati che non corrispondono piu' ai candidati gia' raccolti. Riprodotto
-forzando la sostituzione esattamente li' (dentro `_similarity()`, un seam deterministico invece di
-un vero thread in corsa) e verificato che i due nuovi test falliscono davvero contro il codice
-precedente. Corretto catturando anche `display_names` sotto lock e usando entrambe le istantanee
-locali ovunque nel resto del metodo. `F1.8.2` e' ora chiuso anche per questo store. Prova:
-2.566/2.566 test, ruff/mypy verdi. Resta valido il resto dell'elenco sopra (coda per azioni
-concorrenti di F1.8.1, deadlock applicativo reale di F1.8.5, undo di F1.8.7) - nessuno di questi
-tre ha ancora uno scenario reale/infrastruttura su cui costruire senza inventare un problema che
-non esiste.
-
-**Aggiornamento 16/09/2026 (F1.8.1, prima adozione reale di `ResourceLockManager` - chiusura di
-tutto `F1.8`)**: "coda per azioni concorrenti" sopra non era piu' vero dopo la chiusura del piano
-multi-device (`ResourceLockManager` esiste da fase 7, 15/09/2026) - restava vero solo "mai
-collegato a un chokepoint di produzione". Trovata la fetta piu' stretta e piu' rischiosa: le
-quattro skill di mutazione filesystem gia' raggruppate da `F1.2.2` condividono tutte un
-controllo-poi-agisci non atomico. Buco reale riprodotto empiricamente (non ipotizzato): due
-`MOVE_PATH` concorrenti con sorgenti diverse ma stesso nome file verso la stessa cartella di
-destinazione riportano ENTRAMBI successo, ma uno dei due file sparisce silenziosamente
-sovrascritto dall'altro - perdita di dati silenziosa, non solo un errore sbagliato. Corretto in
-`core/skill_registry.py::execute()` (il dispatcher unico gia' fail-closed per policy, gia' punto
-di passaggio di tutti i chokepoint reali incluso il rollback), con lo stesso limite gia' accettato
-per la capability filesystem di `F1.2.2` su cosa "destination" rappresenta. Con questo, l'unico
-pezzo ancora aperto in tutta `F1.8` e' chiuso, e l'intera sezione `F1.8` e' **chiusa**. Vedi la
-voce datata 16/09/2026 in F1.8 sopra per il dettaglio completo. Prova: 2.755/2.755 test,
-ruff/mypy verdi.
-
-**Aggiornamento 17-18/09/2026 (F1.3.4, meccanismo + prima/seconda fetta di adozione)**: nuovo
-candidato aperto da `F1.3` - "salvare snapshot minimo prima dell'azione, rispettando privacy e
-dimensione". Diverso da `F1.3.5`/`core/undo_store.py` (gia' chiuso, vedi sopra): li' si CALCOLA
-l'intent compensatorio DOPO un'azione riuscita (un inverso naturale, es. `DELETE_PATH` per
-annullare un `CREATE_PATH`) - non richiede aver visto lo stato PRIMA. `DELETE_PATH` non ha pero'
-nessun inverso naturale (`core/execution_safety.py::INTENT_SAFETY_REGISTRY`, "cancellare non ha
-un inverso naturale") - senza aver salvato il contenuto PRIMA della cancellazione, non c'e' modo
-di recuperarlo dopo, qualunque intent compensatorio si inventi. Stesso principio "prima il
-meccanismo, poi l'adozione" gia' seguito per `UndoStore`/`ResourceLockManager`/`TaskRiskBudget` in
-questa sessione, in due fette separate:
-
-Prima fetta (17/09/2026, mai documentata qui all'epoca): `core/action_snapshot.py`
-(`capture_snapshot`/`ActionSnapshot`/`SnapshotStore`) - uno snapshot VERO del contenuto di un file
-prima che un'azione lo muti, `None` (mai un valore parziale/indovinato) se la modalita' privata e'
-attiva (esce PRIMA di toccare il filesystem, non solo prima di persistere - stessa garanzia gia'
-data altrove), il percorso non e' un file esistente, o il file supera un tetto di 2MB (uno
-snapshot TRONCATO sarebbe peggio di nessuno snapshot). Deliberatamente ristretto ai FILE, non alle
-cartelle ("minimo" esclude una copia ricorsiva non limitata). Nessun collegamento a un chokepoint
-reale ne' un modo di RIPRISTINARLO in questa fetta - solo catturare e conservare. Prova: 11 test
-nuovi (`tests/test_action_snapshot.py`), incluso un test di concorrenza vera con 100 thread.
-
-Seconda fetta (18/09/2026, adozione): collegato ai chokepoint reali. `SkillRegistry.execute()`
-(`core/skill_registry.py`) e' l'UNICO punto che fa gia' la risoluzione del percorso "parlato" per
-le quattro mutazioni filesystem (`resolve_user_path`) PRIMA di chiamare la skill vera - a
-differenza di `UndoStore` (che si attacca a valle, con `result.data` gia' pronto, e per questo ha
-richiesto adozione separata in tre chiamanti esterni), uno snapshot deve catturare il contenuto
-PRIMA, con il percorso GIA' risolto: capirlo di nuovo al livello di `JakeCore` avrebbe rischiato di
-catturare il file SBAGLIATO se il percorso grezzo passato dall'utente fosse anche, per caso, un
-percorso relativo valido rispetto alla cwd del processo ma diverso da quello risolto davvero (es.
-un riferimento parlato "quel file" o "desktop\nota.txt"). `execute()` prende ora due parametri
-opzionali (`action_id`/`private`, default `None`/`False`, **nessun cambio di comportamento** per
-chi non li passa ancora) e cattura lo snapshot DENTRO lo stesso lock per resource key gia'
-acquisito per la mutazione (`_resource_lock_keys`/F1.8.1) cosi' un'altra mutazione concorrente
-sullo stesso percorso non puo' intervenire nella finestra tra cattura e cancellazione vera - stesso
-principio "mutare esattamente nel punto giusto" del buco di F1.8.1.
-
-Collegati i DUE chiamanti REALI che eseguono davvero un'azione gia' autorizzata in `core/
-jake_core.py` (non l'agente/`PlanExecutor`, entrambi passano ancora da qui SENZA un `action_id` -
-prossima fetta dichiarata, non fatta oggi): `_resolve_and_execute` (percorso diretto - l'`action_id`
-di correlazione ledger/undo, prima generato solo DOPO un successo, e' ora generato PRIMA di
-eseguire cosi' lo stesso identificatore puo' anche etichettare lo snapshot; nessun cambio
-osservabile sulla ricevuta nel ledger, che continua a riceverlo solo su successo esattamente come
-prima) e `_finalize_pending_action` (il VERO percorso per le azioni DESTRUCTIVE/ADMIN come
-`DELETE_PATH`, che chiedono conferma quasi sempre - scoperto verificando end-to-end, non
-ipotizzato, che senza questa seconda fetta un `DELETE_PATH` confermato dall'utente reale non
-avrebbe MAI prodotto uno snapshot, perche' quel percorso chiama `skill_registry.execute()`
-direttamente, bypassando `_resolve_and_execute` per intero - lo stesso punto cieco gia' documentato
-per il ledger/undo store in F1 prima di essere corretto la' sopra). Nessun collegamento ancora al
-ledger ne' a `UndoStore` su questo secondo percorso (un `action_id` locale, usato solo per lo
-snapshot) - gap preesistente e diverso, non toccato qui.
-
-Ancora deliberatamente FUORI scope, come dichiarato dal modulo stesso: nessun modo di ripristinare
-un file da uno snapshot (quale intent lo farebbe? con quale conferma? - un problema a se'), e
-l'adozione per l'agente a passi/`PlanExecutor` (terza fetta dichiarata, stesso schema seguito da
-`UndoStore`: pilota su `JakeCore` prima, altri due chokepoint dopo in incrementi separati). Prova:
-19 test nuovi end-to-end (non solo il meccanismo isolato, gia' coperto dalla prima fetta) - 5 in
-`tests/test_skill_registry.py::DeletePathSnapshotAdoptionTests` (snapshot catturato con contenuto
-vero PRIMA della cancellazione; nessuno snapshot senza `action_id`; nessuno in modalita' privata
-anche con `action_id`; nessuno per le altre tre mutazioni filesystem, che hanno gia' un rollback
-vero; uno snapshot catturato ma innocuo quando l'azione non e' ancora confermata) e 3 in
-`tests/test_jake_core_pipeline.py::ExecuteCommandSnapshotWiringTests` (percorso diretto E percorso
-di conferma reali via `core.answer()`, correlazione con lo stesso `action_id` del ledger, privacy
-end-to-end sull'intero flusso di conferma). 2.859/2.859 test, ruff/mypy/compileall verdi.
-
-**Aggiornamento 18/09/2026 (F1.3.4, terza e quarta/quinta fetta - CHIUSURA completa su tutti e tre
-i chokepoint)**: completata l'adozione dichiarata sopra come "fuori scope" per `PlanExecutor` e
-l'agente a passi, stesso schema gia' seguito da `UndoStore` (pilota su `JakeCore`, poi gli altri
-due chokepoint in incrementi separati).
-
-Terza fetta, `PlanExecutor` (facile: a differenza di `UndoStore`, che si attacca a valle con
-`result.data` gia' pronto, `PlanExecutor._execute_step()` costruisce gia' il suo lambda executor
-FRESCO a ogni chiamata dentro `execute()`, con accesso diretto a `self.skill_registry` - bastava
-chiudere sull'`action_id` generato PRIMA di `_execute_step()` invece che dopo un successo, stesso
-principio gia' applicato al pilota su `JakeCore`). Nessun rollback della complessita' incontrata
-per `TaskAgent` sotto: `_execute_step()` prende ora `action_id`/`private` opzionali (default
-`None`/`False`), forniti a `SkillRegistry.execute()` dentro il lambda.
-
-Quarta/quinta fetta, l'agente a passi (`TaskAgent`, il caso REALMENTE difficile): qui
-`execute_action_with_retry()` (`core/execution_safety.py`) chiama `self.executor(intent,
-parameters)` con una firma FISSA a 2 argomenti, condivisa da ~15 executor finti diversi nei test
-(`tests/test_agent.py` e altri) e dai DUE executor reali di `JakeCore` (uno per l'agente
-"general", uno condiviso da "coding"/"research" via `agent_kwargs`). Cambiare quella firma per
-portare un terzo parametro `action_id` avrebbe richiesto aggiornare ognuno di quei ~15 finti per
-un beneficio che riguarda solo `DELETE_PATH` - investigato e SCARTATO come sproporzionato.
-Soluzione: un NUOVO `ContextVar` (`core/request_context.py::current_action_id`,
-`set_current_action_id`/`reset_current_action_id`), stesso identico meccanismo/stesse garanzie di
-isolamento per thread gia' usato per `current_agent_name` (F1.2.3) per esattamente lo stesso tipo
-di problema - impostato da `TaskAgent.run()` SOLO intorno alla chiamata a
-`execute_action_with_retry()` (stesso punto, stesso `try/finally`, in cui gia' si imposta
-`current_agent_name`), letto dai due executor reali di `JakeCore` (che gia' avevano un parametro
-`action_id` opzionale dal pilota) e dall'executor di default di `TaskAgent.__init__` (per chi
-costruisce un `TaskAgent` senza passare da `JakeCore` - uno strumento, un test). Un executor finto
-che non lo legge semplicemente lo ignora, **zero** cambi di firma su nessuno dei ~15 finti
-esistenti: l'unica rottura reale trovata eseguendo la suite (non ipotizzata) e' stata nei pochi
-finti che usano l'executor di DEFAULT invece di uno personalizzato (`FakeRegistry.execute()` in
-`tests/test_agent.py`, 7 occorrenze) - quelli SI' ricevono ora sempre `action_id=` come kwarg dal
-nuovo default, quindi la loro firma andava comunque estesa (stesso pattern gia' visto per gli
-altri chokepoint: `*, action_id=None, private=False`), ma solo 7 file/occorrenze contro le ~15+ che
-una firma condivisa avrebbe richiesto.
-
-Stesso identico identificatore riusato sia per lo snapshot sia per la correlazione ledger/undo del
-passo (come gia' fatto per `JakeCore`/`PlanExecutor`): `step_action_id` generato PRIMA di eseguire
-(non piu' solo dopo un successo), nessun cambio osservabile sulla ricevuta nel ledger che continua
-a riceverlo solo su successo. Prova: 13 test nuovi - 3 in `tests/test_plan_executor.py::
-SnapshotWiringTests` (cattura vera con contenuto PRIMA della cancellazione via
-`_execute_step()` diretto con `confirmed=True` gia' presente - un piano automatico non puo' mai
-fornirlo da solo, `strip_authorization_signals()`, quindi la prova end-to-end via `execute()` reale
-mostra solo la cattura innocua quando il passo si ferma su `CONFIRMATION_REQUIRED`; nessuno
-snapshot in modalita' privata), 1 in `tests/test_agent.py::SnapshotWiringTests` (stessa identica
-prova end-to-end via `agent.run()` con un vero `SkillRegistry`, stesso limite di
-"self-confirming" - il modello non puo' fornire `confirmed`, filtrato dai metadata della
-capacita', quindi anche qui solo cattura innocua, mai una cancellazione vera) e 3 in
-`tests/test_agent.py::ActionIdContextPropagationTests` (stesso schema di
-`AgentNameContextPropagationTests` gia' esistente per `current_agent_name` - l'executor vede
-davvero un action_id non-None durante la chiamata, torna a `None` subito dopo il passo, due passi
-dello stesso `run()` ricevono due id DIVERSI). Con questo, F1.3.4 e' **chiusa** su tutti e tre i
-chokepoint reali (comando diretto/confermato, agente a passi, piano automatico) - resta
-dichiaratamente fuori scope solo il RIPRISTINO da uno snapshot (nessun intent/flusso di conferma
-ancora deciso per farlo). 2.866/2.866 test, ruff/mypy/compileall verdi.
-
-**Aggiornamento 18/09/2026 (F1.5.8, adozione - CHIUSURA su entrambi i chokepoint reali)**:
-verificato con l'utente lo stato del progetto dopo la chiusura di F1.3.4 sopra - il Gate G1 era
-gia' stato dichiarato SUPERATO il 16/09/2026 (vedi sotto, sezione "Gate G1"), quindi F2/F3/F4
-(Onda 2) sono gia' sbloccate. L'utente ha scelto esplicitamente di restare su una rifinitura di F1
-invece di aprire una fase nuova. Riletto `core/task_risk_budget.py::TaskRiskBudget` (F1.5.8, fase
-8/10 del piano multi-device, chiuso il 16/09/2026 come motore puro isolato - vedi la voce datata
-sopra): il modulo stesso dichiarava "deliberatamente NON affrontato qui... il collegamento vero a
-`TaskAgent`/`PlanExecutor`" come passo successivo - stesso schema "prima il meccanismo, poi
-l'adozione" di `UndoStore`/`ResourceLockManager`/`ActionSnapshot` in questa sessione, mai fatto per
-questo meccanismo specifico.
-
-`TaskAgent.run()`: un `TaskRiskBudget` per run (mai condiviso tra compiti), `max_authorized_risk=
-RiskLevel.READ_ONLY` (placeholder neutro - il campo non e' consultato da nessuna delle sei regole,
-una richiesta libera non ha comunque un unico intent "originale" da cui derivarlo). Controllato
-`escalation_reason(intent)` PRIMA di eseguire ogni passo (stesso punto in cui gia' si controllano
-`missing`/parametri obbligatori): un motivo non-None costruisce un `pending_confirmation` con la
-STESSA forma gia' usata per un `CONFIRMATION_REQUIRED` vero restituito da una skill (stesso schema
-che `JakeCore._run_agent` gia' sa interpretare) - intent/parametri restano quelli del passo
-proposto (nessuna riscrittura), il passo NON viene mai eseguito. `record_step()` chiamato dopo un
-successo VERIFICATO (dopo l'eventuale downgrade a `VERIFICATION_FAILED` di F1.3, non prima).
-
-`PlanExecutor.execute()`: stesso identico principio, controllato DOPO che `PolicyEngine` ha gia'
-approvato il passo da solo, PRIMA di eseguirlo - un `ESCALATION_DETECTED` (nuovo codice, non
-ancora esistente nel catalogo) con la STESSA semantica gia' scelta per `CONFIRM` (pausa, **nessun
-rollback** dei passi gia' riusciti - a differenza di `BLOCK`, che annulla tutto: un'escalation
-ferma solo il PROSSIMO passo, non nega retroattivamente quelli gia' autorizzati e riusciti
-singolarmente). **Buco reale trovato scrivendo il test del dry-run, non ipotizzato**: il
-`dry_run=True` esistente simula un passo con `continue` PRIMA di raggiungere il punto dove
-`record_step()` viene chiamato per un'esecuzione vera - senza una correzione, un dry-run a piu'
-passi non avrebbe MAI rilevato un'escalation tra il primo e il terzo passo simulato (il budget
-sarebbe rimasto vuoto per l'intera simulazione), contraddicendo la garanzia gia' dichiarata nel
-docstring di `execute()` ("il dry-run mostra la sequenza REALE che accadrebbe, non una finta in
-cui tutto va sempre bene"). Corretto chiamando `record_step()` anche nel ramo `dry_run`, prima del
-`continue` - riprodotto scrivendo prima il test (che falliva contro il codice senza la correzione,
-mostrando `outcome.completed` con 2 passi invece di 1), poi applicato il fix.
-
-`core/action_ledger.py`: aggiunto `"ESCALATION_DETECTED"` sia a `_KNOWN_RESULT_CATEGORIES`
-(`ERROR_CATEGORY_PENDING`, stessa categoria di `CONFIRMATION_REQUIRED` - l'utente non ha ancora
-detto no, semplicemente non gli e' stato ancora chiesto) sia a `authorization_of()`
-(`AUTHORIZATION_PENDING`) - senza questo, il codice nuovo sarebbe caduto silenziosamente su
-`ERROR_CATEGORY_UNCATEGORIZED`/`AUTHORIZATION_NONE`, tecnicamente non un crash ma una
-classificazione fuorviante nel ledger per un evento di sicurezza che merita una categoria vera.
-
-Prova: 10 test nuovi - 3 in `tests/test_agent.py::TaskRiskBudgetWiringTests` (la catena
-"RECALL poi OPEN_URL" ferma OPEN_URL prima di eseguire, con `pending_confirmation` corretto;
-OPEN_URL isolato senza lettura precedente esegue normalmente; due passi READ_ONLY scollegati non
-scatenano nulla), 4 in `tests/test_plan_executor.py::TaskRiskBudgetWiringTests` (stessa catena
-ferma il piano con `ESCALATION_DETECTED`; nessun rollback del passo gia' riuscito, verificato con
-un vero `CREATE_PATH` il cui file sopravvive; un dry-run a due passi rileva comunque l'escalation,
-la prova diretta del buco del dry-run sopra), 2 in `tests/test_action_ledger.py` (categorizzazione
-`ERROR_CATEGORY_PENDING`/`AUTHORIZATION_PENDING` del nuovo codice, sia nudo sia con prefisso
-`error:`), 1 rieseguito senza modifiche (`test_a_forged_skill_cannot_spawn_an_unbounded_number_of_
-child_processes` in `tests/test_sandboxed_skill_worker.py`, un flake gia' di categoria nota -
-dipendente dal carico di sistema sotto suite piena, non da questa modifica - passa isolato e passa
-di nuovo in una corsa completa successiva, mai toccato da questo incremento). 2.875/2.875 test,
-ruff/mypy/compileall verdi. F1.5.8 e' ora **chiusa** su entrambi i chokepoint reali (agente a
-passi, piano automatico) - il percorso a comando diretto di `JakeCore` non ha bisogno di questo
-gate (un comando diretto e' un SINGOLO intent scelto dall'utente, non una catena di passi decisi
-da un modello: non c'e' "storia del task" da cui un'escalation possa emergere).
+1. Eseguire il gate hardware di F2 con `docs/f2-hardware-validation.md` (tre profili di uscita,
+   sessione wake di 24 h, registrazioni consensuali) e `python -m benchmarks.f2_hardware_session
+   evaluate`; solo con `PASS` F2 passa a `DONE` e si valuta `voice_barge_in` diverso da `off`.
+2. Ripetere `tests/test_computer_use_dpi.py` con un secondo monitor collegato (chiude F3.1.5).
+3. Rieseguire `tests/test_vscode_adapter.py` dopo aver completato l'aggiornamento di VS Code.
+4. Poi G2: F4 (HUD nativo) e la parte rimasta di F2.6 (banco di prova su dialoghi reali).
