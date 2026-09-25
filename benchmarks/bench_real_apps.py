@@ -9,6 +9,9 @@ l'effetto finale e' verificato in modo INDIPENDENTE dall'azione (file su disco, 
 dell'app, contenuto della pagina); pulizia completa dopo ogni esecuzione, anche se fallisce. La
 tastiera viene usata solo quando la finestra in primo piano e' esattamente quella del flusso.
 
+Alla prima esecuzione di ogni app si registra anche un dump UIA della sola finestra del flusso, con un
+elemento di riferimento che deve esserci davvero (F3.2, "dump verificati su cinque app reali").
+
 | app | flusso | verifica indipendente |
 |---|---|---|
 | calculator | 17 + 25 = con Invoke UIA sui tasti | il display dell'app mostra 42 |
@@ -50,6 +53,27 @@ class RunResult:
     evidence: str = ""
     diagnosis: list[str] = field(default_factory=list)
     cleanup_ok: bool = True
+    dump: dict | None = None
+
+
+def verified_dump(adapter, window, landmark) -> dict:
+    """F3.2: dump dell'albero UIA della SOLA finestra del flusso, con un elemento di riferimento
+    che deve esserci davvero (non solo "il dump non e' vuoto")."""
+    started = time.perf_counter()
+    tree = adapter.describe_tree(window, 12)
+    elapsed = round((time.perf_counter() - started) * 1000, 1)
+    nodes = []
+
+    def walk(node):
+        if node is None:
+            return
+        nodes.append(node)
+        for child in node.children:
+            walk(child)
+
+    walk(tree)
+    found = any(landmark(node) for node in nodes)
+    return {"elements": len(nodes), "ms": elapsed, "landmark_found": found}
 
 
 def _hwnd(element) -> int:
@@ -110,6 +134,8 @@ class Calculator:
                 for proc in psutil.process_iter(["name", "exe"]):
                     if proc.info["name"] == "CalculatorApp.exe":
                         self.version = package_version_from_path(proc.info["exe"] or "")
+            if index == 1:
+                result.dump = verified_dump(adapter, window, lambda n: n.automation_id == "CalculatorResults")
             engine, executor = SelectorEngine(adapter), ActionExecutor()
             for button in ("clearButton", "num1Button", "num7Button", "plusButton", "num2Button", "num5Button", "equalButton"):
                 executor.invoke(engine.wait_for_unique_element(window, ElementSelector(automation_id=button), timeout_seconds=10.0))
@@ -168,6 +194,8 @@ class Paint:
                 self.version = package_version_from_path(psutil.Process(pid).exe())
             hwnd = _hwnd(window)
             time.sleep(1.0)
+            if index == 1:
+                result.dump = verified_dump(adapter, window, lambda n: n.control_type in ("MenuBar", "ToolBar", "Group"))
             keys_to(hwnd, lambda: pyautogui.hotkey("ctrl", "a"))
             time.sleep(0.4)
             keys_to(hwnd, lambda: pyautogui.press("delete"))
@@ -229,6 +257,8 @@ class Explorer:
             window = find_explorer_window(adapter, folder.name, timeout_seconds=15.0)
             hwnd = _hwnd(window)
             time.sleep(1.0)
+            if index == 1:
+                result.dump = verified_dump(adapter, window, lambda n: n.control_type == "List")
             keys_to(hwnd, lambda: pyautogui.hotkey("ctrl", "shift", "n"))
             time.sleep(1.0)
             keys_to(hwnd, lambda: (pyautogui.hotkey("ctrl", "a"), pyautogui.write(created, interval=0.02), pyautogui.press("enter")))
@@ -274,6 +304,8 @@ class Terminal:
             window = find_terminal_window(adapter, title, timeout_seconds=15.0)
             hwnd = _hwnd(window)
             time.sleep(0.8)
+            if index == 1:
+                result.dump = verified_dump(adapter, window, lambda n: n.control_type == "Document")
             keys_to(hwnd, lambda: (pyautogui.write(f'echo {expected}> "{out}"', interval=0.01), pyautogui.press("enter")))
             deadline = time.monotonic() + 8
             while time.monotonic() < deadline and not out.exists():
@@ -318,6 +350,8 @@ class Edge:
         try:
             window = adapter.find_window_by_process_id(browser.process.pid, timeout_seconds=25.0)  # solo la NOSTRA istanza
             document = find_page_document(adapter, window, timeout_seconds=15.0)
+            if index == 1:
+                result.dump = verified_dump(adapter, window, lambda n: n.name == "Aggiungi" and n.control_type == "Button")
             agent = ComputerAgent()
             typed = agent.type_into_element(text, root=document, name="Campo di testo", control_type="Edit")
             clicked = agent.click_element(root=document, name="Aggiungi", control_type="Button")
@@ -370,8 +404,9 @@ def main(argv=None) -> int:
             outcome.seconds = round(time.perf_counter() - started, 2)
             runs.append(outcome.__dict__)
             print(f"[{'OK' if outcome.success and outcome.cleanup_ok else 'KO'}] {name} #{index} "
-                  f"{outcome.evidence} pulizia={outcome.cleanup_ok} {'; '.join(outcome.diagnosis)}")
-        consecutive = all(r["success"] and r["cleanup_ok"] for r in runs)
+                  f"{outcome.evidence} pulizia={outcome.cleanup_ok} dump={outcome.dump} {'; '.join(outcome.diagnosis)}")
+        dump = runs[0].get("dump") if runs else None
+        consecutive = all(r["success"] and r["cleanup_ok"] for r in runs) and bool(dump and dump["landmark_found"])
         report["apps"][name] = {"workflow": flow.workflow, "version": flow.version, "runs": runs,
                                 "passed_consecutively": consecutive}
     passed = [name for name, app in report["apps"].items() if app["passed_consecutively"]]
