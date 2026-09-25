@@ -109,17 +109,56 @@ class SpeakTests(unittest.TestCase):
         self.assertEqual(play.call_count, 3)
         base.speak.assert_not_called()
 
-    def test_prewarm_runs_one_discarded_conversion(self):
+    def test_prewarm_warms_the_model_and_the_fixed_acknowledgements_without_speaking(self):
         provider, base, server_manager = _provider()
         server_manager.ensure_running.return_value = True
         server_manager.client.convert.return_value = b"AUDIO"
 
         provider.prewarm()
 
-        provider._prewarm_future.result(timeout=2)
-
-        server_manager.client.convert.assert_called_once()
+        self.assertTrue(provider._prewarm_future.result(timeout=2))
+        # "Ciao." per caricare modello e prima inferenza, poi le conferme fisse di sistema
+        self.assertEqual(server_manager.client.convert.call_count, 1 + len(provider.PREWARM_PHRASES))
         base.speak.assert_not_called()
+
+        # "Va bene, annullo." dopo uno stop parte subito: nessuna nuova sintesi ne' conversione
+        with mock.patch.object(provider, "_play") as play, mock.patch.object(provider, "_synthesize_to_bytes") as synth:
+            provider.speak("Va bene, annullo.")
+        play.assert_called_once_with(b"AUDIO")
+        synth.assert_not_called()
+        self.assertEqual(server_manager.client.convert.call_count, 1 + len(provider.PREWARM_PHRASES))
+
+    def test_the_cache_follows_voice_and_rate_and_skips_long_text(self):
+        provider, base, server_manager = _provider()
+        server_manager.ensure_running.return_value = True
+        server_manager.client.convert.return_value = b"AUDIO"
+        base.voice, base.rate = "it-IT-DiegoNeural", "+8%"
+        with mock.patch.object(provider, "_play"):
+            provider.speak("Sono le dieci.")
+            provider.speak("Sono le dieci.")
+            self.assertEqual(server_manager.client.convert.call_count, 1)
+            base.rate = "+20%"  # stile/dispositivo diverso: audio diverso
+            provider.speak("Sono le dieci.")
+            self.assertEqual(server_manager.client.convert.call_count, 2)
+            long_text = "Questa e' una risposta decisamente troppo lunga per essere tenuta in cache."
+            provider.speak(long_text)
+            provider.speak(long_text)
+        self.assertEqual(server_manager.client.convert.call_count, 4)
+
+    def test_a_revoked_consent_never_plays_the_cached_character_voice(self):
+        allowed = [True]
+        base = mock.MagicMock()
+        base.synthesize_to_file.side_effect = _write_wav
+        server_manager = mock.MagicMock()
+        server_manager.ensure_running.return_value = True
+        server_manager.client.convert.return_value = b"AUDIO"
+        provider = CharacterTtsProvider(base, server_manager, consent_check=lambda: allowed[0])
+        with mock.patch.object(provider, "_play") as play:
+            provider.speak("Va bene, annullo.")
+            allowed[0] = False
+            provider.speak("Va bene, annullo.")
+        play.assert_called_once()
+        base.speak.assert_called_once_with("Va bene, annullo.")
 
     def test_an_interruption_between_chunks_stops_the_rest(self):
         provider, base, server_manager = _provider()

@@ -17,6 +17,11 @@ class CharacterTtsProvider(TtsProvider):
     FIRST_CHUNK_MAX_CHARS = 75
     MAX_CHUNK_CHARS = 150
     MIN_CHUNK_CHARS = 45
+    # Frasi brevi gia' convertite: le conferme fisse ("Va bene, annullo.") partono subito invece
+    # di aspettare sintesi + RVC (~1 s) con il microfono in mute. Solo frasi corte, poche voci.
+    CACHE_MAX_CHARS = 60
+    CACHE_MAX_ENTRIES = 32
+    PREWARM_PHRASES = ("Va bene, annullo.", "Eccomi, ti ascolto di nuovo.", "Dettatura terminata.")
 
     @classmethod
     def _speech_chunks(cls, text: str) -> list[str]:
@@ -53,7 +58,16 @@ class CharacterTtsProvider(TtsProvider):
         with self._state_lock:
             return generation == self._generation and not self._interrupted
 
+    def _cache_key(self, text: str) -> tuple:
+        base = self.base_tts_provider
+        return (text, getattr(base, "voice", None), getattr(base, "rate", None))
+
     def _prepare_chunk(self, text: str, generation: int,) -> bytes | None:
+        key = self._cache_key(text)
+        with self._state_lock:
+            cached = self._converted_cache.get(key)
+        if cached is not None:
+            return cached if self._is_current(generation) else None
         source_bytes = self._synthesize_to_bytes(text)
         # Stop arrivato mentre il TTS base stava sintetizzando:
         # non iniziare nemmeno la conversione RVC.
@@ -61,6 +75,12 @@ class CharacterTtsProvider(TtsProvider):
             return None
 
         converted_bytes = self.server_manager.client.convert(source_bytes)
+
+        if len(text) <= self.CACHE_MAX_CHARS:
+            with self._state_lock:
+                if len(self._converted_cache) >= self.CACHE_MAX_ENTRIES:
+                    self._converted_cache.pop(next(iter(self._converted_cache)))
+                self._converted_cache[key] = converted_bytes
 
         # Stop arrivato durante RVC: il risultato ormai prodotto
         # non deve essere riprodotto.
@@ -93,6 +113,7 @@ class CharacterTtsProvider(TtsProvider):
         self._state_lock = threading.Lock()
         self._generation = 0
         self._prewarm_future = None
+        self._converted_cache: dict[tuple, bytes] = {}
 
     def prewarm(self) -> None:
         """Scalda anche TTS + prima inferenza RVC, senza riprodurre audio."""
@@ -112,9 +133,15 @@ class CharacterTtsProvider(TtsProvider):
         try:
             source_bytes = self._synthesize_to_bytes("Ciao.")
             self.server_manager.client.convert(source_bytes)
+            for phrase in self.PREWARM_PHRASES:
+                self._prepare_chunk(phrase, self._generation_snapshot())
             return True
         except Exception:
             return False
+
+    def _generation_snapshot(self) -> int:
+        with self._state_lock:
+            return self._generation
 
     def speak(self, text: str) -> None:
         generation = self._begin_generation()
