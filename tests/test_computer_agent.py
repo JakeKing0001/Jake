@@ -20,6 +20,10 @@ _BUTTON_INFO = ElementInfo(
 )
 
 
+
+# Mouse e tastiera veri: mai input fuori dalla fixture (vedi tests/fixture_input_guard.py).
+from tests.fixture_input_guard import install as setUpModule, uninstall as tearDownModule  # noqa: E402,F401
+
 class ObserveAndLocateTests(unittest.TestCase):
     def test_observe_delegates_to_ocr(self):
         with mock.patch("core.vision.screen.read_screen_words", return_value=WORDS):
@@ -233,6 +237,23 @@ class ClickElementTests(unittest.TestCase):
         self.assertEqual(result.strategy, "uia_invoke")
         self.assertEqual(result.attempts[0][0], "uia_invoke")
         self.assertIn("scala interrotta", result.attempts[0][2])
+
+    def test_a_covered_element_never_receives_the_pixel_fallback(self):
+        """Trovato con un test reale: una fixture comparsa DIETRO l'editor dell'utente ha ricevuto
+        click e testo destinati a lei. Se nel punto c'e' un altro processo (e non si riesce a
+        portare in primo piano il bersaglio) il click pixel non parte e la diagnosi lo dice."""
+        with mock.patch("core.computer_use.ui_automation_adapter.UIAutomationAdapter") as MockAdapter,              mock.patch("core.computer_use.selector.SelectorEngine") as MockEngine,              mock.patch("core.computer_use.executor.ActionExecutor") as MockExecutor,              mock.patch("core.vision.screen.capture_screenshot_image", return_value=None),              mock.patch("pyautogui.click") as click, mock.patch("time.sleep"):
+            adapter, _engine = self._mocked_adapter_and_engine(MockAdapter, MockEngine)
+            adapter.point_belongs_to.return_value = False
+            adapter.process_id_of.return_value = None
+            MockExecutor.return_value.invoke.side_effect = RuntimeError("Invoke non supportato")
+            result = ComputerAgent().click_element(window_title="Jake Computer Use Fixture", name="Aggiungi", idempotent=True)
+
+        click.assert_not_called()
+        adapter.bring_to_front.assert_called()
+        self.assertFalse(result.success)
+        self.assertEqual([a[0] for a in result.attempts], ["uia_invoke", "pixel_click"])
+        self.assertIn("coperto", result.attempts[1][2])
 
     def test_an_idempotent_click_may_still_fall_back_to_the_pixel_click(self):
         """Solo quando il chiamante dichiara che una seconda pressione e' innocua (selezionare una

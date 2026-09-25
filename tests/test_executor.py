@@ -19,6 +19,10 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _FIXTURE_WINDOW_TITLE = "Jake Computer Use Fixture"
 
 
+
+# Mouse e tastiera veri: mai input fuori dalla fixture (vedi tests/fixture_input_guard.py).
+from tests.fixture_input_guard import install as setUpModule, uninstall as tearDownModule  # noqa: E402,F401
+
 class _ExecutorFixtureTestCase(_RealFixtureTestCase):
     def setUp(self):
         self.executor = ActionExecutor()

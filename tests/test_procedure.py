@@ -51,6 +51,10 @@ def _edge_available() -> bool:
         return False
 
 
+
+# Mouse e tastiera veri: mai input fuori dalla fixture (vedi tests/fixture_input_guard.py).
+from tests.fixture_input_guard import install as setUpModule, uninstall as tearDownModule  # noqa: E402,F401
+
 class RecordedStepValidationTests(unittest.TestCase):
     def test_an_unknown_action_is_rejected(self):
         with self.assertRaises(ValueError):

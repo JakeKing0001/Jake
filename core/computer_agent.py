@@ -173,6 +173,38 @@ def _last_performed_strategy(outcome) -> str | None:
     return outcome.successful_strategy or (outcome.attempts[-1].strategy_name if outcome.attempts else None)
 
 
+class ElementOccludedError(Exception):
+    """Un'azione pixel su un elemento coperto da un'altra finestra colpirebbe quella: mai eseguita."""
+
+
+def ensure_pixel_target(adapter, element, x: int, y: int) -> None:
+    """Prima di un click/una digitazione pixel mirati a `element`: nel punto deve esserci davvero il
+    suo processo. Se un'altra finestra lo copre si prova a portarlo in primo piano e si ricontrolla;
+    altrimenti ElementOccludedError e nessun input. Trovato con un test reale: una fixture comparsa
+    DIETRO l'editor aperto dell'utente ha ricevuto il click e il testo destinati a lei."""
+    if adapter.point_belongs_to(element, x, y):
+        return
+    adapter.bring_to_front(element)
+    for _ in range(10):
+        time.sleep(0.05)
+        if adapter.point_belongs_to(element, x, y):
+            return
+    hit = adapter.element_from_point(x, y)
+    owner = process_name_of_pid(adapter.process_id_of(hit)) if hit is not None else None
+    raise ElementOccludedError(f"elemento coperto da un'altra finestra ({owner or 'sconosciuta'}): nessun input inviato")
+
+
+def process_name_of_pid(pid: int | None) -> str | None:
+    if not pid:
+        return None
+    try:
+        import psutil
+
+        return psutil.Process(pid).name()
+    except Exception:
+        return None
+
+
 class ComputerAgent:
     def __init__(self, idempotency_ttl_seconds: float = IDEMPOTENCY_TTL_SECONDS, policy_engine=None) -> None:
         """F3.4.6: `idempotency_ttl_seconds` iniettabile (non solo la costante di modulo) per lo
@@ -467,6 +499,7 @@ class ComputerAgent:
         def _pixel_click() -> None:
             import pyautogui
             raise_if_cancelled()
+            ensure_pixel_target(_adapter, element, center_x, center_y)
             pyautogui.click(center_x, center_y)
             action_performed[0] = True
 
@@ -574,6 +607,7 @@ class ComputerAgent:
         def _pixel_type() -> None:
             import pyautogui
             raise_if_cancelled()
+            ensure_pixel_target(_adapter, element, center_x, center_y)
             pyautogui.click(center_x, center_y)
             # Ctrl+A poi scrivi, MAI scrivere direttamente sul campo com'e' - buco reale trovato
             # verificando questo metodo, non ipotizzato (vedi ROADMAP_EXECUTION.md): SetValue

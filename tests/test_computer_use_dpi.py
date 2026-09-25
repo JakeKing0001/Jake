@@ -4,8 +4,10 @@ La fixture viene lanciata con `QT_SCALE_FACTOR` 1.0 / 1.25 / 1.5 / 2.0 (sopra la
 questa macchina, 125%): Qt ridisegna davvero piu' grande (verificato dai bounds UIA). A ogni scala il
 bottone "Aggiungi" viene premuto con un click PIXEL calcolato dal centro dei bounds UI Automation -
 il percorso che si rompe se coordinate UIA e coordinate del mouse non sono nello stesso spazio (processo
-non per-monitor DPI aware, vedi core/win_dpi.py) - e l'effetto e' verificato in modo indipendente (la
-voce compare davvero nella lista). Multi-monitor: verificabile solo con piu' di un monitor collegato;
+non per-monitor DPI aware, vedi core/win_dpi.py; la consapevolezza per-monitor in un processo pulito
+e' verificata da tests/test_win_dpi.py) - e l'effetto e' verificato in modo indipendente (la voce
+compare davvero nella lista). Prima di ogni click pixel il bottone deve essere davvero in cima nel
+punto (`ensure_pixel_target`): mai un click alla cieca su una finestra che potrebbe coprire la fixture. Multi-monitor: verificabile solo con piu' di un monitor collegato;
 altrimenti il test e' saltato con il motivo, mai dichiarato verde."""
 import ctypes
 import os
@@ -15,15 +17,18 @@ import time
 import unittest
 from pathlib import Path
 
-from core.computer_agent import ComputerAgent
+from core.computer_agent import ComputerAgent, ensure_pixel_target
 from core.computer_use.selector import ElementSelector, SelectorEngine
 from core.computer_use.ui_automation_adapter import UIAutomationAdapter
-from core.win_dpi import PER_MONITOR_AWARE, current_dpi_awareness
 
 _ROOT = Path(__file__).resolve().parent.parent
 _TITLE = "Jake Computer Use Fixture"
 _INPUT_ID = "QApplication.jake_fixture_window.fixture_input"
 
+
+
+# Mouse e tastiera veri: mai input fuori dalla fixture (vedi tests/fixture_input_guard.py).
+from tests.fixture_input_guard import install as setUpModule, uninstall as tearDownModule  # noqa: E402,F401
 
 class FixtureAtScale:
     def __init__(self, scale: float):
@@ -55,10 +60,6 @@ class FixtureAtScale:
 class DpiScalingTests(unittest.TestCase):
     SCALES = (1.0, 1.25, 1.5, 2.0)
 
-    def test_jake_is_per_monitor_dpi_aware_before_acting(self):
-        ComputerAgent()
-        self.assertEqual(current_dpi_awareness(), PER_MONITOR_AWARE)
-
     def test_a_pixel_click_from_uia_bounds_hits_the_button_at_every_scale(self):
         agent = ComputerAgent()
         widths = {}
@@ -74,6 +75,7 @@ class DpiScalingTests(unittest.TestCase):
                 typed = agent.type_into_element(label, window_title=_TITLE, automation_id=_INPUT_ID)
                 self.assertTrue(typed.success)
 
+                ensure_pixel_target(fixture.adapter, button, left + width // 2, top + height // 2)
                 clicked = agent.click_point(left + width // 2, top + height // 2)
                 self.assertTrue(clicked.success)
 
@@ -103,6 +105,7 @@ class DpiScalingTests(unittest.TestCase):
             )
             left, top, w, h = fixture.adapter.describe_element(button).bounds
             self.assertGreaterEqual(left, width, "la finestra deve essere davvero sul secondo monitor")
+            ensure_pixel_target(fixture.adapter, button, left + w // 2, top + h // 2)
             self.assertTrue(agent.type_into_element("secondo monitor", window_title=_TITLE, automation_id=_INPUT_ID).success)
             self.assertTrue(agent.click_point(left + w // 2, top + h // 2).success)
             engine.wait_for_unique_element(

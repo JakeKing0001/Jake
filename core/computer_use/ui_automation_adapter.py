@@ -113,6 +113,37 @@ class ElementInfo:
     children: tuple["ElementInfo", ...] = field(default_factory=tuple)
 
 
+def force_foreground_window(hwnd: int) -> bool:
+    """Porta `hwnd` in primo piano. Windows rifiuta SetForegroundWindow a un processo che non ha
+    ricevuto l'ultimo input: agganciando per un istante la coda di input del thread in primo piano
+    (AttachThreadInput) la richiesta viene accettata senza inviare alcun tasto sintetico."""
+    try:
+        import win32api
+        import win32con
+        import win32gui
+        import win32process
+    except ImportError:
+        return False
+    try:
+        if win32gui.IsIconic(hwnd):
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        foreground = win32gui.GetForegroundWindow()
+        current_thread = win32api.GetCurrentThreadId()
+        foreground_thread = win32process.GetWindowThreadProcessId(foreground)[0] if foreground else 0
+        attached = False
+        if foreground_thread and foreground_thread != current_thread:
+            attached = bool(win32process.AttachThreadInput(current_thread, foreground_thread, True))
+        try:
+            win32gui.BringWindowToTop(hwnd)
+            win32gui.SetForegroundWindow(hwnd)
+        finally:
+            if attached:
+                win32process.AttachThreadInput(current_thread, foreground_thread, False)
+        return win32gui.GetForegroundWindow() == hwnd
+    except Exception:
+        return False
+
+
 class UIAutomationAdapter:
     """F3.2.1: "creare UIAutomationAdapter dietro interfaccia, senza legarlo alle skill" - nessuna
     skill importa `comtypes`/`UIAutomationClient` direttamente, solo questo modulo. Ogni istanza
@@ -372,6 +403,71 @@ class UIAutomationAdapter:
         contro un `QMenu` reale PRIMA di scrivere questo metodo: risolve davvero l'elemento
         `Window`/`MenuItem` corretto, non solo un puntatore vuoto."""
         return self._uia.ElementFromHandle(hwnd)
+
+    def element_from_point(self, x: int, y: int):
+        """L'elemento UI Automation sotto un punto dello schermo (F3.8.1: la dimostrazione registra
+        QUALE elemento e' stato cliccato, mai il punto). None se il punto non e' risolvibile."""
+        point = UIA.tagPOINT(int(x), int(y))
+        try:
+            return self._uia.ElementFromPoint(point)
+        except (ValueError, comtypes.COMError):
+            return None
+
+    def focused_element(self):
+        """L'elemento con il fuoco della tastiera (None se non leggibile)."""
+        try:
+            return self._uia.GetFocusedElement()
+        except (ValueError, comtypes.COMError):
+            return None
+
+    def top_level_window_of(self, element):
+        """La finestra di primo livello che contiene `element` (risalendo il control view)."""
+        walker = self._uia.ControlViewWalker
+        root = self._uia.GetRootElement()
+        current = element
+        try:
+            while True:
+                parent = walker.GetParentElement(current)
+                if not parent or self._uia.CompareElements(parent, root):
+                    return current
+                current = parent
+        except (ValueError, comtypes.COMError):
+            return None
+
+    def point_belongs_to(self, element, x: int, y: int) -> bool:
+        """Vero se nel punto dello schermo (x, y) c'e' davvero un elemento dello STESSO processo di
+        `element`: cio' che un click pixel li' colpirebbe. Falso se un'altra finestra lo copre."""
+        target_pid = self.process_id_of(element)
+        hit = self.element_from_point(x, y)
+        return target_pid is not None and hit is not None and self.process_id_of(hit) == target_pid
+
+    def bring_to_front(self, element) -> bool:
+        """Prova a portare in primo piano la finestra di primo livello di `element` (Windows puo'
+        rifiutarlo: il chiamante ricontrolla sempre con `point_belongs_to`)."""
+        window = self.top_level_window_of(element)
+        try:
+            hwnd = int(window.CurrentNativeWindowHandle) if window is not None else 0
+        except (ValueError, comtypes.COMError, TypeError):
+            hwnd = 0
+        if not hwnd:
+            return False
+        return force_foreground_window(hwnd)
+
+    @staticmethod
+    def process_id_of(element) -> int | None:
+        try:
+            return int(element.CurrentProcessId)
+        except (ValueError, comtypes.COMError, TypeError):
+            return None
+
+    @staticmethod
+    def is_password(element) -> bool:
+        """Vero anche quando la proprieta' non e' leggibile: nel dubbio un campo e' trattato come
+        segreto e il suo contenuto non viene mai registrato."""
+        try:
+            return bool(element.CurrentIsPassword)
+        except (ValueError, comtypes.COMError):
+            return True
 
     def describe_element(self, element) -> ElementInfo | None:
         """Solo l'elemento dato, senza figli (`children` resta vuoto) - vedi `describe_tree` per
