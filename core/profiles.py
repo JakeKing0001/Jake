@@ -93,6 +93,12 @@ class ProfileManager:
             raise ProfileError(f"'{GUEST_ID}' e' riservato alla modalita' ospite")
         return profile_id
 
+    @classmethod
+    def validate_id(cls, profile_id: str) -> str:
+        """Le stesse regole di `create_profile`, per chi deve rifiutare un id PRIMA di altri effetti
+        (es. l'arruolamento vocale, prima di registrare)."""
+        return cls._check_id(profile_id)
+
     # ---- profili persistenti -----------------------------------------------------------------
 
     def create_profile(self, profile_id: str, display_name: str, max_risk: RiskLevel = RiskLevel.ADMIN) -> ProfileNamespace:
