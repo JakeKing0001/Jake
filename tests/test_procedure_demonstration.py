@@ -94,7 +94,7 @@ class _FixtureCase(unittest.TestCase):
 
 class DemonstrationRecordingTests(_FixtureCase):
     def test_real_clicks_and_typing_become_semantic_steps(self):
-        sampler = UiaDemonstrationSampler(_TITLE)
+        sampler = UiaDemonstrationSampler(_TITLE, process_id=self.adapter.process_id_of(self.window))
         self.assertTrue(sampler.start(), sampler.error)
         self._demonstrate_add("dimostrato")
         steps = sampler.stop()
@@ -110,7 +110,10 @@ class DemonstrationRecordingTests(_FixtureCase):
 
 class ProcedureSurvivesRestartResizeAndDataTests(_FixtureCase):
     def test_a_demonstrated_procedure_runs_after_restart_resize_and_with_new_data(self):
-        recorder = RecordComputerProcedureSkill(self.manager)
+        pid = self.adapter.process_id_of(self.window)
+        recorder = RecordComputerProcedureSkill(
+            self.manager, sampler_factory=lambda window: UiaDemonstrationSampler(window, process_id=pid),
+        )
         started = recorder.execute({"action": "start", "window": _TITLE})
         self.assertTrue(started.success, started)
         self._demonstrate_add("primo dato")

@@ -172,13 +172,17 @@ class RecordComputerProcedureSkill:
     def _start(self, window: str) -> SkillResult:
         if self._sampler is not None:
             return SkillResult(success=False, data={"window": self._window}, error="ALREADY_RECORDING")
+        process_id = None
         if not window:
-            window = (self._foreground_title or _foreground_window_title)() or ""
+            window, process_id = (self._foreground_title or _foreground_window)()
         if not window:
             return SkillResult(success=False, data={}, error="WINDOW_NOT_FOUND")
         from core.computer_use.demonstration import UiaDemonstrationSampler
 
-        sampler = (self._sampler_factory or UiaDemonstrationSampler)(window)
+        if self._sampler_factory is not None:
+            sampler = self._sampler_factory(window)
+        else:
+            sampler = UiaDemonstrationSampler(window, process_id=process_id)
         if not sampler.start():
             return SkillResult(success=False, data={"window": window, "reason": sampler.error}, error="WINDOW_NOT_FOUND")
         self._sampler, self._window = sampler, window
@@ -210,10 +214,13 @@ class RecordComputerProcedureSkill:
         })
 
 
-def _foreground_window_title() -> str | None:
+def _foreground_window() -> tuple[str, int | None]:
+    """Titolo e processo della finestra in primo piano ("osserva come faccio" senza nominarla)."""
     try:
         import win32gui
+        import win32process
 
-        return win32gui.GetWindowText(win32gui.GetForegroundWindow()) or None
+        hwnd = win32gui.GetForegroundWindow()
+        return win32gui.GetWindowText(hwnd) or "", win32process.GetWindowThreadProcessId(hwnd)[1]
     except Exception:
-        return None
+        return "", None

@@ -189,3 +189,24 @@ class StructuralDriftTests(unittest.TestCase):
         procedure = self._procedure(("Button:Aggiungi", "Window"))
         self.assertEqual(Procedure.from_dict(procedure.to_dict()).structure, ("Button:Aggiungi", "Window"))
 
+
+class RecordSkillTargetTests(unittest.TestCase):
+    def test_without_a_window_the_foreground_one_is_recorded_by_process(self):
+        from unittest import mock
+
+        from skills.computer_procedure import RecordComputerProcedureSkill
+
+        with mock.patch("core.computer_use.demonstration.UiaDemonstrationSampler") as Sampler:
+            Sampler.return_value.start.return_value = True
+            skill = RecordComputerProcedureSkill(procedure_manager=None, foreground_title=lambda: ("Calcolatrice", 4321))
+            result = skill.execute({"action": "start"})
+        self.assertTrue(result.success)
+        Sampler.assert_called_once_with("Calcolatrice", process_id=4321)
+        self.assertEqual(skill.execute({"action": "start"}).error, "ALREADY_RECORDING")
+
+    def test_stop_without_recording_or_name_is_reported(self):
+        from skills.computer_procedure import RecordComputerProcedureSkill
+
+        self.assertEqual(RecordComputerProcedureSkill(None).execute({"action": "stop", "name": "x"}).error, "NOT_RECORDING")
+        self.assertEqual(RecordComputerProcedureSkill(None).execute({"action": "boh"}).error, "MISSING_PARAMETERS")
+

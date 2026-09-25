@@ -2571,6 +2571,12 @@ class ProgressBarEndToEndTests(unittest.TestCase):
         self.assertGreater(value_at_cancel, 0.0, "precondizione: il progresso deve essere gia' avanzato prima di annullare")
 
         self.executor.invoke(cancel_button)
+        # Letto DOPO l'annullamento: un tick del timer puo' arrivare tra la lettura precedente e
+        # l'elaborazione di "Annulla" (flaky reale: 20 -> 40 prima dello stop). La proprieta' e'
+        # "dopo l'annullamento il valore non si muove piu'", e deve essere ancora a meta'.
+        time.sleep(0.3)
+        value_at_cancel = self._current_progress_value(progress_bar)
+        self.assertLess(value_at_cancel, 100.0, "annullato a meta' strada, non completato")
         time.sleep(1.5)  # abbastanza per completare l'intero avanzamento, se il timer non fosse stato fermato davvero
 
         self.assertEqual(self._current_progress_value(progress_bar), value_at_cancel, "il valore deve restare fermo al punto dell'annullamento")

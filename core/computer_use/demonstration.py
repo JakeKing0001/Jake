@@ -138,8 +138,9 @@ class UiaDemonstrationSampler:
     POLL_SECONDS = 0.02
     VK_LBUTTON = 0x01
 
-    def __init__(self, window_title_contains: str, adapter_factory=None) -> None:
+    def __init__(self, window_title_contains: str, adapter_factory=None, process_id: int | None = None) -> None:
         self.recorder = DemonstrationRecorder(window_title_contains)
+        self.process_id = process_id
         self._adapter_factory = adapter_factory
         self._stop = threading.Event()
         self._ready = threading.Event()
@@ -164,11 +165,11 @@ class UiaDemonstrationSampler:
 
         from core.computer_use.ui_automation_adapter import UIAutomationAdapter, WindowNotFoundError
 
-        adapter = (self._adapter_factory or UIAutomationAdapter)()
         try:
-            window = adapter.find_window_by_title_containing(self.recorder.window_title_contains, timeout_seconds=5.0)
-        except WindowNotFoundError as exc:
-            self.error = str(exc)
+            adapter = (self._adapter_factory or UIAutomationAdapter)()
+            window = self._find_target(adapter, WindowNotFoundError)
+        except Exception as exc:  # mai un thread che muore in silenzio: l'errore arriva a start()
+            self.error = f"{type(exc).__name__}: {exc}"
             self._ready.set()
             return
         self._pid = adapter.process_id_of(window)
@@ -192,6 +193,13 @@ class UiaDemonstrationSampler:
             was_down = down
             time.sleep(self.POLL_SECONDS)
         self._flush_value(self._focused)
+
+    def _find_target(self, adapter, not_found):
+        """La finestra bersaglio: quella del processo indicato, altrimenti l'UNICA che contiene il
+        titolo (due finestre con lo stesso titolo = errore esplicito, mai una scelta a caso)."""
+        if self.process_id is not None:
+            return adapter.find_window_by_process_id(self.process_id, timeout_seconds=5.0)
+        return adapter.find_window_by_title_containing(self.recorder.window_title_contains, timeout_seconds=5.0)
 
     def _in_target(self, element) -> bool:
         return element is not None and self._adapter.process_id_of(element) == self._pid
