@@ -18,6 +18,7 @@ from core.computer_use.browser_adapter import (
     launch_isolated_browser,
     read_address_bar_text,
     read_page_text,
+    find_isolated_browser_window,
 )
 from core.computer_use.selector import ElementSelector, SelectorEngine
 from core.computer_use.ui_automation_adapter import UIAutomationAdapter
@@ -39,7 +40,7 @@ class RealBrowserFixtureTests(unittest.TestCase):
         self.browser = launch_isolated_browser(_FIXTURE_URL)
         self.addCleanup(self.browser.terminate_and_cleanup)
         self.adapter = UIAutomationAdapter()
-        self.window = self.adapter.find_window_by_process_id(self.browser.process.pid, timeout_seconds=15.0)
+        self.window = find_isolated_browser_window(self.adapter, self.browser, timeout_seconds=25.0)
 
     def test_the_page_content_is_not_visible_before_waking_the_accessibility_tree(self):
         """Buco reale trovato investigando, non ipotizzato (vedi il docstring del modulo): prima
@@ -353,4 +354,25 @@ class IsolatedProfileCleanupTests(unittest.TestCase):
 
         self.assertFalse(Path(profile).exists())
         self.assertIsNotNone(holder.poll(), "il processo che teneva il profilo non deve restare vivo")
+
+
+class FindIsolatedBrowserWindowTests(unittest.TestCase):
+    """Verificato il 25/09/2026: il processo Edge lanciato puo' uscire (codice 0) e lasciare la
+    finestra a un altro processo dello STESSO profilo temporaneo; cercare per il PID del
+    lanciatore falliva sempre (e rompeva anche la skill read_web_page)."""
+
+    def test_the_window_of_a_process_sharing_the_isolated_profile_is_found(self):
+        from unittest import mock
+
+        from core.computer_use.browser_adapter import IsolatedBrowserProcess, find_isolated_browser_window
+        from core.computer_use.ui_automation_adapter import WindowNotFoundError
+
+        browser = IsolatedBrowserProcess(mock.MagicMock(pid=100), "C:/tmp/jake_edge_x")
+        adapter = mock.MagicMock()
+        adapter.find_window_by_process_id.side_effect = lambda pid, timeout_seconds: (
+            "finestra" if pid == 200 else (_ for _ in ()).throw(WindowNotFoundError(str(pid))))
+        with mock.patch.object(browser, "_profile_processes", return_value=[mock.MagicMock(pid=200)]):
+            self.assertEqual(find_isolated_browser_window(adapter, browser, timeout_seconds=1.0), "finestra")
+        with mock.patch.object(browser, "_profile_processes", return_value=[]), self.assertRaises(WindowNotFoundError):
+            find_isolated_browser_window(adapter, browser, timeout_seconds=0.3)
 

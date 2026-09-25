@@ -339,7 +339,7 @@ class Edge:
 
     def run_once(self, adapter, index: int) -> RunResult:
         from core.computer_agent import ComputerAgent
-        from core.computer_use.browser_adapter import find_page_document, launch_isolated_browser, read_page_text
+        from core.computer_use.browser_adapter import find_isolated_browser_window, find_page_document, launch_isolated_browser, read_page_text
 
         import psutil
 
@@ -348,7 +348,7 @@ class Edge:
         browser = launch_isolated_browser(url)
         text = f"voce edge {index} {uuid.uuid4().hex[:4]}"
         try:
-            window = adapter.find_window_by_process_id(browser.process.pid, timeout_seconds=25.0)  # solo la NOSTRA istanza
+            window = find_isolated_browser_window(adapter, browser, timeout_seconds=25.0)  # solo la NOSTRA istanza
             document = find_page_document(adapter, window, timeout_seconds=15.0)
             if index == 1:
                 result.dump = verified_dump(adapter, window, lambda n: n.name == "Aggiungi" and n.control_type == "Button")

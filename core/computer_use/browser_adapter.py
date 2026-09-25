@@ -209,6 +209,30 @@ class IsolatedBrowserProcess:
         return holders
 
 
+def find_isolated_browser_window(adapter: UIAutomationAdapter, browser: IsolatedBrowserProcess,
+                                 timeout_seconds: float = 25.0):
+    """La finestra dell'istanza isolata. Non basta il PID del processo lanciato: Edge puo'
+    rilanciarsi e passare la finestra a un altro processo dello STESSO profilo (verificato il
+    25/09/2026: il lanciatore esce con codice 0 e la finestra appartiene a un processo figlio).
+    Si cerca quindi tra i processi che usano il profilo temporaneo univoco di QUESTA istanza -
+    mai tra gli altri Edge dell'utente."""
+    import time
+
+    from core.computer_use.ui_automation_adapter import WindowNotFoundError
+
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        pids = {browser.process.pid} | {proc.pid for proc in browser._profile_processes()}
+        for pid in pids:
+            try:
+                return adapter.find_window_by_process_id(pid, timeout_seconds=0.2)
+            except WindowNotFoundError:
+                continue
+        if time.monotonic() > deadline:
+            raise WindowNotFoundError(f"nessuna finestra del browser isolato ({browser.user_data_dir}) entro {timeout_seconds}s")
+        time.sleep(0.3)
+
+
 def launch_isolated_browser(url: str) -> IsolatedBrowserProcess:
     """Lancia Edge su `url` con un profilo temporaneo ISOLATO (mai il profilo reale dell'utente,
     vedi il docstring del modulo) - il chiamante e' responsabile di chiamare

@@ -17,6 +17,7 @@ from core.computer_use.browser_adapter import (
     read_page_text,
     select_tab,
     wait_for_download,
+    find_isolated_browser_window,
 )
 from core.computer_use.selector import ElementSelector, SelectorEngine
 from core.computer_use.ui_automation_adapter import UIAutomationAdapter
@@ -45,7 +46,7 @@ class _BrowserCase(unittest.TestCase):
         self.browser = launch_isolated_browser(url)
         self.addCleanup(self.browser.terminate_and_cleanup)
         self.adapter = UIAutomationAdapter()
-        self.window = self.adapter.find_window_by_process_id(self.browser.process.pid, timeout_seconds=25.0)
+        self.window = find_isolated_browser_window(self.adapter, self.browser, timeout_seconds=25.0)
         self.document = find_page_document(self.adapter, self.window, timeout_seconds=15.0)
         self.agent = ComputerAgent()
 

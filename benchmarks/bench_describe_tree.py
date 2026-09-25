@@ -54,7 +54,7 @@ def _bench_qt_fixture(iterations: int) -> dict | None:
 
 
 def _bench_large_browser_dom(iterations: int) -> dict | None:
-    from core.computer_use.browser_adapter import BrowserNotFoundError, find_page_document, launch_isolated_browser
+    from core.computer_use.browser_adapter import BrowserNotFoundError, find_page_document, launch_isolated_browser, find_isolated_browser_window
 
     fixture_url = (_REPO_ROOT / "benchmarks" / "browser_fixture_large.html").as_uri()
     adapter = UIAutomationAdapter()
@@ -63,7 +63,7 @@ def _bench_large_browser_dom(iterations: int) -> dict | None:
     except BrowserNotFoundError:
         return None
     try:
-        window = adapter.find_window_by_process_id(browser.process.pid, timeout_seconds=15.0)
+        window = find_isolated_browser_window(adapter, browser, timeout_seconds=25.0)
         document = find_page_document(adapter, window, timeout_seconds=15.0)
         time.sleep(1.0)  # tempo di rendering completo della tabella, non un'attesa a caso: verificato empiricamente necessario per un conteggio elementi stabile
 

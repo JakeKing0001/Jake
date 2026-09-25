@@ -74,7 +74,8 @@ class ReadWebPageSkill:
             find_page_document,
             launch_isolated_browser,
             read_page_text,
-        )
+    find_isolated_browser_window,
+)
         from core.computer_use.ui_automation_adapter import UIAutomationAdapter, WindowNotFoundError
 
         try:
@@ -86,7 +87,7 @@ class ReadWebPageSkill:
         try:
             adapter = UIAutomationAdapter()
             try:
-                window = adapter.find_window_by_process_id(browser.process.pid, timeout_seconds=15.0)
+                window = find_isolated_browser_window(adapter, browser, timeout_seconds=25.0)
             except WindowNotFoundError:
                 return SkillResult(success=False, data={"url": url}, error="OPERATION_FAILED")
             document = find_page_document(adapter, window)

@@ -16,6 +16,7 @@ from core.computer_use.browser_adapter import (
     find_edge_executable,
     find_page_document,
     launch_isolated_browser,
+    find_isolated_browser_window,
 )
 from core.computer_use.procedure import (
     ACTION_CLICK,
@@ -364,7 +365,7 @@ class ReplayAgainstARealBrowserPageTests(unittest.TestCase):
         self.browser = launch_isolated_browser(_BROWSER_FIXTURE_URL)
         self.addCleanup(self.browser.terminate_and_cleanup)
         self.adapter = UIAutomationAdapter()
-        self.window = self.adapter.find_window_by_process_id(self.browser.process.pid, timeout_seconds=15.0)
+        self.window = find_isolated_browser_window(self.adapter, self.browser, timeout_seconds=25.0)
         self.agent = ComputerAgent()
 
     def test_a_recorded_procedure_replays_for_real_against_a_real_browser_page(self):
