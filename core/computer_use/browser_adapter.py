@@ -149,9 +149,10 @@ class IsolatedBrowserProcess:
     modulo piu' volte, non ipotizzato: 19 profili temporanei vuoti accumulati in `%TEMP%` dopo
     poche esecuzioni, mai cancellati perche' nessuno aveva un riferimento al percorso)."""
 
-    def __init__(self, process: subprocess.Popen, user_data_dir: str) -> None:
+    def __init__(self, process: subprocess.Popen, user_data_dir: str, download_dir: str | None = None) -> None:
         self.process = process
         self.user_data_dir = user_data_dir
+        self.download_dir = download_dir
 
     def terminate_and_cleanup(self, timeout_seconds: float = 5.0) -> None:
         """Termina il processo (con `.kill()` di ripiego se non esce entro il timeout, stesso
@@ -216,11 +217,89 @@ def launch_isolated_browser(url: str) -> IsolatedBrowserProcess:
     disco, non solo al processo."""
     executable = find_edge_executable()
     user_data_dir = tempfile.mkdtemp(prefix="jake_edge_")
+    download_dir = _prepare_isolated_downloads(user_data_dir)
     process = subprocess.Popen([
         str(executable), url, f"--user-data-dir={user_data_dir}", "--new-window",
         *_EDGE_ISOLATION_ARGS,
     ])
-    return IsolatedBrowserProcess(process, user_data_dir)
+    return IsolatedBrowserProcess(process, user_data_dir, download_dir)
+
+
+def _prepare_isolated_downloads(user_data_dir: str) -> str:
+    """F3.6.3 (download): senza preferenze, anche un profilo temporaneo InPrivate scarica nella
+    cartella Download PERSONALE dell'utente. I download dell'istanza isolata vanno invece in una
+    cartella dentro il profilo temporaneo (cancellata con lui), senza finestra di conferma."""
+    import json
+
+    download_dir = os.path.join(user_data_dir, "downloads")
+    os.makedirs(os.path.join(user_data_dir, "Default"), exist_ok=True)
+    os.makedirs(download_dir, exist_ok=True)
+    preferences = {
+        "download": {"default_directory": download_dir, "prompt_for_download": False, "directory_upgrade": True},
+        "savefile": {"default_directory": download_dir},
+    }
+    with open(os.path.join(user_data_dir, "Default", "Preferences"), "w", encoding="utf-8") as handle:
+        json.dump(preferences, handle)
+    return download_dir
+
+
+def wait_for_download(download_dir: str, file_name: str, timeout_seconds: float = 10.0) -> Path | None:
+    """Il file scaricato, solo quando e' completo (nessun .crdownload rimasto); None se non arriva."""
+    import time
+
+    target = Path(download_dir) / file_name
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        partial = list(Path(download_dir).glob("*.crdownload"))
+        if target.exists() and not partial:
+            return target
+        time.sleep(0.2)
+    return None
+
+
+def list_tabs(adapter: UIAutomationAdapter, browser_window) -> list[str]:
+    """I titoli delle schede della finestra del browser (TabItem del chrome, mai il contenuto)."""
+    return [info.name for info in (adapter.describe_element(e) for e in adapter.find_matching_elements(browser_window, control_type="TabItem")) if info]
+
+
+def select_tab(adapter: UIAutomationAdapter, browser_window, title_contains: str) -> bool:
+    """Porta in primo piano la scheda il cui titolo contiene `title_contains` (SelectionItem).
+    False se nessuna o piu' di una scheda corrisponde: mai una scelta a caso."""
+    from core.computer_use.executor import ActionExecutor
+
+    matches = []
+    for element in adapter.find_matching_elements(browser_window, control_type="TabItem"):
+        info = adapter.describe_element(element)
+        if info is not None and title_contains in info.name:
+            matches.append(element)
+    if len(matches) != 1:
+        return False
+    ActionExecutor().select(matches[0])
+    return True
+
+
+# F3.6.6: segni di una verifica umana (CAPTCHA, "non sono un robot", controllo anti-bot). Servono
+# SOLO a fermarsi e passare la mano all'utente, mai a decidere di procedere.
+_HUMAN_VERIFICATION_MARKERS = (
+    "captcha", "recaptcha", "hcaptcha", "turnstile", "non sono un robot", "i'm not a robot",
+    "i am not a robot", "verifica di essere umano", "verify you are human", "controllo di sicurezza",
+)
+
+
+def detect_human_verification(adapter: UIAutomationAdapter, document, max_depth: int = 20, tree=None) -> str | None:
+    """Il primo segno di verifica umana trovato nella pagina, None se non ce ne sono. `tree`: un albero
+    gia' letto (es. dalla cache di ComputerAgent) per non rileggere una pagina grande a ogni azione."""
+    stack = [tree if tree is not None else adapter.describe_tree(document, max_depth)]
+    while stack:
+        node = stack.pop()
+        if node is None:
+            continue
+        text = f"{node.name} {node.automation_id}".lower()
+        for marker in _HUMAN_VERIFICATION_MARKERS:
+            if marker in text:
+                return node.name or node.automation_id
+        stack.extend(node.children)
+    return None
 
 
 def read_page_text(adapter: UIAutomationAdapter, document, max_depth: int = 20) -> str:

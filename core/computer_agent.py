@@ -397,6 +397,14 @@ class ComputerAgent:
         adapter = UIAutomationAdapter()
         if root is not None:
             window = root
+            # F3.6.6: davanti a una verifica umana (CAPTCHA) Jake si ferma e lascia fare all'utente.
+            info = adapter.describe_element(root)
+            if info is not None and info.control_type == "Document":
+                from core.computer_use.browser_adapter import detect_human_verification
+
+                marker = detect_human_verification(adapter, root, tree=self._cached_tree(adapter, root, max_depth=20))
+                if marker is not None:
+                    return ComputerActionResult(success=False, error="HUMAN_VERIFICATION_REQUIRED", matched=marker)
         else:
             if window_title is None:
                 raise ValueError("click_element/type_into_element richiedono window_title oppure root")
@@ -428,6 +436,15 @@ class ComputerAgent:
         except Exception:
             hwnd = id(window)
         return self.tree_cache.get_tree(window, hwnd, max_depth=max_depth, adapter=adapter)
+
+    def _cached_tree(self, adapter, element, max_depth: int):
+        """Albero descritto di un elemento senza HWND proprio (es. il Document di una pagina web):
+        chiave = runtime id UIA, stessa cache/TTL/invalidazione di observe_window."""
+        try:
+            key = hash(tuple(element.GetRuntimeId()))
+        except Exception:
+            key = id(element)
+        return self.tree_cache.get_tree(element, key, max_depth=max_depth, adapter=adapter)
 
     def _inspect(self, adapter, window, selector) -> dict | None:
         from core.computer_use.inspector import inspect

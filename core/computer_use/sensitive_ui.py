@@ -23,18 +23,20 @@ SENSITIVE_UI_EFFECTS: dict[str, str] = {
     "upload": "UI_UPLOAD",
     "delete": "UI_DELETE",
     "purchase": "UI_PURCHASE",
+    "download": "UI_DOWNLOAD",
 }
 _EFFECT_VERBS = {
     "send": "inviare", "submit": "confermare/inviare il modulo", "upload": "caricare un file",
-    "delete": "eliminare", "purchase": "acquistare",
+    "delete": "eliminare", "purchase": "acquistare", "download": "scaricare un file",
 }
 
 EFFECT_PARAMETER = {
     "type": "string",
     "required": False,
     "description": (
-        "Solo se questa azione INVIA, CONFERMA un modulo, CARICA un file, ELIMINA o ACQUISTA qualcosa "
-        "nell'app: 'send', 'submit', 'upload', 'delete' o 'purchase'. Richiede la conferma dell'utente. "
+        "Solo se questa azione INVIA, CONFERMA un modulo, CARICA o SCARICA un file, ELIMINA o ACQUISTA "
+        "qualcosa nell'app: 'send', 'submit', 'upload', 'download', 'delete' o 'purchase'. Richiede la "
+        "conferma dell'utente. "
         "Ometterlo per click e tasti ordinari."
     ),
 }

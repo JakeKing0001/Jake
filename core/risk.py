@@ -358,6 +358,7 @@ DECLARED_UI_EFFECT_RISK: dict[str, RiskLevel] = {
     "UI_SEND": RiskLevel.EXTERNAL_ACTION,
     "UI_SUBMIT": RiskLevel.EXTERNAL_ACTION,
     "UI_UPLOAD": RiskLevel.EXTERNAL_ACTION,
+    "UI_DOWNLOAD": RiskLevel.EXTERNAL_ACTION,  # porta dentro contenuto esterno
     "UI_DELETE": RiskLevel.DESTRUCTIVE,
     "UI_PURCHASE": RiskLevel.DESTRUCTIVE,  # spende denaro: irreversibile
 }

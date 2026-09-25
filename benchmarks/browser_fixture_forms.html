@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<!--
+Jake Browser Fixture - moduli, schede e download (F3.6.3 resto). Pagina locale deterministica, nessuna
+richiesta di rete: il download e' un data: URL generato qui, il modulo non invia nulla (onsubmit
+mostra solo il riepilogo nella pagina), il link in nuova scheda apre un'altra pagina locale.
+-->
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Jake Browser Moduli</title>
+</head>
+<body>
+<h1>Jake Browser Moduli</h1>
+<form id="fixture-form" onsubmit="event.preventDefault(); document.getElementById('form-result').textContent = 'Inviato: ' + document.getElementById('form-name').value + ' / ' + document.getElementById('form-city').value + ' / accetto=' + document.getElementById('form-accept').checked;">
+  <input type="text" id="form-name" aria-label="Nome">
+  <input type="text" id="form-city" aria-label="Citta">
+  <input type="checkbox" id="form-accept" aria-label="Accetto le condizioni">
+  <button type="submit" id="form-submit">Invia modulo</button>
+</form>
+<p id="form-result"></p>
+<a href="browser_fixture_page2.html" target="_blank" id="new-tab-link">Apri in una nuova scheda</a>
+<a id="download-link" download="jake_download_fixture.txt" href="data:text/plain;charset=utf-8,Jake%20download%20fixture">Scarica il file di prova</a>
+</body>
+</html>
