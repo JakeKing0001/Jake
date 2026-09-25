@@ -20,11 +20,55 @@ import core.action_ledger
 import core.logger
 import core.session_recorder
 
+# Ogni cartella temporanea "jake*" creata con mkdtemp durante la sessione di test viene rimossa
+# all'uscita del processo. Windows NON pulisce %TEMP% da solo: il 25/09/2026 c'erano 37.591
+# cartelle jake_* lasciate da test che usano mkdtemp senza cancellarle (e da questa stessa cartella
+# di log). Il registro vive qui, prima di qualunque tests.test_*, cosi' copre sia unittest (CI) sia
+# pytest senza toccare ogni singolo test.
+import atexit
+import logging
+import shutil
+
+_created_temp_dirs: list[str] = []
+_original_mkdtemp = tempfile.mkdtemp
+
+
+def _tracking_mkdtemp(suffix=None, prefix=None, dir=None):
+    path = _original_mkdtemp(suffix, prefix, dir)
+    if (prefix or "").lower().startswith("jake"):
+        _created_temp_dirs.append(path)
+    return path
+
+
+tempfile.mkdtemp = _tracking_mkdtemp
+
+
+def _make_writable_and_retry(function, path, _exc_info) -> None:
+    # Gli oggetti di un repository git creati dai test sono in sola lettura su Windows.
+    import os
+    import stat
+
+    try:
+        os.chmod(path, stat.S_IWRITE)
+        function(path)
+    except OSError:
+        pass
+
+
+@atexit.register
+def _remove_test_temp_dirs() -> None:
+    import sys
+
+    logging.shutdown()  # i RotatingFileHandler tengono aperti i log: chiusi prima di cancellare
+    for path in reversed(_created_temp_dirs):
+        if sys.version_info >= (3, 12):
+            shutil.rmtree(path, onexc=_make_writable_and_retry)
+        else:
+            shutil.rmtree(path, onerror=_make_writable_and_retry)
+
+
 # mkdtemp (non TemporaryDirectory): i RotatingFileHandler di core/logger.py tengono il file
-# aperto per tutta la sessione di test, e su Windows un cleanup automatico a fine processo
-# (il finalizer di TemporaryDirectory) fallisce con "file usato da un altro processo" perche'
-# prova a cancellare mentre l'handle e' ancora aperto. La cartella resta in TEMP - normale per
-# una run di test, la ripulisce il sistema operativo.
+# aperto per tutta la sessione di test; la cartella viene rimossa dall'hook qui sopra all'uscita.
 _tmp_path = Path(tempfile.mkdtemp(prefix="jake_test_data_"))
 
 core.logger.DEFAULT_LOG_PATH = _tmp_path / "jake.log"
