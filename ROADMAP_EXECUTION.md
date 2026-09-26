@@ -265,7 +265,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F4.5` | Interaction Design (26/09/2026: trascrizione live, permission card, prove, diagnosi, notifiche nell'HUD nativo; verifica visiva da fare) | `DOING` |
 | `F4.6` | Trust UX (26/09/2026: kill switch visibile; action center con ultima azione, esito, verifica e undo con scadenza; retry/dettagli/precondizioni non ancora) | `DOING` |
 | `F4.7` | Accessibility (G1 superato, mai iniziato; nomi accessibili di stato, microfono e permission card aggiunti il 26/09/2026) | `READY` |
-| `F4.8` | Release Engineering (G1 superato, mai iniziato) | `READY` |
+| `F4.8` | Release Engineering (26/09/2026: core e HUD nativo avviati in ordine come processi separati, riavvio dell'HUD solo dopo un crash e con un tetto; installer/crash dump/rollback non iniziati) | `DOING` |
 | `F5.1` | Memory Platform (F5.1.1/F5.1.3-F5.1.6 il 21/09/2026: schema versionato, migrazioni transazionali con backup, metadati, recupero; resta F5.1.2 separare entita'/episodi/procedure e la prova su una copia del database reale) | `DOING` |
 | `F5.2` | Memory Platform | `DOING` |
 | `F5.3` | Knowledge Model | `DOING` |
@@ -8867,6 +8867,15 @@ Dipende da: F4.1–F4.7 e F0.6.
 6. `F4.8.6` Verificare update e rollback con protocol version differente.
 
 Criterio di uscita: uso quotidiano senza fallback e rollback installer provato.
+
+- 26/09/2026 (F4.8.2): nessuno avviava l'HUD nativo, che si collegava sempre a `127.0.0.1:8765` anche con
+  una porta diversa in config. Con `hud_native_enabled` il core lo avvia DOPO il companion server,
+  passandogli l'indirizzo reale (`JakeHud.exe --jake-url`), solo su loopback senza TLS ne' token (il
+  client nativo non si autentica ancora); `core/native_hud.py` lo sorveglia su un thread daemon: dopo un
+  crash lo riavvia con attese crescenti (al massimo 3 volte in 5 minuti, poi smette e lo scrive nel
+  log), dopo una chiusura voluta non lo riapre, allo shutdown del core lo chiude prima del server.
+  Prova: `tests/test_native_hud.py` (processi finti) e avvio/chiusura reale di `JakeHud.exe` dal
+  supervisore.
 
 ## 11. Gate G2 — Interazione quotidiana sul PC
 

@@ -22,6 +22,8 @@
   "allowed_filesystem_roots": [],
   "admin_passphrase": "",
   "companion_server_enabled": false,
+  "hud_native_enabled": false,
+  "hud_native_path": "",
   "companion_server_port": 8765,
   "home_assistant_url": "",
   "home_assistant_token": "",
