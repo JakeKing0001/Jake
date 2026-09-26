@@ -785,5 +785,47 @@ class PolicyIntegrationTests(unittest.TestCase):
         MockExecutor.return_value.invoke.assert_called_once()
 
 
+class SetListItemCheckedTests(unittest.TestCase):
+    """Nessun tasto parte se la finestra in primo piano non e' quella della lista; un'azione negata
+    dalla policy non tocca neanche la lista. Il percorso reale e' in
+    tests/test_computer_use_integration.py (Task 69/94)."""
+
+    def _adapter(self, state="off"):
+        adapter = mock.Mock()
+        adapter.toggle_state.return_value = state
+        adapter.process_id_of.return_value = 4242
+        return adapter
+
+    def test_no_key_is_sent_when_another_process_owns_the_foreground(self):
+        adapter = self._adapter()
+        with mock.patch("core.computer_use.selector.SelectorEngine.wait_for_unique_element", return_value=object()),                 mock.patch("win32gui.GetForegroundWindow", return_value=1),                 mock.patch("win32process.GetWindowThreadProcessId", return_value=(0, 999)),                 mock.patch("pyautogui.press") as press, mock.patch("time.sleep"):
+            result = ComputerAgent().set_list_item_checked(adapter, object(), "Opzione Y")
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "OPERATION_FAILED")
+        press.assert_not_called()
+
+    def test_an_already_checked_item_needs_no_key(self):
+        adapter = self._adapter(state="on")
+        with mock.patch("core.computer_use.selector.SelectorEngine.wait_for_unique_element", return_value=object()),                 mock.patch("pyautogui.press") as press:
+            result = ComputerAgent().set_list_item_checked(adapter, object(), "Opzione Y", checked=True)
+        self.assertTrue(result.success)
+        self.assertEqual(result.strategy, "none")
+        press.assert_not_called()
+
+    def test_a_policy_denial_stops_before_looking_at_the_list(self):
+        from core.policy_engine import PolicyDecision
+
+        engine = mock.Mock()
+        engine.decide_interactive.return_value = PolicyDecision.BLOCK
+        adapter = self._adapter()
+        with mock.patch("pyautogui.press") as press:
+            result = ComputerAgent(policy_engine=engine).set_list_item_checked(
+                adapter, object(), "Opzione Y", risk_intent="DELETE_PATH")
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "POLICY_BLOCKED")
+        adapter.toggle_state.assert_not_called()
+        press.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

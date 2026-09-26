@@ -437,6 +437,85 @@ class ComputerAgent:
             hwnd = id(window)
         return self.tree_cache.get_tree(window, hwnd, max_depth=max_depth, adapter=adapter)
 
+    def set_list_item_checked(self, adapter, list_element, item_name: str, checked: bool = True,
+                              max_items: int = 200, risk_intent: str | None = None,
+                              policy_parameters: dict | None = None, automated: bool = False) -> ComputerActionResult:
+        """Spunta (o toglie la spunta a) una voce di una lista con caselle, SENZA coordinate.
+
+        Qt cambia la casella di una voce di lista con Spazio solo sull'indice CORRENTE; ne' Toggle ne'
+        Invoke UIA hanno effetto su un QListWidgetItem (Task 54/69), e un click pixel fallisce quando la
+        riga e' ritagliata dal contenitore (Task 94: il centro della riga e' coperto). Qui: fuoco alla
+        lista via UIA, indice corrente portato sulla voce con Home/Giu' verificando la selezione UIA dopo
+        ogni tasto, poi Spazio, poi verifica dello stato Toggle riletto. I tasti partono solo se la
+        finestra in primo piano appartiene al processo della lista (mai tasti a un'altra app).
+        `risk_intent`/`policy_parameters`/`automated`: stessa protezione di `click_element`, il rischio
+        lo dichiara il chiamante."""
+        policy_result = self._check_policy(risk_intent, policy_parameters, automated)
+        if policy_result is not None:
+            return policy_result
+        import pyautogui
+        import win32gui
+        import win32process
+
+        from core.computer_use.selector import ElementSelector, SelectorEngine
+
+        target = "on" if checked else "off"
+        engine = SelectorEngine(adapter)
+        try:
+            item = engine.wait_for_unique_element(list_element, ElementSelector(name=item_name, control_type="ListItem"),
+                                                  timeout_seconds=3.0)
+        except Exception as exc:
+            return ComputerActionResult(success=False, error="NOT_FOUND", attempts=(("keyboard", False, str(exc)),))
+        if adapter.toggle_state(item) == target:
+            return ComputerActionResult(success=True, matched=item_name, verified=True, evidence=EVIDENCE_UIA_PROPERTY,
+                                        strategy="none")
+        pid = adapter.process_id_of(list_element)
+
+        def foreground_ok() -> bool:
+            try:
+                return win32process.GetWindowThreadProcessId(win32gui.GetForegroundWindow())[1] == pid
+            except Exception:
+                return False
+
+        adapter.bring_to_front(list_element)
+        try:
+            list_element.SetFocus()
+        except Exception:
+            pass
+        time.sleep(0.15)
+        if not foreground_ok():
+            return ComputerActionResult(success=False, error="OPERATION_FAILED", attempts=(
+                ("keyboard", False, "la finestra della lista non e' in primo piano: nessun tasto inviato"),))
+
+        def press(key: str) -> None:
+            raise_if_cancelled()
+            if not foreground_ok():
+                raise ElementOccludedError("la finestra della lista ha perso il primo piano: nessun tasto inviato")
+            pyautogui.press(key)
+            time.sleep(0.08)
+
+        try:
+            press("home")
+            for _ in range(max_items):
+                if adapter.describe_element(item).selected:
+                    break
+                press("down")
+            else:
+                return ComputerActionResult(success=False, error="NOT_FOUND", attempts=(
+                    ("keyboard", False, "voce non raggiunta con Giu'"),))
+            press("space")
+        except ElementOccludedError as exc:
+            return ComputerActionResult(success=False, error="OPERATION_FAILED", attempts=(("keyboard", False, str(exc)),))
+        deadline = time.monotonic() + 1.0
+        while adapter.toggle_state(item) != target and time.monotonic() < deadline:
+            time.sleep(0.05)
+        verified = adapter.toggle_state(item) == target
+        self.tree_cache.invalidate()
+        return ComputerActionResult(success=verified, matched=item_name, verified=verified,
+                                    evidence=EVIDENCE_UIA_PROPERTY, strategy="keyboard",
+                                    error=None if verified else "VERIFICATION_FAILED",
+                                    attempts=(("keyboard", verified, None if verified else "stato non cambiato"),))
+
     def _cached_tree(self, adapter, element, max_depth: int):
         """Albero descritto di un elemento senza HWND proprio (es. il Document di una pagina web):
         chiave = runtime id UIA, stessa cache/TTL/invalidazione di observe_window."""

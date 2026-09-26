@@ -580,5 +580,62 @@ class ActionReceiptTests(_ExecutorFixtureTestCase):
         self.assertEqual(receipt.element_name, "Opzione")
 
 
+class SetToggleStateUnitTests(unittest.TestCase):
+    """`set_toggle_state` senza fixture: ogni azione e' seguita dalla rilettura dello stato, Invoke
+    si prova solo dopo che Toggle non ha raggiunto l'obiettivo, e uno stato irraggiungibile solleva
+    invece di ciclare all'infinito. (Il caso reale - QCheckBox a tre stati - e' in
+    tests/test_computer_use_integration.py, Task 42.)"""
+
+    def _executor(self, toggle_cycle, invoke_cycle, start="off"):
+        from unittest import mock
+
+        state = {"value": start}
+        calls = []
+        executor = ActionExecutor()
+
+        def advance(cycle, name):
+            def action(_element):
+                calls.append(name)
+                state["value"] = cycle[(cycle.index(state["value"]) + 1) % len(cycle)]
+            return action
+
+        executor.toggle = advance(toggle_cycle, "Toggle")
+        executor.invoke = advance(invoke_cycle, "Invoke")
+        patcher = mock.patch("core.computer_use.executor._element_identity", return_value=("Casella", "", "CheckBox"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return executor, (lambda _element: state["value"]), calls
+
+    def test_toggle_is_used_when_it_reaches_the_target(self):
+        executor, read_state, calls = self._executor(["off", "on"], ["off", "indeterminate", "on"])
+        receipt = executor.set_toggle_state(object(), "on", read_state)
+        self.assertEqual((receipt.pattern, calls), ("Toggle", ["Toggle"]))
+
+    def test_invoke_is_tried_when_toggle_only_alternates_on_and_off(self):
+        executor, read_state, calls = self._executor(["off", "on"], ["off", "indeterminate", "on"])
+        receipt = executor.set_toggle_state(object(), "indeterminate", read_state)
+        self.assertEqual(receipt.pattern, "Invoke")
+        self.assertEqual(read_state(None), "indeterminate")
+        self.assertEqual(calls[-1], "Invoke")
+        self.assertEqual(calls[:3], ["Toggle"] * 3, "Invoke solo dopo i cicli Toggle falliti")
+
+    def test_an_already_reached_state_performs_no_action(self):
+        executor, read_state, calls = self._executor(["off", "on"], ["off", "on"], start="on")
+        self.assertEqual(executor.set_toggle_state(object(), "on", read_state).pattern, "none")
+        self.assertEqual(calls, [])
+
+    def test_an_unreachable_state_raises_after_a_bounded_number_of_actions(self):
+        executor, read_state, calls = self._executor(["off", "on"], ["off", "on"])
+        executor._wait_state = staticmethod(lambda element, read, target, timeout_s=0.6: read(element) == target)
+        with self.assertRaises(ElementNotInteractableError):
+            executor.set_toggle_state(object(), "indeterminate", read_state, max_cycles=3)
+        self.assertEqual(len(calls), 6)
+
+    def test_an_invalid_target_is_rejected(self):
+        executor, read_state, calls = self._executor(["off", "on"], ["off", "on"])
+        with self.assertRaises(ValueError):
+            executor.set_toggle_state(object(), "maybe", read_state)
+
+
 if __name__ == "__main__":
     unittest.main()

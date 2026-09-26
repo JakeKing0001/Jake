@@ -339,6 +339,38 @@ class ActionExecutor:
         pattern.SetWindowVisualState(UIA.WindowVisualState_Normal)
         return receipt
 
+    def set_toggle_state(self, element, target: str, read_state, max_cycles: int = 3) -> ElementActionReceipt:
+        """Porta una casella allo stato `target` ("on"/"off"/"indeterminate"), verificando dopo OGNI
+        azione con `read_state(element)` (lo stato Toggle riletto dal vivo), mai assumendo l'effetto.
+
+        Prima il pattern Toggle; se in un ciclo completo non raggiunge `target` si passa a Invoke.
+        Trovato sulla fixture (F3.1.2 Task 42): per una QCheckBox a tre stati il Toggle del bridge Qt
+        alterna solo off/on, mentre Invoke usa il ciclo del widget (off -> indeterminate -> on).
+        Stato irraggiungibile con entrambi: ElementNotInteractableError, nessun ciclo infinito."""
+        if target not in ("on", "off", "indeterminate"):
+            raise ValueError(f"stato non valido: {target!r}")
+        if read_state(element) == target:
+            return self._receipt("set_toggle_state", "none", element)
+        for pattern_name in ("Toggle", "Invoke"):
+            for _ in range(max_cycles):
+                if pattern_name == "Toggle":
+                    self.toggle(element)
+                else:
+                    self.invoke(element)
+                if self._wait_state(element, read_state, target):
+                    return self._receipt("set_toggle_state", pattern_name, element)
+        raise ElementNotInteractableError(f"lo stato {target!r} non e' raggiungibile ne' con Toggle ne' con Invoke")
+
+    @staticmethod
+    def _wait_state(element, read_state, target: str, timeout_s: float = 0.6) -> bool:
+        deadline = time.monotonic() + timeout_s
+        while True:
+            if read_state(element) == target:
+                return True
+            if time.monotonic() > deadline:
+                return False
+            time.sleep(0.05)
+
     def _receipt(self, action: str, pattern_name: str, element) -> ElementActionReceipt:
         # Ogni azione costruisce la ricevuta subito prima della chiamata al pattern: e' l'ultimo
         # punto in cui un turno annullato ("Jake, basta") puo' ancora impedire l'effetto.

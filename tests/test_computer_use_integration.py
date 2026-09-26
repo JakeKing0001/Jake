@@ -1336,11 +1336,12 @@ class RadioArrowNavigationAndAccessibilityPropertiesEndToEndTests(unittest.TestC
         self.assertFalse(add_button.CurrentIsPassword)
 
 
-class CheckableListSpaceKeyKnownLimitationEndToEndTests(unittest.TestCase):
-    """Task 69 (F3.1.2 continua verso i 100) - estende il buco gia' documentato in Task 54: NE'
-    il pattern Toggle di UI Automation NE' il tasto Spazio (la convenzione standard Qt/Windows,
-    gia' affidabile per `option_checkbox`/Task 37) hanno un effetto reale su un
-    `QListWidgetItem` checkabile - SOLO un click pixel sul glifo (Task 54) funziona."""
+class CheckableListKeyboardEndToEndTests(unittest.TestCase):
+    """Task 69 - spuntare una voce di `checkable_list` con la tastiera. La conclusione storica ("Spazio
+    non ha effetto") era sbagliata: il test cliccava il CENTRO della riga, che il contenitore della
+    scheda ritaglia e copre (sotto c'e' un Group, verificato con hit-test), quindi la lista non riceveva
+    mai il fuoco. Qt spunta con Spazio la voce CORRENTE: fuoco alla lista via UIA, Home/Giu' e Spazio
+    funzionano senza coordinate (`ComputerAgent.set_list_item_checked`)."""
 
     def setUp(self):
         self.process = subprocess.Popen(
@@ -1362,23 +1363,32 @@ class CheckableListSpaceKeyKnownLimitationEndToEndTests(unittest.TestCase):
             self.process.kill()
             self.process.wait()
 
-    def test_space_key_does_not_check_the_item(self):
-        import pyautogui
-
+    def _checkable_list(self):
         tab_thirteen = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 13", control_type="TabItem"))
         self.executor.select(tab_thirteen)
         time.sleep(0.3)
+        return self.engine.wait_for_unique_element(self.window, ElementSelector(name="Elenco con caselle", control_type="List"),
+                                                   timeout_seconds=3.0)
 
+    def test_the_centre_of_a_clipped_row_belongs_to_another_element(self):
+        """Il fatto che rendeva inaffidabile il vecchio test: nel centro della riga c'e' un altro elemento."""
+        self._checkable_list()
         item = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Opzione Y", control_type="ListItem"), timeout_seconds=3.0)
-        bounds = self.adapter.describe_element(item).bounds
-        self.computer_agent.click_point(bounds[0] + bounds[2] // 2, bounds[1] + bounds[3] // 2)
-        time.sleep(0.3)
+        left, top, width, height = self.adapter.describe_element(item).bounds
+        hit = self.adapter.element_from_point(left + width // 2, top + height // 2)
+        self.assertNotEqual(self.adapter.describe_element(hit).name, "Opzione Y")
 
-        pyautogui.press("space")
-        time.sleep(0.4)
+    def test_space_on_the_current_item_checks_it_without_coordinates(self):
+        checkable_list = self._checkable_list()
 
-        item_again = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Opzione Y", control_type="ListItem"), timeout_seconds=3.0)
-        self.assertEqual(self.adapter.describe_element(item_again).toggle_state, "off", "documenta il buco: Spazio non ha effetto reale qui, diverso da option_checkbox (Task 37)")
+        result = self.computer_agent.set_list_item_checked(self.adapter, checkable_list, "Opzione Y", checked=True)
+
+        self.assertTrue(result.success, result)
+        self.assertEqual(result.strategy, "keyboard")
+        states = {name: self.adapter.describe_element(self.engine.wait_for_unique_element(
+            self.window, ElementSelector(name=name, control_type="ListItem"), timeout_seconds=3.0)).toggle_state
+            for name in ("Opzione X", "Opzione Y", "Opzione Z")}
+        self.assertEqual(states, {"Opzione X": "off", "Opzione Y": "on", "Opzione Z": "off"})
 
 
 class MoreKeyboardShortcutsAcrossFieldsEndToEndTests(unittest.TestCase):
@@ -2086,9 +2096,27 @@ class CheckableListCoverageAndTransferAndComboEndToEndTests(unittest.TestCase):
 
         self.assertEqual(self._click_glyph_and_wait("Opzione Y", "on"), "on")
 
-    def test_the_third_checkable_item_is_a_known_unreachable_edge_case(self):
-        """Task 94: **buco reale trovato scrivendo questo task, non ipotizzato, dichiarato
-        onestamente invece di forzare un test verde**: a differenza di "Opzione X"/"Opzione Y",
+    def test_the_third_checkable_item_is_checked_with_the_keyboard(self):
+        """Task 94: "Opzione Z" e' fuori dall'area visibile del contenitore (vedi il test sotto), ma la
+        tastiera non ha bisogno che sia visibile: fuoco alla lista via UIA, indice corrente portato su Z,
+        Spazio, stato Toggle riletto. Nessuna coordinata."""
+        tab_thirteen = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 13", control_type="TabItem"))
+        self.executor.select(tab_thirteen)
+        time.sleep(0.3)
+        checkable_list = self.engine.wait_for_unique_element(
+            self.window, ElementSelector(name="Elenco con caselle", control_type="List"), timeout_seconds=3.0)
+
+        result = self.computer_agent.set_list_item_checked(self.adapter, checkable_list, "Opzione Z", checked=True)
+
+        self.assertTrue(result.success, result)
+        item = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Opzione Z", control_type="ListItem"), timeout_seconds=3.0)
+        self.assertEqual(self.adapter.describe_element(item).toggle_state, "on")
+
+    def test_a_pixel_click_cannot_reach_the_clipped_third_row(self):
+        """Fatto conservato (non piu' il Task 94): un click pixel sulla terza riga non la raggiunge,
+        perche' il contenitore della scheda la ritaglia.
+
+        Storia: a differenza di "Opzione X"/"Opzione Y",
         "Opzione Z" (la terza e ultima riga) risulta TROVABILE via UI Automation (bounds validi
         letti con successo) ma NON raggiungibile con un click reale - verificato con un probe
         dedicato che ha esplorato sistematicamente ogni offset x/y plausibile, nessuno funziona.
@@ -2097,8 +2125,8 @@ class CheckableListCoverageAndTransferAndComboEndToEndTests(unittest.TestCase):
         (72px fisici) di quanto la sua stessa `checkable_list` dichiari come minimo (110 logici,
         ~137 fisici) - "Opzione Z" e' quindi FISICAMENTE oltre il bordo visibile del contenitore,
         con bounds UI Automation che non riflettono il ritaglio reale (la STESSA classe di buco
-        gia' documentata per Task 19, qui pero' senza un rimedio pratico immediato: ne' il pattern
-        Scroll ne' la rotella del mouse hanno un effetto su questo contenitore specifico). La sua
+        gia' documentata per Task 19: ne' il pattern Scroll ne' la rotella del mouse hanno un
+        effetto su questo contenitore). Il rimedio senza coordinate e' la tastiera, test sopra. La sua
         indipendenza dalle altre due righe resta comunque verificata a livello Qt in
         `tests/test_computer_use_fixture.py::CheckableListTests`."""
         tab_thirteen = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 13", control_type="TabItem"))
@@ -3292,12 +3320,11 @@ class MoreKeyboardAndFocusEndToEndTests(unittest.TestCase):
         self.assertEqual(len(new_handles), 0, "nessuna nuova finestra (il menu contestuale) deve apparire per un right-click fuori da ogni elemento")
 
 
-class ToolTipKnownLimitationEndToEndTests(unittest.TestCase):
-    """Task 39 (F3.1.2 continua verso i 100) - `add_button.setToolTip(...)`. **Buco reale trovato
-    con un probe dedicato, non ipotizzato**: `CurrentHelpText` via UI Automation resta VUOTO anche
-    con un tooltip Qt impostato - il bridge di accessibilita' di Qt non lo mappa (a differenza di
-    `accessibleName`/`objectName`, gia' esercitati con successo altrove in questa fixture). Un
-    limite reale, documentato onestamente invece di un tentativo di aggirarlo."""
+class ToolTipEndToEndTests(unittest.TestCase):
+    """Task 39 - `add_button.setToolTip(...)`. Il bridge Qt lascia VUOTO `HelpText` (fatto del
+    provider, verificato sotto) ma espone il tooltip come `FullDescription`: la conclusione storica
+    "limite reale" guardava solo `HelpText`. Rivisto il 26/09/2026 con una sonda su tutte le
+    proprieta' di descrizione UIA."""
 
     def setUp(self):
         self.process = subprocess.Popen(
@@ -3319,7 +3346,11 @@ class ToolTipKnownLimitationEndToEndTests(unittest.TestCase):
 
     def test_current_help_text_stays_empty_despite_a_real_qt_tooltip(self):
         add_button = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Aggiungi", control_type="Button"))
-        self.assertEqual(add_button.CurrentHelpText, "", "buco noto: Qt non mappa il tooltip su CurrentHelpText")
+        self.assertEqual(add_button.CurrentHelpText, "", "fatto del provider: Qt non mappa il tooltip su HelpText")
+
+    def test_the_tooltip_is_read_through_full_description(self):
+        add_button = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Aggiungi", control_type="Button"))
+        self.assertEqual(self.adapter.read_description(add_button), "Aggiunge il testo del campo alla lista")
 
 
 class ReadOnlyFieldEndToEndTests(unittest.TestCase):
@@ -3403,8 +3434,23 @@ class TristateCheckboxEndToEndTests(unittest.TestCase):
             time.sleep(0.2)
             observed_states.append(self.adapter.describe_element(checkbox).toggle_state)
 
-        self.assertNotIn("indeterminate", observed_states, f"buco noto: Toggle() non raggiunge mai il terzo stato: {observed_states}")
+        self.assertNotIn("indeterminate", observed_states, f"fatto del provider: Toggle() non raggiunge mai il terzo stato: {observed_states}")
         self.assertEqual(set(observed_states), {"off", "on"})
+
+    def test_set_toggle_state_reaches_indeterminate_through_invoke(self):
+        """Il pattern Invoke del bridge Qt usa il ciclo del widget (off -> indeterminate -> on):
+        `set_toggle_state` ci arriva verificando lo stato dopo ogni azione, senza coordinate."""
+        tab_nine = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Tab 9", control_type="TabItem"))
+        self.executor.select(tab_nine)
+        time.sleep(0.3)
+        checkbox = self.engine.wait_for_unique_element(self.window, ElementSelector(name="Casella a tre stati"), timeout_seconds=3.0)
+
+        receipt = self.executor.set_toggle_state(checkbox, "indeterminate", self.adapter.toggle_state)
+
+        self.assertEqual(receipt.pattern, "Invoke")
+        self.assertEqual(self.adapter.describe_element(checkbox).toggle_state, "indeterminate")
+        self.executor.set_toggle_state(checkbox, "off", self.adapter.toggle_state)
+        self.assertEqual(self.adapter.describe_element(checkbox).toggle_state, "off")
 
 
 class NoSelectionListEndToEndTests(unittest.TestCase):

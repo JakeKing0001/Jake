@@ -545,6 +545,23 @@ class UIAutomationAdapter:
             UIA.WindowVisualState_Maximized: "maximized",
         }.get(state, str(state))
 
+    def read_description(self, element) -> str | None:
+        """La descrizione accessibile dell'elemento (per un widget Qt: il tooltip). Qt la espone come
+        `FullDescription` e lascia vuoto `HelpText` (verificato sulla fixture: F3.1.2 Task 39); si
+        prova la prima, poi la seconda. None se nessuna delle due c'e'."""
+        for property_id in (UIA.UIA_FullDescriptionPropertyId, UIA.UIA_HelpTextPropertyId):
+            try:
+                value = element.GetCurrentPropertyValue(property_id)
+            except (ValueError, comtypes.COMError):
+                continue
+            if isinstance(value, str) and value.strip():
+                return value
+        return None
+
+    def toggle_state(self, element) -> str | None:
+        """Stato Toggle letto dal vivo: "on"/"off"/"indeterminate", None senza pattern Toggle."""
+        return self._toggle_state_of(element)
+
     def _toggle_state_of(self, element) -> str | None:
         """None (non una stringa a caso) per un elemento che non supporta affatto il pattern
         Toggle - stesso principio di `_selection_state_of` sotto. "on"/"off"/"indeterminate"
