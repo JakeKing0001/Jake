@@ -250,7 +250,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F2.5` | Speech Runtime (uscita predefinita rilevata, cache delle conferme RVC, pipeline di produzione misurata il 25/09/2026: primo campione p95 1,2-1,5 s, pause tra chunk < 1 ms; manca "prima emissione < 2 s" dalla fine della voce su hardware) | `VERIFY` |
 | `F2.6` | Conversation Runtime (dialogo/correzione/ellissi/ordinali collegati a JakeCore nel commit a4a2685 - la riga precedente "libreria non collegata" era stantia; bench_dialogue 22/22 senza correzioni, un banco di prova su dialoghi reali resta aperto) | `VERIFY` |
 | `F2.7` | Identity and Voice (profili opt-in, isolamento per turno, arruolamento CLI corretto e testato il 25/09/2026; qualita' della firma da ritarare su voci vere) | `VERIFY` |
-| `F3.1` | Computer Use Quality (benchmark unico dei 100 task: 100/100 in due esecuzioni consecutive il 26/09/2026, i 4 ex-limiti raggiunti via UIA; DPI verificato a quattro scale il 25/09/2026; manca solo la prova con due monitor fisici) | `VERIFY` |
+| `F3.1` | Computer Use Quality (benchmark unico dei 100 task: 100/100 in due esecuzioni consecutive il 26/09/2026, i 4 ex-limiti raggiunti via UIA; DPI verificato a quattro scale il 25/09/2026; multi-display verificato dall'utente il 26/09/2026 con un secondo display Windows via SpaceDesk, non un monitor fisico) | `DONE` |
 | `F3.2` | Windows Automation (cache collegata al percorso reale; dump verificati e flussi su cinque app reali il 25/09/2026) | `DONE` |
 | `F3.3` | Windows Automation (inspector con candidato/alternative/punteggio/motivo nei risultati, CLI ed evento HUD; invalidazione strutturale collegata alle procedure - 25/09/2026; il disegno del pannello nell'HUD e' F4.5) | `DONE` |
 | `F3.4` | Execution Runtime (verificato end-to-end sui 100 task e su cinque app reali il 25/09/2026; policy anche per click/tasti dichiarati sensibili) | `DONE` |
@@ -5179,8 +5179,10 @@ intenzionali a 0,5/3/6 m, registrazioni consensuali per il WER. Fino ad allora F
 
 ## 9. F3 — Computer Use Engine 3.0
 
-- Stato: `VERIFY` (25/09/2026: Gate F3 soddisfatto con prove reali - vedi "Audit e chiusura di F3" e
-  Gate F3; resta solo la prova multi-monitor di F3.1.5, che richiede un secondo schermo fisico)
+- Stato: `DONE` (26/09/2026: Gate F3 soddisfatto con prove reali - vedi "Audit e chiusura di F3" e
+  Gate F3; F3.1.5 multi-display chiuso dall'utente con Windows in modalita' desktop esteso e un
+  secondo display fornito da SpaceDesk: test multi-monitor e benchmark computer use 100/100 superati.
+  Evidenza: secondo display Windows via SpaceDesk, non un secondo monitor fisico)
 - Priorità: `P1`
 - Output: Jake controlla Windows per semantica, verifica il risultato e usa i pixel come fallback.
 
@@ -8259,7 +8261,9 @@ Fonte: codice, test reali e benchmark di questa data; le voci storiche sopra res
   96/100 in due esecuzioni consecutive. Non riusciti: 39 tooltip, 42 tristato, 69 spunta da tastiera, 94 terza voce spuntabile
   (limiti Qt/UIA gia' documentati). Task 29 era instabile (lettura prima che "Annulla" fosse
   elaborato): test corretto. DPI: Jake restava "system aware" dopo `import pyautogui`; ora
-  per-monitor in ogni modalita', prova reale a scale 1,0/1,25/1,5/2,0. Multi-monitor: un solo
+  per-monitor in ogni modalita', prova reale a scale 1,0/1,25/1,5/2,0. Multi-monitor (26/09/2026, eseguito
+  dall'utente): desktop esteso con secondo display Windows via SpaceDesk, test multi-monitor verde e
+  benchmark 100/100 - un monitor fisico non e' stato provato. Prima: un solo
   schermo qui, test saltato con il motivo (VERIFY).
 - F3.2/F3.3: `TreeCache` nel percorso reale (ComputerAgent, invalidata dopo ogni azione) per
   l'inspector (`core/computer_use/inspector.py`, `tools/selector_inspector.py`,
@@ -10255,6 +10259,5 @@ Aggiornato 26/09/2026, fine sessione (le note precedenti restano nella cronologi
 2. Verifica visiva dell'HUD nativo con Jake acceso (`hud/native/build/JakeHud.exe`): stati e
    etichetta dell'orb, anello di esito, permission card, trascrizione live, indicatore microfono,
    ultima azione con Annulla, pulsante "Ferma tutto" (F4.4/F4.5/F4.6 restano `VERIFY` fino ad allora).
-3. Ripetere `tests/test_computer_use_dpi.py` con un secondo monitor collegato (chiude F3.1.5).
-4. Poi: orb 3D/particelle (F4.4.7-F4.4.8), action center completo (retry, dettagli, precondizioni),
+3. Poi: orb 3D/particelle (F4.4.7-F4.4.8), action center completo (retry, dettagli, precondizioni),
    citazioni di memoria anche fuori da RECALL (F5.5), task monitor sulla pipeline proattiva (F6.1).
