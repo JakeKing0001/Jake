@@ -30,4 +30,16 @@ RowLayout {
     }
 
     Item { Layout.fillWidth: true }
+
+    // F4.6.5 ("kill switch visibile"): sempre presente, separato dalle scorciatoie. "ferma tutto"
+    // e' nella corsia a corrispondenza esatta del NLU (training/intents.jsonl -> KILL_SWITCH):
+    // nessun modello in mezzo, ferma agenti e automazioni come il comando vocale.
+    Button {
+        id: killSwitch
+        text: qsTr("Ferma tutto")
+        Accessible.name: qsTr("Ferma tutto: interrompe subito agenti e automazioni")
+        palette.button: "#7f1d1d"
+        palette.buttonText: "#fecaca"
+        onClicked: root.actionTriggered("ferma tutto")
+    }
 }
