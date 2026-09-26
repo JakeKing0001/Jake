@@ -154,14 +154,71 @@ class LiveTranscriber:
                     self._logger.exception("Errore nel callback dei partial")
 
 
+class SttModelLock:
+    """Lock del modello Whisper con PRIORITA' alla trascrizione finale (gate hardware F2, 26/09/2026:
+    la finale aspettava partial da 1-5 s sullo stesso lock, e il comando partiva in ritardo).
+
+    La finale usa `with lock:` e aspetta al massimo il partial GIA' in corso (una decodifica non si
+    interrompe a meta'); mentre una finale aspetta, nessun nuovo partial parte: `try_acquire_partial`
+    non blocca mai e rinuncia se il modello e' occupato o se una finale e' in attesa."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._guard = threading.Lock()
+        self._finals_waiting = 0
+
+    def __enter__(self) -> SttModelLock:
+        with self._guard:
+            self._finals_waiting += 1
+        try:
+            self._lock.acquire()
+        finally:
+            with self._guard:
+                self._finals_waiting -= 1
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self._lock.release()
+
+    def try_acquire_partial(self) -> bool:
+        with self._guard:
+            if self._finals_waiting:
+                return False
+            return self._lock.acquire(blocking=False)
+
+    def release_partial(self) -> None:
+        self._lock.release()
+
+
 class _LockedProvider:
     """Serializza le chiamate al modello con un lock condiviso con la trascrizione finale."""
 
-    def __init__(self, provider, lock: threading.Lock) -> None:
+    def __init__(self, provider, lock) -> None:
         self._provider = provider
         self._lock = lock
         if hasattr(provider, "transcribe_detailed"):
             self.transcribe_detailed = self._detailed
+
+    def transcribe_partial(self, audio, sample_rate):
+        """Decodifica per un partial: (testo, confidenza), oppure None se il modello serve alla finale
+        (il partial si salta, non si degrada). Usa la decodifica leggera del provider se c'e'."""
+        if hasattr(self._lock, "try_acquire_partial"):
+            if not self._lock.try_acquire_partial():
+                return None
+            release = self._lock.release_partial
+        else:
+            self._lock.acquire()
+            release = self._lock.release
+        try:
+            fast = getattr(self._provider, "transcribe_partial", None)
+            if fast is not None:
+                return fast(audio, sample_rate)
+            detailed = getattr(self._provider, "transcribe_detailed", None)
+            if detailed is not None:
+                return detailed(audio, sample_rate)
+            return self._provider.transcribe(audio, sample_rate), None
+        finally:
+            release()
 
     def transcribe(self, audio, sample_rate):
         with self._lock:

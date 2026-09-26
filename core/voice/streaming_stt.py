@@ -213,6 +213,18 @@ class StreamingTranscriber:
     def buffered_samples(self) -> int:
         return len(self._buffer)
 
+    def _decode_partial(self, audio: np.ndarray) -> tuple[str, float | None] | None:
+        """Decodifica leggera per un partial, se il provider la offre; None = partial saltato
+        (il modello serve alla trascrizione finale)."""
+        partial = getattr(self.provider, "transcribe_partial", None)
+        if partial is None:
+            return self._decode(audio)
+        result = partial(audio, self.sample_rate)
+        if result is None:
+            return None
+        text, confidence = result
+        return str(text).strip(), confidence
+
     def _decode(self, audio: np.ndarray) -> tuple[str, float | None]:
         detailed = getattr(self.provider, "transcribe_detailed", None)
         if detailed is not None:
@@ -230,11 +242,14 @@ class StreamingTranscriber:
         self._samples_at_last_decode = len(self._buffer)
         started = self._clock()
         try:
-            text, confidence = self._decode(self._buffer.snapshot())
+            decoded = self._decode_partial(self._buffer.snapshot())
         except Exception:
             self._logger.exception("Errore nella trascrizione parziale")
             self.degraded = True
             return []
+        if decoded is None:
+            return []  # la finale ha la precedenza: nessun partial questa volta, niente degrado
+        text, confidence = decoded
         elapsed = self._clock() - started
         if self.partial_budget_s is not None and elapsed > self.partial_budget_s:
             # In ritardo: questo risultato e' gia' vecchio e il prossimo lo sarebbe ancora di piu'.

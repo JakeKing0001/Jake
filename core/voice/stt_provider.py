@@ -132,6 +132,27 @@ class WhisperSttProvider(SttProvider):
         text = self._drop_hallucinations(" ".join(segment.text.strip() for segment in segments).strip())
         return text, (self._confidence(segments) if text else None)
 
+    def transcribe_partial(self, audio, sample_rate: int = 16000) -> tuple[str, float | None]:
+        """Decodifica LEGGERA per i sottotitoli in tempo reale (F2.2.2): greedy, senza secondo VAD
+        Silero e senza timestamp. Il gate hardware del 26/09/2026 ha misurato partial da 1-5 s con la
+        decodifica completa (beam 5 + VAD) usata anche qui: il testo definitivo resta quello della
+        trascrizione finale, un partial deve solo arrivare in tempo."""
+        segments, _info = self._model.transcribe(
+            audio,
+            language=self.language,
+            initial_prompt=self.initial_prompt,
+            beam_size=1,
+            best_of=1,
+            temperature=0.0,
+            condition_on_previous_text=False,
+            without_timestamps=True,
+            vad_filter=False,
+            no_speech_threshold=0.6,
+        )
+        segments = list(segments)
+        text = self._drop_hallucinations(" ".join(segment.text.strip() for segment in segments).strip())
+        return text, (self._confidence(segments) if text else None)
+
     @staticmethod
     def _confidence(segments) -> float | None:
         weighted, total = 0.0, 0.0

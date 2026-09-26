@@ -12,7 +12,7 @@ from core.request_context import (
 )
 from core.voice.audio_profile import apply_to_provider, classify_output_device, detect_output_device_name
 from core.voice.barge_in import BargeInController, classify_interruption
-from core.voice.live_transcriber import LiveTranscriber
+from core.voice.live_transcriber import LiveTranscriber, SttModelLock
 from core.voice.listening_state import (
     EchoGuard, ListeningState, ListeningStateMachine, MicIndicator, RepeatGuard, WakeCooldown,
 )
@@ -52,6 +52,22 @@ STOP_CURRENT_TASK_PATTERN = re.compile(
 def _is_bare_stop(command: str) -> bool:
     """La frase e' SOLO una richiesta di fermarsi ("basta", "fermati", "annulla"...)."""
     return STOP_CURRENT_TASK_PATTERN.fullmatch(command.strip(" .,!?").lower()) is not None
+
+
+# Sotto questa confidenza STT (media esponenziata di avg_logprob di Whisper) una frase del follow-up e'
+# quasi sempre rumore o parole storpiate: il parlato normale in stanza sta di solito sopra 0,6. Solo il
+# follow-up la usa: un comando con "Jake" o una risposta a una conferma seguono la strada di sempre.
+FOLLOW_UP_MIN_CONFIDENCE = 0.45
+_REPEATED_WORD = re.compile(r"\b(\w{2,})\b(?:[\s,.;!?]+\1\b){3,}", re.IGNORECASE)
+
+
+def _unreliable_transcript(text: str, confidence: float | None) -> bool:
+    """Confidenza reale troppo bassa, oppure la ripetizione a raffica tipica delle allucinazioni di
+    Whisper ("miro, miro, miro, miro"). Senza confidenza (provider che non la riporta) decide solo
+    la ripetizione: nessun rifiuto inventato."""
+    if confidence is not None and confidence < FOLLOW_UP_MIN_CONFIDENCE:
+        return True
+    return bool(_REPEATED_WORD.search(text))
 
 
 def _edit_distance(a: str, b: str) -> int:
@@ -98,7 +114,8 @@ class _SessionSpeaker:
         self._session = session
 
     def cancel(self) -> int:
-        self._session._interrupt_speech()
+        # barge-in: l'audio si ferma subito, il thread TTS vecchio si chiude da solo (non si aspetta qui)
+        self._session._interrupt_speech(wait=False)
         return 0
 
 
@@ -190,7 +207,7 @@ class WakeWordSession:
         # decodifiche insieme, quindi le serializza `_stt_lock` (condiviso con la trascrizione finale): un
         # partial in corso puo' ritardare la finale. Per questo "auto" li abilita solo su GPU, dove una
         # decodifica dura frazioni di secondo (su CPU medium int8 misurato: 4,2 s per una frase intera).
-        self._stt_lock = threading.Lock()
+        self._stt_lock = SttModelLock()  # la finale ha la precedenza sui partial
         self.on_transcript = on_transcript  # callable(TranscriptEvent): partial E final, per un HUD che vuole i sottotitoli
         self.live_transcriber = None
         self._live_active = False
@@ -205,6 +222,7 @@ class WakeWordSession:
         self._command_thread = None
         self._command_cancel_event = None
         self._stopped = False
+        self._retired_tts_thread = None
         self._active_turn: _VoiceTurn | None = None
         self._pending_turn: _VoiceTurn | None = None
         self._attach_hooks()
@@ -480,7 +498,12 @@ class WakeWordSession:
         self._active_output_device = self.output_device_name or detect_output_device_name()
         apply_to_provider(self.tts_provider, self.speech_style, self._active_output_device)
 
+        retired = self._retired_tts_thread
+
         def run():
+            # una frase fermata senza attesa deve aver finito prima che questa parli (mai due voci)
+            if retired is not None and retired is not threading.current_thread():
+                retired.join(timeout=2)
             self.vad_listener.muted = True
             self.playback_aec.reset()  # nuova riproduzione: riferimento e calibrazione ripartono
             self.barge_in.begin_response()
@@ -509,13 +532,22 @@ class WakeWordSession:
         self._tts_thread = threading.Thread(target=run, daemon=True)
         self._tts_thread.start()
 
-    def _interrupt_speech(self) -> None:
-        if self._tts_thread is not None and self._tts_thread.is_alive():
+    def _interrupt_speech(self, wait: bool = True) -> None:
+        """Ferma la voce. `wait=False` (stop, barge-in): lo stop percepito e' `tts_provider.stop()`; il
+        thread TTS vecchio finisce da solo (la sua coda dorme 0,25 s) senza piu' toccare microfono e
+        stato perche' non e' piu' quello corrente, e la frase successiva lo aspetta sul PROPRIO thread.
+        Gate hardware 26/09/2026: il join qui costava 250-470 ms sui 500-700 ms di barge-in misurati."""
+        thread = self._tts_thread
+        if thread is not None and thread.is_alive():
             try:
                 self.tts_provider.stop()
             except Exception:
                 pass
-            self._tts_thread.join(timeout=2)
+            if wait:
+                thread.join(timeout=2)
+            else:
+                self._retired_tts_thread = thread
+                self._tts_thread = None
         self.vad_listener.muted = False
 
     # ---- controlli --------------------------------------------------------------------
@@ -532,7 +564,7 @@ class WakeWordSession:
 
     def arm_listening(self) -> None:
         """Come aver detto 'Jake': la prossima frase e' un comando (click sull'orb dell'HUD)."""
-        self._interrupt_speech()
+        self._interrupt_speech(wait=False)
         self.listening.arm_command()
         self._set_state("listening", "")
 
@@ -667,7 +699,7 @@ class WakeWordSession:
                     self._respond("Va bene, annullo.")
                 else:
                     # La risposta era gia' pronta: resta solo da non pronunciarla oltre.
-                    self._interrupt_speech()
+                    self._interrupt_speech(wait=False)
                 return
             if not self._command_cancelling():
                 self._logger.info("Ignorato comando mentre un task e' ancora in corso: %s", text)
@@ -723,7 +755,7 @@ class WakeWordSession:
             self.wake_cooldown.register()
             if self.metrics is not None:
                 self.metrics.wake()
-            self._interrupt_speech()  # "Jake" detto mentre stava ancora parlando: interrompilo
+            self._interrupt_speech(wait=False)  # "Jake" detto mentre stava ancora parlando: interrompilo
             if not remainder:
                 self.listening.arm_command()
                 self._set_state("listening", "")
@@ -749,6 +781,15 @@ class WakeWordSession:
 
         self.listening.set_pending_action(bool(self.jake_core.conversation_state.has_pending_action()))
         if self.listening.accepts_without_wake_word():
+            unaddressed = self.listening.state in (ListeningState.FOLLOW_UP, ListeningState.COMMAND)
+            if unaddressed and _unreliable_transcript(text, self.last_confidence):
+                # Senza "Jake" in questa frase (follow-up, o la ripetizione appena chiesta) una
+                # trascrizione molto incerta (rumore, parole senza senso) non diventa un comando: si
+                # chiede di ripetere, senza inventare un intent. CONFIRMATION segue la sua strada.
+                self._logger.info("Follow-up ignorato: trascrizione incerta (confidenza %s)", self.last_confidence)
+                self.listening.arm_command()
+                self._respond("Non ho capito bene, puoi ripetere?")
+                return
             self._process_command(text)
             return
 
@@ -814,7 +855,7 @@ class WakeWordSession:
             self._pending_turn = None
 
         # Se nel frattempo Jake sta anche parlando, ferma pure la voce.
-        self._interrupt_speech()
+        self._interrupt_speech(wait=False)
 
         self.listening.command_consumed()
         self.wake_cooldown.reset()
