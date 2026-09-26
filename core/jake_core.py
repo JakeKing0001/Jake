@@ -34,6 +34,7 @@ from core.nlu.normalizer import TranscriptNormalizer
 from core.nlu.retriever import CapabilityRetriever
 from core.notification_center import NotificationCenter
 from core.notification_policy import NotificationPolicy, QuietHours
+from core.proactive_gate import DELIVER, DUPLICATE, ProactiveGate
 from core.ollama_client import OllamaClient
 from core import orchestrator
 from core.orchestrator import JakeOrchestrator
@@ -200,6 +201,14 @@ class JakeCore:
             ),
             critical_contacts=set(config.get("notification_critical_contacts") or []),
             vip_contacts=set(config.get("notification_vip_contacts") or []),
+        )
+        # F6.1/F6.3: stessi freni per promemoria, automazioni e avvisi (duplicati, budget orario, quiet
+        # hours, nessuna interruzione durante una conversazione) - vedi core/proactive_gate.py.
+        self.proactive_gate = ProactiveGate(
+            dedup_window_s=float(config.get("notification_dedup_seconds", 600)),
+            hourly_budget=int(config.get("notification_hourly_budget", 3)),
+            in_quiet_hours=self.notification_policy.in_quiet_hours,
+            conversation_active=lambda: getattr(self, "_in_flight_answers", 0) > 0,
         )
         self.task_bridge = TaskNotificationBridge(
             self.task_monitor, self.notification_policy, self.event_bus,
@@ -458,6 +467,7 @@ class JakeCore:
         # (CLI, voce, tray, HUD) puo' sostituire questo callback per parlarli o mostrarli.
         self.reminder_manager = self.skill_registry.reminder_manager
         self.scheduler = ReminderScheduler(self.reminder_manager, on_due=self._default_on_reminder_due, interval_seconds=5)
+        self.scheduler.on_tick = self.release_deferred_notifications
         self.scheduler.start()
 
         # Contestualizzazione leggera del desktop (v2.0): il classificatore e il planner
@@ -612,7 +622,7 @@ class JakeCore:
 
     # ---- callback di default -------------------------------------------------------------
 
-    def notify(self, kind: str, message: str, *, trace_id: str | None = None) -> str | None:
+    def notify(self, kind: str, message: str, *, trace_id: str | None = None, critical: bool = False) -> str | None:
         """Punto unico da cui passa ogni notifica proattiva (promemoria/avviso/automazione)
         prima di essere presentata, sia in CLI (qui sotto) sia in voce (vedi WakeWordSession,
         core/voice/wake_word_session.py, che chiama questo stesso metodo): applica la modalita'
@@ -627,9 +637,45 @@ class JakeCore:
         dentro il risultato testuale di `SET_NOTIFICATION_MODE`, mai come un secondo `HudEvent` -
         non c'e' un evento successivo a cui riattaccare il trace_id, dichiarato apertamente."""
         gated = self.notification_center.gate(kind, message)
+        gate = getattr(self, "proactive_gate", None)
+        if gated is not None and gate is not None:
+            # F6.1/F6.3: un duplicato si scarta; budget, quiet hours o conversazione in corso -> in coda
+            outcome, reason = gate.check(kind, gated, critical=critical)
+            if outcome != DELIVER:
+                if outcome != DUPLICATE:
+                    self.notification_center.defer(kind, gated)
+                self.logger.info("Notifica %s %s: %s", kind, "scartata" if outcome == DUPLICATE else "rimandata", reason)
+                return None
         if gated is not None:
             self.event_bus.publish(HudEvent(EventType.NOTIFICATION, {"kind": kind, "text": gated}, trace_id=trace_id))
         return gated
+
+    # Dopo una risposta si aspetta questo tempo prima di un riepilogo: la voce potrebbe ancora parlare.
+    DIGEST_QUIET_AFTER_ANSWER_S = 60.0
+    DIGEST_MAX_ITEMS = 3
+
+    def release_deferred_notifications(self) -> str | None:
+        """F6.3: le notifiche rimandate dal gate (budget, quiet hours, conversazione) non restano in coda
+        per sempre. Appena le condizioni lo permettono escono come UN riepilogo attraverso il canale degli
+        avvisi (stampa in CLI, voce nella sessione vocale). Ritorna il riepilogo consegnato, o None."""
+        gate = getattr(self, "proactive_gate", None)
+        center = getattr(self, "notification_center", None)
+        if gate is None or center is None or center.suspended:
+            return None
+        if gate.conversation_active() or gate.in_quiet_hours() or not gate.budget_available():
+            return None  # il riepilogo stesso deve poter passare, o verrebbe rimandato di nuovo
+        if time.time() - getattr(self, "_last_answer_finished_at", 0.0) < self.DIGEST_QUIET_AFTER_ANSWER_S:
+            return None
+        items = center.take_deferred()
+        if not items:
+            return None
+        shown = [item["message"].rstrip(".") for item in items[: self.DIGEST_MAX_ITEMS]]
+        digest = "Mentre eri impegnato: " + "; ".join(shown) + "."
+        if len(items) > self.DIGEST_MAX_ITEMS:
+            digest += f" E altre {len(items) - self.DIGEST_MAX_ITEMS} notifiche."
+        callback = getattr(getattr(self, "system_advisor", None), "on_advisory", None) or self._default_on_advisory
+        callback(digest)
+        return digest
 
     def _default_on_reminder_due(self, reminder: dict) -> None:
         message = self.notify("reminder", self.format_due_reminder(reminder))
@@ -915,6 +961,7 @@ class JakeCore:
         finally:
             with self._in_flight_lock:
                 self._in_flight_answers -= 1
+                self._last_answer_finished_at = time.time()
 
     def _answer_counted(self, text: str, raw_text: str) -> str:
         # F1.8.4 ("drain limitato"): conta questa chiamata come "in corso" da qui a return -
@@ -928,6 +975,7 @@ class JakeCore:
         finally:
             with self._in_flight_lock:
                 self._in_flight_answers -= 1
+                self._last_answer_finished_at = time.time()
 
     def _answer_inner(self, text: str, raw_text: str) -> str:
         text = self._resolve_pronouns(text)

@@ -247,6 +247,9 @@ class NotificationPolicy:
             reason += ": in silenzio sullo schermo per non disturbare a voce"
         return Decision("deliver_now", reason, priority, channel, device.device_id if device else None, spoken, notification.message)
 
+    def in_quiet_hours(self) -> bool:
+        return self._in_quiet_hours()
+
     def _in_quiet_hours(self) -> bool:
         return bool(self.quiet_hours and self.quiet_hours.contains(self._now_of_day()))
 

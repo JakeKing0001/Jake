@@ -273,7 +273,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F5.5` | Retrieval Quality | `DOING` |
 | `F5.6` | Context Runtime | `DOING` |
 | `F5.7` | Privacy Engineering (libreria completa il 21/09/2026; dal 26/09/2026 nel percorso reale: "dimentica" cancella anche registro e indici con ricevuta, l'uso dei ricordi viene registrato, "da dove sai X" spiega la provenienza; purge/export/backup non ancora esposti a voce/HUD) | `DOING` |
-| `F6.1` | Proactivity Platform | `DOING` |
+| `F6.1` | Proactivity Platform (26/09/2026: promemoria, automazioni e avvisi passano dagli stessi freni in `JakeCore.notify` - duplicati, budget orario, quiet hours, conversazione in corso - e si sospendono insieme durante prove e benchmark) | `DOING` |
 | `F6.2` | Proactivity Quality | `DOING` |
 | `F6.3` | Notification UX (libreria di decisione il 21/09/2026; collegata a JakeCore/EventBus/HUD il 22/09/2026 - vedi F6.7; nessuna consegna reale di call/companion) | `DOING` |
 | `F6.4` | Goal Runtime | `DOING` |
@@ -8789,9 +8789,10 @@ o il solo prototipo 2D non chiudono il requisito. La verifica dell'handoff dipen
 - 26/09/2026 (prima fetta di F4.4.1/F4.4.5/F4.4.6): nuovo evento `CONFIRMATION` (pubblicato quando
   l'azione in sospeso cambia; intent, motivo, rischio, fonte esterna e `trace_id`, mai i parametri)
   -> stato `WAITING`; `SPEAKING` e `DICTATION` distinti; l'orb mostra sempre anche un'etichetta
-  testuale e ha un nome accessibile; stato coerente dopo reconnect/fuori ordine (fixture). Restano
-  la base 3D, le particelle, l'audio reale e gli stati success/warning (nessun evento li porta
-  ancora): `DOING`, verifica visiva `VERIFY`.
+  testuale e ha un nome accessibile; stato coerente dopo reconnect/fuori ordine (fixture). Esito
+  success/warning/error dall'ultima `ACTION_RECEIPT` (verificata / non verificata / fallita), tenuto
+  separato dallo stato del turno e mostrato dall'orb come anello per ~2 s. Restano la base 3D, le
+  particelle e l'audio reale: `DOING`, verifica visiva `VERIFY`.
 
 ### F4.5 — Pannelli contestuali
 
@@ -8983,6 +8984,12 @@ Dipende da: F5.2–F5.4.
 
 Criterio di uscita: ogni risposta di memoria ha almeno una fonte oppure è marcata come inferenza.
 
+- 26/09/2026 (F5.5.3/F5.5.4 per `RECALL`): ogni ricordo nella risposta porta la provenienza - "me l'hai
+  detto tu il GG/MM/AAAA", "l'ho dedotto io, non me l'hai detto tu", "salvato da un agente" o la fonte
+  registrata. Prima la risposta era solo "chiave: valore" e un'inferenza sembrava un fatto detto
+  dall'utente. Prova in `tests/test_memory_privacy_integration.py`. Restano citazioni per le altre
+  risposte che usano la memoria (agente, domande libere) e le metriche precision/recall.
+
 ### F5.6 — Context engine event-driven
 
 Dipende da: F3 e F5.1.
@@ -9104,6 +9111,20 @@ Dipende da: G1.
 
 Criterio di uscita: reminder, trigger e advisor usano lo stesso event pipeline; almeno un
 monitor rileva un evento fixture senza richiesta dell'utente e senza duplicarlo.
+
+- 26/09/2026 (prima fetta del criterio): le tre fonti passavano solo dalla matrice modalita' x tipo di
+  `NotificationCenter`; quiet hours e priorita' le conosceva soltanto il task monitor. Ora
+  `JakeCore.notify` applica `core/proactive_gate.py` a tutte e tre: un duplicato entro 10 minuti si
+  scarta; avvisi e automazioni in quiet hours, durante una conversazione in corso o oltre 3 consegne
+  nell'ultima ora vanno in coda (mai persi); i promemoria (orario chiesto dall'utente) e gli eventi
+  dichiarati critici dal produttore non vengono trattenuti, salvo i duplicati. Soglie da config
+  (`notification_dedup_seconds`, `notification_hourly_budget`). `JakeCore.proactivity_suspended`
+  sospende tutte le fonti durante prove e benchmark (usato da `f2_hardware_session`). Prova:
+  `tests/test_proactive_gate.py`. Le voci rimandate non restano in coda per sempre: appena finiscono
+  conversazione e quiet hours, c'e' budget e sono passati 60 s dall'ultima risposta (la voce potrebbe
+  ancora parlare), escono come UN riepilogo ("Mentre eri impegnato: ...", al massimo 3 voci piu' il
+  conteggio) dal canale degli avvisi, controllato ogni 5 s dallo scheduler dei promemoria; mai durante
+  una sospensione. Resta: portare anche il task monitor sulla stessa pipeline.
 
 ### F6.2 — Suggestion engine
 
@@ -10214,10 +10235,15 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 26/09/2026 (le note precedenti, ferme al 16/09/2026, restano nella cronologia Git).
+Aggiornato 26/09/2026, fine sessione (le note precedenti restano nella cronologia Git).
 
-1. Eseguire il gate hardware di F2 con `docs/f2-hardware-validation.md` (tre profili di uscita,
-   sessione wake di 24 h, registrazioni consensuali) e `python -m benchmarks.f2_hardware_session
-   evaluate`; solo con `PASS` F2 passa a `DONE` e si valuta `voice_barge_in` diverso da `off`.
-2. Ripetere `tests/test_computer_use_dpi.py` con un secondo monitor collegato (chiude F3.1.5).
-3. Poi G2: F4 (HUD nativo) e la parte rimasta di F2.6 (banco di prova su dialoghi reali).
+1. Ripetere il gate hardware di F2 con `docs/f2-hardware-validation.md` dopo le correzioni del
+   26/09/2026 (partial, barge-in, routing, lingua, follow-up, proattivita' sospesa): tre profili,
+   >= 20 interruzioni e 10+10 risposte senza interruzione ciascuno, sessione wake di 24 h, poi
+   `python -m benchmarks.f2_hardware_session evaluate`. Solo con `PASS` F2 passa a `DONE`.
+2. Verifica visiva dell'HUD nativo con Jake acceso (`hud/native/build/JakeHud.exe`): stati e
+   etichetta dell'orb, anello di esito, permission card, trascrizione live, indicatore microfono,
+   ultima azione con Annulla, pulsante "Ferma tutto" (F4.4/F4.5/F4.6 restano `VERIFY` fino ad allora).
+3. Ripetere `tests/test_computer_use_dpi.py` con un secondo monitor collegato (chiude F3.1.5).
+4. Poi: orb 3D/particelle (F4.4.7-F4.4.8), action center completo (retry, dettagli, precondizioni),
+   citazioni di memoria anche fuori da RECALL (F5.5), task monitor sulla pipeline proattiva (F6.1).

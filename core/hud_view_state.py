@@ -61,6 +61,10 @@ class HudViewState:
     confirmation_external: bool = False
     confirmation_trace_id: str = ""
     activities: list[dict[str, Any]] = field(default_factory=list)
+    # F4.4.1: esito dell'ultima azione (success = riuscita e verificata, warning = riuscita ma non
+    # verificata, error = fallita). Separato da `state`: l'orb lo mostra brevemente, senza anticipare
+    # un successo ne' nascondere un'attesa o un errore del turno in corso.
+    last_outcome: str = ""
     last_sequence_id: int = 0
     ignored: int = 0
     incompatible: bool = False
@@ -202,6 +206,10 @@ class HudViewState:
         if event_type == "ACTION_RECEIPT":
             item.update(intent=_text(payload, "intent"), outcome=_text(payload, "outcome"),
                         verified=_text(payload, "verified"), trace_id=trace_id)
+            if item["outcome"] != "success":
+                self.last_outcome = "error"
+            else:
+                self.last_outcome = "success" if item["verified"] == "verified" else "warning"
         else:
             expires = payload.get("expires_at")
             item.update(undo_intent=_text(payload, "compensating_intent"),

@@ -10,6 +10,9 @@ class ReminderScheduler:
     def __init__(self, reminder_manager, on_due=None, interval_seconds: float = 20, stop_timeout_seconds: float = 2.0):
         self.reminder_manager = reminder_manager
         self.on_due = on_due
+        # F6.3: chiamato a ogni giro dopo i promemoria (JakeCore lo usa per il riepilogo delle
+        # notifiche rimandate). Un errore qui non ferma mai il ciclo.
+        self.on_tick = None
         self.interval_seconds = interval_seconds
         # F1.8.5: configurabile solo per i test (verificare un thread che non si ferma in tempo
         # senza dover davvero aspettare i 2s reali di default) - il comportamento di produzione
@@ -61,4 +64,9 @@ class ReminderScheduler:
                             )
             except Exception:
                 self._logger.exception("Errore controllando i promemoria scaduti")
+            if self.on_tick is not None:
+                try:
+                    self.on_tick()
+                except Exception:
+                    self._logger.exception("Errore nel giro periodico dello scheduler")
             self._stop_event.wait(self.interval_seconds)

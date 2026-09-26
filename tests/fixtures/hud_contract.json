@@ -189,12 +189,22 @@
         {"event": {"type": "ACTION_RECEIPT", "payload": {"intent": "SENZA_ID"}, "sequence_id": 4}}
       ],
       "expect": {
-        "state": "IDLE", "ignored": 1,
+        "state": "IDLE", "ignored": 1, "last_outcome": "error",
         "activities": [
           {"action_id": "a1", "intent": "CREATE_PATH", "outcome": "success", "verified": "verified", "trace_id": "t-1", "undo_intent": "DELETE_PATH", "undo_expires_at": 1790000300},
           {"action_id": "a2", "intent": "SEND_EMAIL", "outcome": "failed", "verified": "unverified", "trace_id": "", "undo_intent": "", "undo_expires_at": 0}
         ]
       }
+    },
+    {
+      "name": "esito dell'ultima azione: verificata = success, non verificata = warning, senza toccare lo stato",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "EXECUTING", "sequence_id": 1}},
+        {"event": {"type": "ACTION_RECEIPT", "payload": {"action_id": "a1", "intent": "CREATE_PATH", "outcome": "success", "verified": "verified"}, "sequence_id": 2}},
+        {"event": {"type": "ACTION_RECEIPT", "payload": {"action_id": "a2", "intent": "OPEN_APP", "outcome": "success", "verified": "unverified"}, "sequence_id": 3}}
+      ],
+      "expect": {"state": "EXECUTING", "last_outcome": "warning"}
     },
     {
       "name": "eventi senza sequence_id (client o test locali) si applicano comunque",
