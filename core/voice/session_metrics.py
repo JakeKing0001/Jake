@@ -36,6 +36,7 @@ class SessionMetrics:
         self.echo_ignored = 0
         self.commands = 0
         self.duplicate_finals = 0
+        self.finals = 0
         self._utterance_started: float | None = None
         self._partial_seen = False
         self._last_final_id: str | None = None
@@ -68,6 +69,7 @@ class SessionMetrics:
 
     def final(self, utterance_id: str) -> None:
         with self._lock:
+            self.finals += 1
             if utterance_id == self._last_final_id:
                 self.duplicate_finals += 1
             self._last_final_id = utterance_id
@@ -123,7 +125,7 @@ class SessionMetrics:
                 "barge_in": {"detected": len(self.barge_in_latency_ms), "latency_ms": list(self.barge_in_latency_ms),
                              "method": "internal_lower_bound"},
                 "streaming": {"partial_latency_ms": list(self.first_partial_ms), "duplicate_finals": self.duplicate_finals,
-                              "definition": "inizio frase -> primo partial pubblicato"},
+                              "finals": self.finals, "definition": "inizio frase -> primo partial pubblicato"},
                 "tts": {"first_emission_ms": list(self.first_emission_ms),
                         "response_to_audio_ms": list(self.response_to_audio_ms),
                         "definition": "fine frase utente -> primo campione audio della risposta"},

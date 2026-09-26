@@ -73,15 +73,21 @@ Durante la sessione:
 
 Jake misura da sé, senza salvare audio né testo: interruzioni riconosciute e latenza voce→stop,
 prima emissione TTS (dalla fine della voce dell'utente), latenza del primo partial, finali
-duplicati, attivazioni wake ed eco ignorate. Alla chiusura (Ctrl+C o "Jake, esci") il runner chiede
-i conteggi che solo chi fa la prova conosce e salva `benchmarks/results/f2_hardware_<profilo>_<data>.json`
-(cartella ignorata da Git).
+duplicati, frasi finali, attivazioni wake ed eco ignorate. Alla chiusura (Ctrl+C o "Jake, esci") il
+runner chiede i conteggi che solo chi fa la prova conosce: interruzioni tentate, risposte lasciate
+finire in stanza normale e con sottofondo (separatamente), falsi stop, comandi nati dall'eco, latenze
+misurate con registrazione esterna (facoltative), falsi wake, wake intenzionali a 0,5 m, 3 m e 6 m
+(separatamente) e wake non sentiti. Salva poi `benchmarks/results/f2_hardware_<profilo>_<data>.json`
+(cartella ignorata da Git). I falsi stop vengono sottratti dalle interruzioni riconosciute da Jake,
+così un falso stop non gonfia il tasso di riconoscimento.
 
 La latenza di stop misurata da Jake è un limite inferiore: comprende la finestra di riconoscimento
 e lo stop del provider, non la latenza d'ingresso della scheda audio. Se il p95 interno supera i
 250 ms, oppure per una verifica a campione, registrare localmente microfono e loopback di sistema
 con Audacity/OBS e misurare la distanza tra l'inizio della forma d'onda dell'utente e la fine del
-TTS; usare quella misura nel report al posto della stima interna. Non conservare la registrazione
+TTS; inserire quei millisecondi quando il runner li chiede: sostituiscono la stima interna nel
+verdetto (che resta comunque salvata in `measured_by_jake`). Senza misura esterna, una stima interna
+fra 250 e 300 ms dà `VERIFY`, non `PASS`; oltre 300 ms è già `FAIL`. Non conservare la registrazione
 dopo aver estratto i millisecondi. Il limite noto della TV non va escluso: se produce falsi
 barge-in, il profilo fallisce.
 
@@ -106,7 +112,7 @@ Lasciare Jake in voce continua nell'ambiente reale, anche in più sessioni:
 Il runner registra le ore e l'ora di ogni attivazione accettata; nel foglio di prova annotare la
 condizione (silenzio/TV/musica/conversazione) e la frase che ha causato ogni falso wake. Eseguire i
 20 wake intenzionali distribuiti tra circa 0,5 m, 3 m e 6 m e riportare alla chiusura quanti non
-sono stati sentiti.
+sono stati sentiti. Se una delle tre distanze non è stata provata il criterio resta `VERIFY`.
 
 ## 4. Verdetto
 
@@ -114,9 +120,12 @@ sono stati sentiti.
 .\.venv\Scripts\python.exe -m benchmarks.f2_hardware_session evaluate
 ```
 
-Il comando legge tutti i report, applica le soglie di questo documento per ciascun profilo (vale
-l'ultimo report di ogni profilo: una prova migliore non cancella un fallimento successivo) e somma
-le ore wake. Ogni criterio è `PASS`, `FAIL` oppure `VERIFY` quando mancano dati: il gate è verde
+Il comando legge tutti i report del metodo corrente (quelli di versioni precedenti del runner sono
+ignorati), applica le soglie di questo documento per ciascun profilo (vale l'ultimo report di ogni
+profilo: una prova migliore non cancella un fallimento successivo) e somma ore, falsi wake e wake
+intenzionali di tutte le sessioni. Il fallback a frase completa conta come `PASS` solo se i partial
+erano davvero non disponibili (trascrittore assente o degradato) e sono state prodotte frasi finali:
+l'assenza di dati resta `VERIFY`. Ogni criterio è `PASS`, `FAIL` oppure `VERIFY` quando mancano dati: il gate è verde
 solo con tutti i profili e il wake in `PASS`. Il p95 usa lo stesso helper dei benchmark del
 progetto (`benchmarks/_report.py::percentile`).
 
