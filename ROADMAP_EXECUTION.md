@@ -5131,6 +5131,26 @@ Fonte: codice, test e misure reali di questa data; le voci storiche sopra restan
   partial solo se davvero degradato, stima interna di stop tra 250 e 300 ms = `VERIFY` finche'
   non c'e' la misura esterna (`METHOD_VERSION` 3).
 
+### Primo gate hardware (laptop) e correzioni — 26/09/2026
+
+Prima sessione reale (Realtek integrati, `large-v3-turbo` CUDA, Edge + RVC): barge-in 505-709 ms,
+primo partial 2,1-23,7 s, fine voce -> audio 3,7-8,2 s (risposta pronta -> audio 1,2-1,9 s), 0
+finali duplicati; prove insufficienti per un verdetto (3 interruzioni, 0 prove silenziose). Cause e
+correzioni:
+- partial: stessa decodifica pesante della finale (beam 5 + VAD Silero) sullo stesso lock, e la
+  finale li aspettava. Ora partial greedy leggeri e `SttModelLock` con priorita' alla finale (un
+  partial non parte se la finale aspetta; se il modello e' occupato si salta, senza degradare);
+- barge-in: 250-470 ms erano il `join()` del thread TTS dopo lo stop (la sua coda dorme 0,25 s).
+  Negli stop l'audio si ferma e il thread vecchio viene ritirato; la frase successiva lo aspetta sul
+  proprio thread. Finestra di rilevamento (240 ms) invariata;
+- "e spiegami le differenze tra Java e Python" dopo un calcolo era letto come ellissi e finiva nella
+  calcolatrice: un'ellissi ora e' un frammento breve, senza verbi discorsivi ne' domande;
+- deriva verso il cinese: istruzione di lingua piu' esplicita, taglio all'ultima frase italiana e un
+  solo nuovo tentativo se ne resta troppo poco (`core/language_guard.py`);
+- follow-up: una trascrizione con confidenza < 0,45 o con ripetizioni a raffica chiede di ripetere;
+- durante `f2_hardware_session` la proattivita' e' sospesa (`JakeCore.proactivity_suspended`).
+Da rifare fisicamente con `docs/f2-hardware-validation.md`: F2 resta `VERIFY`.
+
 ### Gate F2
 
 - benchmark audio pubblicato localmente;

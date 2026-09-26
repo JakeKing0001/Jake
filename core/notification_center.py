@@ -74,11 +74,30 @@ class NotificationCenter:
         self.mode = mode
         self._queued: list[dict] = []
         self._lock = threading.Lock()
+        self._suspended = 0
+
+    @property
+    def suspended(self) -> bool:
+        return self._suspended > 0
+
+    def suspend(self) -> None:
+        """Sospensione temporanea (benchmark, test, prove guidate): ogni notifica va in coda,
+        qualunque sia la modalita'. Annidabile; non cambia la modalita' scelta dall'utente."""
+        with self._lock:
+            self._suspended += 1
+
+    def resume(self) -> list[str]:
+        """Fine di una sospensione: restituisce i messaggi in coda ammessi dalla modalita' corrente."""
+        with self._lock:
+            self._suspended = max(0, self._suspended - 1)
+            if self._suspended:
+                return []
+        return self.set_mode(self.mode)
 
     def gate(self, kind: str, message: str) -> str | None:
         """Se 'kind' e' ammesso nella modalita' corrente restituisce il messaggio (da
         presentare subito); altrimenti lo mette in coda e restituisce None."""
-        if message and kind in MODE_ALLOWED_KINDS.get(self.mode, frozenset()):
+        if message and not self._suspended and kind in MODE_ALLOWED_KINDS.get(self.mode, frozenset()):
             return message
         if message:
             with self._lock:

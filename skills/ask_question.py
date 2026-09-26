@@ -1,6 +1,7 @@
 import json
 from urllib import error, request
 
+from core.language_guard import keep_reply_language
 from core.skill_result import SkillResult
 from core.ollama_client import DEFAULT_BASE_URL
 from core.network import read_url
@@ -47,9 +48,20 @@ class AskQuestionSkill:
         answer = self._ask(question)
         if answer is None:
             return SkillResult(success=False, data={}, error="OLLAMA_UNAVAILABLE")
-        return SkillResult(success=True, data={"answer": answer})
+        kept, drifted = keep_reply_language(answer, question)
+        if drifted and len(kept) < self.MIN_KEPT_CHARS:
+            # la deriva e' arrivata presto: un solo nuovo tentativo, deterministico e con la lingua ribadita
+            retry = self._ask(question, temperature=0.0, insist_language=True)
+            if retry is not None:
+                kept, _ = keep_reply_language(retry, question)
+        if drifted and not kept:
+            kept = "Scusa, non sono riuscito a formulare bene la risposta. Puoi ripetere la domanda?"
+        return SkillResult(success=True, data={"answer": kept})
 
-    def _ask(self, question: str) -> str | None:
+    # Sotto questa lunghezza la parte italiana rimasta dopo una deriva di lingua non basta come risposta.
+    MIN_KEPT_CHARS = 80
+
+    def _ask(self, question: str, temperature: float = 0.4, insist_language: bool = False) -> str | None:
         messages = [
             {
                 "role": "system",
@@ -57,7 +69,11 @@ class AskQuestionSkill:
                     "Sei Jake, un assistente vocale personale. Rispondi in italiano in modo "
                     "chiaro, utile e conciso: la risposta viene letta ad alta voce, quindi evita "
                     "markdown, elenchi puntati o formattazione, preferendo 2-5 frasi a meno che "
-                    "l'utente non chieda esplicitamente piu' dettaglio."
+                    "l'utente non chieda esplicitamente piu' dettaglio. Scrivi tutta la risposta in "
+                    "italiano, dall'inizio alla fine, salvo che l'utente chieda esplicitamente "
+                    "un'altra lingua; non usare mai caratteri cinesi, giapponesi o coreani."
+                    + (" Attenzione: la risposta precedente e' passata a un'altra lingua. Resta in "
+                       "italiano per tutta la risposta." if insist_language else "")
                 ),
             }
         ]
@@ -68,7 +84,7 @@ class AskQuestionSkill:
         messages.append({"role": "user", "content": question})
 
         payload = {"model": self.model, "stream": False,
-            "keep_alive": "30m", "options": {"num_ctx": 8192, "temperature": 0.4}, "messages": messages}
+            "keep_alive": "30m", "options": {"num_ctx": 8192, "temperature": temperature}, "messages": messages}
         body = json.dumps(payload).encode("utf-8")
         http_request = request.Request(
             f"{self.base_url}/api/chat", data=body, headers={"Content-Type": "application/json"}, method="POST",

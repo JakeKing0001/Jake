@@ -225,7 +225,19 @@ COMMAND_VERBS = frozenset({
     "apri", "chiudi", "cerca", "metti", "scrivi", "leggi", "dimmi", "fai", "vai", "avvia", "spegni", "accendi",
     "imposta", "mostra", "ricordami", "crea", "cancella", "elimina", "invia", "manda", "riproduci", "alza",
     "abbassa", "salva", "copia", "sposta", "trova", "mostrami", "dammi", "calcola", "converti", "traduci",
-    "open", "close", "search", "play", "set", "show", "send", "delete", "create", "turn",
+    # richieste discorsive: "e spiegami X" dopo un calcolo e' una domanda nuova, non un valore per lo slot
+    "spiegami", "spiega", "raccontami", "racconta", "parlami", "descrivi", "descrivimi", "riassumi", "elenca",
+    "confronta", "fammi", "aiutami", "insegnami", "dimostrami",
+    "open", "close", "search", "play", "set", "show", "send", "delete", "create", "turn", "explain", "tell",
+})
+
+# Un'ellissi e' un frammento ("e a Milano?", "anche Discord"): una frase lunga o una domanda e' una
+# richiesta nuova. Gate hardware 26/09/2026: "e spiegami le differenze tra Java e Python" dopo "quanto
+# fa 6 per 8" finiva come nuova espressione per la calcolatrice.
+_ELLIPSIS_MAX_WORDS = 5
+_ELLIPSIS_QUESTION_WORDS = frozenset({
+    "come", "perche", "perché", "cosa", "che", "quale", "quali", "quanto", "quanti", "chi", "dove", "quando",
+    "how", "why", "what", "which", "who", "where", "when",
 })
 
 _ELLIPSIS = re.compile(
@@ -252,12 +264,17 @@ def resolve_ellipsis(text: str, last_intent: str | None, last_parameters: dict |
     if not match:
         return None
     value = match.group(1).strip()
-    if not value or any(word.lower() in COMMAND_VERBS for word in re.findall(r"\w+", value)):
+    words = [word.lower() for word in re.findall(r"\w+", value)]
+    if not value or len(words) > _ELLIPSIS_MAX_WORDS or any(word in COMMAND_VERBS for word in words):
+        return None
+    if words[0] in _ELLIPSIS_QUESTION_WORDS:
         return None
     text_slots = [name for name, current in last_parameters.items() if isinstance(current, str)]
     if len(text_slots) != 1:
         return None
     slot = text_slots[0]
+    if slot == "expression" and not re.search(r"\d", value):
+        return None  # un calcolo si completa con numeri, non con parole
     updated = dict(last_parameters)
     updated[slot] = value
     return EllipsisResolution(last_intent, updated, slot, value)

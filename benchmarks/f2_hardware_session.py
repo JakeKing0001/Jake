@@ -321,13 +321,19 @@ def run_session(profile: str, notes: str = "") -> Path:
         barge_in="on", partials="on", speaker_store=main._speaker_store(), metrics=metrics,
     )
     print(f"Prova F2 '{profile}': voce continua con barge-in e partial attivi (solo per questa prova).")
+    print("Promemoria, automazioni e avvisi proattivi sono sospesi fino alla fine della prova.")
     print("Segui docs/f2-hardware-validation.md. Chiudi con Ctrl+C o dicendo 'Jake, esci'.")
+    released: list[str] = []
     try:
-        session.run()
-    except KeyboardInterrupt:
-        pass
+        with core.proactivity_suspended("prova hardware F2") as released:
+            try:
+                session.run()
+            except KeyboardInterrupt:
+                pass
     finally:
         session.stop()
+        for message in released:
+            print(f"Rimandato durante la prova: {message}")
         if server_manager is not None:
             server_manager.stop()
         core.shutdown()
