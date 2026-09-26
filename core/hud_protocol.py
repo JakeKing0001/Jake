@@ -59,6 +59,11 @@ class EventType(str, Enum):
     # "inspection": {"verdict", "reason", "chosen", "alternatives": [{name, control_type,
     # automation_id, score, reason}]}}. Solo metadati UI, mai testo scritto dall'utente.
     SELECTOR_INSPECTION = "SELECTOR_INSPECTION"
+    # F4.4.1/F4.5.3: Jake aspetta una conferma o un'autenticazione (stato "waiting" dell'HUD).
+    # Payload: {"pending": bool, "intent": str, "reason": "confirmation_required"|"auth_required",
+    # "risk": str (core/risk.py::RiskLevel), "external_source": bool}. Solo metadati: MAI i
+    # parametri dell'azione (possono contenere testo personale, F4.5.7).
+    CONFIRMATION = "CONFIRMATION"
 
 
 # Traduce gli stati gia' in uso da WakeWordSession/SessionHooks.set_state (stringhe libere,

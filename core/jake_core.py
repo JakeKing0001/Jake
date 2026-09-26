@@ -343,6 +343,7 @@ class JakeCore:
             retriever=self.retriever, client=self.ollama,
         )
         self.conversation_state = self.skill_registry.conversation_state
+        self.conversation_state.on_pending_change = self._publish_pending_confirmation
         self.memory_manager = self.skill_registry.memory_manager
         # F2.7 (adozione, seconda fetta - isolamento vero di memoria per profilo): None per
         # default (opt-in via multi_user_profiles_enabled in config.json), nessun cambio di
@@ -2745,6 +2746,25 @@ class JakeCore:
             "response": response,
             "action_id": action_id,
         }
+
+    def _publish_pending_confirmation(self, action: dict | None) -> None:
+        """F4.4.1/F4.5.3: stato "waiting" e permission card dell'HUD. Solo metadati dell'azione in
+        sospeso (intent, motivo, rischio, fonte esterna), mai i suoi parametri."""
+        if action is None:
+            payload: dict = {"pending": False}
+        else:
+            intent = str(action.get("intent") or "")
+            try:
+                risk = risk_of(intent).value if intent else ""
+            except Exception:
+                risk = ""
+            payload = {
+                "pending": True, "intent": intent, "reason": str(action.get("reason") or "confirmation_required"),
+                "risk": risk, "external_source": bool(action.get("suggested_by_external_content")),
+            }
+        trace_id = action.get("trace_id") if isinstance(action, dict) else None
+        self.event_bus.publish(HudEvent(EventType.CONFIRMATION, payload,
+                                        trace_id=trace_id if isinstance(trace_id, str) else None))
 
     # ---- sospensione della proattivita' ----------------------------------------------------
 

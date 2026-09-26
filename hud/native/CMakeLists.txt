@@ -83,6 +83,14 @@ add_custom_command(
 )
 add_custom_target(JakeHudEventTypesHeader DEPENDS "${JAKE_HUD_EVENT_TYPES_HEADER}")
 
+# F4.1 (contratto HUD): il riduttore degli eventi e' una libreria senza rete ne' QML, usata sia
+# dall'HUD sia dal test di contratto che esegue la stessa suite di fixture del riferimento Python.
+add_library(JakeHudProtocol STATIC src/HudEventReducer.h src/HudEventReducer.cpp)
+add_dependencies(JakeHudProtocol JakeHudEventTypesHeader)
+target_include_directories(JakeHudProtocol PUBLIC src "${CMAKE_CURRENT_BINARY_DIR}/generated")
+target_compile_definitions(JakeHudProtocol PUBLIC JAKE_PROTOCOL_VERSION=${JAKE_PROTOCOL_VERSION})
+target_link_libraries(JakeHudProtocol PUBLIC Qt6::Core)
+
 qt_add_executable(JakeHud
     src/main.cpp
     src/JakeClient.h
@@ -110,10 +118,10 @@ target_include_directories(JakeHud PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/gene
 
 target_compile_definitions(JakeHud PRIVATE
     JAKE_PRODUCT_VERSION="${JAKE_PRODUCT_VERSION}"
-    JAKE_PROTOCOL_VERSION=${JAKE_PROTOCOL_VERSION}
 )
 
 target_link_libraries(JakeHud PRIVATE
+    JakeHudProtocol
     Qt6::Core
     Qt6::Gui
     Qt6::Qml
@@ -150,3 +158,13 @@ endif()
 set_target_properties(JakeHud PROPERTIES
     WIN32_EXECUTABLE ON
 )
+
+# F4.1: "client Python finto e JakeClient C++ superano la stessa suite di fixture".
+enable_testing()
+qt_add_executable(JakeHudContractTests tests/contract_tests.cpp)
+target_link_libraries(JakeHudContractTests PRIVATE JakeHudProtocol Qt6::Core)
+set_target_properties(JakeHudContractTests PROPERTIES WIN32_EXECUTABLE OFF)
+add_test(NAME hud_contract
+    COMMAND JakeHudContractTests "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/fixtures/hud_contract.json")
+# Le DLL di Qt accanto al binario le copia windeployqt (POST_BUILD di JakeHud, stessa cartella).
+add_dependencies(JakeHudContractTests JakeHud)

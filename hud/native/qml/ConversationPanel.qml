@@ -16,6 +16,14 @@ Rectangle {
         id: hoverHandler
     }
 
+    // F2.2.7/F4.5.1: trascrizione live (partial provvisorio in corsivo, final normale), passo in
+    // corso, ultima prova e diagnosi del selettore - dal riduttore condiviso via JakeClient.
+    property string transcriptText: ""
+    property bool transcriptFinal: false
+    property string stepDescription: ""
+    property string evidenceSummary: ""
+    property string inspectionReason: ""
+
     function append(senderRole, messageText) {
         // Nomi dei campi del modello deliberatamente diversi da proprieta' comuni di Item/Text
         // (es. "text"): "text: text" dentro un delegate Text{} si legherebbe a se stesso invece
@@ -26,9 +34,56 @@ Rectangle {
 
     ListModel { id: model }
 
+    Column {
+        id: live
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.margins: 10
+        spacing: 2
+
+        Text {
+            width: parent.width
+            visible: root.transcriptText.length > 0
+            text: root.transcriptText
+            font.italic: !root.transcriptFinal
+            color: root.transcriptFinal ? "#e5e7eb" : "#9ca3af"
+            wrapMode: Text.WordWrap
+            font.pixelSize: 13
+            Accessible.name: (root.transcriptFinal ? qsTr("Hai detto: ") : qsTr("Sto sentendo: ")) + text
+        }
+        Text {
+            width: parent.width
+            visible: root.stepDescription.length > 0
+            text: qsTr("Passo: %1").arg(root.stepDescription)
+            color: "#facc15"
+            wrapMode: Text.WordWrap
+            font.pixelSize: 12
+        }
+        Text {
+            width: parent.width
+            visible: root.evidenceSummary.length > 0
+            text: root.evidenceSummary
+            color: "#3ddc84"
+            wrapMode: Text.WordWrap
+            font.pixelSize: 12
+        }
+        Text {
+            width: parent.width
+            visible: root.inspectionReason.length > 0
+            text: qsTr("Non trovato: %1").arg(root.inspectionReason)
+            color: "#fb923c"
+            wrapMode: Text.WordWrap
+            font.pixelSize: 12
+        }
+    }
+
     ListView {
         id: list
-        anchors.fill: parent
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.bottom: live.top
         anchors.margins: 10
         spacing: 8
         clip: true

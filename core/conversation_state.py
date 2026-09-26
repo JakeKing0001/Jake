@@ -52,6 +52,9 @@ class ConversationStateManager:
         # metodo sotto invece di essere un parametro esplicito.
         self._pending_actions: dict[str | None, dict] = {}
         self._pending_action_lock = threading.Lock()
+        # F4.4.1/F4.5.3: chiamata (azione o None) FUORI dal lock ogni volta che l'azione in sospeso
+        # di un canale cambia davvero - JakeCore la usa per l'evento CONFIRMATION dell'HUD.
+        self.on_pending_change = None
         self._short_term_history: deque[dict] = deque(maxlen=short_term_limit)
         self._last_search_results: list[dict] = []
         self._entities: dict = {}
@@ -117,11 +120,23 @@ class ConversationStateManager:
         senza toccare quella di nessun altro canale."""
         with self._pending_action_lock:
             self._pending_actions[current_device_id()] = deepcopy(action)
+        self._notify_pending(action)
 
     def clear_pending_action(self):
         """Cancella l'azione in attesa PER QUESTO CANALE."""
         with self._pending_action_lock:
-            self._pending_actions.pop(current_device_id(), None)
+            removed = self._pending_actions.pop(current_device_id(), None)
+        if removed is not None:
+            self._notify_pending(None)
+
+    def _notify_pending(self, action) -> None:
+        callback = self.on_pending_change
+        if callback is None:
+            return
+        try:
+            callback(deepcopy(action) if action is not None else None)
+        except Exception:
+            pass  # un osservatore guasto non deve mai rompere la conferma
 
     def take_pending_action(self):
         """F1.8.1: legge E cancella l'azione in attesa PER QUESTO CANALE in UN'UNICA operazione
@@ -134,7 +149,9 @@ class ConversationStateManager:
         indipendente: non vede ne' interferisce con questa azione."""
         with self._pending_action_lock:
             action = self._pending_actions.pop(current_device_id(), None)
-            return deepcopy(action) if action is not None else None
+        if action is not None:
+            self._notify_pending(None)
+        return deepcopy(action) if action is not None else None
 
     # ---- riferimenti recenti (v3.1) -------------------------------------------------------
 
