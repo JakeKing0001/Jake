@@ -250,7 +250,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F2.5` | Speech Runtime (uscita predefinita rilevata, cache delle conferme RVC, pipeline di produzione misurata il 25/09/2026: primo campione p95 1,2-1,5 s, pause tra chunk < 1 ms; manca "prima emissione < 2 s" dalla fine della voce su hardware) | `VERIFY` |
 | `F2.6` | Conversation Runtime (dialogo/correzione/ellissi/ordinali collegati a JakeCore nel commit a4a2685 - la riga precedente "libreria non collegata" era stantia; bench_dialogue 22/22 senza correzioni, un banco di prova su dialoghi reali resta aperto) | `VERIFY` |
 | `F2.7` | Identity and Voice (profili opt-in, isolamento per turno, arruolamento CLI corretto e testato il 25/09/2026; qualita' della firma da ritarare su voci vere) | `VERIFY` |
-| `F3.1` | Computer Use Quality (benchmark unico dei 100 task: 96/100 in due esecuzioni consecutive, i fallimenti sono i 4 limiti dichiarati; DPI verificato a quattro scale il 25/09/2026; manca solo la prova con due monitor fisici) | `VERIFY` |
+| `F3.1` | Computer Use Quality (benchmark unico dei 100 task: 100/100 in due esecuzioni consecutive il 26/09/2026, i 4 ex-limiti raggiunti via UIA; DPI verificato a quattro scale il 25/09/2026; manca solo la prova con due monitor fisici) | `VERIFY` |
 | `F3.2` | Windows Automation (cache collegata al percorso reale; dump verificati e flussi su cinque app reali il 25/09/2026) | `DONE` |
 | `F3.3` | Windows Automation (inspector con candidato/alternative/punteggio/motivo nei risultati, CLI ed evento HUD; invalidazione strutturale collegata alle procedure - 25/09/2026; il disegno del pannello nell'HUD e' F4.5) | `DONE` |
 | `F3.4` | Execution Runtime (verificato end-to-end sui 100 task e su cinque app reali il 25/09/2026; policy anche per click/tasti dichiarati sensibili) | `DONE` |
@@ -5109,6 +5109,28 @@ Fonte: codice, test e misure reali di questa data; le voci storiche sopra restan
 - CI di master era rossa (mypy, test di pronuncia rimasto a "fail" invece di "fàil", 5 test di
   sessione scritti per `answer()` sincrona): corretto.
 
+### Hardening F2/F3 — 26/09/2026
+
+- F3.1, i 4 limiti del benchmark rivisti con sonde sulla fixture: nessuno era un limite del
+  provider. Tooltip: Qt lo espone come `FullDescription` (`read_description`). Tre stati: Toggle
+  alterna solo on/off, Invoke segue il ciclo del widget (`set_toggle_state`, stato riletto dopo
+  ogni azione). Lista con caselle (69/94): il vecchio test cliccava il centro di una riga
+  ritagliata e coperta, quindi Spazio non arrivava alla lista; `set_list_item_checked` usa fuoco
+  UIA + Home/Giu' + Spazio con verifica, senza coordinate. I fatti del provider restano come
+  test. Il runner si interrompeva al primo task fallito: corretto.
+- Stress della cancellazione (`bench_turn_cancellation`, 6 scenari reali x 17): trovato e
+  corretto un caso in cui il comando dopo "Jake, basta" andava perso (stop detto mentre Jake
+  pronunciava una risposta gia' consegnata: "basta" finiva alla NLU e occupava il turno).
+  Stop entro 62 ms, tranne TaskAgent ~208 ms (polling documentato di 0,2 s).
+- Thread e risorse della voce: i provider TTS usavano thread non daemon, e l'uscita del
+  processo aspettava una conversione RVC gia' abbandonata (8,3 s misurati; timeout 30 s).
+  Ora `DaemonExecutor` e `close()`. `main.py` non chiamava mai `WakeWordSession.stop()`: ora si',
+  e lo stop annulla il turno in corso e non lascia parlare nulla dopo.
+- Runner hardware F2 allineato al documento: prove silenziose 10+10 (stanza/sottofondo), wake
+  divisi per distanza, falsi stop non contati come interruzioni riconosciute, fallback dei
+  partial solo se davvero degradato, stima interna di stop tra 250 e 300 ms = `VERIFY` finche'
+  non c'e' la misura esterna (`METHOD_VERSION` 3).
+
 ### Gate F2
 
 - benchmark audio pubblicato localmente;
@@ -5128,9 +5150,10 @@ Stato al 25/09/2026 (ricalcolato su codice, test e misure; sostituisce la tabell
 | accessibilita' via sottotitoli e testo equivalente | **fatto** (sottotitoli live nell'HUD, test) |
 | cancellazione del turno corrente | **fatto** (25/09/2026, vedi sopra) |
 
-Gate software F2 (25/09/2026, Python 3.12.6 locale): suite completa 4.778 passati, 0 falliti,
-1 saltato (multi-monitor, un solo schermo); ruff, mypy selettivo, compileall, smoke test e
-`bench_dialogue` (22/22, 0 correzioni) verdi; CI Windows 3.11/3.12 sul commit finale. Restano SOLO prove fisiche, da eseguire con `docs/f2-hardware-validation.md`: tre profili
+Gate software F2 (26/09/2026, Python 3.12.6 locale): suite completa 4.823 passati, 0 falliti,
+1 saltato (multi-monitor, un solo schermo); ruff, mypy selettivo, compileall, smoke test verdi;
+`bench_dialogue` 22/22, `bench_dialogue_stress` 84/84 (0 riesecuzioni non sicure),
+`bench_turn_cancellation` 102/102. Restano SOLO prove fisiche, da eseguire con `docs/f2-hardware-validation.md`: tre profili
 di uscita con >= 20 interruzioni e 20 risposte ciascuno, sessione wake di 24 h con 20 wake
 intenzionali a 0,5/3/6 m, registrazioni consensuali per il WER. Fino ad allora F2 resta `VERIFY`.
 
@@ -8259,7 +8282,7 @@ Stato al 25/09/2026:
 
 | Criterio | Stato | Prova |
 |---|---|---|
-| ≥ 90% su 100 task fixture | **fatto** | 96/100 in due esecuzioni consecutive con `bench_computer_use_tasks` (limiti contati come falliti) |
+| ≥ 90% su 100 task fixture | **fatto** | 100/100 in due esecuzioni consecutive con `bench_computer_use_tasks` (26/09/2026; era 96/100, vedi "Hardening F2/F3") |
 | 100% azioni sensibili sottoposte a policy | **fatto** per ogni azione dichiarata sensibile | `tests/test_sensitive_ui.py` (5 skill x 6 effetti), `risk_intent` di ComputerAgent/procedure, test reali su Edge; un click non dichiarato resta `LOCAL_REVERSIBLE` (il rischio non si deduce dal testo del bottone) |
 | nessuna doppia azione nei retry | **fatto** | scala che si ferma dopo un Invoke eseguito, idempotency key, `execute_with_retry` solo per intent sicuri, nessun retry dopo un annullamento |
 | diagnosi e strategia visibili per ogni fallimento | **fatto** | `ComputerActionResult.strategy/attempts/inspection`, diagnosi nel report dei 100 task |
@@ -10122,7 +10145,7 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 25/09/2026 (le note precedenti, ferme al 16/09/2026, restano nella cronologia Git).
+Aggiornato 26/09/2026 (le note precedenti, ferme al 16/09/2026, restano nella cronologia Git).
 
 1. Eseguire il gate hardware di F2 con `docs/f2-hardware-validation.md` (tre profili di uscita,
    sessione wake di 24 h, registrazioni consensuali) e `python -m benchmarks.f2_hardware_session
