@@ -9133,7 +9133,9 @@ monitor rileva un evento fixture senza richiesta dell'utente e senza duplicarlo.
   conversazione e quiet hours, c'e' budget e sono passati 60 s dall'ultima risposta (la voce potrebbe
   ancora parlare), escono come UN riepilogo ("Mentre eri impegnato: ...", al massimo 3 voci piu' il
   conteggio) dal canale degli avvisi, controllato ogni 5 s dallo scheduler dei promemoria; mai durante
-  una sospensione. Resta: portare anche il task monitor sulla stessa pipeline.
+  una sospensione. Nella sessione vocale un avviso o un'automazione arrivati mentre Jake parla o lavora a
+  un comando vanno in coda invece di tagliare la risposta in corso (prima `_speak_async` la
+  interrompeva). Resta: portare anche il task monitor sulla stessa pipeline.
 
 ### F6.2 — Suggestion engine
 

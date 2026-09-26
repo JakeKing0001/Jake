@@ -206,6 +206,31 @@ class ProactivitySuspensionTests(unittest.TestCase):
         self.assertEqual(released, ["Promemoria: medicina"])
 
 
+class NoInterruptionWhileSpeakingTests(VoiceSessionTestCase):
+    def test_an_advisory_while_jake_speaks_is_queued_not_spoken_over_the_answer(self):
+        """F6.3: prima l'avviso partiva subito e _speak_async tagliava la risposta in corso."""
+        center = NotificationCenter()
+        core = SimpleNamespace(conversation_state=SimpleNamespace(has_pending_action=lambda: False),
+                               kill_switch=KillSwitch(), EXIT_SENTINEL="__exit__", notification_center=center,
+                               notify=mock.MagicMock(side_effect=lambda kind, message: message))
+        vad = SimpleNamespace(on_level=None, muted=False, SAMPLE_RATE=16000)
+        tts = _LingeringTts()
+        session = track(WakeWordSession(core, mock.MagicMock(), tts, vad_listener=vad, follow_up_seconds=0))
+        self.addCleanup(tts.stop)
+        session._speak_async("La risposta lunga che l'utente sta ascoltando.")
+        self.assertTrue(_wait(lambda: tts.active == 1))
+
+        session._on_advisory("Batteria al 10%")
+
+        core.notify.assert_not_called()
+        self.assertEqual(tts.spoken, ["La risposta lunga che l'utente sta ascoltando."])
+        self.assertEqual(center.take_deferred(), [{"kind": "advisory", "message": "Batteria al 10%", "deferred": True}])
+        tts.stop()
+        session._tts_thread.join(2)
+        session._on_advisory("Disco quasi pieno")
+        core.notify.assert_called_once_with("advisory", "Disco quasi pieno")
+
+
 def _wait(predicate, timeout=2.0):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
