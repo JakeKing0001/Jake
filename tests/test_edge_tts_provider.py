@@ -3,6 +3,7 @@ trovato. 'edge_tts'/'av'/'sounddevice' sono pacchetti VERI installati in questo 
 patchano le loro classi/funzioni direttamente con mock.patch (mai mock.patch.dict su
 sys.modules - vedi la nota in tests/test_character_tts_provider.py sul perche')."""
 import asyncio
+import time
 import unittest
 from unittest import mock
 
@@ -183,19 +184,28 @@ class SpeakTests(unittest.TestCase):
         provider.fallback.speak.assert_called_once_with(f"{long_a} {long_b}")
 
     def test_interruption_stops_processing_further_sentences(self):
+        """La frase successiva viene pre-sintetizzata MENTRE suona la corrente (per design): dopo
+        l'interruzione non deve essere suonata, e il prefetch non va oltre di lei. (La versione
+        precedente asseriva che la seconda non fosse neanche sintetizzata: passava solo se il worker
+        perdeva la corsa con il thread del test.)"""
         provider = _provider()
         long_a = "Questa e' la prima frase, abbastanza lunga da restare sola."
         long_b = "Questa e' la seconda frase, anche lei sufficientemente lunga."
+        long_c = "Questa e' la terza frase, che non deve mai essere preparata."
+        played = []
 
         def interrupt_after_playing(pcm):
+            played.append(pcm)
             provider._interrupted = True
 
         with mock.patch("core.voice.edge_tts_provider.is_online", return_value=True):
             with mock.patch.object(provider, "_synthesize", side_effect=lambda text: text.encode()) as synth:
                 with mock.patch.object(provider, "_decode_mp3", side_effect=lambda mp3: mp3):
                     with mock.patch.object(provider, "_play", side_effect=interrupt_after_playing):
-                        provider.speak(f"{long_a} {long_b}")
-        synth.assert_called_once_with(long_a)
+                        provider.speak(f"{long_a} {long_b} {long_c}")
+                        time.sleep(0.1)  # un eventuale prefetch in volo ha il tempo di arrivare
+        self.assertEqual(played, [long_a.encode()])
+        self.assertNotIn(mock.call(long_c), synth.call_args_list)
 
 
 class StopTests(unittest.TestCase):

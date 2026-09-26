@@ -3,7 +3,8 @@ import os
 import tempfile
 import wave
 import threading
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future
+from core.voice.daemon_executor import DaemonExecutor
 from core.voice.speech_text import split_prosodic
 from core.voice.rvc_client import RvcError
 from core.voice.tts_provider import TtsProvider, scale_pcm
@@ -106,7 +107,8 @@ class CharacterTtsProvider(TtsProvider):
         # Due worker: una frase nuova (es. "Va bene, annullo.") non deve aspettare in coda la
         # sintesi/conversione ormai inutile della frase interrotta, che non si puo' abortire a
         # meta' ma il cui risultato viene comunque scartato (_is_current).
-        self._executor = ThreadPoolExecutor(
+        # Thread daemon: una conversione abbandonata non trattiene l'uscita di Jake (vedi daemon_executor).
+        self._executor = DaemonExecutor(
             max_workers=2,
             thread_name_prefix="jake-rvc-prefetch",
         )
@@ -266,3 +268,11 @@ class CharacterTtsProvider(TtsProvider):
             sd.stop()
 
         self.base_tts_provider.stop()
+
+    def close(self) -> None:
+        """Fine sessione: stop, nessuna conversione in coda parte piu', la voce di base chiude le sue."""
+        self.stop()
+        self._executor.shutdown(wait=False, cancel_futures=True)
+        close_base = getattr(self.base_tts_provider, "close", None)
+        if callable(close_base):
+            close_base()

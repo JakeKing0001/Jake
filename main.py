@@ -277,6 +277,7 @@ def run_wake_word_mode():
     try:
         session.run()
     finally:
+        session.stop()
         if server_manager is not None:
             server_manager.stop()
         core.shutdown()
@@ -347,6 +348,8 @@ def run_jarvis_mode(with_voice: bool = True):
     try:
         app.run()
     finally:
+        if session is not None:
+            session.stop()
         if server_manager is not None:
             server_manager.stop()
 

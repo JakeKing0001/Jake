@@ -204,6 +204,7 @@ class WakeWordSession:
         self._command_lock = threading.Lock()
         self._command_thread = None
         self._command_cancel_event = None
+        self._stopped = False
         self._active_turn: _VoiceTurn | None = None
         self._pending_turn: _VoiceTurn | None = None
         self._attach_hooks()
@@ -473,8 +474,8 @@ class WakeWordSession:
         # F2.5.1: Markdown e codice non si leggono; lo stile puo' abbreviare. Cio' che Jake dice davvero (non
         # il testo originale) e' cio' che l'eco-guard deve riconoscere.
         text = prepare_for_speech(text, self.speech_style) if text else ""
-        if not text:
-            return
+        if not text or self._stopped:
+            return  # dopo stop() nessuna frase (neanche di un turno che finisce ora) deve parlare
         self._interrupt_speech()
         self._active_output_device = self.output_device_name or detect_output_device_name()
         apply_to_provider(self.tts_provider, self.speech_style, self._active_output_device)
@@ -967,7 +968,23 @@ class WakeWordSession:
         keyboard.write(lowered + " ", delay=0.004)
 
     def stop(self) -> None:
+        """Fine della sessione. Il turno in corso viene annullato (come "Jake, basta": il suo worker
+        smette di aspettare e la sua risposta e' scartata), quello in coda cade, la voce si ferma e il
+        provider rilascia le sue risorse. Non aspetta i thread daemon: non blocca l'uscita."""
         self._running = False
+        self._stopped = True
+        with self._command_lock:
+            if self._active_turn is not None:
+                self._active_turn.cancel_event.set()
+            self._pending_turn = None
         self._interrupt_speech()
         if self.live_transcriber is not None:
             self.live_transcriber.close()
+        close = getattr(self.tts_provider, "close", None)
+        try:
+            if callable(close):
+                close()
+            else:
+                self.tts_provider.stop()
+        except Exception:
+            self._logger.exception("Errore chiudendo la sintesi vocale")

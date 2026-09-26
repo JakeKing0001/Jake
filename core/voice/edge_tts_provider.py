@@ -10,8 +10,8 @@ import io
 import re
 import threading
 import wave
-from concurrent.futures import ThreadPoolExecutor
 
+from core.voice.daemon_executor import DaemonExecutor
 from core.logger import get_logger
 from core.network import is_online
 from core.voice.tts_provider import TtsProvider, scale_pcm
@@ -52,7 +52,8 @@ class EdgeTtsProvider(TtsProvider):
         self._lock = threading.Lock()
         # Due worker: dopo stop() la frase nuova non aspetta in coda la sintesi di rete, non
         # abortibile, della frase interrotta (il cui risultato viene scartato).
-        self._executor = ThreadPoolExecutor(max_workers=2)
+        # Thread daemon: una sintesi di rete abbandonata non trattiene l'uscita di Jake (vedi daemon_executor).
+        self._executor = DaemonExecutor(max_workers=2, thread_name_prefix="jake-edge-tts")
         self._logger = get_logger()
         self._consecutive_failures = 0
 
@@ -189,6 +190,14 @@ class EdgeTtsProvider(TtsProvider):
                 pass
         if self.fallback is not None:
             self.fallback.stop()
+
+    def close(self) -> None:
+        """Fine sessione: stop, nessuna sintesi in coda parte piu', il ripiego chiude le sue risorse."""
+        self.stop()
+        self._executor.shutdown(wait=False, cancel_futures=True)
+        close_fallback = getattr(self.fallback, "close", None)
+        if callable(close_fallback):
+            close_fallback()
 
     def synthesize_to_file(self, text: str, output_path: str) -> None:
         """WAV su disco (per la conversione RVC o per test senza altoparlanti)."""

@@ -16,6 +16,11 @@ class TtsProvider(ABC):
         """Interrompe immediatamente la riproduzione in corso, se presente."""
         raise NotImplementedError
 
+    def close(self) -> None:
+        """Fine della sessione vocale: ferma la voce e rilascia le risorse del provider. Idempotente;
+        questo default non ha nulla da rilasciare oltre allo stop."""
+        self.stop()
+
     def set_speech_params(self, volume: float = 1.0, rate_delta_percent: int = 0) -> bool:
         """Volume (0-1) e variazione di ritmo (%) per le prossime frasi (F2.5.7). Ritorna True se il
         provider li applica; questo default non li supporta e lo dichiara invece di ignorarli."""
