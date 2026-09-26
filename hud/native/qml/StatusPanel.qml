@@ -1,73 +1,56 @@
 import QtQuick
 import QtQuick.Layouts
+import JakeHud
 
-// Status panel (fase 4.9.2): connessione al server companion, stato corrente, dispositivo
-// attivo (v5.9, DEVICE_HANDOFF).
-RowLayout {
+// Riga di stato compatta (chip): connessione (con il motivo se manca), microfono sempre visibile (F2.3.5),
+// dispositivo attivo (v5.9). Testo oltre al colore in ogni chip (F4.4.5).
+GlassPanel {
     id: root
     property bool connected: false
     property string connectionProblem: ""
     property string state: "IDLE"
     property string activeDevice: ""
-    // F2.3.5: indicatore del microfono sempre visibile (MIC_STATE): aperto, aperto ma in pausa
-    // mentre Jake parla, chiuso. Testo oltre al colore.
     property bool micOpen: false
     property bool micDiscarding: false
-    // F4.2.1: esposto cosi' Main.qml puo' sapere se il puntatore e' su QUESTO pannello, per
-    // disattivare il click-through dell'overlay solo quando serve davvero (vedi il commento in
-    // Main.qml sul perche' e' per-pannello e non un'unica area grande quanto tutti i pannelli).
-    property alias hovered: hoverHandler.hovered
+    implicitHeight: 36
+    radius: height / 2
 
-    HoverHandler {
-        id: hoverHandler
+    component Chip: RowLayout {
+        property color dot: Theme.textFaint
+        property string label: ""
+        spacing: 6
+        Rectangle { width: 8; height: 8; radius: 4; color: parent.dot; Layout.alignment: Qt.AlignVCenter }
+        Text {
+            text: parent.label
+            color: Theme.textMuted
+            font.pixelSize: Theme.fontSmall
+            elide: Text.ElideRight
+            Layout.maximumWidth: 190
+            Accessible.role: Accessible.StaticText
+            Accessible.name: text
+        }
     }
 
-    Rectangle {
-        width: 8
-        height: 8
-        radius: 4
-        color: root.connected ? "#3ddc84" : "#f87171"
-        Layout.alignment: Qt.AlignVCenter
-    }
+    RowLayout {
+        anchors.fill: parent
+        anchors.leftMargin: 14
+        anchors.rightMargin: 14
+        spacing: 14
 
-    Text {
-        text: root.connected ? qsTr("Connesso")
-            : root.connectionProblem.length > 0 ? qsTr("Non connesso: %1").arg(root.connectionProblem) : qsTr("Non connesso")
-        elide: Text.ElideRight
-        Layout.maximumWidth: 220
-        color: "#9ca3af"
-        font.pixelSize: 12
-    }
-
-    Text {
-        text: "· " + root.state
-        color: "#6b7280"
-        font.pixelSize: 12
-    }
-
-    Item { Layout.fillWidth: true }
-
-    Rectangle {
-        width: 8
-        height: 8
-        radius: 4
-        color: !root.micOpen ? "#6b7280" : root.micDiscarding ? "#facc15" : "#f87171"
-        Layout.alignment: Qt.AlignVCenter
-    }
-
-    Text {
-        text: !root.micOpen ? qsTr("Microfono chiuso")
-            : root.micDiscarding ? qsTr("Microfono in pausa") : qsTr("Microfono aperto")
-        color: "#9ca3af"
-        font.pixelSize: 12
-        Accessible.role: Accessible.StaticText
-        Accessible.name: text
-    }
-
-    Text {
-        visible: root.activeDevice.length > 0
-        text: qsTr("Attivo: %1").arg(root.activeDevice)
-        color: "#6b7280"
-        font.pixelSize: 12
+        Chip {
+            dot: root.connected ? Theme.ok : Theme.danger
+            label: root.connected ? qsTr("Connesso")
+                : root.connectionProblem.length > 0 ? qsTr("Non connesso: %1").arg(root.connectionProblem) : qsTr("Non connesso")
+        }
+        Item { Layout.fillWidth: true }
+        Chip {
+            dot: !root.micOpen ? Theme.textFaint : root.micDiscarding ? Theme.warn : Theme.danger
+            label: !root.micOpen ? qsTr("Mic chiuso") : root.micDiscarding ? qsTr("Mic in pausa") : qsTr("Mic aperto")
+        }
+        Chip {
+            visible: root.activeDevice.length > 0
+            dot: Theme.accent
+            label: root.activeDevice
+        }
     }
 }

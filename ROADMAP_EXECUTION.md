@@ -261,10 +261,10 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F4.1` | Protocol Architecture (26/09/2026: riduttore di riferimento Python e riduttore C++ superano la stessa suite di 18 fixture, ctest nella CI; sequence_id/trace_id consumati anche lato C++) | `DONE` |
 | `F4.2` | Native HUD (F4.2.1/F4.2.4 chiusi, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026; F4.2.5/F4.2.6 e resto di F4.2.3 richiedono test interattivi/visivi) | `DOING` |
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
-| `F4.4` | Interaction Design (26/09/2026: stati waiting/speaking/dictation, etichetta testuale dello stato, ordine eventi e reconnect coerenti; orb 3D/particelle/audio non iniziati) | `DOING` |
+| `F4.4` | Interaction Design (26/09/2026: orb 3D Qt Quick 3D con nucleo volumetrico e particle shell, comportamento per stato interrupt-safe, reduced motion di Windows, qualita' high/low, fallback 2D; livelli audio reali e verifica visiva degli stati ancora da fare) | `DOING` |
 | `F4.5` | Interaction Design (26/09/2026: trascrizione live, permission card, prove, diagnosi, notifiche nell'HUD nativo; verifica visiva da fare) | `DOING` |
 | `F4.6` | Trust UX (26/09/2026: kill switch visibile; action center con ultima azione, esito, verifica e undo con scadenza; retry/dettagli/precondizioni non ancora) | `DOING` |
-| `F4.7` | Accessibility (G1 superato, mai iniziato; nomi accessibili di stato, microfono e permission card aggiunti il 26/09/2026) | `READY` |
+| `F4.7` | Accessibility (26/09/2026: nomi accessibili, focus ring, scrittura reale nella barra comandi di un overlay no-activate, scorciatoie globali Ctrl+Shift+J / Ctrl+Alt+Fine, reduced motion di sistema; screen reader, scaling e alto contrasto da verificare) | `DOING` |
 | `F4.8` | Release Engineering (26/09/2026: core e HUD nativo avviati in ordine come processi separati, riavvio dell'HUD solo dopo un crash e con un tetto; installer/crash dump/rollback non iniziati) | `DOING` |
 | `F5.1` | Memory Platform (F5.1.1/F5.1.3-F5.1.6 il 21/09/2026: schema versionato, migrazioni transazionali con backup, metadati, recupero; resta F5.1.2 separare entita'/episodi/procedure e la prova su una copia del database reale) | `DOING` |
 | `F5.2` | Memory Platform | `DOING` |
@@ -8798,6 +8798,24 @@ o il solo prototipo 2D non chiudono il requisito. La verifica dell'handoff dipen
   separato dallo stato del turno e mostrato dall'orb come anello per ~2 s. Restano la base 3D, le
   particelle e l'audio reale: `DOING`, verifica visiva `VERIFY`.
 
+- 26/09/2026, sera (F4.4.7/F4.4.8, prima versione reale): `hud/native/qml/Orb3D.qml` - scena Qt Quick 3D
+  (camera prospettica, nucleo emissivo + guscio traslucido, luce che prende il colore dello stato) e una
+  particle shell `ParticleSystem3D` sulla superficie di una sfera (1400 particelle in "high", 450 in "low").
+  Ogni stato cambia colore, raggio del guscio, velocita' di rotazione, densita' e deriva delle particelle
+  (THINKING vortice denso, EXECUTING flusso verticale, WAITING quasi fermo, ERROR dispersione); esito
+  success/warning/error come compattazione/dispersione breve. Interrupt-safe: rotazione integrata per frame
+  e Behavior su ogni parametro (un cambio di stato riparte dal valore corrente). Reduced motion segue
+  l'impostazione di Windows "Mostra animazioni" (o `JAKE_HUD_REDUCED_MOTION=1`); qualita' con
+  `JAKE_HUD_QUALITY=low`; fallback 2D se Qt Quick 3D manca in build o a runtime (`JAKE_HUD_ORB=2d`).
+  Verificato con screenshot reali dell'HUD collegato al companion (THINKING/LISTENING). Resta `VERIFY` il
+  giudizio visivo umano; restano da fare i livelli audio reali (F4.4.4).
+- 26/09/2026, sera (layout): l'orb e' la presenza principale e prende lo spazio libero; pannelli con un solo
+  materiale (`Theme.qml`/`GlassPanel.qml`, riempimento pieno finche' non c'e' blur di sistema: con il vetro
+  semitrasparente il testo delle finestre sotto rendeva i pannelli illeggibili); conversazione compatta
+  (ultimo scambio + riga live) con cronologia apribile; notifiche ed errori come toast che si chiudono da
+  soli; action center compatto; azioni rapide dentro la barra comandi. F4.3 (blur/composizione reali) non
+  iniziato: su Windows il backdrop DWM si applica all'intera finestra, non ai singoli pannelli.
+
 ### F4.5 — Pannelli contestuali
 
 Dipende da: F4.1 e contratti F1.
@@ -8858,6 +8876,13 @@ Dipende da: F4.2.
 6. `F4.7.6` Localizzare UI senza rompere layout e shortcut.
 
 Criterio di uscita: checklist accessibilità + test Windows e monitor matrix completati.
+
+- 26/09/2026, sera (F4.7.1/F4.6.5): l'overlay e' no-activate, quindi un click non gli dava la tastiera e i tasti
+  finivano nell'app sotto: nella barra comandi non si poteva davvero scrivere. Ora il click sulla barra (o
+  Ctrl+Shift+J, scorciatoia globale) rende la finestra attivabile per il tempo della digitazione e la
+  riporta no-activate/click-through a invio, Esc o focus perso. Ctrl+Alt+Fine (globale) invia "ferma tutto".
+  Le scorciatoie sono registrate con RegisterHotKey; se un'altra app le ha gia' prese non vengono finte.
+  Focus ring visibile sul campo di testo. Verifica interattiva `VERIFY`.
 
 ### F4.8 — Packaging e migrazione dal legacy
 
