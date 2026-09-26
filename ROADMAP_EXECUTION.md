@@ -250,7 +250,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F2.5` | Speech Runtime (uscita predefinita rilevata, cache delle conferme RVC, pipeline di produzione misurata il 25/09/2026: primo campione p95 1,2-1,5 s, pause tra chunk < 1 ms; manca "prima emissione < 2 s" dalla fine della voce su hardware) | `VERIFY` |
 | `F2.6` | Conversation Runtime (dialogo/correzione/ellissi/ordinali collegati a JakeCore nel commit a4a2685 - la riga precedente "libreria non collegata" era stantia; bench_dialogue 22/22 senza correzioni, un banco di prova su dialoghi reali resta aperto) | `VERIFY` |
 | `F2.7` | Identity and Voice (profili opt-in, isolamento per turno, arruolamento CLI corretto e testato il 25/09/2026; qualita' della firma da ritarare su voci vere) | `VERIFY` |
-| `F3.1` | Computer Use Quality (benchmark unico dei 100 task: 100/100 in due esecuzioni consecutive il 26/09/2026, i 4 ex-limiti raggiunti via UIA; DPI verificato a quattro scale il 25/09/2026; manca solo la prova con due monitor fisici) | `VERIFY` |
+| `F3.1` | Computer Use Quality (benchmark unico dei 100 task: 100/100 in due esecuzioni consecutive il 26/09/2026, i 4 ex-limiti raggiunti via UIA; DPI verificato a quattro scale il 25/09/2026; multi-display verificato dall'utente il 26/09/2026 con un secondo display Windows via SpaceDesk, non un monitor fisico) | `DONE` |
 | `F3.2` | Windows Automation (cache collegata al percorso reale; dump verificati e flussi su cinque app reali il 25/09/2026) | `DONE` |
 | `F3.3` | Windows Automation (inspector con candidato/alternative/punteggio/motivo nei risultati, CLI ed evento HUD; invalidazione strutturale collegata alle procedure - 25/09/2026; il disegno del pannello nell'HUD e' F4.5) | `DONE` |
 | `F3.4` | Execution Runtime (verificato end-to-end sui 100 task e su cinque app reali il 25/09/2026; policy anche per click/tasti dichiarati sensibili) | `DONE` |
@@ -261,10 +261,10 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F4.1` | Protocol Architecture (26/09/2026: riduttore di riferimento Python e riduttore C++ superano la stessa suite di 18 fixture, ctest nella CI; sequence_id/trace_id consumati anche lato C++) | `DONE` |
 | `F4.2` | Native HUD (F4.2.1/F4.2.4 chiusi, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026; F4.2.5/F4.2.6 e resto di F4.2.3 richiedono test interattivi/visivi) | `DOING` |
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
-| `F4.4` | Interaction Design (26/09/2026: stati waiting/speaking/dictation, etichetta testuale dello stato, ordine eventi e reconnect coerenti; orb 3D/particelle/audio non iniziati) | `DOING` |
+| `F4.4` | Interaction Design (26/09/2026: orb 3D Qt Quick 3D con nucleo volumetrico e particle shell, comportamento per stato interrupt-safe, reduced motion di Windows, qualita' high/low, fallback 2D; livelli audio reali e verifica visiva degli stati ancora da fare) | `DOING` |
 | `F4.5` | Interaction Design (26/09/2026: trascrizione live, permission card, prove, diagnosi, notifiche nell'HUD nativo; verifica visiva da fare) | `DOING` |
 | `F4.6` | Trust UX (26/09/2026: kill switch visibile; action center con ultima azione, esito, verifica e undo con scadenza; retry/dettagli/precondizioni non ancora) | `DOING` |
-| `F4.7` | Accessibility (G1 superato, mai iniziato; nomi accessibili di stato, microfono e permission card aggiunti il 26/09/2026) | `READY` |
+| `F4.7` | Accessibility (26/09/2026: nomi accessibili, focus ring, scrittura reale nella barra comandi di un overlay no-activate, scorciatoie globali Ctrl+Shift+J / Ctrl+Alt+Fine, reduced motion di sistema; screen reader, scaling e alto contrasto da verificare) | `DOING` |
 | `F4.8` | Release Engineering (26/09/2026: core e HUD nativo avviati in ordine come processi separati, riavvio dell'HUD solo dopo un crash e con un tetto; installer/crash dump/rollback non iniziati) | `DOING` |
 | `F5.1` | Memory Platform (F5.1.1/F5.1.3-F5.1.6 il 21/09/2026: schema versionato, migrazioni transazionali con backup, metadati, recupero; resta F5.1.2 separare entita'/episodi/procedure e la prova su una copia del database reale) | `DOING` |
 | `F5.2` | Memory Platform | `DOING` |
@@ -5179,8 +5179,10 @@ intenzionali a 0,5/3/6 m, registrazioni consensuali per il WER. Fino ad allora F
 
 ## 9. F3 — Computer Use Engine 3.0
 
-- Stato: `VERIFY` (25/09/2026: Gate F3 soddisfatto con prove reali - vedi "Audit e chiusura di F3" e
-  Gate F3; resta solo la prova multi-monitor di F3.1.5, che richiede un secondo schermo fisico)
+- Stato: `DONE` (26/09/2026: Gate F3 soddisfatto con prove reali - vedi "Audit e chiusura di F3" e
+  Gate F3; F3.1.5 multi-display chiuso dall'utente con Windows in modalita' desktop esteso e un
+  secondo display fornito da SpaceDesk: test multi-monitor e benchmark computer use 100/100 superati.
+  Evidenza: secondo display Windows via SpaceDesk, non un secondo monitor fisico)
 - Priorità: `P1`
 - Output: Jake controlla Windows per semantica, verifica il risultato e usa i pixel come fallback.
 
@@ -8259,7 +8261,9 @@ Fonte: codice, test reali e benchmark di questa data; le voci storiche sopra res
   96/100 in due esecuzioni consecutive. Non riusciti: 39 tooltip, 42 tristato, 69 spunta da tastiera, 94 terza voce spuntabile
   (limiti Qt/UIA gia' documentati). Task 29 era instabile (lettura prima che "Annulla" fosse
   elaborato): test corretto. DPI: Jake restava "system aware" dopo `import pyautogui`; ora
-  per-monitor in ogni modalita', prova reale a scale 1,0/1,25/1,5/2,0. Multi-monitor: un solo
+  per-monitor in ogni modalita', prova reale a scale 1,0/1,25/1,5/2,0. Multi-monitor (26/09/2026, eseguito
+  dall'utente): desktop esteso con secondo display Windows via SpaceDesk, test multi-monitor verde e
+  benchmark 100/100 - un monitor fisico non e' stato provato. Prima: un solo
   schermo qui, test saltato con il motivo (VERIFY).
 - F3.2/F3.3: `TreeCache` nel percorso reale (ComputerAgent, invalidata dopo ogni azione) per
   l'inspector (`core/computer_use/inspector.py`, `tools/selector_inspector.py`,
@@ -8794,6 +8798,24 @@ o il solo prototipo 2D non chiudono il requisito. La verifica dell'handoff dipen
   separato dallo stato del turno e mostrato dall'orb come anello per ~2 s. Restano la base 3D, le
   particelle e l'audio reale: `DOING`, verifica visiva `VERIFY`.
 
+- 26/09/2026, sera (F4.4.7/F4.4.8, prima versione reale): `hud/native/qml/Orb3D.qml` - scena Qt Quick 3D
+  (camera prospettica, nucleo emissivo + guscio traslucido, luce che prende il colore dello stato) e una
+  particle shell `ParticleSystem3D` sulla superficie di una sfera (1400 particelle in "high", 450 in "low").
+  Ogni stato cambia colore, raggio del guscio, velocita' di rotazione, densita' e deriva delle particelle
+  (THINKING vortice denso, EXECUTING flusso verticale, WAITING quasi fermo, ERROR dispersione); esito
+  success/warning/error come compattazione/dispersione breve. Interrupt-safe: rotazione integrata per frame
+  e Behavior su ogni parametro (un cambio di stato riparte dal valore corrente). Reduced motion segue
+  l'impostazione di Windows "Mostra animazioni" (o `JAKE_HUD_REDUCED_MOTION=1`); qualita' con
+  `JAKE_HUD_QUALITY=low`; fallback 2D se Qt Quick 3D manca in build o a runtime (`JAKE_HUD_ORB=2d`).
+  Verificato con screenshot reali dell'HUD collegato al companion (THINKING/LISTENING). Resta `VERIFY` il
+  giudizio visivo umano; restano da fare i livelli audio reali (F4.4.4).
+- 26/09/2026, sera (layout): l'orb e' la presenza principale e prende lo spazio libero; pannelli con un solo
+  materiale (`Theme.qml`/`GlassPanel.qml`, riempimento pieno finche' non c'e' blur di sistema: con il vetro
+  semitrasparente il testo delle finestre sotto rendeva i pannelli illeggibili); conversazione compatta
+  (ultimo scambio + riga live) con cronologia apribile; notifiche ed errori come toast che si chiudono da
+  soli; action center compatto; azioni rapide dentro la barra comandi. F4.3 (blur/composizione reali) non
+  iniziato: su Windows il backdrop DWM si applica all'intera finestra, non ai singoli pannelli.
+
 ### F4.5 — Pannelli contestuali
 
 Dipende da: F4.1 e contratti F1.
@@ -8854,6 +8876,13 @@ Dipende da: F4.2.
 6. `F4.7.6` Localizzare UI senza rompere layout e shortcut.
 
 Criterio di uscita: checklist accessibilità + test Windows e monitor matrix completati.
+
+- 26/09/2026, sera (F4.7.1/F4.6.5): l'overlay e' no-activate, quindi un click non gli dava la tastiera e i tasti
+  finivano nell'app sotto: nella barra comandi non si poteva davvero scrivere. Ora il click sulla barra (o
+  Ctrl+Shift+J, scorciatoia globale) rende la finestra attivabile per il tempo della digitazione e la
+  riporta no-activate/click-through a invio, Esc o focus perso. Ctrl+Alt+Fine (globale) invia "ferma tutto".
+  Le scorciatoie sono registrate con RegisterHotKey; se un'altra app le ha gia' prese non vengono finte.
+  Focus ring visibile sul campo di testo. Verifica interattiva `VERIFY`.
 
 ### F4.8 — Packaging e migrazione dal legacy
 
@@ -10255,6 +10284,5 @@ Aggiornato 26/09/2026, fine sessione (le note precedenti restano nella cronologi
 2. Verifica visiva dell'HUD nativo con Jake acceso (`hud/native/build/JakeHud.exe`): stati e
    etichetta dell'orb, anello di esito, permission card, trascrizione live, indicatore microfono,
    ultima azione con Annulla, pulsante "Ferma tutto" (F4.4/F4.5/F4.6 restano `VERIFY` fino ad allora).
-3. Ripetere `tests/test_computer_use_dpi.py` con un secondo monitor collegato (chiude F3.1.5).
-4. Poi: orb 3D/particelle (F4.4.7-F4.4.8), action center completo (retry, dettagli, precondizioni),
+3. Poi: orb 3D/particelle (F4.4.7-F4.4.8), action center completo (retry, dettagli, precondizioni),
    citazioni di memoria anche fuori da RECALL (F5.5), task monitor sulla pipeline proattiva (F6.1).

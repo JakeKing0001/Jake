@@ -62,6 +62,9 @@ if(WIN32 AND NOT Qt6_DIR AND NOT DEFINED ENV{QTDIR} AND NOT DEFINED ENV{Qt6_DIR}
 endif()
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 Network)
+# F4.4.7: Orb 3D con Qt Quick 3D (moduli aggiuntivi qtquick3d + qtshadertools). Opzionale: senza, l'HUD
+# compila e usa l'orb 2D (Main.qml ricade su Orb.qml se Orb3D.qml non e' nel modulo).
+find_package(Qt6 6.5 QUIET COMPONENTS Quick3D)
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 qt_standard_project_setup(REQUIRES 6.5)
@@ -97,20 +100,34 @@ qt_add_executable(JakeHud
     src/JakeClient.cpp
     src/OverlayStyler.h
     src/OverlayStyler.cpp
+    src/GlobalHotkeys.h
+    src/GlobalHotkeys.cpp
 )
 
 # Modulo QML "JakeHud" (vedi "import JakeHud" in qml/Main.qml ed engine.loadFromModule in
 # src/main.cpp): registra sia i file .qml sia JakeClient (QML_ELEMENT in src/JakeClient.h).
-qt_add_qml_module(JakeHud
-    URI JakeHud
-    VERSION 1.0
-    QML_FILES
+set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+set(JAKE_HUD_QML_FILES
         qml/Main.qml
+        qml/Theme.qml
+        qml/GlassPanel.qml
         qml/Orb.qml
         qml/CommandBar.qml
         qml/ConversationPanel.qml
         qml/StatusPanel.qml
-        qml/QuickActions.qml
+        qml/ActionCenter.qml
+)
+if(TARGET Qt6::Quick3D)
+    list(APPEND JAKE_HUD_QML_FILES qml/Orb3D.qml)
+    message(STATUS "JakeHud: Qt Quick 3D trovato, orb 3D abilitato")
+else()
+    message(STATUS "JakeHud: Qt Quick 3D non trovato, solo orb 2D")
+endif()
+qt_add_qml_module(JakeHud
+    URI JakeHud
+    VERSION 1.0
+    QML_FILES ${JAKE_HUD_QML_FILES}
+    RESOURCES qml/assets/particle.png
 )
 
 add_dependencies(JakeHud JakeHudEventTypesHeader)
@@ -119,6 +136,11 @@ target_include_directories(JakeHud PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/gene
 target_compile_definitions(JakeHud PRIVATE
     JAKE_PRODUCT_VERSION="${JAKE_PRODUCT_VERSION}"
 )
+
+if(TARGET Qt6::Quick3D)
+    target_link_libraries(JakeHud PRIVATE Qt6::Quick3D)
+    target_compile_definitions(JakeHud PRIVATE JAKE_HAS_QUICK3D=1)
+endif()
 
 target_link_libraries(JakeHud PRIVATE
     JakeHudProtocol

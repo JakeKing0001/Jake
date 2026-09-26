@@ -42,4 +42,11 @@ public:
     // pipeline QPA di Qt fallisca per questa combinazione di flag. `SW_SHOWNOACTIVATE` (non
     // `SW_SHOW`) per non rubare il focus alla ricomparsa, in linea con `makeNoActivate()`.
     Q_INVOKABLE void forceVisibility(QQuickWindow *window, bool visible);
+
+    // F4.7.1: con WS_EX_NOACTIVATE un click non porta la finestra in primo piano, quindi la tastiera
+    // resterebbe all'app sottostante e nella barra comandi non si potrebbe scrivere. Per il tempo della
+    // digitazione (click sulla barra o Ctrl+Shift+J) l'HUD diventa attivabile e prende il focus; finita
+    // la digitazione (invio, Esc, focus perso) torna no-activate e click-through come prima.
+    Q_INVOKABLE void beginKeyboardInput(QQuickWindow *window);
+    Q_INVOKABLE void endKeyboardInput(QQuickWindow *window);
 };

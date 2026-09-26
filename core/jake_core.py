@@ -2851,14 +2851,45 @@ class JakeCore:
         if not bool(config.get("companion_server_enabled", False)):
             self.logger.warning("hud_native_enabled richiede companion_server_enabled: HUD nativo non avviato")
             return
-        if companion_tls_context is not None or not is_loopback_host(companion_host) or config.get("companion_token"):
-            self.logger.warning("HUD nativo non avviato: supporta solo il companion su loopback senza TLS ne' token")
+        if companion_tls_context is not None or not is_loopback_host(companion_host):
+            self.logger.warning("HUD nativo non avviato: supporta solo il companion su loopback senza TLS")
             return
         port = int(getattr(self.companion_server, "port", 0) or config.get("companion_server_port", 8765) or 8765)
         exe = Path(config.get("hud_native_path") or DEFAULT_EXE)
-        self.native_hud = NativeHudSupervisor(exe, f"http://127.0.0.1:{port}")
+        credentials = self._provision_native_hud_credential()
+        self.native_hud = NativeHudSupervisor(exe, f"http://127.0.0.1:{port}", credentials=credentials)
         if not self.native_hud.start():
             self.native_hud = None
+            self._revoke_native_hud_credential()
+
+    def _provision_native_hud_credential(self) -> dict | None:
+        """L'HUD nativo e' un client companion come un altro: si autentica con una credenziale
+        per-dispositivo (F7), mai con un'eccezione per localhost. Ruotata a ogni avvio del core,
+        capability minime (vedere lo stato e mandare comandi; niente approval, file o audio),
+        revocata allo shutdown. Il token esiste in chiaro solo qui e nel processo dell'HUD."""
+        from core.companion_guard import EndpointClass
+        from core.native_hud import NATIVE_HUD_CREDENTIAL_TTL_S, NATIVE_HUD_DEVICE_ID
+
+        store = getattr(self.companion_server, "credential_store", None)
+        if store is None:
+            return None  # nessuna autenticazione per-dispositivo in uso: non serve una credenziale
+        store.register_device(NATIVE_HUD_DEVICE_ID, "HUD nativo (questo PC)")
+        credential = store.issue_credential(NATIVE_HUD_DEVICE_ID, ttl_seconds=NATIVE_HUD_CREDENTIAL_TTL_S)
+        self.companion_server.guard.set_capabilities(
+            NATIVE_HUD_DEVICE_ID, {EndpointClass.READ_ONLY, EndpointClass.COMMAND},
+        )
+        return {"device_id": NATIVE_HUD_DEVICE_ID, "token": credential.token}
+
+    def _revoke_native_hud_credential(self) -> None:
+        from core.native_hud import NATIVE_HUD_DEVICE_ID
+
+        store = getattr(getattr(self, "companion_server", None), "credential_store", None)
+        if store is None:
+            return
+        try:
+            store.revoke(NATIVE_HUD_DEVICE_ID)
+        except Exception:
+            self.logger.exception("Errore revocando la credenziale dell'HUD nativo")
 
     # ---- sospensione della proattivita' ----------------------------------------------------
 
@@ -2977,6 +3008,7 @@ class JakeCore:
                 native_hud.stop()
             except Exception:
                 self.logger.exception("Errore chiudendo l'HUD nativo durante lo shutdown")
+            self._revoke_native_hud_credential()
         # companion_server e' fermato PER PRIMO E DA SOLO (non nel loop sotto): smette di
         # accettare richieste NUOVE prima che _drain_in_flight_answers() aspetti quelle GIA' in
         # corso - l'ordine conta, altrimenti una richiesta potrebbe iniziare proprio mentre si
