@@ -672,3 +672,5 @@
 {"text": "vai su youtube e metti musica rilassante", "intent": "PLAY_MEDIA", "parameters": {"query": "musica rilassante", "service": "youtube"}}
 {"text": "apri spotify e metti i coldplay", "intent": "PLAY_MEDIA", "parameters": {"query": "coldplay", "service": "spotify"}}
 {"text": "annulla l'ultima azione", "intent": "UNDO_LAST_ACTION", "parameters": {}}
+{"text": "da dove sai il mio indirizzo", "intent": "EXPLAIN_MEMORY", "parameters": {"key": "indirizzo"}}
+{"text": "perche ricordi il compleanno di marco", "intent": "EXPLAIN_MEMORY", "parameters": {"key": "compleanno di marco"}}

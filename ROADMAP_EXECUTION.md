@@ -272,7 +272,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F5.4` | Memory Reliability | `DOING` |
 | `F5.5` | Retrieval Quality | `DOING` |
 | `F5.6` | Context Runtime | `DOING` |
-| `F5.7` | Privacy Engineering (libreria completa il 21/09/2026: ricerca/spiegazione, modifica, cancellazione con ricevuta e residui, purge, export, backup cifrato, retention per profilo; non ancora esposta come skill/HUD) | `DOING` |
+| `F5.7` | Privacy Engineering (libreria completa il 21/09/2026; dal 26/09/2026 nel percorso reale: "dimentica" cancella anche registro e indici con ricevuta, l'uso dei ricordi viene registrato, "da dove sai X" spiega la provenienza; purge/export/backup non ancora esposti a voce/HUD) | `DOING` |
 | `F6.1` | Proactivity Platform | `DOING` |
 | `F6.2` | Proactivity Quality | `DOING` |
 | `F6.3` | Notification UX (libreria di decisione il 21/09/2026; collegata a JakeCore/EventBus/HUD il 22/09/2026 - vedi F6.7; nessuna consegna reale di call/companion) | `DOING` |
@@ -9011,6 +9011,20 @@ Dipende da: F5.1 e F4.5.
 7. `F5.7.7` Applicare retention diversa per profilo e categoria.
 
 Criterio di uscita: un ricordo può essere trovato e cancellato da tutti gli indici con prova.
+
+- 26/09/2026 (integrazione in JakeCore): la libreria non era usata da nessun percorso reale. `FORGET`
+  ("dimentica X") usava `MemoryManager.forget`, che lasciava la chiave nel registro `memory_audit` e
+  non dava prova; ora passa da `MemoryPrivacyDashboard.delete` per ogni categoria del ricordo
+  (relazioni, registro, indici registrati, controllo dei residui nel file) e salva una ricevuta con
+  il solo hash accanto al database; se la verifica non riesce la risposta lo dice. `RECALL` registra
+  l'uso di ogni ricordo restituito (contatore, data, voce di registro; mai in modalita' privata): prima
+  `use_count` restava sempre 0. Nuovo `EXPLAIN_MEMORY` (sola lettura): "da dove sai X / perche'
+  ricordi X" spiega autore, fonte, sensibilita', scadenza e uso. Prova:
+  `tests/test_memory_privacy_integration.py` (database temporaneo, dati sintetici). La copia del valore
+  nella cronologia delle conversazioni ("ricordati che il mio indirizzo e' via X") ora viene oscurata
+  (`[dimenticato]`) e contata nella ricevuta: senza, il controllo dei residui la trovava e la
+  cancellazione non era verificabile. Restano fuori dal database, e quindi fuori dalla prova: il log
+  applicativo (`data/jake.log`) e le copie esportate dall'utente.
 
 - `F5.7.1`-`F5.7.7` — 21/09/2026 (`core/memory_privacy.py`, `core/memory_backup.py`; libreria, non ancora esposta come
   skill o schermata):

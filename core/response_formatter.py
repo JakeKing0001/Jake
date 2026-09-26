@@ -46,6 +46,7 @@ def format_plan_outcome(outcome, total_steps: int, registry=None) -> str:
 _NOT_FOUND_BY_INTENT = {
     "LIST_SMART_DEVICES": "Non ho trovato nessun dispositivo smart home.",
     "RECALL": "Non ho trovato nulla su questo argomento.",
+    "EXPLAIN_MEMORY": "Non ricordo nulla con quel nome, quindi non c'e' niente da spiegare.",
     "FORGET": "Non trovo nulla da dimenticare con quel nome.",
     "FIND_FILE": "Non ho trovato nessun file corrispondente.",
     "SEARCH_FILES": "Non ho trovato nessun file corrispondente.",
@@ -258,7 +259,12 @@ def _format_success(intent: str, result: SkillResult, registry=None) -> str | No
         formatted = "; ".join(_entry_line(entry) for entry in data["results"])
         return f"Ecco cosa ricordo: {formatted}"
     if intent == "FORGET":
+        if data.get("verified") is False:
+            return (f"Ho cancellato {data['key']}, ma non posso garantire che non ne resti traccia: "
+                    "la verifica della cancellazione non e' riuscita del tutto.")
         return f"Ho dimenticato {data['key']}."
+    if intent == "EXPLAIN_MEMORY":
+        return "\n\n".join(data.get("explanations") or [])
     if intent == "LINK_MEMORY":
         return f"Ok, ho collegato {data['subject']} — {data['predicate']} — {data['object']}."
     if intent in ("OPEN_PATH", "OPEN_SEARCH_RESULT"):

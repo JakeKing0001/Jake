@@ -149,7 +149,8 @@ class DeletionTests(Base):
         self.memory.link("password wifi", "fact", "di", "router", "fact")
         receipt = self.dash.delete("password wifi", actor="davide")
         assert receipt is not None
-        self.assertEqual(receipt.rows_removed, {"memory_relations": 1, "memory_audit": 1, "memories": 1})
+        self.assertEqual(receipt.rows_removed, {"memory_relations": 1, "memory_audit": 1, "memories": 1,
+                                               "conversation_history_redacted": 0})
         self.assertTrue(receipt.verified)
         self.assertEqual(receipt.residue_check, "clean")
         self.assertIsNone(self.dash.get("password wifi"))
