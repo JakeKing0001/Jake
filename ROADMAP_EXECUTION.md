@@ -10235,10 +10235,15 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 26/09/2026 (le note precedenti, ferme al 16/09/2026, restano nella cronologia Git).
+Aggiornato 26/09/2026, fine sessione (le note precedenti restano nella cronologia Git).
 
-1. Eseguire il gate hardware di F2 con `docs/f2-hardware-validation.md` (tre profili di uscita,
-   sessione wake di 24 h, registrazioni consensuali) e `python -m benchmarks.f2_hardware_session
-   evaluate`; solo con `PASS` F2 passa a `DONE` e si valuta `voice_barge_in` diverso da `off`.
-2. Ripetere `tests/test_computer_use_dpi.py` con un secondo monitor collegato (chiude F3.1.5).
-3. Poi G2: F4 (HUD nativo) e la parte rimasta di F2.6 (banco di prova su dialoghi reali).
+1. Ripetere il gate hardware di F2 con `docs/f2-hardware-validation.md` dopo le correzioni del
+   26/09/2026 (partial, barge-in, routing, lingua, follow-up, proattivita' sospesa): tre profili,
+   >= 20 interruzioni e 10+10 risposte senza interruzione ciascuno, sessione wake di 24 h, poi
+   `python -m benchmarks.f2_hardware_session evaluate`. Solo con `PASS` F2 passa a `DONE`.
+2. Verifica visiva dell'HUD nativo con Jake acceso (`hud/native/build/JakeHud.exe`): stati e
+   etichetta dell'orb, anello di esito, permission card, trascrizione live, indicatore microfono,
+   ultima azione con Annulla, pulsante "Ferma tutto" (F4.4/F4.5/F4.6 restano `VERIFY` fino ad allora).
+3. Ripetere `tests/test_computer_use_dpi.py` con un secondo monitor collegato (chiude F3.1.5).
+4. Poi: orb 3D/particelle (F4.4.7-F4.4.8), action center completo (retry, dettagli, precondizioni),
+   citazioni di memoria anche fuori da RECALL (F5.5), task monitor sulla pipeline proattiva (F6.1).
