@@ -9113,8 +9113,11 @@ monitor rileva un evento fixture senza richiesta dell'utente e senza duplicarlo.
   dichiarati critici dal produttore non vengono trattenuti, salvo i duplicati. Soglie da config
   (`notification_dedup_seconds`, `notification_hourly_budget`). `JakeCore.proactivity_suspended`
   sospende tutte le fonti durante prove e benchmark (usato da `f2_hardware_session`). Prova:
-  `tests/test_proactive_gate.py`. Resta: un'unica pipeline di eventi anche per task monitor e
-  digest delle voci in coda.
+  `tests/test_proactive_gate.py`. Le voci rimandate non restano in coda per sempre: appena finiscono
+  conversazione e quiet hours, c'e' budget e sono passati 60 s dall'ultima risposta (la voce potrebbe
+  ancora parlare), escono come UN riepilogo ("Mentre eri impegnato: ...", al massimo 3 voci piu' il
+  conteggio) dal canale degli avvisi, controllato ogni 5 s dallo scheduler dei promemoria; mai durante
+  una sospensione. Resta: portare anche il task monitor sulla stessa pipeline.
 
 ### F6.2 — Suggestion engine
 

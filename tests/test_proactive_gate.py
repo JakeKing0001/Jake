@@ -1,4 +1,5 @@
 """F6.1/F6.3: promemoria, automazioni e avvisi passano dagli stessi freni in JakeCore.notify."""
+import time
 import unittest
 from unittest import mock
 
@@ -73,6 +74,34 @@ class NotifyPipelineTests(unittest.TestCase):
         self.assertEqual(core.notification_center.pending_count(), 1, "il duplicato non va neanche in coda")
         self.assertEqual(subscriber.get(timeout=1).payload["text"], "Promemoria: medicina")
         self.assertTrue(subscriber.empty())
+
+    def test_deferred_notifications_come_back_as_one_digest_when_the_conversation_is_over(self):
+        busy = {"value": True}
+        core = self._core(ProactiveGate(conversation_active=lambda: busy["value"]))
+        delivered = []
+        core.system_advisor = mock.MagicMock(on_advisory=lambda message: delivered.append(core.notify("advisory", message)))
+        core.notify("advisory", "Batteria al 10%.")
+        core.notify("trigger", "Ho eseguito il backup")
+        self.assertIsNone(core.release_deferred_notifications(), "durante la conversazione non esce nulla")
+        busy["value"] = False
+        core._last_answer_finished_at = 0.0
+        digest = core.release_deferred_notifications()
+        self.assertEqual(digest, "Mentre eri impegnato: Batteria al 10%; Ho eseguito il backup.")
+        self.assertEqual(delivered, [digest])
+        self.assertEqual(core.notification_center.pending_count(), 0)
+        self.assertIsNone(core.release_deferred_notifications(), "nessun riepilogo vuoto o ripetuto")
+
+    def test_no_digest_right_after_an_answer_or_while_suspended(self):
+        core = self._core(ProactiveGate())
+        core.system_advisor = mock.MagicMock()
+        core.notification_center.defer("advisory", "Disco quasi pieno")
+        core._last_answer_finished_at = time.time()
+        self.assertIsNone(core.release_deferred_notifications(), "Jake potrebbe ancora parlare")
+        core._last_answer_finished_at = 0.0
+        core.notification_center.suspend()
+        self.assertIsNone(core.release_deferred_notifications())
+        core.notification_center.resume()
+        core.system_advisor.on_advisory.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -126,7 +126,18 @@ class NotificationCenter:
         in corso: vedi core/proactive_gate.py). Esce come le altre voci in coda."""
         if message:
             with self._lock:
-                self._queued.append({"kind": kind, "message": message})
+                self._queued.append({"kind": kind, "message": message, "deferred": True})
+
+    def take_deferred(self) -> list[dict]:
+        """Toglie dalla coda e restituisce le voci rimandate da `defer` che la modalita' corrente ammette;
+        quelle messe in coda dalla modalita' restano li' (escono solo al suo cambio, come sempre)."""
+        allowed = MODE_ALLOWED_KINDS.get(self.mode, frozenset())
+        with self._lock:
+            if self._suspended:
+                return []
+            taken = [item for item in self._queued if item.get("deferred") and item["kind"] in allowed]
+            self._queued = [item for item in self._queued if item not in taken]
+            return taken
 
     def pending_count(self) -> int:
         with self._lock:

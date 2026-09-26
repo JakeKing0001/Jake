@@ -42,6 +42,13 @@ class ProactiveGate:
         self._recent: dict[tuple[str, str], float] = {}
         self._deliveries: deque[float] = deque()
 
+    def budget_available(self) -> bool:
+        """C'e' ancora posto per una consegna proattiva nell'ultima ora."""
+        now = self._clock()
+        while self._deliveries and now - self._deliveries[0] >= 3600:
+            self._deliveries.popleft()
+        return len(self._deliveries) < self.hourly_budget
+
     def check(self, kind: str, message: str, critical: bool = False) -> tuple[str, str]:
         """(esito, ragione): esito e' DELIVER, DUPLICATE (da scartare) o DEFER (da mettere in coda)."""
         now = self._clock()
