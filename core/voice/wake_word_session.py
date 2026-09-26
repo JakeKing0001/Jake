@@ -452,7 +452,22 @@ class WakeWordSession:
         self._set_state("notify", message)
         self.speak(message)
 
+    def _defer_while_busy(self, kind: str, message: str) -> bool:
+        """F6.3 ("non interrompere conversazioni"): mentre Jake parla o lavora a un comando, un avviso o
+        un'automazione NON si pronuncia (farlo taglierebbe la risposta in corso): va in coda ed esce nel
+        riepilogo delle notifiche rimandate. I promemoria restano puntuali."""
+        if not (self._speaking() or self._command_busy()):
+            return False
+        center = getattr(self.jake_core, "notification_center", None)
+        if center is None or not hasattr(center, "defer"):
+            return False
+        center.defer(kind, message)
+        self._logger.info("Notifica %s rimandata: Jake sta parlando o lavorando", kind)
+        return True
+
     def _on_advisory(self, message: str) -> None:
+        if self._defer_while_busy("advisory", message):
+            return
         message = self.jake_core.notify("advisory", message)
         if message is None:
             return
@@ -463,6 +478,8 @@ class WakeWordSession:
         from core.response_formatter import format_plan_outcome
         summary = format_plan_outcome(outcome, total_steps, self.jake_core.skill_registry)
         raw = f"Ho eseguito automaticamente {trigger.get('name')}. {summary.splitlines()[0]}"
+        if self._defer_while_busy("trigger", raw):
+            return
         message = self.jake_core.notify("trigger", raw)
         if message is None:
             return
