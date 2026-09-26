@@ -30,10 +30,11 @@ GATE_SUCCESS_RATE = 0.90
 
 
 def _diagnosis(test, err) -> str:
-    exc_type, exc, _tb = err
-    message = str(exc).strip().splitlines()
-    first = message[0] if message else ""
-    return f"{test.id().rsplit('.', 1)[-1]}: {exc_type.__name__}: {first}"[:400]
+    """unittest conserva in failures/errors il traceback GIA' formattato (una stringa): la diagnosi
+    e' la riga finale "Tipo: messaggio"."""
+    lines = [line for line in str(err).strip().splitlines() if line.strip()]
+    last = lines[-1].strip() if lines else "errore senza messaggio"
+    return f"{test.id().rsplit('.', 1)[-1]}: {last}"[:400]
 
 
 def run_task(task: Task) -> dict:

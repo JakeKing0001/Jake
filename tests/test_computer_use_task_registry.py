@@ -34,6 +34,28 @@ class TaskRegistryTests(unittest.TestCase):
                 seen[test_id] = task.number
 
 
+class RunTaskDiagnosisTests(unittest.TestCase):
+    """Bug reale: al primo task fallito il runner andava in crash (trattava il traceback gia'
+    formattato di unittest come una tupla exc_info) e non mostrava mai la diagnosi."""
+
+    def test_a_failing_task_is_reported_with_its_diagnosis_not_a_crash(self):
+        from unittest import mock
+
+        from benchmarks.bench_computer_use_tasks import run_task
+        from benchmarks.computer_use_tasks import Task
+
+        class AlwaysFails(unittest.TestCase):  # definito qui: mai raccolto dalla discovery
+            def test_fails(self):
+                self.fail("il bottone non si e' abilitato")
+
+        task = Task(999, "finto", "goal", ("finto.AlwaysFails.test_fails",), "test")
+        with mock.patch("unittest.defaultTestLoader.loadTestsFromName",
+                        return_value=unittest.TestSuite([AlwaysFails("test_fails")])):
+            outcome = run_task(task)
+        self.assertEqual(outcome["status"], "failed")
+        self.assertIn("AssertionError: il bottone non si e' abilitato", outcome["diagnosis"][0])
+
+
 class SummaryTests(unittest.TestCase):
     def _result(self, number, status):
         return {"task": number, "title": "t", "status": status, "success": status == "passed", "diagnosis": []}
