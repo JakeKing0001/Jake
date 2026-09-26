@@ -270,12 +270,17 @@ class JakeCore:
             pairing_service=self.pairing_service, conversation_state=self.skill_registry.conversation_state,
             on_pairing_requested=self._on_pairing_requested,
         )
+        self.native_hud = None
         if bool(config.get("companion_server_enabled", False)):
             self.companion_server.start()
             self.logger.info(
                 "Server companion in ascolto su %s:%d%s", companion_host, self.companion_server.port,
                 " (TLS)" if companion_tls_context is not None else "",
             )
+        # F4.8.2: l'HUD nativo parte DOPO il companion server (a cui si collega) e vive come processo
+        # separato sorvegliato; solo su loopback senza TLS ne' token (il client nativo non si autentica).
+        if bool(config.get("hud_native_enabled", False)):
+            self._start_native_hud(config, companion_host, companion_tls_context)
 
         # Skill/plugin installabili (v2.0): un file .py in plugins/ con una funzione
         # register(registry) diventa una capacita' di Jake senza toccare il core.
@@ -2838,6 +2843,23 @@ class JakeCore:
             "expires_at": float(descriptor.expires_at),
         }))
 
+    def _start_native_hud(self, config: dict, companion_host: str, companion_tls_context) -> None:
+        from pathlib import Path
+
+        from core.native_hud import DEFAULT_EXE, NativeHudSupervisor
+
+        if not bool(config.get("companion_server_enabled", False)):
+            self.logger.warning("hud_native_enabled richiede companion_server_enabled: HUD nativo non avviato")
+            return
+        if companion_tls_context is not None or not is_loopback_host(companion_host) or config.get("companion_token"):
+            self.logger.warning("HUD nativo non avviato: supporta solo il companion su loopback senza TLS ne' token")
+            return
+        port = int(getattr(self.companion_server, "port", 0) or config.get("companion_server_port", 8765) or 8765)
+        exe = Path(config.get("hud_native_path") or DEFAULT_EXE)
+        self.native_hud = NativeHudSupervisor(exe, f"http://127.0.0.1:{port}")
+        if not self.native_hud.start():
+            self.native_hud = None
+
     # ---- sospensione della proattivita' ----------------------------------------------------
 
     @contextlib.contextmanager
@@ -2948,6 +2970,13 @@ class JakeCore:
         # nome del componente prima di continuare con gli altri (non ferma lo shutdown: un
         # componente che non si chiude bene non deve impedire agli altri di provarci).
         #
+        # F4.8.2: l'HUD nativo si chiude prima del server a cui e' collegato (niente riconnessioni a vuoto).
+        native_hud = getattr(self, "native_hud", None)
+        if native_hud is not None:
+            try:
+                native_hud.stop()
+            except Exception:
+                self.logger.exception("Errore chiudendo l'HUD nativo durante lo shutdown")
         # companion_server e' fermato PER PRIMO E DA SOLO (non nel loop sotto): smette di
         # accettare richieste NUOVE prima che _drain_in_flight_answers() aspetti quelle GIA' in
         # corso - l'ordine conta, altrimenti una richiesta potrebbe iniziare proprio mentre si
