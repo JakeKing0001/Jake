@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
@@ -306,6 +307,7 @@ class MemoryPrivacyDashboard:
                     "DELETE FROM memory_audit WHERE memory_key = ? AND memory_category = ?", (key, category),
                 ).rowcount,
                 "memories": connection.execute("DELETE FROM memories WHERE key = ? AND category = ?", (key, category)).rowcount,
+                "conversation_history_redacted": self._redact_history(value),
             }
             connection.commit()
             derived: dict[str, dict] = {}
@@ -327,6 +329,23 @@ class MemoryPrivacyDashboard:
         )
         self._store_receipt(receipt)
         return receipt
+
+    def _redact_history(self, value: str) -> int:
+        """Una copia del ricordo vive anche nella cronologia delle conversazioni ("ricordati che il mio
+        indirizzo e' via X"): dimenticare vuol dire toglierla anche da li'. Il valore diventa
+        "[dimenticato]" nelle righe che lo contengono (senza distinguere maiuscole); valori troppo corti
+        per essere riconosciuti con sicurezza (< 4 caratteri) non si toccano. Chiamata sotto il lock."""
+        if len(value.strip()) < 4:
+            return 0
+        pattern = re.compile(re.escape(value.strip()), re.IGNORECASE)
+        connection = self.memory.connection
+        rows = connection.execute(
+            "SELECT id, text FROM conversation_history WHERE instr(lower(text), lower(?)) > 0", (value.strip(),),
+        ).fetchall()
+        for row in rows:
+            connection.execute("UPDATE conversation_history SET text = ? WHERE id = ?",
+                               (pattern.sub("[dimenticato]", row["text"]), row["id"]))
+        return len(rows)
 
     def _residue_check(self, value: str) -> str:
         """Cerca i byte del valore appena cancellato nel file del database. "found" = ce n'e' ancora una copia

@@ -61,6 +61,19 @@ class MemoryPrivacySkillTests(unittest.TestCase):
         self.assertEqual(json.loads(receipt.splitlines()[0])["memory_hash"], result.data["receipts"][0])
         self.assertEqual(self.skills["FORGET"].execute({"key": "indirizzo di prova"}).error, "NOT_FOUND")
 
+    def test_forget_also_removes_the_copy_in_the_conversation_history(self):
+        """Senza questo il valore restava nella cronologia e la cancellazione non era verificabile."""
+        self.memory.log_turn("user", "ricordati che il mio indirizzo e' VIA SINTETICA 12, grazie")
+        self.memory.log_turn("jake", "Ok, lo ricordero'.")
+
+        result = self.skills["FORGET"].execute({"key": "indirizzo di prova"})
+
+        self.assertTrue(result.data["verified"])
+        self.assertEqual(result.data["residue_check"], "clean")
+        with self.memory.lock:
+            texts = [row[0] for row in self.memory.connection.execute("SELECT text FROM conversation_history")]
+        self.assertEqual(texts, ["ricordati che il mio indirizzo e' [dimenticato], grazie", "Ok, lo ricordero'."])
+
 
 if __name__ == "__main__":
     unittest.main()

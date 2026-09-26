@@ -9020,9 +9020,11 @@ Criterio di uscita: un ricordo può essere trovato e cancellato da tutti gli ind
   l'uso di ogni ricordo restituito (contatore, data, voce di registro; mai in modalita' privata): prima
   `use_count` restava sempre 0. Nuovo `EXPLAIN_MEMORY` (sola lettura): "da dove sai X / perche'
   ricordi X" spiega autore, fonte, sensibilita', scadenza e uso. Prova:
-  `tests/test_memory_privacy_integration.py` (database temporaneo, dati sintetici). Il criterio
-  d'uscita (cancellazione da TUTTI gli indici) resta aperto per gli indici fuori dal database (esempi
-  imparati, NEST) non ancora registrati con `register_index`.
+  `tests/test_memory_privacy_integration.py` (database temporaneo, dati sintetici). La copia del valore
+  nella cronologia delle conversazioni ("ricordati che il mio indirizzo e' via X") ora viene oscurata
+  (`[dimenticato]`) e contata nella ricevuta: senza, il controllo dei residui la trovava e la
+  cancellazione non era verificabile. Restano fuori dal database, e quindi fuori dalla prova: il log
+  applicativo (`data/jake.log`) e le copie esportate dall'utente.
 
 - `F5.7.1`-`F5.7.7` — 21/09/2026 (`core/memory_privacy.py`, `core/memory_backup.py`; libreria, non ancora esposta come
   skill o schermata):
