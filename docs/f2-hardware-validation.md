@@ -45,6 +45,8 @@ provider TTS e nomi/indici mostrati da `sounddevice`. I report sintetici sono so
 Non serve modificare `config/settings.json`: il runner della prova forza `voice_barge_in` e
 `voice_partials` a `on` soltanto per la durata della sessione e misura la configurazione vocale
 reale (se `voice_character` è impostato, la voce di personaggio RVC, non la voce di base).
+Per la durata della prova il runner sospende anche promemoria, automazioni e avvisi proattivi
+(batteria, disco, housekeeping): le notifiche arrivate nel frattempo vengono mostrate alla fine.
 
 Per un riferimento dei tempi della sola pipeline vocale (TTS di base, RVC, primo campione, pause fra
 chunk, `answer()`), senza microfono né altoparlanti:

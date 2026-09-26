@@ -1,3 +1,4 @@
+import contextlib
 import threading
 import time
 from datetime import time as datetime_time
@@ -2744,6 +2745,42 @@ class JakeCore:
             "response": response,
             "action_id": action_id,
         }
+
+    # ---- sospensione della proattivita' ----------------------------------------------------
+
+    @contextlib.contextmanager
+    def proactivity_suspended(self, reason: str):
+        """Per la durata del blocco Jake non prende iniziative: promemoria, automazioni e avvisi di
+        sistema/housekeeping si fermano, e qualunque notifica arrivi comunque va in coda. Solo a
+        runtime (nessuna configurazione persistente toccata); all'uscita ripartono SOLO i componenti
+        che erano attivi (un kill switch resta rispettato) e si restituiscono i messaggi in coda ora
+        ammessi. Gate hardware F2 (26/09/2026): notifiche partite durante la misura della voce."""
+        components = [("scheduler", self.scheduler), ("trigger_scheduler", self.trigger_scheduler),
+                      ("system_advisor", self.system_advisor)]
+        paused = []
+        self.notification_center.suspend()
+        self.logger.info("Proattivita' sospesa: %s", reason)
+        try:
+            for name, component in components:
+                thread = getattr(component, "_thread", None)
+                if thread is not None and thread.is_alive():
+                    try:
+                        component.stop()
+                        paused.append((name, component))
+                    except Exception:
+                        self.logger.exception("Errore sospendendo %s", name)
+            released: list[str] = []
+            yield released
+        finally:
+            for name, component in paused:
+                if name != "system_advisor" and self.kill_switch.is_active():
+                    continue  # il kill switch li ha voluti fermi: non si riaccendono da soli
+                try:
+                    component.start()
+                except Exception:
+                    self.logger.exception("Errore riprendendo %s", name)
+            released.extend(self.notification_center.resume())
+            self.logger.info("Proattivita' ripresa: %s", reason)
 
     # ---- kill switch -----------------------------------------------------------------------
 
