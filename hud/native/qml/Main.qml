@@ -52,10 +52,15 @@ ApplicationWindow {
         id: overlayStyler
     }
 
+    HoverHandler {
+        id: permissionHover
+        target: permissionCard
+    }
+
     // Vero SOLO quando il puntatore e' sopra uno dei cinque pannelli - mai calcolato dalla
     // geometria del ColumnLayout (che includerebbe anche i vuoti tra un pannello e l'altro, il
     // limite dichiarato del primo passo di F4.2.1).
-    readonly property bool pointerOverAnyPanel: statusPanel.hovered || orb.hovered
+    readonly property bool pointerOverAnyPanel: statusPanel.hovered || orb.hovered || permissionHover.hovered
         || conversation.hovered || quickActions.hovered || commandBar.hovered
 
     onPointerOverAnyPanelChanged: overlayStyler.setClickThrough(window, !pointerOverAnyPanel)
@@ -78,6 +83,8 @@ ApplicationWindow {
             connected: jake.connected
             state: jake.state
             activeDevice: jake.activeDevice
+            micOpen: jake.micOpen
+            micDiscarding: jake.micDiscarding
         }
 
         Orb {
@@ -88,10 +95,58 @@ ApplicationWindow {
             state: jake.state
         }
 
+        // F4.5.3 (permission card): cosa aspetta conferma, con quale rischio e se l'ha suggerito un
+        // contenuto esterno. Nessun bottone qui: si conferma a voce o dalla barra comandi ("si'"),
+        // lo stesso percorso gia' coperto dalla policy.
+        Rectangle {
+            id: permissionCard
+            Layout.fillWidth: true
+            visible: jake.confirmationPending
+            implicitHeight: permissionColumn.implicitHeight + 16
+            radius: 10
+            color: "#2a1f14"
+            border.color: "#fb923c"
+            Accessible.role: Accessible.AlertMessage
+            Accessible.name: permissionTitle.text + ". " + permissionDetail.text
+
+            Column {
+                id: permissionColumn
+                anchors.fill: parent
+                anchors.margins: 8
+                spacing: 2
+                Text {
+                    id: permissionTitle
+                    text: jake.confirmationAuth ? qsTr("Serve l'autenticazione") : qsTr("Serve la tua conferma")
+                    color: "#fb923c"
+                    font.bold: true
+                    font.pixelSize: 13
+                }
+                Text {
+                    id: permissionDetail
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    text: qsTr("Azione: %1 · rischio: %2").arg(jake.confirmationIntent).arg(jake.confirmationRisk || qsTr("sconosciuto"))
+                        + (jake.confirmationExternal ? qsTr(" · suggerita da un contenuto esterno") : "")
+                    color: "#e5e7eb"
+                    font.pixelSize: 12
+                }
+            }
+        }
+
         ConversationPanel {
             id: conversation
             Layout.fillWidth: true
             Layout.fillHeight: true
+            Layout.topMargin: 14
+            transcriptText: jake.transcriptText
+            transcriptFinal: jake.transcriptFinal
+            stepDescription: jake.state === "EXECUTING" ? jake.stepDescription : ""
+            evidenceSummary: jake.evidenceSummary
+            inspectionReason: jake.inspectionReason
+            activitySummary: jake.lastActivitySummary
+            undoExpiresAt: jake.lastUndoExpiresAt
+            // l'undo passa dallo stesso skill del comando vocale (scadenza e controlli inclusi)
+            onUndoRequested: jake.sendCommand("annulla l'ultima azione")
         }
 
         QuickActions {

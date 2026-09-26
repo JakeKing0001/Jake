@@ -59,6 +59,18 @@ class EventType(str, Enum):
     # "inspection": {"verdict", "reason", "chosen", "alternatives": [{name, control_type,
     # automation_id, score, reason}]}}. Solo metadati UI, mai testo scritto dall'utente.
     SELECTOR_INSPECTION = "SELECTOR_INSPECTION"
+    # F4.4.1/F4.5.3: Jake aspetta una conferma o un'autenticazione (stato "waiting" dell'HUD).
+    # Payload: {"pending": bool, "intent": str, "reason": "confirmation_required"|"auth_required",
+    # "risk": str (core/risk.py::RiskLevel), "external_source": bool}. Solo metadati: MAI i
+    # parametri dell'azione (possono contenere testo personale, F4.5.7).
+    CONFIRMATION = "CONFIRMATION"
+    # F4.5/F4.6.1: una ricevuta appena scritta nel ledger. Payload: {"action_id", "intent",
+    # "requested_by" ("user"|"agent"|"trigger"|...), "outcome" ("success"|"failed"),
+    # "error_category", "verified"}. Mai parametri ne' testo dell'utente.
+    ACTION_RECEIPT = "ACTION_RECEIPT"
+    # F4.6.3: un'azione e' annullabile fino a `expires_at` (epoch s). Payload: {"action_id",
+    # "compensating_intent", "expires_at"}. Si unisce alla ricevuta con lo stesso action_id.
+    UNDO_AVAILABLE = "UNDO_AVAILABLE"
 
 
 # Traduce gli stati gia' in uso da WakeWordSession/SessionHooks.set_state (stringhe libere,

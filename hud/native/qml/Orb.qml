@@ -21,6 +21,9 @@ Item {
         case "LISTENING": return "#4fd1ff";
         case "THINKING": return "#a78bfa";
         case "EXECUTING": return "#facc15";
+        case "SPEAKING": return "#38bdf8";
+        case "WAITING": return "#fb923c";
+        case "DICTATION": return "#f472b6";
         case "ERROR": return "#f87171";
         case "PAUSED": return "#6b7280";
         default: return "#3ddc84"; // IDLE e stati non mappati esplicitamente
@@ -28,6 +31,24 @@ Item {
     }
 
     readonly property bool pulsing: state === "LISTENING" || state === "THINKING" || state === "EXECUTING"
+        || state === "SPEAKING"
+
+    // F4.4.5 ("colore, forma e testo: mai solo colore"): lo stato e' sempre anche scritto.
+    readonly property string stateLabel: {
+        switch (state) {
+        case "LISTENING": return qsTr("In ascolto");
+        case "THINKING": return qsTr("Sto pensando");
+        case "EXECUTING": return qsTr("Sto eseguendo");
+        case "SPEAKING": return qsTr("Sto parlando");
+        case "WAITING": return qsTr("Attendo conferma");
+        case "DICTATION": return qsTr("Dettatura");
+        case "ERROR": return qsTr("Errore");
+        case "PAUSED": return qsTr("In pausa");
+        default: return qsTr("Pronto");
+        }
+    }
+    Accessible.role: Accessible.Indicator
+    Accessible.name: qsTr("Stato di Jake: %1").arg(stateLabel)
 
     Rectangle {
         id: glow
@@ -54,5 +75,14 @@ Item {
         color: root.stateColor
 
         Behavior on color { ColorAnimation { duration: 250 } }
+    }
+
+    Text {
+        anchors.top: parent.bottom
+        anchors.topMargin: 4
+        anchors.horizontalCenter: parent.horizontalCenter
+        text: root.stateLabel
+        color: "#d1d5db"
+        font.pixelSize: 12
     }
 }

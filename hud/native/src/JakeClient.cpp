@@ -1,5 +1,6 @@
 #include "JakeClient.h"
 
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkRequest>
@@ -51,6 +52,7 @@ void JakeClient::connectToJake(const QString &baseUrl) {
     }
     m_eventBuffer.clear();
     m_protocolMismatchReported = false;
+    m_reducer.connectionStarted();
 
     QNetworkRequest request(QUrl(m_baseUrl + QStringLiteral("/events")));
     request.setRawHeader("Accept", "text/event-stream");
@@ -58,8 +60,8 @@ void JakeClient::connectToJake(const QString &baseUrl) {
     // costruito lato server (core/event_bus.py::EventBus.subscribe_with_replay, PR #133) -
     // m_lastSequenceId=0 (mai connesso prima) non manda l'header affatto, stesso comportamento
     // di sempre per la primissima connessione.
-    if (m_lastSequenceId > 0)
-        request.setRawHeader("Last-Event-ID", QByteArray::number(m_lastSequenceId));
+    if (m_reducer.view().lastSequenceId > 0)
+        request.setRawHeader("Last-Event-ID", QByteArray::number(m_reducer.view().lastSequenceId));
     m_eventStream = m_manager->get(request);
     connect(m_eventStream, &QIODevice::readyRead, this, &JakeClient::onEventStreamReadyRead);
     connect(m_eventStream, &QNetworkReply::finished, this, &JakeClient::onEventStreamFinished);
@@ -142,20 +144,14 @@ void JakeClient::onEventStreamFinished() {
 }
 
 void JakeClient::handleEventLine(const QString &jsonLine) {
-    const auto doc = QJsonDocument::fromJson(jsonLine.toUtf8());
-    if (!doc.isObject()) return;
-    const auto object = doc.object();
-    if (object.value("schema_version").toInt(-1) != JAKE_PROTOCOL_VERSION) {
-        // F4.1.6 ("definire compatibility window"): finestra ZERO - nessuna tolleranza tra
-        // versioni diverse, per costruzione (JAKE_PROTOCOL_VERSION e' generato dallo stesso
-        // config/release.json letto da core/version.py, vedi CMakeLists.txt - le due parti sono
-        // sempre build-compatibili quando ricompilate insieme; uno scarto e' sempre un binario
-        // HUD non ricompilato dopo un cambio di schema, mai una versione "abbastanza vicina" da
-        // tollerare). Segnalato UNA sola volta per connessione (non un errorOccurred per ogni
-        // evento sullo stesso stream, vedi m_protocolMismatchReported) e lo stream si interrompe
-        // subito: onEventStreamFinished() programmera' comunque una riconnessione automatica fra
-        // kReconnectDelayMs, che fallira' di nuovo nello stesso modo finche' l'HUD non viene
-        // ricompilato - lo stesso comportamento gia' definito per /status (fetchStatus()).
+    // F4.1: le regole stanno in HudEventReducer (stesse fixture di core/hud_view_state.py). Un
+    // tipo sconosciuto o un payload malformato viene ignorato: prima finiva in setState(type) e
+    // TRANSCRIPT/MIC_STATE/VERIFICATION diventavano "stati" dell'orb col proprio nome.
+    const HudEventReducer::Result result = m_reducer.applyLine(jsonLine.toUtf8());
+    if (result == HudEventReducer::Result::Incompatible) {
+        // F4.1.6 ("definire compatibility window"): finestra ZERO - uno scarto e' sempre un HUD non
+        // ricompilato dopo un cambio di schema. Segnalato UNA volta per connessione e lo stream si
+        // interrompe; la riconnessione automatica fallira' di nuovo allo stesso modo.
         if (!m_protocolMismatchReported) {
             m_protocolMismatchReported = true;
             emit errorOccurred(QStringLiteral("Evento Jake con versione protocollo non compatibile"));
@@ -164,43 +160,63 @@ void JakeClient::handleEventLine(const QString &jsonLine) {
             m_eventStream->abort();
         return;
     }
-    const QString type = object.value("type").toString();
-    const auto payload = object.value("payload").toObject();
-    // F4.1.3: aggiornato per OGNI evento riuscito, indipendentemente dal tipo - e' quello che
-    // connectToJake() manda come Last-Event-ID alla prossima riconnessione.
-    const qint64 sequenceId = object.value("sequence_id").toInteger(0);
-    if (sequenceId > 0)
-        m_lastSequenceId = sequenceId;
+    if (result != HudEventReducer::Result::Applied)
+        return;
 
-    // F4.1.2: JakeHudEventType::* (generato da tools/generate_hud_event_types.py DALLA fonte
-    // vera, core/hud_protocol.py::EventType) invece di stringhe letterali scritte qui a mano -
-    // un tipo aggiunto/rinominato lato Python fa fallire questa build invece di disallinearsi in
-    // silenzio.
+    const HudViewState &view = m_reducer.view();
+    const QString &type = m_reducer.lastType();
+    const QJsonObject &payload = m_reducer.lastPayload();
+    // Segnali puntuali per chi li usa gia' (Main.qml): stessi di prima, ora solo per eventi validi.
     if (type == QLatin1String(JakeHudEventType::USER_MESSAGE)) {
         emit messageReceived(QStringLiteral("user"), payload.value("text").toString());
     } else if (type == QLatin1String(JakeHudEventType::JAKE_MESSAGE)) {
-        emit messageReceived(QStringLiteral("jake"), payload.value("text").toString());
-        setState(QLatin1String(JakeHudEventType::IDLE));
+        if (payload.value("text").isString() && !payload.value("text").toString().isEmpty())
+            emit messageReceived(QStringLiteral("jake"), payload.value("text").toString());
     } else if (type == QLatin1String(JakeHudEventType::AGENT_STEP)) {
-        emit agentStep(payload.value("step").toInt(), payload.value("description").toString());
-        setState(QLatin1String(JakeHudEventType::EXECUTING));
+        emit agentStep(view.stepIndex, view.stepDescription);
     } else if (type == QLatin1String(JakeHudEventType::NOTIFICATION)) {
         emit notification(payload.value("kind").toString(), payload.value("text").toString());
     } else if (type == QLatin1String(JakeHudEventType::ERROR)) {
-        emit errorOccurred(payload.value("detail").toString());
-        setState(QLatin1String(JakeHudEventType::ERROR));
+        emit errorOccurred(view.lastError);
     } else if (type == QLatin1String(JakeHudEventType::DEVICE_HANDOFF)) {
-        setActiveDevice(payload.value("to").toString());
-        emit deviceHandoff(payload.value("from").toString(), payload.value("to").toString());
-    } else if (type == QLatin1String(JakeHudEventType::HUD_SHOW)) {
-        emit visibilityRequested(true);
-    } else if (type == QLatin1String(JakeHudEventType::HUD_HIDE)) {
-        emit visibilityRequested(false);
-    } else {
-        // LISTENING/THINKING/EXECUTING/IDLE/DICTATION/PAUSED: il nome dell'evento coincide gia'
-        // con lo stato da mostrare, nessuna traduzione necessaria.
-        setState(type);
+        emit deviceHandoff(payload.value("from").toString(), view.activeDevice);
+    } else if (type == QLatin1String(JakeHudEventType::HUD_SHOW) || type == QLatin1String(JakeHudEventType::HUD_HIDE)) {
+        emit visibilityRequested(view.visible);
     }
+    setActiveDevice(view.activeDevice);
+    setState(view.state);
+    emit viewChanged();
+}
+
+QString JakeClient::lastActivitySummary() const {
+    const QJsonArray &activities = m_reducer.view().activities;
+    if (activities.isEmpty()) return QString();
+    const QJsonObject last = activities.last().toObject();
+    if (last.value("intent").toString().isEmpty()) return QString(); // solo l'undo e' arrivato finora
+    QString summary = last.value("intent").toString() + QStringLiteral(" · ")
+        + (last.value("outcome").toString() == QLatin1String("success") ? tr("riuscita") : tr("non riuscita"));
+    const QString verified = last.value("verified").toString();
+    if (verified == QLatin1String("verified")) summary += QStringLiteral(" · ") + tr("verificata");
+    else if (verified == QLatin1String("verification_failed")) summary += QStringLiteral(" · ") + tr("verifica fallita");
+    return summary;
+}
+
+qint64 JakeClient::lastUndoExpiresAt() const {
+    const QJsonArray &activities = m_reducer.view().activities;
+    return activities.isEmpty() ? 0 : activities.last().toObject().value("undo_expires_at").toInteger(0);
+}
+
+QString JakeClient::evidenceSummary() const {
+    const QJsonArray &evidence = m_reducer.view().evidence;
+    if (evidence.isEmpty()) return QString();
+    const QJsonObject last = evidence.last().toObject();
+    const QString intent = last.value("intent").toString();
+    if (last.value("kind").toString() == QLatin1String("undo"))
+        return tr("Annullato: %1").arg(intent);
+    const QString verified = last.value("verified").toString();
+    if (verified == QLatin1String("verified")) return tr("Verificato: %1").arg(intent);
+    if (verified == QLatin1String("verification_failed")) return tr("Verifica fallita: %1").arg(intent);
+    return tr("Non verificato: %1").arg(intent);
 }
 
 void JakeClient::sendCommand(const QString &text) {

@@ -99,10 +99,9 @@ jobs:
 
       - uses: seanmiddleditch/gha-setup-ninja@v5
 
-      # Il prototipo C++/QML non ha ancora una suite di test (vedi hud/native/README.md): qui
-      # verifichiamo solo che compili ed esegua senza errori subito dopo l'avvio, non il
-      # comportamento visivo. E' la stessa verifica fatta manualmente per il commit 4.9.2,
-      # ora ripetuta a ogni push invece che una tantum.
+      # Qui si verifica che l'HUD compili, che il riduttore degli eventi superi il contratto
+      # condiviso con Python e che l'eseguibile resti aperto dopo l'avvio; il comportamento
+      # visivo resta una verifica manuale.
       - uses: jurplel/install-qt-action@v4
         with:
           version: "6.7.3"
@@ -115,6 +114,12 @@ jobs:
       - name: Compila
         working-directory: hud/native
         run: cmake --build --preset windows-ninja
+
+      # F4.1: il riduttore C++ degli eventi esegue la stessa suite di fixture del riferimento
+      # Python (tests/fixtures/hud_contract.json, tests/test_hud_contract.py).
+      - name: Contratto eventi HUD (stesse fixture del client Python)
+        working-directory: hud/native
+        run: ctest --test-dir build --output-on-failure
 
       - name: Avvia e chiudi subito (fuma il binario, nessun server companion in questo job)
         working-directory: hud/native/build

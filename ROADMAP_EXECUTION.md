@@ -258,13 +258,13 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F3.6` | Browser Automation (moduli, schede, download nella cartella dell'istanza, stop davanti ai CAPTCHA, profilo temporaneo davvero cancellato - 25/09/2026; solo Edge) | `DONE` |
 | `F3.7` | Application Adapters (Calcolatrice, Paint, Esplora File, terminale ed Edge: flussi definiti, versioni dichiarate, 3/3 di fila con verifica indipendente e pulizia; Impostazioni/Office/messaggistica non coperti per scelta di sicurezza; VS Code isolato verificato di nuovo dopo il completamento del suo aggiornamento) | `DONE` |
 | `F3.8` | Demonstration Learning (dimostrazione vera -> passi semantici, parametri, descrizione, versione/app/undo, sospensione su drift, ri-approvazione; sopravvive a riavvio, resize e dati diversi - 25/09/2026) | `DONE` |
-| `F4.1` | Protocol Architecture (F4.1.2/F4.1.3/F4.1.5/F4.1.6 chiusi, F4.1.1 chiuso lato Python (sequence_id+trace_id)/F4.1.4 prima fetta lato Python - 16/09/2026; solo il lato C++ di F4.1.1/F4.1.4 resta scoperto, gap permanente dichiarato) | `DOING` |
+| `F4.1` | Protocol Architecture (26/09/2026: riduttore di riferimento Python e riduttore C++ superano la stessa suite di 18 fixture, ctest nella CI; sequence_id/trace_id consumati anche lato C++) | `DONE` |
 | `F4.2` | Native HUD (F4.2.1/F4.2.4 chiusi, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026; F4.2.5/F4.2.6 e resto di F4.2.3 richiedono test interattivi/visivi) | `DOING` |
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
-| `F4.4` | Interaction Design (G1 superato, mai iniziato) | `READY` |
-| `F4.5` | Interaction Design (G1 superato, mai iniziato) | `READY` |
-| `F4.6` | Trust UX (G1 superato, mai iniziato) | `READY` |
-| `F4.7` | Accessibility (G1 superato, mai iniziato) | `READY` |
+| `F4.4` | Interaction Design (26/09/2026: stati waiting/speaking/dictation, etichetta testuale dello stato, ordine eventi e reconnect coerenti; orb 3D/particelle/audio non iniziati) | `DOING` |
+| `F4.5` | Interaction Design (26/09/2026: trascrizione live, permission card, prove, diagnosi, notifiche nell'HUD nativo; verifica visiva da fare) | `DOING` |
+| `F4.6` | Trust UX (26/09/2026: kill switch visibile; action center con ultima azione, esito, verifica e undo con scadenza; retry/dettagli/precondizioni non ancora) | `DOING` |
+| `F4.7` | Accessibility (G1 superato, mai iniziato; nomi accessibili di stato, microfono e permission card aggiunti il 26/09/2026) | `READY` |
 | `F4.8` | Release Engineering (G1 superato, mai iniziato) | `READY` |
 | `F5.1` | Memory Platform (F5.1.1/F5.1.3-F5.1.6 il 21/09/2026: schema versionato, migrazioni transazionali con backup, metadati, recupero; resta F5.1.2 separare entita'/episodi/procedure e la prova su una copia del database reale) | `DOING` |
 | `F5.2` | Memory Platform | `DOING` |
@@ -8685,6 +8685,17 @@ Criterio di uscita: client Python finto e JakeClient C++ superano la stessa suit
   `sequence_id`/`trace_id`, gap permanente dichiarato). Prova: build C++ verde, nessun test Python
   toccato in questo incremento (suite gia' verde da F4.1.1).
 
+- `F4.1` (chiusura, 26/09/2026): il client C++ interpretava 8 tipi di evento su 21 e mandava gli
+  altri in `setState(type)` (TRANSCRIPT/MIC_STATE/VERIFICATION diventavano "stati" dell'orb).
+  `core/hud_view_state.py` e' il riduttore di riferimento; `hud/native/src/HudEventReducer` applica le
+  stesse regole in C++ ed e' usato da `JakeClient`. Entrambi eseguono `tests/fixtures/hud_contract.json`
+  (18 scenari: stati, trascrizione con revisioni, microfono, prove con `trace_id`, conferma, tipi
+  sconosciuti e payload malformati ignorati, versione rifiutata, duplicati e fuori ordine scartati,
+  server ripartito riconosciuto al primo evento di una nuova connessione) - Python in
+  `tests/test_hud_contract.py`, C++ in `hud/native/tests/contract_tests.cpp` via `ctest` nel job HUD
+  della CI. Un tipo di `EventType` senza fixture fa fallire il test Python. Criterio d'uscita
+  soddisfatto.
+
 ### F4.2 — Shell overlay nativa
 
 Dipende da: F4.1.
@@ -8775,6 +8786,13 @@ stati target su orb 3D particellare nativa; nessuno stato bloccato dopo errore/r
 risposta ad audio reale, coerenza con i pannelli e budget F4.3 verificati. Una demo decorativa
 o il solo prototipo 2D non chiudono il requisito. La verifica dell'handoff dipende inoltre da F7.
 
+- 26/09/2026 (prima fetta di F4.4.1/F4.4.5/F4.4.6): nuovo evento `CONFIRMATION` (pubblicato quando
+  l'azione in sospeso cambia; intent, motivo, rischio, fonte esterna e `trace_id`, mai i parametri)
+  -> stato `WAITING`; `SPEAKING` e `DICTATION` distinti; l'orb mostra sempre anche un'etichetta
+  testuale e ha un nome accessibile; stato coerente dopo reconnect/fuori ordine (fixture). Restano
+  la base 3D, le particelle, l'audio reale e gli stati success/warning (nessun evento li porta
+  ancora): `DOING`, verifica visiva `VERIFY`.
+
 ### F4.5 — Pannelli contestuali
 
 Dipende da: F4.1 e contratti F1.
@@ -8793,6 +8811,12 @@ Dipende da: F4.1 e contratti F1.
 Criterio di uscita: ogni `ActionReceipt` ha una rappresentazione accessibile nell'HUD e i
 pannelli contestuali restano coerenti con l'orb, senza coprire controlli, prove o richieste.
 
+- 26/09/2026 (prima fetta di F4.5.1/F4.5.3/F4.5.4/F4.5.6): pannello conversazione con trascrizione
+  live (partial in corsivo, final normale), passo in corso, ultima prova (verificato/non
+  verificato/annullato) e diagnosi del selettore; permission card con azione, rischio e fonte
+  esterna; indicatore del microfono sempre visibile. Nessun parametro dell'azione nelle preview
+  (F4.5.7). Verifica visiva/interattiva `VERIFY`.
+
 ### F4.6 — Action center e undo
 
 Dipende da: F1.3 e F4.5.
@@ -8805,6 +8829,17 @@ Dipende da: F1.3 e F4.5.
 6. `F4.6.6` Separare audit tecnico da testo user-facing.
 
 Criterio di uscita: undo end-to-end verificato per file, finestra e workflow fixture.
+
+- 26/09/2026 (F4.6.5, prima fetta): pulsante "Ferma tutto" sempre visibile nell'HUD nativo, che
+  invia `ferma tutto` (corsia a corrispondenza esatta -> `KILL_SWITCH`, nessun modello in mezzo).
+  Scorciatoia globale non ancora fatta.
+- 26/09/2026 (F4.6.1/F4.6.3, prima fetta; F4.5 criterio "ogni ActionReceipt ha una rappresentazione"):
+  `ActionLedger.record` pubblica `ACTION_RECEIPT` (intent, esito, categoria, verifica, `trace_id`; mai
+  parametri, nulla in modalita' privata) e `UndoStore.save` pubblica `UNDO_AVAILABLE` (intent inverso e
+  scadenza, mai i parametri compensatori). I due riduttori li uniscono per `action_id` in qualunque
+  ordine (fixture condivisa). L'HUD mostra l'ultima azione con esito/verifica e un pulsante "Annulla"
+  finche' l'undo non scade, che invia "annulla l'ultima azione" (nuova frase esatta ->
+  `UNDO_LAST_ACTION`, stesso skill e controlli del comando vocale). Verifica visiva `VERIFY`.
 
 ### F4.7 — Accessibilità e multi-monitor
 

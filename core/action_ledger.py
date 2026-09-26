@@ -401,6 +401,9 @@ class ActionLedger:
     def __init__(self, path: Path | None = None):
         self._path = Path(path) if path else DEFAULT_LEDGER_PATH
         self._write_lock = threading.Lock()
+        # F4.5/F4.6.1: osservatore (receipt) chiamato dopo ogni ricevuta scritta - JakeCore lo usa
+        # per l'evento ACTION_RECEIPT dell'HUD. Mai in modalita' privata (la ricevuta non esiste).
+        self.on_record = None
 
     def record(self, receipt: ActionReceipt, *, private: bool = False) -> None:
         # Stessa policy di core/logger.log_action e core/session_recorder.SessionRecorder:
@@ -415,6 +418,12 @@ class ActionLedger:
                 if needs_separator:
                     handle.write("\n")
                 handle.write(line)
+        callback = self.on_record
+        if callback is not None:
+            try:
+                callback(receipt)
+            except Exception:
+                pass  # un osservatore guasto non deve mai far perdere o fallire una ricevuta
 
     def _last_write_was_truncated(self) -> bool:
         """F1.7.1 ("resistente a record parziali e arresto improvviso"): True se il file esiste,

@@ -1,0 +1,209 @@
+{
+  "description": "Suite condivisa del contratto HUD (F4.1): la eseguono sia core/hud_view_state.py (tests/test_hud_contract.py) sia hud/native/src/HudEventReducer.cpp (hud/native/tests/contract_tests.cpp). Passi: {\"connect\": true} = nuova connessione SSE; {\"event\": {...}} = evento valido (schema_version aggiunta dal runner se manca); {\"line\": \"...\"} = riga data: grezza. 'expect' confronta solo i campi elencati.",
+  "scenarios": [
+    {
+      "name": "gli stati di base cambiano lo stato mostrato",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "LISTENING", "sequence_id": 1}},
+        {"event": {"type": "THINKING", "sequence_id": 2}},
+        {"event": {"type": "DICTATION", "sequence_id": 3}},
+        {"event": {"type": "PAUSED", "sequence_id": 4}}
+      ],
+      "expect": {"state": "PAUSED", "last_sequence_id": 4, "ignored": 0}
+    },
+    {
+      "name": "risposta con testo: messaggio e ritorno a idle",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "USER_MESSAGE", "payload": {"text": "che ore sono"}, "sequence_id": 1}},
+        {"event": {"type": "THINKING", "sequence_id": 2}},
+        {"event": {"type": "JAKE_MESSAGE", "payload": {"text": "Sono le dieci."}, "sequence_id": 3}}
+      ],
+      "expect": {"state": "IDLE", "messages": [["user", "che ore sono"], ["jake", "Sono le dieci."]]}
+    },
+    {
+      "name": "lo stato legacy speaking arriva come JAKE_MESSAGE senza testo",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "JAKE_MESSAGE", "payload": {"detail": "Sono le dieci."}, "sequence_id": 1}}
+      ],
+      "expect": {"state": "SPEAKING", "messages": []}
+    },
+    {
+      "name": "un passo dell'agente e' esecuzione con descrizione",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "AGENT_STEP", "payload": {"step": 2, "description": "Apro il file"}, "sequence_id": 1}}
+      ],
+      "expect": {"state": "EXECUTING", "step_index": 2, "step_description": "Apro il file"}
+    },
+    {
+      "name": "errore: stato e dettaglio",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "ERROR", "payload": {"detail": "errore imprevisto"}, "sequence_id": 1}}
+      ],
+      "expect": {"state": "ERROR", "last_error": "errore imprevisto"}
+    },
+    {
+      "name": "trascrizione, microfono, notifiche e prove non cambiano lo stato",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "LISTENING", "sequence_id": 1}},
+        {"event": {"type": "MIC_STATE", "payload": {"open": true, "discarding": false, "reason": "command", "since": 1.0}, "sequence_id": 2}},
+        {"event": {"type": "TRANSCRIPT", "payload": {"utterance_id": "u1", "revision": 1, "kind": "partial", "text": "che ore", "stable_text": "che", "confidence": null}, "sequence_id": 3}},
+        {"event": {"type": "NOTIFICATION", "payload": {"kind": "reminder", "text": "Promemoria: medicina"}, "sequence_id": 4}},
+        {"event": {"type": "VERIFICATION", "payload": {"intent": "CREATE_PATH", "verified": "verified"}, "sequence_id": 5, "trace_id": "t-42"}},
+        {"event": {"type": "UNDO", "payload": {"intent": "CREATE_PATH"}, "sequence_id": 6}},
+        {"event": {"type": "SELECTOR_INSPECTION", "payload": {"procedure": "p", "step": 1, "error": "NOT_FOUND", "inspection": {"verdict": "not_found", "reason": "nessun bottone Salva", "chosen": null, "alternatives": []}}, "sequence_id": 7}}
+      ],
+      "expect": {
+        "state": "LISTENING", "mic_open": true, "mic_discarding": false, "mic_reason": "command",
+        "transcript_text": "che ore", "transcript_final": false,
+        "notifications": [["reminder", "Promemoria: medicina"]],
+        "evidence": [{"kind": "verification", "intent": "CREATE_PATH", "verified": "verified", "trace_id": "t-42"}, {"kind": "undo", "intent": "CREATE_PATH", "verified": "", "trace_id": ""}],
+        "inspection_verdict": "not_found", "inspection_reason": "nessun bottone Salva"
+      }
+    },
+    {
+      "name": "il final chiude la frase: revisioni vecchie e partial tardivi ignorati",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "TRANSCRIPT", "payload": {"utterance_id": "u1", "revision": 2, "kind": "partial", "text": "che ore so"}, "sequence_id": 1}},
+        {"event": {"type": "TRANSCRIPT", "payload": {"utterance_id": "u1", "revision": 1, "kind": "partial", "text": "che"}, "sequence_id": 2}},
+        {"event": {"type": "TRANSCRIPT", "payload": {"utterance_id": "u1", "revision": 3, "kind": "final", "text": "che ore sono?"}, "sequence_id": 3}},
+        {"event": {"type": "TRANSCRIPT", "payload": {"utterance_id": "u1", "revision": 4, "kind": "partial", "text": "che ore sono? eh"}, "sequence_id": 4}}
+      ],
+      "expect": {"transcript_text": "che ore sono?", "transcript_final": true, "transcript_revision": 3}
+    },
+    {
+      "name": "una frase nuova sostituisce la trascrizione precedente",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "TRANSCRIPT", "payload": {"utterance_id": "u1", "revision": 3, "kind": "final", "text": "apri Spotify"}, "sequence_id": 1}},
+        {"event": {"type": "TRANSCRIPT", "payload": {"utterance_id": "u2", "revision": 1, "kind": "partial", "text": "e chiudi"}, "sequence_id": 2}}
+      ],
+      "expect": {"transcript_utterance": "u2", "transcript_text": "e chiudi", "transcript_final": false}
+    },
+    {
+      "name": "mostra/nascondi e passaggio ad altro dispositivo",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "HUD_SHOW", "sequence_id": 1}},
+        {"event": {"type": "HUD_HIDE", "sequence_id": 2}},
+        {"event": {"type": "DEVICE_HANDOFF", "payload": {"from": "pc", "to": "telefono"}, "sequence_id": 3}}
+      ],
+      "expect": {"visible": false, "active_device": "telefono", "state": "IDLE"}
+    },
+    {
+      "name": "tipo sconosciuto e payload non oggetto: ignorati, mai diventano uno stato",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "THINKING", "sequence_id": 1}},
+        {"event": {"type": "BOGUS_EVENT", "sequence_id": 2}},
+        {"event": {"type": "NOTIFICATION", "payload": ["non", "un", "oggetto"], "sequence_id": 3}},
+        {"line": "questo non e' JSON"},
+        {"line": "[1, 2, 3]"},
+        {"event": {"sequence_id": 4}}
+      ],
+      "expect": {"state": "THINKING", "ignored": 5, "notifications": [], "last_sequence_id": 1}
+    },
+    {
+      "name": "trascrizione malformata: ignorata senza toccare quella valida",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "TRANSCRIPT", "payload": {"utterance_id": "u1", "revision": 1, "kind": "final", "text": "ciao"}, "sequence_id": 1}},
+        {"event": {"type": "TRANSCRIPT", "payload": {"utterance_id": "u2", "revision": 1, "kind": "boh", "text": "rumore"}, "sequence_id": 2}},
+        {"event": {"type": "TRANSCRIPT", "payload": {"revision": 1, "kind": "partial", "text": "senza id"}, "sequence_id": 3}}
+      ],
+      "expect": {"transcript_text": "ciao", "transcript_final": true, "ignored": 2}
+    },
+    {
+      "name": "versione di protocollo diversa: evento rifiutato, stream da interrompere",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "LISTENING", "sequence_id": 1}},
+        {"line": "{\"schema_version\": 999, \"type\": \"ERROR\", \"payload\": {\"detail\": \"x\"}, \"sequence_id\": 2}"}
+      ],
+      "expect": {"state": "LISTENING", "incompatible": true, "last_sequence_id": 1}
+    },
+    {
+      "name": "duplicati e fuori ordine nella stessa connessione: ignorati",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "LISTENING", "sequence_id": 5}},
+        {"event": {"type": "ERROR", "payload": {"detail": "vecchio"}, "sequence_id": 4}},
+        {"event": {"type": "LISTENING", "sequence_id": 5}},
+        {"event": {"type": "THINKING", "sequence_id": 6}}
+      ],
+      "expect": {"state": "THINKING", "last_error": "", "ignored": 2, "last_sequence_id": 6}
+    },
+    {
+      "name": "reconnect allo stesso server: il replay continua da dove era rimasto",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "LISTENING", "sequence_id": 10}},
+        {"connect": true},
+        {"event": {"type": "THINKING", "sequence_id": 11}},
+        {"event": {"type": "EXECUTING", "sequence_id": 12}}
+      ],
+      "expect": {"state": "EXECUTING", "last_sequence_id": 12, "ignored": 0}
+    },
+    {
+      "name": "reconnect a un server ripartito: il contatore si azzera e gli eventi si applicano",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "EXECUTING", "sequence_id": 500}},
+        {"connect": true},
+        {"event": {"type": "IDLE", "sequence_id": 1}},
+        {"event": {"type": "LISTENING", "sequence_id": 2}}
+      ],
+      "expect": {"state": "LISTENING", "last_sequence_id": 2, "ignored": 0}
+    },
+    {
+      "name": "conferma in sospeso: stato WAITING con intent e rischio, poi risolta",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "THINKING", "sequence_id": 1}},
+        {"event": {"type": "CONFIRMATION", "payload": {"pending": true, "intent": "DELETE_PATH", "reason": "confirmation_required", "risk": "destructive", "external_source": true}, "sequence_id": 2, "trace_id": "t-7"}}
+      ],
+      "expect": {"state": "WAITING", "confirmation_pending": true, "confirmation_intent": "DELETE_PATH", "confirmation_risk": "destructive", "confirmation_external": true, "confirmation_trace_id": "t-7"}
+    },
+    {
+      "name": "conferma risolta: si torna a idle e la card sparisce",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "CONFIRMATION", "payload": {"pending": true, "intent": "SEND_EMAIL", "reason": "auth_required", "risk": "external_action"}, "sequence_id": 1}},
+        {"event": {"type": "CONFIRMATION", "payload": {"pending": false}, "sequence_id": 2}}
+      ],
+      "expect": {"state": "IDLE", "confirmation_pending": false, "confirmation_intent": "", "confirmation_reason": ""}
+    },
+    {
+      "name": "action center: ricevuta e undo si uniscono per action_id in qualunque ordine",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "UNDO_AVAILABLE", "payload": {"action_id": "a1", "compensating_intent": "DELETE_PATH", "expires_at": 1790000300.5}, "sequence_id": 1}},
+        {"event": {"type": "ACTION_RECEIPT", "payload": {"action_id": "a1", "intent": "CREATE_PATH", "requested_by": "user", "outcome": "success", "error_category": "success", "verified": "verified"}, "sequence_id": 2, "trace_id": "t-1"}},
+        {"event": {"type": "ACTION_RECEIPT", "payload": {"action_id": "a2", "intent": "SEND_EMAIL", "requested_by": "agent", "outcome": "failed", "error_category": "denied", "verified": "unverified"}, "sequence_id": 3}},
+        {"event": {"type": "ACTION_RECEIPT", "payload": {"intent": "SENZA_ID"}, "sequence_id": 4}}
+      ],
+      "expect": {
+        "state": "IDLE", "ignored": 1,
+        "activities": [
+          {"action_id": "a1", "intent": "CREATE_PATH", "outcome": "success", "verified": "verified", "trace_id": "t-1", "undo_intent": "DELETE_PATH", "undo_expires_at": 1790000300},
+          {"action_id": "a2", "intent": "SEND_EMAIL", "outcome": "failed", "verified": "unverified", "trace_id": "", "undo_intent": "", "undo_expires_at": 0}
+        ]
+      }
+    },
+    {
+      "name": "eventi senza sequence_id (client o test locali) si applicano comunque",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "THINKING"}},
+        {"event": {"type": "IDLE"}}
+      ],
+      "expect": {"state": "IDLE", "last_sequence_id": 0}
+    }
+  ]
+}

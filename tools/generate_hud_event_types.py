@@ -29,6 +29,12 @@ _HEADER_TEMPLATE = """// GENERATO AUTOMATICAMENTE da tools/generate_hud_event_ty
 
 namespace JakeHudEventType {{
 {constants}
+
+// Tutti i tipi noti (F4.1, contratto HUD): un tipo fuori da questo elenco e' ignorato dal client,
+// mai trattato come uno stato col proprio nome.
+inline constexpr const char *ALL[] = {{
+{all_names}
+}};
 }}
 """
 
@@ -37,7 +43,8 @@ def generate_header(event_type_names: list) -> str:
     constants = "\n".join(
         f'inline constexpr const char *{name} = "{name}";' for name in event_type_names
     )
-    return _HEADER_TEMPLATE.format(constants=constants)
+    all_names = "\n".join(f"    {name}," for name in event_type_names)
+    return _HEADER_TEMPLATE.format(constants=constants, all_names=all_names)
 
 
 def main() -> int:
