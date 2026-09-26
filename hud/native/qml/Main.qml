@@ -93,6 +93,7 @@ ApplicationWindow {
             Layout.topMargin: 8
             Layout.bottomMargin: 8
             state: jake.state
+            outcome: jake.lastOutcome
         }
 
         // F4.5.3 (permission card): cosa aspetta conferma, con quale rischio e se l'ha suggerito un

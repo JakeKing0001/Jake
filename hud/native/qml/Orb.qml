@@ -6,6 +6,9 @@ import QtQuick
 Item {
     id: root
     property string state: "IDLE"
+    // F4.4.1: esito dell'ultima azione, mostrato come anello per ~2 s e poi via (lo stato resta).
+    property string outcome: ""
+    onOutcomeChanged: if (outcome.length > 0) outcomeFlash.restart()
     width: 120
     height: 120
     // F4.2.1: vedi lo stesso alias in StatusPanel.qml - l'orb non gestisce ancora click propri,
@@ -75,6 +78,24 @@ Item {
         color: root.stateColor
 
         Behavior on color { ColorAnimation { duration: 250 } }
+    }
+
+    Rectangle {
+        id: outcomeRing
+        anchors.centerIn: parent
+        width: parent.width * 0.8
+        height: parent.height * 0.8
+        radius: width / 2
+        color: "transparent"
+        border.width: 4
+        border.color: root.outcome === "success" ? "#3ddc84" : root.outcome === "warning" ? "#facc15" : "#f87171"
+        opacity: 0
+        SequentialAnimation {
+            id: outcomeFlash
+            NumberAnimation { target: outcomeRing; property: "opacity"; to: 1; duration: 150 }
+            PauseAnimation { duration: 1700 }
+            NumberAnimation { target: outcomeRing; property: "opacity"; to: 0; duration: 300 }
+        }
     }
 
     Text {

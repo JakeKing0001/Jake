@@ -8789,9 +8789,10 @@ o il solo prototipo 2D non chiudono il requisito. La verifica dell'handoff dipen
 - 26/09/2026 (prima fetta di F4.4.1/F4.4.5/F4.4.6): nuovo evento `CONFIRMATION` (pubblicato quando
   l'azione in sospeso cambia; intent, motivo, rischio, fonte esterna e `trace_id`, mai i parametri)
   -> stato `WAITING`; `SPEAKING` e `DICTATION` distinti; l'orb mostra sempre anche un'etichetta
-  testuale e ha un nome accessibile; stato coerente dopo reconnect/fuori ordine (fixture). Restano
-  la base 3D, le particelle, l'audio reale e gli stati success/warning (nessun evento li porta
-  ancora): `DOING`, verifica visiva `VERIFY`.
+  testuale e ha un nome accessibile; stato coerente dopo reconnect/fuori ordine (fixture). Esito
+  success/warning/error dall'ultima `ACTION_RECEIPT` (verificata / non verificata / fallita), tenuto
+  separato dallo stato del turno e mostrato dall'orb come anello per ~2 s. Restano la base 3D, le
+  particelle e l'audio reale: `DOING`, verifica visiva `VERIFY`.
 
 ### F4.5 — Pannelli contestuali
 

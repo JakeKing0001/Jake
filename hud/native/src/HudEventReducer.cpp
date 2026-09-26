@@ -68,6 +68,7 @@ QJsonObject HudViewState::snapshot() const {
         {"confirmation_external", confirmationExternal},
         {"confirmation_trace_id", confirmationTraceId},
         {"activities", activities},
+        {"last_outcome", lastOutcome},
         {"last_sequence_id", lastSequenceId},
         {"ignored", ignored},
         {"incompatible", incompatible},
@@ -226,6 +227,11 @@ void HudEventReducer::reduceActivity(const QString &type, const QJsonObject &pay
         item.insert("outcome", text(payload, "outcome"));
         item.insert("verified", text(payload, "verified"));
         item.insert("trace_id", traceId);
+        if (item.value("outcome").toString() != QLatin1String("success"))
+            m_view.lastOutcome = QStringLiteral("error");
+        else
+            m_view.lastOutcome = item.value("verified").toString() == QLatin1String("verified")
+                ? QStringLiteral("success") : QStringLiteral("warning");
     } else {
         item.insert("undo_intent", text(payload, "compensating_intent"));
         const QJsonValue expires = payload.value(QStringLiteral("expires_at"));

@@ -34,6 +34,7 @@ struct HudViewState {
     QString confirmationRisk;
     bool confirmationExternal = false;
     QString confirmationTraceId;
+    QString lastOutcome;       // F4.4.1: success | warning | error (ultima ricevuta)
     QJsonArray activities;     // [{action_id, intent, outcome, verified, trace_id, undo_intent, undo_expires_at}, ...]
     qint64 lastSequenceId = 0;
     int ignored = 0;
