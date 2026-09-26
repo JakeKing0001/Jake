@@ -479,6 +479,29 @@ class TransformPatternTests(unittest.TestCase):
             self.process.kill()
             self.process.wait()
 
+    def _settled_bounds(self, timeout=5.0):
+        """La geometria appena la finestra esiste puo' ancora cambiare (Qt la assesta all'avvio):
+        si misura solo quando due letture a distanza restano uguali. Su un runner CI lento una
+        misura presa troppo presto faceva sembrare nullo un Resize() reale (3.11, 26/09/2026)."""
+        previous = self.adapter.describe_element(self.window).bounds
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            time.sleep(0.2)
+            current = self.adapter.describe_element(self.window).bounds
+            if current == previous:
+                return current
+            previous = current
+        return previous
+
+    def _bounds_when(self, predicate, timeout=3.0):
+        """L'effetto di Transform si legge quando arriva (con un limite), non nell'istante dopo la chiamata."""
+        deadline = time.monotonic() + timeout
+        bounds = self.adapter.describe_element(self.window).bounds
+        while not predicate(bounds) and time.monotonic() < deadline:
+            time.sleep(0.05)
+            bounds = self.adapter.describe_element(self.window).bounds
+        return bounds
+
     def test_the_window_reports_it_can_move_and_resize_but_not_rotate(self):
         """Task 51."""
         from comtypes.gen import UIAutomationClient as UIA
@@ -492,21 +515,21 @@ class TransformPatternTests(unittest.TestCase):
         """Task 52. **Verificato con un probe dedicato, non assunto**: la larghezza finale non
         coincide necessariamente con quella richiesta (clampata dai vincoli di layout Qt) - questo
         test verifica solo che CAMBI davvero, non un valore esatto."""
-        before = self.adapter.describe_element(self.window).bounds
+        before = self._settled_bounds()
 
         self.executor.resize_window(self.window, before[2] + 50, before[3])
 
-        after = self.adapter.describe_element(self.window).bounds
+        after = self._bounds_when(lambda bounds: bounds[2] > before[2])
         self.assertGreater(after[2], before[2], "la larghezza deve aumentare davvero, non solo che Resize() non sollevi")
 
     def test_moving_the_window_really_changes_its_position(self):
         """Task 53. Stessa cautela di Task 52: verifica solo che la posizione cambi, non le
         coordinate esatte."""
-        before = self.adapter.describe_element(self.window).bounds
+        before = self._settled_bounds()
 
         self.executor.move_window(self.window, before[0] + 20, before[1] + 10)
 
-        after = self.adapter.describe_element(self.window).bounds
+        after = self._bounds_when(lambda bounds: (bounds[0], bounds[1]) != (before[0], before[1]))
         self.assertNotEqual((after[0], after[1]), (before[0], before[1]), "la posizione deve cambiare davvero")
 
     def test_resize_and_move_return_receipts_naming_the_transform_pattern(self):
