@@ -180,6 +180,10 @@ class SttModelLock:
     def __exit__(self, *exc) -> None:
         self._lock.release()
 
+    def locked(self) -> bool:
+        """Come threading.Lock.locked(): il modello e' occupato (da una finale o da un partial)."""
+        return self._lock.locked()
+
     def try_acquire_partial(self) -> bool:
         with self._guard:
             if self._finals_waiting:
