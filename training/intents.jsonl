@@ -671,3 +671,4 @@
 {"text": "apri youtube e cerca lofi", "intent": "SEARCH_IN_BROWSER", "parameters": {"query": "lofi", "site": "youtube"}}
 {"text": "vai su youtube e metti musica rilassante", "intent": "PLAY_MEDIA", "parameters": {"query": "musica rilassante", "service": "youtube"}}
 {"text": "apri spotify e metti i coldplay", "intent": "PLAY_MEDIA", "parameters": {"query": "coldplay", "service": "spotify"}}
+{"text": "annulla l'ultima azione", "intent": "UNDO_LAST_ACTION", "parameters": {}}

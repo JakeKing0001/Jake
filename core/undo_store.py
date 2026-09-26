@@ -74,10 +74,18 @@ class UndoStore:
     def __init__(self) -> None:
         self._descriptors: dict[str, UndoDescriptor] = {}
         self._lock = threading.Lock()
+        # F4.6.3: osservatore (descriptor) - JakeCore lo usa per l'evento UNDO_AVAILABLE dell'HUD.
+        self.on_save = None
 
     def save(self, descriptor: UndoDescriptor) -> None:
         with self._lock:
             self._descriptors[descriptor.action_id] = descriptor
+        callback = self.on_save
+        if callback is not None:
+            try:
+                callback(descriptor)
+            except Exception:
+                pass
 
     def get(self, action_id: str, *, now: Optional[float] = None) -> Optional[UndoDescriptor]:
         """`None` sia se non esiste sia se non e' piu' usabile (scaduto o gia' consumato) - un

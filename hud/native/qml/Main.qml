@@ -143,6 +143,10 @@ ApplicationWindow {
             stepDescription: jake.state === "EXECUTING" ? jake.stepDescription : ""
             evidenceSummary: jake.evidenceSummary
             inspectionReason: jake.inspectionReason
+            activitySummary: jake.lastActivitySummary
+            undoExpiresAt: jake.lastUndoExpiresAt
+            // l'undo passa dallo stesso skill del comando vocale (scadenza e controlli inclusi)
+            onUndoRequested: jake.sendCommand("annulla l'ultima azione")
         }
 
         QuickActions {

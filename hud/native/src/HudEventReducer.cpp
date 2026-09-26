@@ -67,6 +67,7 @@ QJsonObject HudViewState::snapshot() const {
         {"confirmation_risk", confirmationRisk},
         {"confirmation_external", confirmationExternal},
         {"confirmation_trace_id", confirmationTraceId},
+        {"activities", activities},
         {"last_sequence_id", lastSequenceId},
         {"ignored", ignored},
         {"incompatible", incompatible},
@@ -192,6 +193,8 @@ void HudEventReducer::reduce(const QString &type, const QJsonObject &payload, co
             if (m_view.state == QLatin1String("WAITING"))
                 m_view.state = QStringLiteral("IDLE");
         }
+    } else if (isType(type, ACTION_RECEIPT) || isType(type, UNDO_AVAILABLE)) {
+        reduceActivity(type, payload, traceId);
     } else if (isType(type, SELECTOR_INSPECTION)) {
         const QJsonValue inspectionValue = payload.value(QStringLiteral("inspection"));
         const QJsonObject inspection = inspectionValue.isObject() ? inspectionValue.toObject() : QJsonObject();
@@ -199,6 +202,39 @@ void HudEventReducer::reduce(const QString &type, const QJsonObject &payload, co
         const QString reason = text(inspection, "reason");
         m_view.inspectionReason = reason.isEmpty() ? text(payload, "error") : reason;
     }
+}
+
+void HudEventReducer::reduceActivity(const QString &type, const QJsonObject &payload, const QString &traceId) {
+    const QString actionId = text(payload, "action_id");
+    if (actionId.isEmpty()) {
+        m_view.ignored += 1;
+        return;
+    }
+    int index = -1;
+    for (int i = 0; i < m_view.activities.size(); ++i) {
+        if (m_view.activities.at(i).toObject().value("action_id").toString() == actionId) {
+            index = i;
+            break;
+        }
+    }
+    QJsonObject item = index >= 0 ? m_view.activities.at(index).toObject() : QJsonObject{
+        {"action_id", actionId}, {"intent", QString()}, {"outcome", QString()}, {"verified", QString()},
+        {"trace_id", QString()}, {"undo_intent", QString()}, {"undo_expires_at", 0},
+    };
+    if (type == QLatin1String(JakeHudEventType::ACTION_RECEIPT)) {
+        item.insert("intent", text(payload, "intent"));
+        item.insert("outcome", text(payload, "outcome"));
+        item.insert("verified", text(payload, "verified"));
+        item.insert("trace_id", traceId);
+    } else {
+        item.insert("undo_intent", text(payload, "compensating_intent"));
+        const QJsonValue expires = payload.value(QStringLiteral("expires_at"));
+        item.insert("undo_expires_at", expires.isDouble() ? static_cast<qint64>(expires.toDouble()) : 0);
+    }
+    if (index >= 0)
+        m_view.activities.replace(index, item);
+    else
+        push(m_view.activities, item);
 }
 
 void HudEventReducer::reduceTranscript(const QJsonObject &payload) {

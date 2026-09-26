@@ -37,6 +37,9 @@ class JakeClient : public QObject {
     Q_PROPERTY(QString confirmationRisk READ confirmationRisk NOTIFY viewChanged)
     Q_PROPERTY(bool confirmationAuth READ confirmationAuth NOTIFY viewChanged)
     Q_PROPERTY(bool confirmationExternal READ confirmationExternal NOTIFY viewChanged)
+    // F4.6.1/F4.6.3: ultima attivita' dell'action center e scadenza del suo undo (epoch s, 0 = no).
+    Q_PROPERTY(QString lastActivitySummary READ lastActivitySummary NOTIFY viewChanged)
+    Q_PROPERTY(qint64 lastUndoExpiresAt READ lastUndoExpiresAt NOTIFY viewChanged)
 
 public:
     explicit JakeClient(QObject *parent = nullptr);
@@ -58,6 +61,8 @@ public:
     QString confirmationRisk() const { return m_reducer.view().confirmationRisk; }
     bool confirmationAuth() const { return m_reducer.view().confirmationReason == QLatin1String("auth_required"); }
     bool confirmationExternal() const { return m_reducer.view().confirmationExternal; }
+    QString lastActivitySummary() const;
+    qint64 lastUndoExpiresAt() const;
 
     // baseUrl es. "http://127.0.0.1:8765" (vedi companion_server_port in config.json).
     Q_INVOKABLE void connectToJake(const QString &baseUrl);

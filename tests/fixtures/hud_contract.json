@@ -180,6 +180,23 @@
       "expect": {"state": "IDLE", "confirmation_pending": false, "confirmation_intent": "", "confirmation_reason": ""}
     },
     {
+      "name": "action center: ricevuta e undo si uniscono per action_id in qualunque ordine",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "UNDO_AVAILABLE", "payload": {"action_id": "a1", "compensating_intent": "DELETE_PATH", "expires_at": 1790000300.5}, "sequence_id": 1}},
+        {"event": {"type": "ACTION_RECEIPT", "payload": {"action_id": "a1", "intent": "CREATE_PATH", "requested_by": "user", "outcome": "success", "error_category": "success", "verified": "verified"}, "sequence_id": 2, "trace_id": "t-1"}},
+        {"event": {"type": "ACTION_RECEIPT", "payload": {"action_id": "a2", "intent": "SEND_EMAIL", "requested_by": "agent", "outcome": "failed", "error_category": "denied", "verified": "unverified"}, "sequence_id": 3}},
+        {"event": {"type": "ACTION_RECEIPT", "payload": {"intent": "SENZA_ID"}, "sequence_id": 4}}
+      ],
+      "expect": {
+        "state": "IDLE", "ignored": 1,
+        "activities": [
+          {"action_id": "a1", "intent": "CREATE_PATH", "outcome": "success", "verified": "verified", "trace_id": "t-1", "undo_intent": "DELETE_PATH", "undo_expires_at": 1790000300},
+          {"action_id": "a2", "intent": "SEND_EMAIL", "outcome": "failed", "verified": "unverified", "trace_id": "", "undo_intent": "", "undo_expires_at": 0}
+        ]
+      }
+    },
+    {
       "name": "eventi senza sequence_id (client o test locali) si applicano comunque",
       "steps": [
         {"connect": true},

@@ -75,5 +75,38 @@ class ConfirmationEventTests(unittest.TestCase):
         self.assertEqual(closed.payload, {"pending": False})
 
 
+class ActionCenterEventTests(unittest.TestCase):
+    def test_receipts_and_undo_reach_the_hud_without_parameters(self):
+        import tempfile
+
+        from core.action_ledger import ActionLedger, ActionReceipt
+        from core.event_bus import EventBus
+        from core.jake_core import JakeCore
+        from core.undo_store import UndoDescriptor, UndoStore
+
+        core = JakeCore.__new__(JakeCore)
+        core.event_bus = EventBus()
+        subscriber = core.event_bus.subscribe()
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = ActionLedger(Path(tmp) / "ledger.jsonl")
+            ledger.on_record = core._publish_action_receipt
+            receipt = ActionReceipt(action_id="a1", trace_id="t1", ts=1.0, intent="CREATE_PATH", requested_by="agent:general",
+                                    risk_decision="local_reversible", authorization="none", result="success",
+                                    idempotency_key="k1")
+            ledger.record(receipt, private=True)
+            self.assertTrue(subscriber.empty(), "in modalita' privata non c'e' ricevuta, quindi nessun evento")
+            ledger.record(receipt)
+        store = UndoStore()
+        store.on_save = core._publish_undo_available
+        store.save(UndoDescriptor(action_id="a1", compensating_intent="DELETE_PATH",
+                                  compensating_parameters={"path": "C:/segreto.txt"}, expires_at=100.0))
+        recorded, undo = subscriber.get(timeout=1), subscriber.get(timeout=1)
+        self.assertEqual(recorded.type, EventType.ACTION_RECEIPT)
+        self.assertEqual((recorded.payload["requested_by"], recorded.payload["outcome"], recorded.trace_id),
+                         ("agent", "success", "t1"))
+        self.assertEqual(undo.payload, {"action_id": "a1", "compensating_intent": "DELETE_PATH", "expires_at": 100.0})
+        self.assertNotIn("segreto", undo.to_json())
+
+
 if __name__ == "__main__":
     unittest.main()

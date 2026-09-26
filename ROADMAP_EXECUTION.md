@@ -263,7 +263,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
 | `F4.4` | Interaction Design (26/09/2026: stati waiting/speaking/dictation, etichetta testuale dello stato, ordine eventi e reconnect coerenti; orb 3D/particelle/audio non iniziati) | `DOING` |
 | `F4.5` | Interaction Design (26/09/2026: trascrizione live, permission card, prove, diagnosi, notifiche nell'HUD nativo; verifica visiva da fare) | `DOING` |
-| `F4.6` | Trust UX (26/09/2026: kill switch visibile nell'HUD; action center/undo non iniziati) | `DOING` |
+| `F4.6` | Trust UX (26/09/2026: kill switch visibile; action center con ultima azione, esito, verifica e undo con scadenza; retry/dettagli/precondizioni non ancora) | `DOING` |
 | `F4.7` | Accessibility (G1 superato, mai iniziato; nomi accessibili di stato, microfono e permission card aggiunti il 26/09/2026) | `READY` |
 | `F4.8` | Release Engineering (G1 superato, mai iniziato) | `READY` |
 | `F5.1` | Memory Platform (F5.1.1/F5.1.3-F5.1.6 il 21/09/2026: schema versionato, migrazioni transazionali con backup, metadati, recupero; resta F5.1.2 separare entita'/episodi/procedure e la prova su una copia del database reale) | `DOING` |
@@ -8833,6 +8833,13 @@ Criterio di uscita: undo end-to-end verificato per file, finestra e workflow fix
 - 26/09/2026 (F4.6.5, prima fetta): pulsante "Ferma tutto" sempre visibile nell'HUD nativo, che
   invia `ferma tutto` (corsia a corrispondenza esatta -> `KILL_SWITCH`, nessun modello in mezzo).
   Scorciatoia globale non ancora fatta.
+- 26/09/2026 (F4.6.1/F4.6.3, prima fetta; F4.5 criterio "ogni ActionReceipt ha una rappresentazione"):
+  `ActionLedger.record` pubblica `ACTION_RECEIPT` (intent, esito, categoria, verifica, `trace_id`; mai
+  parametri, nulla in modalita' privata) e `UndoStore.save` pubblica `UNDO_AVAILABLE` (intent inverso e
+  scadenza, mai i parametri compensatori). I due riduttori li uniscono per `action_id` in qualunque
+  ordine (fixture condivisa). L'HUD mostra l'ultima azione con esito/verifica e un pulsante "Annulla"
+  finche' l'undo non scade, che invia "annulla l'ultima azione" (nuova frase esatta ->
+  `UNDO_LAST_ACTION`, stesso skill e controlli del comando vocale). Verifica visiva `VERIFY`.
 
 ### F4.7 — Accessibilità e multi-monitor
 

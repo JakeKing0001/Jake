@@ -188,6 +188,24 @@ void JakeClient::handleEventLine(const QString &jsonLine) {
     emit viewChanged();
 }
 
+QString JakeClient::lastActivitySummary() const {
+    const QJsonArray &activities = m_reducer.view().activities;
+    if (activities.isEmpty()) return QString();
+    const QJsonObject last = activities.last().toObject();
+    if (last.value("intent").toString().isEmpty()) return QString(); // solo l'undo e' arrivato finora
+    QString summary = last.value("intent").toString() + QStringLiteral(" · ")
+        + (last.value("outcome").toString() == QLatin1String("success") ? tr("riuscita") : tr("non riuscita"));
+    const QString verified = last.value("verified").toString();
+    if (verified == QLatin1String("verified")) summary += QStringLiteral(" · ") + tr("verificata");
+    else if (verified == QLatin1String("verification_failed")) summary += QStringLiteral(" · ") + tr("verifica fallita");
+    return summary;
+}
+
+qint64 JakeClient::lastUndoExpiresAt() const {
+    const QJsonArray &activities = m_reducer.view().activities;
+    return activities.isEmpty() ? 0 : activities.last().toObject().value("undo_expires_at").toInteger(0);
+}
+
 QString JakeClient::evidenceSummary() const {
     const QJsonArray &evidence = m_reducer.view().evidence;
     if (evidence.isEmpty()) return QString();

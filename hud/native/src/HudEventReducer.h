@@ -34,6 +34,7 @@ struct HudViewState {
     QString confirmationRisk;
     bool confirmationExternal = false;
     QString confirmationTraceId;
+    QJsonArray activities;     // [{action_id, intent, outcome, verified, trace_id, undo_intent, undo_expires_at}, ...]
     qint64 lastSequenceId = 0;
     int ignored = 0;
     bool incompatible = false;
@@ -61,6 +62,7 @@ private:
     Result ignore();
     void reduce(const QString &type, const QJsonObject &payload, const QString &traceId);
     void reduceTranscript(const QJsonObject &payload);
+    void reduceActivity(const QString &type, const QJsonObject &payload, const QString &traceId);
     static void push(QJsonArray &items, const QJsonValue &item);
 
     HudViewState m_view;

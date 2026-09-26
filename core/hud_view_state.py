@@ -60,6 +60,7 @@ class HudViewState:
     confirmation_risk: str = ""
     confirmation_external: bool = False
     confirmation_trace_id: str = ""
+    activities: list[dict[str, Any]] = field(default_factory=list)
     last_sequence_id: int = 0
     ignored: int = 0
     incompatible: bool = False
@@ -163,6 +164,8 @@ class HudViewState:
                 self.confirmation_trace_id = ""
                 if self.state == "WAITING":
                     self.state = "IDLE"
+        elif event_type in ("ACTION_RECEIPT", "UNDO_AVAILABLE"):
+            self._activity(event_type, payload, trace_id)
         elif event_type == "SELECTOR_INSPECTION":
             inspection = payload.get("inspection")
             inspection = inspection if isinstance(inspection, dict) else {}
@@ -183,6 +186,26 @@ class HudViewState:
         self.transcript_revision = revision
         self.transcript_text = _text(payload, "text")
         self.transcript_final = kind == "final"
+
+    def _activity(self, event_type: str, payload: dict[str, Any], trace_id: str) -> None:
+        """Attivita' recenti (F4.6.1) per action_id: ricevuta e undo si uniscono in qualunque ordine
+        arrivino (F4.6.3)."""
+        action_id = _text(payload, "action_id")
+        if not action_id:
+            self.ignored += 1
+            return
+        item = next((entry for entry in self.activities if entry["action_id"] == action_id), None)
+        if item is None:
+            item = {"action_id": action_id, "intent": "", "outcome": "", "verified": "", "trace_id": "",
+                    "undo_intent": "", "undo_expires_at": 0}
+            self._push(self.activities, item)
+        if event_type == "ACTION_RECEIPT":
+            item.update(intent=_text(payload, "intent"), outcome=_text(payload, "outcome"),
+                        verified=_text(payload, "verified"), trace_id=trace_id)
+        else:
+            expires = payload.get("expires_at")
+            item.update(undo_intent=_text(payload, "compensating_intent"),
+                        undo_expires_at=int(expires) if isinstance(expires, (int, float)) and not isinstance(expires, bool) else 0)
 
     @staticmethod
     def _push(items: list, item) -> None:

@@ -23,6 +23,19 @@ Rectangle {
     property string stepDescription: ""
     property string evidenceSummary: ""
     property string inspectionReason: ""
+    // F4.6.1/F4.6.3: ultima attivita' e scadenza del suo undo (epoch s; 0 = non annullabile).
+    property string activitySummary: ""
+    property real undoExpiresAt: 0
+    property real nowSeconds: Date.now() / 1000
+    readonly property bool undoAvailable: undoExpiresAt > nowSeconds
+    signal undoRequested()
+
+    Timer {
+        interval: 1000
+        repeat: true
+        running: root.undoExpiresAt > 0
+        onTriggered: root.nowSeconds = Date.now() / 1000
+    }
 
     function append(senderRole, messageText) {
         // Nomi dei campi del modello deliberatamente diversi da proprieta' comuni di Item/Text
@@ -67,6 +80,25 @@ Rectangle {
             color: "#3ddc84"
             wrapMode: Text.WordWrap
             font.pixelSize: 12
+        }
+        Row {
+            width: parent.width
+            spacing: 8
+            visible: root.activitySummary.length > 0
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: qsTr("Ultima azione: %1").arg(root.activitySummary)
+                    + (root.undoAvailable ? qsTr(" · annullabile per %1 s").arg(Math.max(0, Math.floor(root.undoExpiresAt - root.nowSeconds))) : "")
+                color: "#cbd5e1"
+                font.pixelSize: 12
+                Accessible.name: text
+            }
+            Button {
+                visible: root.undoAvailable
+                text: qsTr("Annulla")
+                Accessible.name: qsTr("Annulla l'ultima azione")
+                onClicked: root.undoRequested()
+            }
         }
         Text {
             width: parent.width
