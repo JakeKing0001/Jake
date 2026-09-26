@@ -685,6 +685,67 @@ class VoiceSessionCancellationTests(VoiceSessionTestCase):
             self.assertTrue(session.wait_for_commands(2))
         self.assertEqual(core.calls[-1], "che ore sono")
 
+    def _speaking_session(self, pending_action=False):
+        """Una risposta gia' consegnata che Jake sta ancora pronunciando; il core risponde a tutto
+        con un piccolo ritardo, come una vera classificazione NLU."""
+        class SlowCore(_BlockingCore):
+            def answer(self, text):
+                text = text.strip(" ?!.").lower()
+                with self._lock:
+                    self.calls.append(text)
+                time.sleep(0.3)
+                return "C'era una volta un lungo racconto." if text == "raccontami una storia" else f"eseguito: {text}"
+
+        class LongTts(_QuietTts):
+            def __init__(self):
+                super().__init__()
+                self.stopped = threading.Event()
+                self.speaking = threading.Event()
+
+            def speak(self, text):
+                super().speak(text)
+                if text.startswith("C'era"):
+                    self.speaking.set()
+                    self.stopped.wait(5)
+
+            def stop(self):
+                self.stopped.set()
+
+        core = SlowCore()
+        core.conversation_state = SimpleNamespace(has_pending_action=lambda: pending_action)
+        session, stt, _ = self._session(core, follow_up_seconds=0)
+        tts = LongTts()
+        session.tts_provider = tts
+        self.addCleanup(tts.stopped.set)
+        clock = {"t": 1000.0}
+        session.wake_cooldown._clock = lambda: clock["t"]
+
+        def hear(text):
+            clock["t"] += 2.0
+            self._hear(session, stt, text)
+        hear("Jake, raccontami una storia")
+        self.assertTrue(session.wait_for_commands(2))
+        self.assertTrue(tts.speaking.wait(2), "la risposta lunga non sta parlando")
+        return session, core, tts, hear
+
+    def test_a_bare_stop_while_a_delivered_answer_is_speaking_only_stops_the_voice(self):
+        """Regressione (stress di cancellazione, 26/09/2026): "Jake, basta" mentre Jake pronunciava una
+        risposta gia' consegnata diventava il comando "basta" per JakeCore (una classificazione NLU di
+        secondi): il comando detto subito dopo veniva scartato come "task ancora in corso"."""
+        session, core, tts, hear = self._speaking_session()
+        hear("Jake, basta")
+        self.assertTrue(tts.stopped.is_set(), "la voce si ferma")
+        hear("Jake, che ore sono?")
+        self.assertTrue(session.wait_for_commands(2))
+        self.assertEqual(core.calls, ["raccontami una storia", "che ore sono"])
+
+    def test_a_bare_stop_with_a_pending_confirmation_still_reaches_the_core_as_a_no(self):
+        session, core, tts, hear = self._speaking_session(pending_action=True)
+        hear("Jake, basta")
+        self.assertTrue(session.wait_for_commands(2))
+        self.assertTrue(tts.stopped.is_set())
+        self.assertEqual(core.calls, ["raccontami una storia", "basta"])
+
     def test_a_stale_tts_thread_does_not_unmute_or_reset_the_newer_speech(self):
         core = _BlockingCore()
         stuck = threading.Event()

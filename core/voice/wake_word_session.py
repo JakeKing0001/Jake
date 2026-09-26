@@ -727,6 +727,15 @@ class WakeWordSession:
                 self.listening.arm_command()
                 self._set_state("listening", "")
                 return
+            if _is_bare_stop(remainder) and not self.jake_core.conversation_state.has_pending_action():
+                # Nessun turno in corso (quel caso e' gestito sopra) e nessuna conferma in sospeso:
+                # "Jake, basta" chiede solo di smettere di parlare, gia' fatto qui sopra. Mandarlo a
+                # JakeCore lo farebbe classificare dalla NLU (secondi) e il comando detto subito dopo
+                # verrebbe scartato come "task ancora in corso".
+                self.listening.command_consumed()
+                self.wake_cooldown.reset()
+                self._set_state("idle", "")
+                return
             self._process_command(remainder)
             if _is_bare_stop(remainder):
                 # "Jake, basta" e' un annullamento esplicito: il comando che l'utente dira' subito
