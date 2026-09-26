@@ -344,6 +344,9 @@ class JakeCore:
         )
         self.conversation_state = self.skill_registry.conversation_state
         self.conversation_state.on_pending_change = self._publish_pending_confirmation
+        recall_skill = self.skill_registry.skills.get("RECALL")
+        if hasattr(recall_skill, "private_mode_provider"):
+            recall_skill.private_mode_provider = lambda: self.private_mode  # F5.7.3: nessuna traccia d'uso in privato
         self.action_ledger.on_record = self._publish_action_receipt
         self.undo_store.on_save = self._publish_undo_available
         self.memory_manager = self.skill_registry.memory_manager

@@ -34,9 +34,13 @@ class RecallSkill:
 
     SEMANTIC_SCORE_THRESHOLD = 0.5
 
-    def __init__(self, memory_manager, embedding_provider=None):
+    def __init__(self, memory_manager, embedding_provider=None, dashboard=None):
         self.memory_manager = memory_manager
         self.embedding_provider = embedding_provider
+        # F5.7.3 ("chi ha usato un ricordo"): ogni ricordo restituito all'utente registra l'uso (contatore,
+        # data, voce nel registro eventi). Mai in modalita' privata: li' non si scrive nulla.
+        self.dashboard = dashboard
+        self.private_mode_provider = lambda: False
 
     def execute(self, parameters: dict = None):
         parameters = parameters or {}
@@ -79,4 +83,10 @@ class RecallSkill:
             related = self.memory_manager.related(entry["key"], entry.get("category", "fact"))
             if related:
                 entry["related"] = related
+        if self.dashboard is not None and not self.private_mode_provider():
+            for entry in results:
+                try:
+                    self.dashboard.record_use(entry["key"], entry.get("category", "fact"), actor="jake", context="recall")
+                except Exception:
+                    pass  # la statistica d'uso non deve mai impedire di rispondere
         return SkillResult(success=True, data={"results": results})

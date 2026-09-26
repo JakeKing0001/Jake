@@ -137,6 +137,14 @@ class MemoryPrivacyDashboard:
         data["has_embedding"] = bool(data["has_embedding"])
         return MemoryRecord(**data, expired=bool(data["expires_at"] and data["expires_at"] < now), why=why)
 
+    def categories_of(self, key: str) -> list[str]:
+        """Le categorie in cui esiste un ricordo con questa chiave esatta (per "dimentica X")."""
+        with self.memory.lock:
+            rows = self.memory.connection.execute(
+                "SELECT DISTINCT category FROM memories WHERE key = ? ORDER BY category", (key,),
+            ).fetchall()
+        return [row[0] for row in rows]
+
     def get(self, key: str, category: str = "fact") -> MemoryRecord | None:
         with self.memory.lock:
             row = self.memory.connection.execute(

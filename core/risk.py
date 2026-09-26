@@ -115,6 +115,7 @@ SKILL_RISK: dict[str, RiskLevel] = {
     # -- memoria/note/todo: cancellare e' l'unica azione distruttiva ---------------------
     "REMEMBER": RiskLevel.LOCAL_REVERSIBLE,
     "RECALL": RiskLevel.READ_ONLY,
+    "EXPLAIN_MEMORY": RiskLevel.READ_ONLY,
     "FORGET": RiskLevel.DESTRUCTIVE,
     "LINK_MEMORY": RiskLevel.LOCAL_REVERSIBLE,
     "PURGE_OLD_HISTORY": RiskLevel.DESTRUCTIVE,
