@@ -28,6 +28,10 @@ ApplicationWindow {
 
     // 127.0.0.1:8765 e' il default di companion_server_port in config/settings.example.json.
     property string jakeBaseUrl: "http://127.0.0.1:8765"
+    // Credenziale per-dispositivo consegnata dal core sullo stdin (vedi src/main.cpp): vuota se
+    // l'HUD e' stato avviato a mano verso un core senza autenticazione.
+    property string jakeDeviceId: ""
+    property string jakeToken: ""
 
     JakeClient {
         id: jake
@@ -66,6 +70,8 @@ ApplicationWindow {
     onPointerOverAnyPanelChanged: overlayStyler.setClickThrough(window, !pointerOverAnyPanel)
 
     Component.onCompleted: {
+        if (jakeToken.length > 0)
+            jake.setCredentials(jakeDeviceId, jakeToken)
         jake.connectToJake(jakeBaseUrl)
         overlayStyler.makeNoActivate(window)
         overlayStyler.setClickThrough(window, true)
@@ -81,6 +87,7 @@ ApplicationWindow {
             id: statusPanel
             Layout.fillWidth: true
             connected: jake.connected
+            connectionProblem: jake.connectionProblem
             state: jake.state
             activeDevice: jake.activeDevice
             micOpen: jake.micOpen

@@ -19,7 +19,10 @@ class JakeClient : public QObject {
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
     Q_PROPERTY(QString state READ state NOTIFY stateChanged)
     Q_PROPERTY(QString activeDevice READ activeDevice NOTIFY activeDeviceChanged)
-    Q_PROPERTY(QString deviceId READ deviceId CONSTANT)
+    Q_PROPERTY(QString deviceId READ deviceId NOTIFY deviceIdChanged)
+    // Ultimo problema di connessione (vuoto se connesso): UNO stato, non un messaggio ripetuto a
+    // ogni tentativo di riconnessione.
+    Q_PROPERTY(QString connectionProblem READ connectionProblem NOTIFY connectionProblemChanged)
     // F4.1/F4.5: il resto della vista viene dal riduttore condiviso (HudEventReducer), non da
     // stringhe interpretate qui: microfono (F2.3.5), trascrizione live (F2.2.7), passo in corso,
     // ultima prova (UNDO/VERIFICATION, F1.3.8), diagnosi del selettore (F3.3.6), ultimo errore.
@@ -49,6 +52,7 @@ public:
     QString state() const { return m_state; }
     QString activeDevice() const { return m_activeDevice; }
     QString deviceId() const { return m_deviceId; }
+    QString connectionProblem() const { return m_connectionProblem; }
     bool micOpen() const { return m_reducer.view().micOpen; }
     bool micDiscarding() const { return m_reducer.view().micDiscarding; }
     QString transcriptText() const { return m_reducer.view().transcriptText; }
@@ -67,12 +71,17 @@ public:
     QString lastOutcome() const { return m_reducer.view().lastOutcome; }
 
     // baseUrl es. "http://127.0.0.1:8765" (vedi companion_server_port in config.json).
+    // F7/F4.8.2: credenziale per-dispositivo consegnata dal core (vedi main.cpp): Authorization Bearer
+    // su OGNI richiesta. Senza credenziale il client funziona solo con un core senza autenticazione.
+    Q_INVOKABLE void setCredentials(const QString &deviceId, const QString &token);
     Q_INVOKABLE void connectToJake(const QString &baseUrl);
     Q_INVOKABLE void sendCommand(const QString &text);
     Q_INVOKABLE void claimSession();
 
 signals:
     void connectedChanged();
+    void deviceIdChanged();
+    void connectionProblemChanged();
     void stateChanged();
     void viewChanged();
     void activeDeviceChanged();
@@ -100,12 +109,17 @@ private:
     void setActiveDevice(const QString &value);
     void handleEventLine(const QString &jsonLine);
     void fetchStatus();
+    QNetworkRequest makeRequest(const QString &path) const;
+    void setConnectionProblem(const QString &problem);
+    static QString describeFailure(QNetworkReply *reply);
 
     QNetworkAccessManager *m_manager;
     QNetworkReply *m_eventStream = nullptr;
     QString m_baseUrl;
     QString m_eventBuffer;
     QString m_deviceId;
+    QString m_authToken;
+    QString m_connectionProblem;
     bool m_connected = false;
     QString m_state = QStringLiteral("IDLE");
     QString m_activeDevice;
