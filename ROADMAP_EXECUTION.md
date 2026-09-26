@@ -8984,6 +8984,12 @@ Dipende da: F5.2–F5.4.
 
 Criterio di uscita: ogni risposta di memoria ha almeno una fonte oppure è marcata come inferenza.
 
+- 26/09/2026 (F5.5.3/F5.5.4 per `RECALL`): ogni ricordo nella risposta porta la provenienza - "me l'hai
+  detto tu il GG/MM/AAAA", "l'ho dedotto io, non me l'hai detto tu", "salvato da un agente" o la fonte
+  registrata. Prima la risposta era solo "chiave: valore" e un'inferenza sembrava un fatto detto
+  dall'utente. Prova in `tests/test_memory_privacy_integration.py`. Restano citazioni per le altre
+  risposte che usano la memoria (agente, domande libere) e le metriche precision/recall.
+
 ### F5.6 — Context engine event-driven
 
 Dipende da: F3 e F5.1.

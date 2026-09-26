@@ -236,6 +236,22 @@ def _format_error(intent: str, result: SkillResult) -> str:
     return "Si è verificato un errore durante l'esecuzione"
 
 
+
+def _memory_provenance(entry: dict) -> str:
+    """F5.5 ("ogni risposta di memoria ha almeno una fonte oppure e' marcata come inferenza"): da dove
+    viene il ricordo, in poche parole. Un'inferenza di Jake non si presenta mai come un fatto detto
+    dall'utente."""
+    source = str(entry.get("source") or "")
+    day = str(entry.get("updated_at") or "")[:10]
+    date = f"{day[8:10]}/{day[5:7]}/{day[0:4]}" if len(day) == 10 and day[4] == "-" else ""
+    if source == "user":
+        return f" (me l'hai detto tu{' il ' + date if date else ''})"
+    if source == "inferred":
+        return " (l'ho dedotto io, non me l'hai detto tu)"
+    if source.startswith("agent:"):
+        return " (salvato da un agente)"
+    return f" (fonte: {source})" if source else " (fonte sconosciuta)"
+
 def _format_success(intent: str, result: SkillResult, registry=None) -> str | None:
     data = result.data or {}
     if intent == "RESUME_INTERRUPTED_TASK":
@@ -255,7 +271,7 @@ def _format_success(intent: str, result: SkillResult, registry=None) -> str | No
                 extra = "; ".join(f"{r['predicate']} {r['key']}" for r in related if r.get("value") is not None)
                 if extra:
                     line += f" ({extra})"
-            return line
+            return line + _memory_provenance(entry)
         formatted = "; ".join(_entry_line(entry) for entry in data["results"])
         return f"Ecco cosa ricordo: {formatted}"
     if intent == "FORGET":

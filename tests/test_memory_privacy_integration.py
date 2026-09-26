@@ -75,5 +75,15 @@ class MemoryPrivacySkillTests(unittest.TestCase):
         self.assertEqual(texts, ["ricordati che il mio indirizzo e' [dimenticato], grazie", "Ok, lo ricordero'."])
 
 
+    def test_every_recalled_memory_says_where_it_comes_from(self):
+        """F5.5: una risposta di memoria ha sempre una fonte, e un'inferenza non passa per un fatto detto."""
+        from core.response_formatter import format_skill_result
+
+        self.memory.remember("umore di prova", "stanco", source="inferred")
+        text = format_skill_result("RECALL", self.skills["RECALL"].execute({"query": "prova"}))
+        self.assertIn("via Sintetica 12 (me l'hai detto tu il ", text)
+        self.assertIn("stanco (l'ho dedotto io, non me l'hai detto tu)", text)
+
+
 if __name__ == "__main__":
     unittest.main()
