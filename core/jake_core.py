@@ -34,6 +34,7 @@ from core.nlu.normalizer import TranscriptNormalizer
 from core.nlu.retriever import CapabilityRetriever
 from core.notification_center import NotificationCenter
 from core.notification_policy import NotificationPolicy, QuietHours
+from core.proactive_gate import DELIVER, DUPLICATE, ProactiveGate
 from core.ollama_client import OllamaClient
 from core import orchestrator
 from core.orchestrator import JakeOrchestrator
@@ -200,6 +201,14 @@ class JakeCore:
             ),
             critical_contacts=set(config.get("notification_critical_contacts") or []),
             vip_contacts=set(config.get("notification_vip_contacts") or []),
+        )
+        # F6.1/F6.3: stessi freni per promemoria, automazioni e avvisi (duplicati, budget orario, quiet
+        # hours, nessuna interruzione durante una conversazione) - vedi core/proactive_gate.py.
+        self.proactive_gate = ProactiveGate(
+            dedup_window_s=float(config.get("notification_dedup_seconds", 600)),
+            hourly_budget=int(config.get("notification_hourly_budget", 3)),
+            in_quiet_hours=self.notification_policy.in_quiet_hours,
+            conversation_active=lambda: getattr(self, "_in_flight_answers", 0) > 0,
         )
         self.task_bridge = TaskNotificationBridge(
             self.task_monitor, self.notification_policy, self.event_bus,
@@ -612,7 +621,7 @@ class JakeCore:
 
     # ---- callback di default -------------------------------------------------------------
 
-    def notify(self, kind: str, message: str, *, trace_id: str | None = None) -> str | None:
+    def notify(self, kind: str, message: str, *, trace_id: str | None = None, critical: bool = False) -> str | None:
         """Punto unico da cui passa ogni notifica proattiva (promemoria/avviso/automazione)
         prima di essere presentata, sia in CLI (qui sotto) sia in voce (vedi WakeWordSession,
         core/voice/wake_word_session.py, che chiama questo stesso metodo): applica la modalita'
@@ -627,6 +636,15 @@ class JakeCore:
         dentro il risultato testuale di `SET_NOTIFICATION_MODE`, mai come un secondo `HudEvent` -
         non c'e' un evento successivo a cui riattaccare il trace_id, dichiarato apertamente."""
         gated = self.notification_center.gate(kind, message)
+        gate = getattr(self, "proactive_gate", None)
+        if gated is not None and gate is not None:
+            # F6.1/F6.3: un duplicato si scarta; budget, quiet hours o conversazione in corso -> in coda
+            outcome, reason = gate.check(kind, gated, critical=critical)
+            if outcome != DELIVER:
+                if outcome != DUPLICATE:
+                    self.notification_center.defer(kind, gated)
+                self.logger.info("Notifica %s %s: %s", kind, "scartata" if outcome == DUPLICATE else "rimandata", reason)
+                return None
         if gated is not None:
             self.event_bus.publish(HudEvent(EventType.NOTIFICATION, {"kind": kind, "text": gated}, trace_id=trace_id))
         return gated

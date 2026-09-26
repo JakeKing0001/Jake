@@ -121,6 +121,13 @@ class NotificationCenter:
             self._queued = remaining
             return [item["message"] for item in released]
 
+    def defer(self, kind: str, message: str) -> None:
+        """In coda per dopo anche se la modalita' lo ammetterebbe (budget, quiet hours, conversazione
+        in corso: vedi core/proactive_gate.py). Esce come le altre voci in coda."""
+        if message:
+            with self._lock:
+                self._queued.append({"kind": kind, "message": message})
+
     def pending_count(self) -> int:
         with self._lock:
             return len(self._queued)

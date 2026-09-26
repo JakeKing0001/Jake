@@ -273,7 +273,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F5.5` | Retrieval Quality | `DOING` |
 | `F5.6` | Context Runtime | `DOING` |
 | `F5.7` | Privacy Engineering (libreria completa il 21/09/2026; dal 26/09/2026 nel percorso reale: "dimentica" cancella anche registro e indici con ricevuta, l'uso dei ricordi viene registrato, "da dove sai X" spiega la provenienza; purge/export/backup non ancora esposti a voce/HUD) | `DOING` |
-| `F6.1` | Proactivity Platform | `DOING` |
+| `F6.1` | Proactivity Platform (26/09/2026: promemoria, automazioni e avvisi passano dagli stessi freni in `JakeCore.notify` - duplicati, budget orario, quiet hours, conversazione in corso - e si sospendono insieme durante prove e benchmark) | `DOING` |
 | `F6.2` | Proactivity Quality | `DOING` |
 | `F6.3` | Notification UX (libreria di decisione il 21/09/2026; collegata a JakeCore/EventBus/HUD il 22/09/2026 - vedi F6.7; nessuna consegna reale di call/companion) | `DOING` |
 | `F6.4` | Goal Runtime | `DOING` |
@@ -9104,6 +9104,17 @@ Dipende da: G1.
 
 Criterio di uscita: reminder, trigger e advisor usano lo stesso event pipeline; almeno un
 monitor rileva un evento fixture senza richiesta dell'utente e senza duplicarlo.
+
+- 26/09/2026 (prima fetta del criterio): le tre fonti passavano solo dalla matrice modalita' x tipo di
+  `NotificationCenter`; quiet hours e priorita' le conosceva soltanto il task monitor. Ora
+  `JakeCore.notify` applica `core/proactive_gate.py` a tutte e tre: un duplicato entro 10 minuti si
+  scarta; avvisi e automazioni in quiet hours, durante una conversazione in corso o oltre 3 consegne
+  nell'ultima ora vanno in coda (mai persi); i promemoria (orario chiesto dall'utente) e gli eventi
+  dichiarati critici dal produttore non vengono trattenuti, salvo i duplicati. Soglie da config
+  (`notification_dedup_seconds`, `notification_hourly_budget`). `JakeCore.proactivity_suspended`
+  sospende tutte le fonti durante prove e benchmark (usato da `f2_hardware_session`). Prova:
+  `tests/test_proactive_gate.py`. Resta: un'unica pipeline di eventi anche per task monitor e
+  digest delle voci in coda.
 
 ### F6.2 — Suggestion engine
 
