@@ -301,20 +301,24 @@ class VadListenerUtteranceCallbacksTests(VoiceSessionTestCase):
 
         return check
 
-    def test_frames_of_the_utterance_are_offered_but_not_the_silence_before_it(self):
+    def test_the_partials_get_the_same_audio_as_the_utterance_preroll_included_but_not_older_silence(self):
+        # prova reale del 27/09/2026: l'attacco della parola ("J" di Jake) cade prima del primo frame "parlato" e va
+        # tenuto (pre-roll, PREROLL_MS); il silenzio piu' vecchio no. Partial e frase finale ricevono lo stesso audio.
+        preroll = VadListener.PREROLL_MS // VadListener.FRAME_MS
         silence = np.zeros((FRAME, 1), dtype=np.int16)
         speech = np.full((FRAME, 1), 1000, dtype=np.int16)
-        listener = self._listener([False, False, True, True, False])
+        frames = [silence] * (preroll + 3) + [speech, speech, silence]
+        listener = self._listener([False] * (preroll + 3) + [True, True, False])
         seen, ended = [], []
         listener.on_utterance_frame = lambda frame: seen.append(frame.shape)
         listener.on_utterance_end = lambda: ended.append(1)
-        with mock.patch("sounddevice.InputStream", side_effect=self._stream([silence, silence, speech, speech, silence])):
-            gen = listener.listen_for_utterances(self._continue(5))
+        with mock.patch("sounddevice.InputStream", side_effect=self._stream(frames)):
+            gen = listener.listen_for_utterances(self._continue(len(frames)))
             utterance = next(gen)
             gen.close()
-        self.assertEqual(len(seen), 3)  # 2 di parlato + 1 di coda: mai i 2 frame di silenzio iniziale
+        self.assertEqual(len(seen), preroll + 3)  # pre-roll + 2 di parlato + 1 di coda: mai i 3 frame piu' vecchi
         self.assertEqual(ended, [1])
-        self.assertEqual(len(utterance), FRAME * 3)
+        self.assertEqual(len(utterance), FRAME * (preroll + 3))
 
     def test_broken_callbacks_do_not_interrupt_listening(self):
         speech = np.full((FRAME, 1), 1000, dtype=np.int16)

@@ -10,6 +10,8 @@ Il buffer dei frame vive solo in RAM e viene svuotato appena una frase e' stata 
 annullata (F2.2.5): nessun percorso di questo modulo scrive su disco."""
 from __future__ import annotations
 
+from collections import deque
+
 import numpy as np
 
 SAMPLE_RATE = 16000
@@ -20,12 +22,18 @@ class UtteranceSegmenter:
     e' terminata (silenzio sufficiente dopo il parlato, oppure lunghezza massima raggiunta),
     altrimenti None."""
 
-    def __init__(self, silence_frames_needed: int, max_frames: int) -> None:
+    def __init__(self, silence_frames_needed: int, max_frames: int, preroll_frames: int = 0) -> None:
         self.silence_frames_needed = max(1, silence_frames_needed)
         self.max_frames = max(1, max_frames)
         self._frames: list[np.ndarray] = []
         self._silence_run = 0
         self._in_speech = False
+        # Prova reale del 27/09/2026: "Jake" trascritto "ERIK"/"Take"/"Ike", "che ore" -> "chiore". webrtcvad riconosce
+        # il parlato solo dalla parte sonora della sillaba: l'attacco (la "g" di Jake, la "k" di che) cade nei frame
+        # PRIMA del primo "parlato" e veniva scartato. Gli ultimi `preroll_frames` frame di silenzio restano in un
+        # anello e aprono la frase; Whisper riceve anche un po' di silenzio iniziale, che gli serve.
+        self._preroll: deque[np.ndarray] = deque(maxlen=max(0, preroll_frames))
+        self._onset: list[np.ndarray] = []
 
     @property
     def in_speech(self) -> bool:
@@ -41,14 +49,27 @@ class UtteranceSegmenter:
         self._frames = []
         self._silence_run = 0
         self._in_speech = False
+        self._preroll.clear()
+        self._onset = []
+
+    def pop_onset(self) -> list[np.ndarray]:
+        """I frame di pre-roll con cui e' appena cominciata una frase (per i partial), una volta sola."""
+        onset, self._onset = self._onset, []
+        return onset
 
     def feed(self, frame: np.ndarray, is_speech: bool) -> np.ndarray | None:
         if is_speech:
+            if not self._in_speech and self._preroll:
+                self._onset = list(self._preroll)
+                self._frames.extend(self._onset)
+                self._preroll.clear()
             self._frames.append(frame)
             self._silence_run = 0
             self._in_speech = True
             return None
         if not self._in_speech:
+            if self._preroll.maxlen:
+                self._preroll.append(frame)
             return None
         self._frames.append(frame)  # include un po' di coda dopo il parlato
         self._silence_run += 1

@@ -1,4 +1,5 @@
 import contextlib
+import copy
 import threading
 import time
 from pathlib import Path
@@ -33,6 +34,7 @@ from core.nlu.examples import ExampleStore
 from core.nlu.index import lexical_similarity
 from core.nlu.normalizer import TranscriptNormalizer
 from core.nlu.retriever import CapabilityRetriever
+from core.nlu.transcript_repair import AMBIGUOUS, REPAIRED, UNCLEAR, Assessment, TranscriptRepair
 from core.notification_center import NotificationCenter
 from core.notification_policy import NotificationPolicy, QuietHours
 from core.proactive_gate import DELIVER, DUPLICATE, MUTED, ProactiveGate, notification_key
@@ -53,7 +55,7 @@ from core.request_context import (
 )
 from core.taint import wrap_external_content
 from core.response_formatter import format_plan_outcome, format_skill_result
-from core.risk import risk_of
+from core.risk import RiskLevel, risk_of
 from core.voice.dialogue import (
     DialogueContext,
     ReplyKind,
@@ -1067,28 +1069,39 @@ class JakeCore:
         question = f"Vuoi che te lo ricordi {describe(commitment.remind_at, now)}?"
         return f"{response} {question}".strip() if response else question
 
-    # Confidenza STT (exp della media di avg_logprob di Whisper, 0-1) sotto la quale una frase che non e' un comando
-    # deterministico non viene interpretata: si chiede di ripetere. Frasi brevi: soglia piu' alta (una trascrizione
-    # rotta di 2-3 parole e' la piu' facile da scambiare per una chiacchiera, e ripeterla costa poco).
-    UNCLEAR_CONFIDENCE = 0.5
     SLOW_TURN_NOTICE_S = 8.0
-    UNCLEAR_CONFIDENCE_SHORT = 0.62
-    SHORT_UTTERANCE_WORDS = 4
+    UNCLEAR_REPLY = "Non ho capito bene, puoi ripetere?"
 
-    def _unclear_voice_turn(self, text: str) -> bool:
+    def _transcript_repair(self) -> TranscriptRepair:
+        """Lessico dagli esempi affidabili (ricostruito solo quando gli esempi cambiano) + la conversazione recente."""
+        examples = self.example_store.all()
+        cached = getattr(self, "_repair_cache", None)
+        if cached is None or cached[0] != len(examples):
+            cached = (len(examples), TranscriptRepair.from_examples(examples))
+            self._repair_cache = cached
+        repair = copy.copy(cached[1])
+        repair.lexicon = set(cached[1].lexicon)
+        for turn in self.conversation_state.get_short_term_history():
+            repair.add_context(turn.get("text", ""))
+        return repair
+
+    def _assess_voice_turn(self, text: str) -> Assessment | None:
         """Solo per i turni vocali con una confidenza reale (testo scritto e provider senza confidenza: mai). La corsia
-        deterministica (esempi esatti: "che ore sono", date, calcoli) passa sempre: la' non si interpreta nulla."""
+        deterministica (esempi esatti: "che ore sono", date, calcoli) passa sempre: la' non si interpreta nulla.
+        Altrimenti trascrizione corrotta (chiedere), recuperabile (correggere con prudenza) o affidabile: vedi
+        core/nlu/transcript_repair.py."""
         confidence = current_stt_confidence()
-        if confidence is None:
-            return False
-        if self.example_store.find_exact(text) is not None:
-            return False
-        threshold = self.UNCLEAR_CONFIDENCE_SHORT if len(text.split()) <= self.SHORT_UTTERANCE_WORDS else self.UNCLEAR_CONFIDENCE
-        if confidence >= threshold:
-            return False
-        self.logger.info("Trascrizione incerta (confidenza %.2f < %.2f): chiedo di ripetere invece di interpretare '%s'",
-                         confidence, threshold, text)
-        return True
+        if confidence is None or self.example_store.find_exact(text) is not None:
+            return None
+        assessment = self._transcript_repair().assess(
+            text, confidence, self.example_store.find_exact, lambda intent: risk_of(intent) == RiskLevel.READ_ONLY)
+        if assessment.verdict == REPAIRED:
+            self.logger.info("Trascrizione corretta (confidenza %.2f, %s): '%s' -> '%s'", confidence,
+                             assessment.reason, text, assessment.text)
+        elif assessment.verdict in (UNCLEAR, AMBIGUOUS):
+            self.logger.info("Trascrizione incerta (%s): chiedo di ripetere invece di interpretare '%s'",
+                             assessment.reason, text)
+        return assessment
 
     def _run_in_current_profile(self, callback):
         """
@@ -1807,12 +1820,18 @@ class JakeCore:
                 learn=False,
             )
 
-        if self._unclear_voice_turn(text):
+        assessment = self._assess_voice_turn(text)
+        if assessment is not None and assessment.verdict in (UNCLEAR, AMBIGUOUS):
             # prova reale del 27/09/2026: "Jake, io ero sono." (trascrizione rotta) era diventata una chiacchiera
             # inventata ("stai cambiando tono?"). Meglio chiedere che indovinare il significato.
-            reply = "Non ho capito bene, puoi ripetere?"
+            reply = self.UNCLEAR_REPLY
+            if assessment.verdict == AMBIGUOUS:
+                reply = f"Non ho capito bene: intendevi «{assessment.options[0]}» o «{assessment.options[1]}»? Puoi ripetere?"
             self._remember_exchange(text, Command("UNKNOWN", {}), reply)
             return reply
+        if assessment is not None and assessment.verdict == REPAIRED:
+            # "chiore sono" -> "che ore sono": da qui in poi (router, apprendimento, memoria) vale la frase corretta
+            text = assessment.text
 
         if len(text.split()) <= 4:
             quick = chitchat.reply(text)

@@ -182,3 +182,23 @@ class TranscribeDetailedTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VocabularyTests(unittest.TestCase):
+    """Prova reale del 27/09/2026: il prompt era quasi tutto nomi di app inglesi del menu Start."""
+
+    def test_the_prompt_is_italian_speech_from_trusted_examples_plus_a_few_speakable_apps(self):
+        from core.nlu.examples import Example
+        from core.voice.stt_vocabulary import intent_phrases, spoken_app_names
+
+        examples = [Example("che ore sono adesso", "GET_TIME"), Example("dimmi che ore sono", "GET_TIME"),
+                    Example("apri discord adesso", "OPEN_APP"),
+                    Example("chiore sono", "GET_TIME", source="auto")]  # imparato da solo: puo' essere storto
+        phrases = intent_phrases(examples)
+        self.assertIn("Che ore sono adesso?", phrases)  # un intent di domande resta una domanda
+        self.assertFalse(any("chiore" in phrase.lower() for phrase in phrases))
+        apps = spoken_app_names(["Administrative Tools", "Uninstall OP Auto Clicker", "IDLE (Python 3.10 64-bit)",
+                                 "Nahimic Companion", "Discord"], mentioned="apri discord adesso")
+        self.assertEqual(apps[0], "Discord")
+        self.assertNotIn("Administrative Tools", apps)
+        self.assertNotIn("IDLE (Python 3.10 64-bit)", apps)

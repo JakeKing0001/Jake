@@ -66,16 +66,19 @@ class WhisperSttProvider(SttProvider):
     volte piu' veloce di 'medium' su CPU), altrimenti 'medium' int8 su CPU come prima. Il
     prompt iniziale ("hotwords") e' costruito dinamicamente con i nomi delle app installate e
     il vocabolario di Jake, cosi' Whisper riconosce "Blender", "Visual Studio Code", "Opera"
-    invece di storpiarli in parole italiane a caso."""
+    invece di storpiarli in parole italiane a caso.
+
+    Prova reale del 27/09/2026: il prompt deve restare ITALIANO parlato (frasi tipiche degli intent, vedi
+    core/voice/stt_vocabulary.py) con pochi nomi di app: un elenco di nomi inglesi spingeva Whisper verso forme straniere
+    ("Prozessor", "ERIK")."""
 
     GPU_MODEL = "large-v3-turbo"
     CPU_MODEL = "medium"
-    BASE_VOCABULARY = [
-        "Jake", "apri", "chiudi", "cerca su YouTube", "cerca su Google", "metti un timer",
-        "promemoria", "che ore sono", "scrivi", "clicca su", "volume", "luminosità",
-        "Visual Studio Code", "Spotify", "Opera", "Blender", "Discord", "WhatsApp", "Chrome",
-    ]
+    # frasi sempre presenti: il nome di Jake nel modo in cui viene detto, e la domanda piu' frequente
+    BASE_PHRASES = ["Jake, che ore sono?", "Jake, che cos'è?"]
+    BASE_VOCABULARY = ["Jake", "YouTube", "Google", "Spotify", "WhatsApp", "Visual Studio Code"]
     MAX_PROMPT_CHARS = 600  # initial_prompt: max ~224 token
+    PHRASE_BUDGET = 380     # il resto del prompt va ai nomi propri (app)
 
     # Prova reale del 27/09/2026: su una GPU da 8 GB Whisper in float16 (~1,6 GB), qwen2.5:7b (~4,8 GB), voce RVC e HUD 3D
     # insieme hanno esaurito la memoria video e il modello linguistico e' crollato a ~40 token/s (ogni risposta scaduta).
@@ -89,7 +92,7 @@ class WhisperSttProvider(SttProvider):
         return "int8_float16" if total_vram_mb is not None and total_vram_mb <= cls.SHARED_GPU_MAX_MB else "float16"
 
     def __init__(self, model_size: str = None, language: str = "it", device: str = None,
-                 compute_type: str = None, hotwords: list[str] = None):
+                 compute_type: str = None, hotwords: list[str] = None, phrases: list[str] = None):
         from faster_whisper import WhisperModel
 
         logger = get_logger()
@@ -118,13 +121,26 @@ class WhisperSttProvider(SttProvider):
         logger.info("Whisper pronto: modello %s su %s (%s)", self.model_size, self.device, self.compute_type)
 
         self.hotwords = list(hotwords or [])
+        self.phrases = list(phrases or [])
         self.initial_prompt = self._build_prompt()
 
     def set_hotwords(self, hotwords: list[str]) -> None:
         self.hotwords = list(hotwords or [])
         self.initial_prompt = self._build_prompt()
 
+    def set_phrases(self, phrases: list[str]) -> None:
+        self.phrases = list(phrases or [])
+        self.initial_prompt = self._build_prompt()
+
     def _build_prompt(self) -> str:
+        sentences, used, seen_sentences = [], 0, set()
+        for phrase in self.BASE_PHRASES + self.phrases:
+            phrase = phrase.strip()
+            if phrase and phrase.lower() not in seen_sentences and used + len(phrase) + 1 <= self.PHRASE_BUDGET:
+                seen_sentences.add(phrase.lower())
+                sentences.append(phrase)
+                used += len(phrase) + 1
+        head = " ".join(sentences)
         seen = set()
         words = []
         for word in self.BASE_VOCABULARY + self.hotwords:
@@ -132,8 +148,11 @@ class WhisperSttProvider(SttProvider):
             if key and key not in seen and len(key) <= 40:
                 seen.add(key)
                 words.append(word.strip())
-        prompt = ", ".join(words)
-        return prompt[: self.MAX_PROMPT_CHARS].rsplit(",", 1)[0] + "." if len(prompt) > self.MAX_PROMPT_CHARS else prompt + "."
+        room = self.MAX_PROMPT_CHARS - len(head) - 1
+        tail = ", ".join(words)
+        if len(tail) > room:
+            tail = tail[:room].rsplit(",", 1)[0]
+        return f"{head} {tail}.".strip() if tail else head
 
     def transcribe(self, audio, sample_rate: int = 16000) -> str:
         return self.transcribe_detailed(audio, sample_rate)[0]

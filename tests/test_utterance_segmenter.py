@@ -59,6 +59,22 @@ class FeedTests(unittest.TestCase):
         self.assertEqual(len(second), FRAME * 3)
 
 
+class PreRollTests(unittest.TestCase):
+    def test_the_frames_just_before_the_first_speech_frame_open_the_utterance(self):
+        """Prova reale del 27/09/2026: "Jake" -> "ERIK"/"Take". L'attacco della parola cade prima del primo frame che
+        webrtcvad giudica parlato: gli ultimi frame di silenzio (e solo quelli) aprono la frase."""
+        segmenter = UtteranceSegmenter(silence_frames_needed=1, max_frames=100, preroll_frames=2)
+        for value in (1, 2, 3):
+            segmenter.feed(_frame(value), False)
+        segmenter.feed(_frame(9), True)
+        self.assertEqual([int(f[0, 0]) for f in segmenter.pop_onset()], [2, 3])
+        self.assertEqual(segmenter.pop_onset(), [], "consegnato una volta sola")
+        utterance = segmenter.feed(_frame(0), False)
+        assert utterance is not None
+        self.assertEqual(len(utterance), FRAME * 4)  # 2 di pre-roll + 1 di parlato + 1 di coda
+        self.assertAlmostEqual(float(utterance[0]), 2 / 32768.0)
+
+
 class VolatileBufferTests(unittest.TestCase):
     """F2.2.5: il buffer vive in RAM e si svuota appena la frase e' consegnata o annullata."""
 

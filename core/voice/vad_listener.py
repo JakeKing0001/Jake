@@ -12,6 +12,7 @@ class VadListener:
     SAMPLE_RATE = 16000
     FRAME_MS = 30  # webrtcvad accetta solo frame da 10/20/30 ms
     FRAME_SAMPLES = SAMPLE_RATE * FRAME_MS // 1000
+    PREROLL_MS = 300  # audio prima del primo frame di parlato che apre la frase (attacco delle consonanti)
 
     def __init__(
         self,
@@ -79,7 +80,8 @@ class VadListener:
             device=self.device,
             callback=callback,
         ):
-            segmenter = UtteranceSegmenter(self.silence_frames_needed, self.max_frames)
+            segmenter = UtteranceSegmenter(self.silence_frames_needed, self.max_frames,
+                                           preroll_frames=self.PREROLL_MS // self.FRAME_MS)
             self._segmenter = segmenter
 
             while should_continue():
@@ -114,8 +116,11 @@ class VadListener:
                         continue
 
                 utterance = segmenter.feed(frame, bool(is_speech))
+                onset = segmenter.pop_onset()
                 if self.on_utterance_frame is not None and (segmenter.in_speech or utterance is not None):
                     try:
+                        for early in onset:  # anche i partial partono dall'attacco della parola
+                            self.on_utterance_frame(early.reshape(-1))
                         self.on_utterance_frame(frame.reshape(-1))
                     except Exception:
                         pass
