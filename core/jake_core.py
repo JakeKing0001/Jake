@@ -823,7 +823,7 @@ class JakeCore:
     def _on_agent_step(self, step_index: int, description: str) -> None:
         self.session_hooks.call("set_state", "working", description)
         # F4.5.2: il passo in corso; l'esito e la durata arrivano da _on_agent_step_completed
-        self._running_step = (step_index, description, time.monotonic())
+        self._running_step: tuple[int, str, float] | None = (step_index, description, time.monotonic())
         self.event_bus.publish(HudEvent(EventType.AGENT_STEP, {"step": step_index, "description": description,
                                                                "status": "running"}))
 
