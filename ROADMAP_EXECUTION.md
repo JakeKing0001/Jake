@@ -271,7 +271,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F5.3` | Knowledge Model | `DOING` |
 | `F5.4` | Memory Reliability (27/09/2026: nessuna sovrascrittura silenziosa di fatti/preferenze - versione precedente conservata e dichiarata, un'inferenza non sostituisce un fatto detto dall'utente, conflitti registrati, "dimentica" cancella anche le versioni; conferma prima di cambiare un ricordo importante o fissato; decadimento per categoria nel ranking, fissati esclusi; consolidamento non ancora) | `DOING` |
 | `F5.5` | Retrieval Quality (27/09/2026: ricordi pertinenti con fonte anche nelle risposte libere, budget di contesto, grafo a un salto; agente e metriche ancora da fare) | `DOING` |
-| `F5.6` | Context Runtime | `DOING` |
+| `F5.6` | Context Runtime (27/09/2026: segnali non riletti non piu' presentati come attuali; appunti marcati privati da chi li copia mai letti) | `DOING` |
 | `F5.7` | Privacy Engineering (libreria completa il 21/09/2026; dal 26/09/2026 nel percorso reale: "dimentica" cancella anche registro e indici con ricevuta, l'uso dei ricordi viene registrato, "da dove sai X" spiega la provenienza; dal 27/09/2026 "esporta i miei ricordi" e "fissa il ricordo X" a voce; purge/backup non ancora esposti a voce/HUD) | `DOING` |
 | `F6.1` | Proactivity Platform (26/09/2026: promemoria, automazioni e avvisi passano dagli stessi freni in `JakeCore.notify` - duplicati, budget orario, quiet hours, conversazione in corso - e si sospendono insieme durante prove e benchmark) | `DOING` |
 | `F6.2` | Proactivity Quality | `DOING` |
@@ -9110,6 +9110,15 @@ Dipende da: F3 e F5.1.
 7. `F5.6.7` Scadere segnali stale invece di presentarli come stato attuale.
 
 Criterio di uscita: riferimenti impliciti risolti senza cattura continua indiscriminata.
+
+- 27/09/2026 (F5.6.4/F5.6.7, bug reali in `core/desktop_context.py`): (1) se la lettura delle finestre aperte o
+  degli appunti cominciava a fallire, l'ultimo valore restava e finiva in ogni prompt come "Finestre aperte ora"
+  / "Appunti": ora ogni segnale ha il momento dell'ultima lettura riuscita e oltre `max(10 s, 3 x poll)` non viene
+  piu' presentato come attuale. (2) L'anteprima degli appunti veniva letta e mandata al modello anche quando l'app
+  che ha copiato chiede a Windows di non monitorarla (password manager, campi password:
+  `ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory`=0): ora non la legge nemmeno e
+  il contesto dice solo "contenuto privato (non letto)". Test sugli appunti VERI di Windows (contenuto
+  dell'utente salvato e ripristinato) e con orologio finto per la freschezza.
 
 ### F5.7 — Privacy dashboard e portabilità
 
