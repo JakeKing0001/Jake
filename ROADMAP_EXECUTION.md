@@ -9498,6 +9498,9 @@ Criterio di uscita: 30 giorni di pilot senza loop di notifica o azione distrutti
   Stesso giorno (F6.7.7): "cosa stai sorvegliando?" (`LIST_WATCHES`) e "smetti di sorvegliare npm" (`STOP_WATCH`,
   toglie solo l'avviso, il processo non si tocca). Test con processo figlio reale: annullata la sorveglianza, il
   processo finisce normalmente e nessun avviso parte.
+  E "a cosa stai lavorando?" (`STATUS_OVERVIEW`): la prima lettura reale di `TaskMonitorRegistry.active()` (compiti
+  degli agenti ancora aperti, con stato e da quanto), piu' sorveglianze, conferma in attesa dell'utente e notifiche
+  trattenute, in una risposta. Test con registro, centro notifiche e stato di conversazione reali.
 - 27/09/2026 (bug reale trovato qui): le skill aggiunte per F6.3.4, F7.1.3 e F8.2 (feedback sulle notifiche, `SET_DEVICE_ACCESS`,
   `PLAN_SKILL_INSTALL`/`INSTALL_SKILL_PACKAGE`) non avevano frasi in `core/response_formatter.py`: l'utente avrebbe sentito il
   dizionario grezzo (`{'message': ..., 'multiplier': 0.5}`) o "Si e' verificato un errore" per rifiuti con un motivo preciso (firma
