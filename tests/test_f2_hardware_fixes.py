@@ -224,7 +224,8 @@ class NoInterruptionWhileSpeakingTests(VoiceSessionTestCase):
 
         core.notify.assert_not_called()
         self.assertEqual(tts.spoken, ["La risposta lunga che l'utente sta ascoltando."])
-        self.assertEqual(center.take_deferred(), [{"kind": "advisory", "message": "Batteria al 10%", "deferred": True}])
+        self.assertEqual(center.take_deferred(), [{"kind": "advisory", "message": "Batteria al 10%", "deferred": True,
+                                                     "not_before": None}])  # F6.3: nessun rinvio a orario
         tts.stop()
         session._tts_thread.join(2)
         session._on_advisory("Disco quasi pieno")
