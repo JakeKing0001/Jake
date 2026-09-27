@@ -384,7 +384,14 @@ class MemoryManager:
         Ogni voce ha `why` (perche' e' stata scelta). Ricordi scaduti mai inclusi."""
         import re
 
-        words = [w for w in re.findall(r"[\w']+", (question or "").lower())
+        from core.temporal_parser import find_relative_range
+
+        # F5.5 (retrieval temporale): "ieri", "la settimana scorsa"... restringono al periodo, e non sono parole da cercare
+        temporal = find_relative_range(question or "")
+        lowered_question = (question or "").lower()
+        if temporal is not None:
+            lowered_question = lowered_question.replace(temporal[1], " ")
+        words = [w for w in re.findall(r"[\w']+", lowered_question)
                  if len(w) >= 4 and w not in self._STOPWORDS]
         candidates: dict[tuple, dict] = {}
         if words:
@@ -425,6 +432,11 @@ class MemoryManager:
                     entry["score"] = similarity * self._freshness(entry)
                     entry["why"] = f"simile per significato ({similarity:.2f})"
                     candidates[key] = entry
+        if temporal is not None:
+            (since, until), phrase = temporal
+            candidates = {k: e for k, e in candidates.items() if since <= str(e.get("updated_at") or "") <= until}
+            for entry in candidates.values():
+                entry["why"] += f", detto {phrase}"
         ranked = sorted(candidates.values(), key=lambda e: (e["score"], e.get("updated_at") or ""), reverse=True)
         if ranked:
             top = ranked[0]
