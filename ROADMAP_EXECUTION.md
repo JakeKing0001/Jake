@@ -281,7 +281,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F6.6` | Meeting Experience (libreria di regole il 21/09/2026: brief senza dati inventati, consenso e indicatore, follow-up gated; dal 27/09/2026 "com'e' la mia giornata" usa il brief con promemoria e todo reali; nessun connettore reale) | `DOING` |
 | `F6.7` | Runtime Reliability (monitor/housekeeping il 22/09/2026; task monitor collegato a JakeCore/EventBus/HUD lo stesso giorno - vedi F6.3; dal 27/09/2026 "avvisami quando finisce la build" su un processo reale, notifica dalla pipeline unica; housekeeping senza connettori reali ne' pilot) | `DOING` |
 | `F7.1` | Companion Security (F7.1.1/.4/.5/.6/.7 il 22/09/2026; F7.1.2 - pairing HTTP - chiuso il 22/09/2026, vedi F7.2; TLS reale generato/persistito dal server il 22/09/2026; capability persistenti F7.1.3 dal 27/09/2026 - impostabili a voce con SET_DEVICE_ACCESS, valide subito e dopo un riavvio, riga corrotta = nessun permesso; manca la distribuzione del certificato al telefono oltre al pairing) | `DOING` |
-| `F7.2` | Mobile Companion (pairing/chat live/approve-deny sullo stesso task end-to-end il 22/09/2026; lista/revoca dispositivi via HTTP e prima app Android reale - MAI compilata/eseguita in questo ambiente - il 22/09/2026; dal 27/09/2026 revoca/rotazione chiudono anche lo stream gia' aperto; senza file share/offline queue/wipe lato app) | `DOING` |
+| `F7.2` | Mobile Companion (pairing/chat live/approve-deny sullo stesso task end-to-end il 22/09/2026; lista/revoca dispositivi via HTTP e prima app Android reale - MAI compilata/eseguita in questo ambiente - il 22/09/2026; dal 27/09/2026 revoca/rotazione chiudono anche lo stream gia' aperto; file dal telefono al PC con permesso esplicito; senza offline queue/wipe lato app) | `DOING` |
 | `F7.3` | Voice Devices | `BACKLOG` |
 | `F7.4` | Presence Runtime (27/09/2026: lease del dispositivo attivo - scade senza segni di vita, rinnovato da richieste e stream aperto, rilasciato alla revoca) | `DOING` |
 | `F7.5` | Home Integration | `DOING` |
@@ -290,7 +290,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F8.1` | Skill Platform (manifest validato e loader che rifiuta prima dell'import il 22/09/2026; dal 27/09/2026 il rischio dichiarato da un pacchetto verificato e approvato arriva a `risk_of`/PolicyEngine, mai sopra un intent integrato; hook non eseguiti) | `DOING` |
 | `F8.2` | Supply-chain Security (pacchetti firmati, catalogo, quarantena/revoca, pin/rollback il 22/09/2026; dal 27/09/2026 nel runtime: caricamento all'avvio con ricontrollo di firma/hash, installazione in due passi PLAN_SKILL_INSTALL -> INSTALL_SKILL_PACKAGE (ADMIN) legata al digest mostrato; UI HUD e distribuzione non ancora) | `DOING` |
 | `F8.3` | Skill Forge (27/09/2026: scansione dei segreti prima della sandbox - chiavi private, token per formato, credenziali letterali) | `DOING` |
-| `F8.4` | Model Runtime (router con capability/inventario/eval/warm-unload/redazione il 22/09/2026; dal 27/09/2026 JakeCore sceglie il modello col router: catalogo da config, modelli installati, telemetria reale di batteria/VRAM, osservazioni reali di successo/latenza di ogni chiamata; dal 27/09/2026 il modello lasciato dal router viene scaricato davvero da Ollama) | `DOING` |
+| `F8.4` | Model Runtime (router con capability/inventario/eval/warm-unload/redazione il 22/09/2026; dal 27/09/2026 JakeCore sceglie il modello col router: catalogo da config, modelli installati, telemetria reale di batteria/VRAM, osservazioni reali di successo/latenza di ogni chiamata; dal 27/09/2026 il modello lasciato dal router viene scaricato davvero da Ollama; la scelta del router e SET_MODEL arrivano a tutte le skill che usano il modello di ragionamento, ricontrollata a ogni giro dello scheduler) | `DOING` |
 | `F8.5` | Agent Runtime (27/09/2026: il supervisore ferma anche lo stesso strumento fallito 3 volte di fila con parametri diversi e chiede all'utente) | `DOING` |
 | `F8.6` | Release Safety (golden/security set, confronto, canary, rollback, canali firmati il 22/09/2026; senza runner reali ne' collegamento HUD) | `DOING` |
 
@@ -9719,6 +9719,13 @@ una notifica apre il task corretto e un'eventuale risposta aggiorna la stessa se
   (lo stream aperto si chiude entro un secondo, vedi sopra) e toglie le chiavi di sincronizzazione del
   dispositivo dal portachiavi F7.6. L'HUD nativo di questo PC non e' mai un bersaglio. Test: stesso server
   reale, frase -> skill -> stream chiuso, evento successivo non ricevuto, chiavi rimosse, richieste nuove 401.
+- 27/09/2026 sera (F7.2.5, file share esplicito e con scope): `POST /files/<nome>` - corpo binario fino a 25 MB,
+  solo con credenziale per-dispositivo e capability `FILE` (non di default; livello "file" di `SET_DEVICE_ACCESS`),
+  nome ripulito (niente cartelle, nomi nascosti o riservati di Windows, niente eseguibili/script), salvataggio in
+  `Documenti\Jake\Dal telefono\<dispositivo>` (o `companion_files_dir`) senza sovrascrivere, scrittura atomica
+  tramite `.part`, riga di audit e notifica all'HUD (redatta in modalita' privata). Test con server reale: senza
+  permesso 403 e nulla scritto; con permesso file salvato e duplicato rinominato; percorsi, nomi nascosti, script
+  e nomi riservati 400. Resta da fare il lato app (pulsante "invia al PC") e la direzione PC -> telefono.
 
 - `F7.2.1`/`F7.2.2`/`F7.2.3`/`F7.2.4`/`F7.2.8` (Companion Mobile MVP end-to-end, riuso di F7.1/F7.6/F6 senza sistemi
   paralleli) — 22/09/2026: `core/pairing_service.py` (esteso), `core/companion_guard.py`/`core/companion_server.py`
@@ -10090,6 +10097,13 @@ Criterio di uscita: perdita del modello principale non blocca i comandi locali s
   thread daemon, una sola volta, senza bloccare ne' sollevare. Verificato su Ollama reale su questa macchina:
   `nomic-embed-text` caricato -> `/api/ps` lo elenca -> `unload` -> `/api/ps` vuoto. Test del collegamento con
   router reale e telemetria iniettata (100% -> 15% a batteria).
+- 27/09/2026 sera (F8.4, bug reale): ASK_QUESTION (le risposte libere), traduzioni, riassunti, correzione testi,
+  rilevamento lingua e il resto ricevono il nome del modello alla costruzione e chiamano Ollama con `self.model`.
+  Ne' la scelta del router (modello leggero a batteria) ne' `SET_MODEL` ("usa il modello X") li raggiungevano:
+  cambiavano agenti e planner, le risposte libere restavano sul vecchio modello fino al riavvio. Ora
+  `JakeCore._propagate_model` passa al nuovo modello ogni componente che usava il precedente (visione, codice ed
+  embedding hanno modelli propri e non vengono toccati) e lo scheduler ricontrolla la scelta a ogni giro. Test con
+  router reale e telemetria iniettata, e con SET_MODEL.
 
 - `F8.4.1`-`F8.4.7` (instradamento dei modelli, senza collegamento a `JakeCore`) — 22/09/2026: `core/model_router.py`. Oggi il nome del
   modello (`qwen2.5:7b`) e' ripetuto hardcoded in `core/jake_core.py`, `core/router.py` e `core/skill_catalog.py`: questo modulo e' il

@@ -286,6 +286,8 @@ class JakeCore:
             tls_fingerprint=self.companion_tls_fingerprint,
             pairing_service=self.pairing_service, conversation_state=self.skill_registry.conversation_state,
             on_pairing_requested=self._on_pairing_requested,
+            # F7.2.5: i file dal telefono (solo dispositivi con accesso "file") finiscono qui, uno per dispositivo
+            files_dir=Path(config.get("companion_files_dir") or Path.home() / "Documents" / "Jake" / "Dal telefono"),
         )
         self.native_hud = None
         if bool(config.get("companion_server_enabled", False)):
@@ -497,7 +499,7 @@ class JakeCore:
         self.reminder_manager = self.skill_registry.reminder_manager
         self.scheduler = ReminderScheduler(self.reminder_manager, on_due=self._default_on_reminder_due, interval_seconds=5)
         self.scheduler.on_missed = self._on_missed_reminders
-        self.scheduler.on_tick = self.release_deferred_notifications
+        self.scheduler.on_tick = self._scheduler_tick
         self.scheduler.start()
 
         # Contestualizzazione leggera del desktop (v2.0): il classificatore e il planner
@@ -733,6 +735,14 @@ class JakeCore:
     # Dopo una risposta si aspetta questo tempo prima di un riepilogo: la voce potrebbe ancora parlare.
     DIGEST_QUIET_AFTER_ANSWER_S = 60.0
     DIGEST_MAX_ITEMS = 3
+
+    def _scheduler_tick(self) -> None:
+        """Un giro periodico dello scheduler: notifiche rimandate (F6.3) e scelta del modello (F8.4.4)."""
+        self.release_deferred_notifications()
+        try:
+            self._route_models_tick()
+        except Exception:
+            self.logger.exception("Errore ricontrollando la scelta del modello")
 
     def release_deferred_notifications(self) -> str | None:
         """F6.3: le notifiche rimandate dal gate (budget, quiet hours, conversazione) non restano in coda
@@ -3202,9 +3212,12 @@ class JakeCore:
 
     @model.setter
     def model(self, value: str) -> None:
-        """SET_MODEL: il modello configurato cambia e il router riparte dal nuovo catalogo."""
+        """SET_MODEL: il modello configurato cambia e il router riparte dal nuovo catalogo; la nuova scelta arriva
+        subito anche alle skill (vedi _propagate_model)."""
         self._configured_model = value
         self._model_router = None
+        if getattr(self, "ollama", None) is not None:
+            _ = self.model
 
     def _release_previous_model(self, chosen: str) -> None:
         """F8.4.4: quando il router passa a un altro modello (es. quello leggero a batteria bassa), il precedente
@@ -3214,6 +3227,7 @@ class JakeCore:
         self._last_routed_model = chosen
         if previous is None or previous == chosen:
             return
+        self._propagate_model(previous, chosen)
 
         logger = getattr(self, "logger", None)
 
@@ -3227,6 +3241,29 @@ class JakeCore:
                     logger.warning("Non sono riuscito a scaricare il modello %s", previous)
 
         threading.Thread(target=unload, name="jake-model-unload", daemon=True).start()
+
+    def _propagate_model(self, previous: str, chosen: str) -> None:
+        """F8.4 (router ovunque) + bug reale: ASK_QUESTION, traduzioni, riassunti, correzione testi e gli altri
+        componenti ricevono il nome del modello alla costruzione e chiamano Ollama direttamente con `self.model`. Ne'
+        la scelta del router (modello leggero a batteria) ne' SET_MODEL li raggiungevano: le risposte libere restavano
+        sul vecchio modello fino al riavvio. Qui ogni componente che usava il modello precedente passa a quello nuovo;
+        chi ha un modello proprio diverso (visione, codice, embedding) non viene toccato."""
+        registry = getattr(self, "skill_registry", None)
+        skills = getattr(registry, "skills", {}) or {}
+        components = list(skills.values()) + [
+            getattr(getattr(self, "router", None), "primary_provider", None),
+            getattr(self, "planner_provider", None), getattr(self, "context_summarizer", None),
+        ]
+        for component in components:
+            if component is not None and getattr(component, "model", None) == previous:
+                try:
+                    component.model = chosen
+                except AttributeError:
+                    pass
+
+    def _route_models_tick(self) -> None:
+        """Ricontrolla la scelta del router (batteria, modelli installati): se cambia, propaga e scarica il vecchio."""
+        _ = self.model
 
     # ---- sospensione della proattivita' ----------------------------------------------------
 

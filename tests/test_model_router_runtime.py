@@ -81,6 +81,41 @@ class ModelUnloadTests(unittest.TestCase):
         self.assertEqual(unloaded, ["grande:7b"], "scaricato una volta, solo al cambio")
 
 
+class ModelPropagationTests(unittest.TestCase):
+    """Bug reale: ASK_QUESTION, traduzioni e riassunti ricevono il modello alla costruzione; ne' il router ne' SET_MODEL
+    li raggiungevano. Ora ogni componente che usava il modello precedente passa al nuovo."""
+
+    def _core(self, hardware):
+        from core.jake_core import JakeCore
+
+        core = JakeCore.__new__(JakeCore)
+        core.ollama = SimpleNamespace(list_models=lambda: ["grande:7b", "piccolo:1b", "nuovo:8b"], unload=lambda m: None)
+        core.config = SimpleNamespace(get=lambda key, default=None: None)
+        core._configured_model = "grande:7b"
+        core._model_router = build_local_router(CONFIG, core.ollama.list_models, hardware=lambda: hardware["info"])
+        self.ask = SimpleNamespace(model="grande:7b")
+        self.vision = SimpleNamespace(model="qwen2.5vl:7b")
+        core.skill_registry = SimpleNamespace(skills={"ASK_QUESTION": self.ask, "DESCRIBE_SCREEN": self.vision})
+        return core
+
+    def test_battery_switch_reaches_the_skills_but_not_models_of_other_kinds(self):
+        hardware = {"info": HardwareInfo(on_battery=False, battery_percent=100)}
+        core = self._core(hardware)
+        core._route_models_tick()
+        hardware["info"] = HardwareInfo(on_battery=True, battery_percent=15)
+        core._model_router = build_local_router(CONFIG, core.ollama.list_models, hardware=lambda: hardware["info"])
+        core._route_models_tick()
+        self.assertEqual((self.ask.model, self.vision.model), ("piccolo:1b", "qwen2.5vl:7b"))
+
+    def test_set_model_reaches_the_skills_immediately(self):
+        from skills.model_control import SetModelSkill
+
+        core = self._core({"info": HardwareInfo(on_battery=False, battery_percent=100)})
+        core._route_models_tick()
+        SetModelSkill([core], SimpleNamespace(set=lambda *a: None)).execute({"model": "nuovo:8b"})
+        self.assertEqual(self.ask.model, "nuovo:8b")
+
+
 class RealObservationsTests(unittest.TestCase):
     def test_every_real_model_call_feeds_the_router_statistics(self):
         from unittest import mock

@@ -10,6 +10,7 @@ LEVELS = {
     "guardare": ("read_only",),
     "comandi": ("read_only", "command"),
     "completo": ("read_only", "command", "approval"),
+    "file": ("read_only", "command", "file"),              # F7.2.5: puo' anche inviare file al PC
 }
 PROTECTED_DEVICES = {"native-hud-local"}  # ha una credenziale propria, rigenerata a ogni avvio del core
 

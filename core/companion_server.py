@@ -59,7 +59,9 @@ import ssl
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import cast
+from urllib.parse import unquote
 
 from core.companion_guard import (
     MAX_NAME_CHARS, MIN_PROTOCOL_VERSION, CompanionGuard, EndpointClass, ValidationError, check_bind_policy,
@@ -117,8 +119,11 @@ class CompanionServer:
         token: str | None = None, credential_store: DeviceCredentialStore | None = None,
         tls_context: ssl.SSLContext | None = None, guard: CompanionGuard | None = None,
         pairing_service=None, conversation_state=None, on_pairing_requested=None, tls_fingerprint: str | None = None,
+        files_dir: Path | None = None,
     ):
         self.event_bus = event_bus or EventBus()
+        # F7.2.5: dove finiscono i file inviati dal telefono (una sottocartella per dispositivo); None = funzione spenta
+        self.files_dir = Path(files_dir) if files_dir is not None else None
         self.command_handler = command_handler or (lambda text: "")
         self.devices = DeviceRegistry(on_expired=self._active_device_expired)
         self.host = host
@@ -409,6 +414,8 @@ class _Handler(BaseHTTPRequestHandler):
             if parts[3] == "release":
                 return self._handle_release(device_id)
             return self._handle_revoke(device_id)
+        if len(parts) == 3 and parts[1] == "files":
+            return self._handle_file_upload(unquote(parts[2]))
         if len(parts) == 3 and parts[1] == "approvals":
             try:
                 task_id = validate_identifier(parts[2], "task_id", required=True)
@@ -420,6 +427,80 @@ class _Handler(BaseHTTPRequestHandler):
         self._drain_body()
         self._json_response(404, {"error": "not_found"})
         return None
+
+    # ---- file share (F7.2.5) ---------------------------------------------------------------------------
+
+    MAX_FILE_BYTES = 25 * 1024 * 1024
+    BLOCKED_FILE_SUFFIXES = frozenset({
+        ".exe", ".bat", ".cmd", ".com", ".ps1", ".psm1", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".msi", ".msp",
+        ".scr", ".dll", ".lnk", ".reg", ".hta", ".cpl", ".jar",
+    })
+
+    def _safe_file_name(self, raw: str) -> str | None:
+        """Solo un nome di file: niente cartelle, niente nomi nascosti o riservati, niente eseguibili (un file
+        ricevuto dal telefono non deve poter partire con un doppio click)."""
+        name = raw.strip()
+        if not name or len(name) > 120 or any(c in name for c in '/\\:*?"<>|') or any(ord(c) < 32 for c in name):
+            return None
+        if name.startswith(".") or name.rstrip(". ") != name:
+            return None
+        if Path(name).suffix.lower() in self.BLOCKED_FILE_SUFFIXES:
+            return None
+        if Path(name).stem.upper() in {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
+                                        *(f"LPT{i}" for i in range(1, 10))}:
+            return None
+        return name
+
+    def _handle_file_upload(self, raw_name: str):
+        """F7.2.5 ("file share esplicito e scoped"): il telefono manda UN file, come corpo binario. Serve una
+        credenziale per-dispositivo e la capability FILE (non concessa di default). Il file finisce SOLO nella
+        cartella di quel dispositivo, mai sovrascrivendo un file esistente, e l'HUD lo dice."""
+        if self.companion.files_dir is None:
+            self._drain_body()
+            return self._json_response(404, {"error": "files_not_configured"})
+        if self._authenticated_device_id is None:
+            self._drain_body()
+            return self._reject_body(403, "device_identity_required")
+        name = self._safe_file_name(raw_name)
+        if name is None:
+            self._drain_body()
+            return self._reject_body(400, "invalid_file_name")
+        raw_length = self.headers.get("Content-Length", "")
+        if self.headers.get("Transfer-Encoding") or not raw_length.strip().isdigit():
+            return self._reject_body(411, "length_required")
+        length = int(raw_length)
+        if length > self.MAX_FILE_BYTES:
+            self.close_connection = True  # non si legge un corpo cosi' grande: si chiude
+            return self._reject_body(413, "file_too_large")
+        folder = self.companion.files_dir / self._authenticated_device_id
+        folder.mkdir(parents=True, exist_ok=True)
+        stem, suffix = Path(name).stem, Path(name).suffix
+        target = folder / name
+        counter = 1
+        while target.exists():
+            target = folder / f"{stem} ({counter}){suffix}"
+            counter += 1
+        partial = target.with_name(target.name + ".part")
+        received = 0
+        try:
+            with open(partial, "wb") as handle:
+                while received < length:
+                    chunk = self.rfile.read(min(64 * 1024, length - received))
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+                    received += len(chunk)
+        except (OSError, socket.timeout, TimeoutError):
+            partial.unlink(missing_ok=True)
+            return self._reject_body(408, "request_timeout")
+        if received < length:
+            partial.unlink(missing_ok=True)
+            return self._reject_body(400, "truncated_body")
+        partial.replace(target)
+        self._audit("file_received", status=200, file=target.name, bytes=received)
+        self.companion.event_bus.publish(HudEvent(EventType.NOTIFICATION, {
+            "kind": "file", "text": f"Ricevuto dal telefono: {target.name}", "device_id": self._authenticated_device_id}))
+        return self._json_response(200, {"saved_as": target.name, "bytes": received})
 
     def _device_id_mismatch(self, url_device_id: str) -> bool:
         """Vero se questa richiesta e' autenticata per-dispositivo (F1.4.6, fase 6) E il
