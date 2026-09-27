@@ -69,6 +69,8 @@ QJsonObject HudViewState::snapshot() const {
         {"confirmation_trace_id", confirmationTraceId},
         {"activities", activities},
         {"last_outcome", lastOutcome},
+        {"audio_source", audioSource},
+        {"audio_level", audioLevel},
         {"last_sequence_id", lastSequenceId},
         {"ignored", ignored},
         {"incompatible", incompatible},
@@ -194,6 +196,10 @@ void HudEventReducer::reduce(const QString &type, const QJsonObject &payload, co
             if (m_view.state == QLatin1String("WAITING"))
                 m_view.state = QStringLiteral("IDLE");
         }
+    } else if (isType(type, AUDIO_LEVEL)) {
+        const QJsonValue level = payload.value(QStringLiteral("level"));
+        m_view.audioLevel = level.isDouble() ? qBound(0.0, level.toDouble(), 1.0) : 0.0;
+        m_view.audioSource = text(payload, "source");
     } else if (isType(type, ACTION_RECEIPT) || isType(type, UNDO_AVAILABLE)) {
         reduceActivity(type, payload, traceId);
     } else if (isType(type, SELECTOR_INSPECTION)) {

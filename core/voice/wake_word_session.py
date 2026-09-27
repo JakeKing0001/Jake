@@ -5,28 +5,36 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from core.hud_protocol import EventType, HudEvent
 from core.logger import get_logger
 from core.request_context import (
-    reset_current_speaker_profile_id, reset_current_stt_confidence, set_current_speaker_profile_id,
+    reset_current_speaker_profile_id,
+    reset_current_stt_confidence,
+    set_current_speaker_profile_id,
     set_current_stt_confidence,
+)
+from core.turn_cancellation import (
+    TurnCancelled,
+    reset_current_turn_cancel_event,
+    set_current_turn_cancel_event,
 )
 from core.voice.audio_profile import apply_to_provider, classify_output_device, detect_output_device_name
 from core.voice.barge_in import BargeInController, classify_interruption
-from core.voice.live_transcriber import LiveTranscriber, SttModelLock
 from core.voice.listening_state import (
-    EchoGuard, ListeningState, ListeningStateMachine, MicIndicator, RepeatGuard, WakeCooldown,
+    EchoGuard,
+    ListeningState,
+    ListeningStateMachine,
+    MicIndicator,
+    RepeatGuard,
+    WakeCooldown,
 )
+from core.voice.live_transcriber import LiveTranscriber, SttModelLock
 from core.voice.playback_aec import PlaybackAec
 from core.voice.session_metrics import SessionMetrics
 from core.voice.speaker_profile import SpeakerProfileStore, extract_features, identify
 from core.voice.speech_text import STYLES, prepare_for_speech
 from core.voice.streaming_stt import TranscriptEvent, to_hud_event
 from core.voice.vad_listener import VadListener
-from core.turn_cancellation import (
-    TurnCancelled,
-    reset_current_turn_cancel_event,
-    set_current_turn_cancel_event,
-)
 
 # Varianti di riferimento: Whisper a volte trascrive male "Jake" (nome poco comune in italiano).
 # Il confronto vero e proprio (_is_close_to_wake_word) usa la distanza di edit da queste, cosi'
@@ -117,6 +125,28 @@ class _SessionSpeaker:
         # barge-in: l'audio si ferma subito, il thread TTS vecchio si chiude da solo (non si aspetta qui)
         self._session._interrupt_speech(wait=False)
         return 0
+
+
+class AudioLevelPublisher:
+    """F4.4.4: livelli audio per l'orb dell'HUD, al massimo `max_rate_hz` al secondo e solo quando cambiano
+    abbastanza da vedersi. Un numero arrotondato, mai campioni audio."""
+
+    def __init__(self, publish, max_rate_hz: float = 10.0, min_delta: float = 0.05, clock=time.monotonic) -> None:
+        self._publish = publish
+        self._interval = 1.0 / max_rate_hz
+        self._min_delta = min_delta
+        self._clock = clock
+        self._last: dict[str, tuple[float, float]] = {}
+
+    def update(self, source: str, level: float) -> bool:
+        level = round(min(1.0, max(0.0, float(level))), 2)
+        now = self._clock()
+        last_at, last_level = self._last.get(source, (-1e9, -1.0))
+        if now - last_at < self._interval or abs(level - last_level) < self._min_delta:
+            return False
+        self._last[source] = (now, level)
+        self._publish(source, level)
+        return True
 
 
 class WakeWordSession:
@@ -223,6 +253,8 @@ class WakeWordSession:
         self._command_cancel_event = None
         self._stopped = False
         self._retired_tts_thread = None
+        self._audio_levels = AudioLevelPublisher(
+            lambda source, level: self._publish_hud_event(HudEvent(EventType.AUDIO_LEVEL, {"source": source, "level": level})))
         self._active_turn: _VoiceTurn | None = None
         self._pending_turn: _VoiceTurn | None = None
         self._attach_hooks()
@@ -269,9 +301,19 @@ class WakeWordSession:
 
     def _attach_reference_sink(self) -> None:
         """Il provider TTS, se riproduce da se', pubblica cio' che manda agli altoparlanti (AEC)."""
-        sink = self.playback_aec.push_reference
+        push_reference = self.playback_aec.push_reference
+
+        def sink(samples, rate):
+            push_reference(samples, rate)
+            try:
+                data = np.asarray(samples, dtype=np.float32).reshape(-1)
+                if data.size:
+                    peak = float(np.sqrt(np.mean(data.astype(np.float64) ** 2)))
+                    self._audio_levels.update("voice", min(1.0, peak * 6.0))
+            except Exception:
+                pass
         if self.metrics is not None:
-            metrics, push = self.metrics, self.playback_aec.push_reference
+            metrics, push = self.metrics, sink
 
             def sink(samples, rate):
                 metrics.audio_started()
@@ -499,6 +541,18 @@ class WakeWordSession:
     def _on_frame_level(self, level: float, is_speech: bool) -> None:
         if self.on_level is not None:
             self.on_level(level, is_speech)
+        # F4.4.4: l'orb reagisce alla voce dell'utente SOLO quando Jake ascolta un comando
+        if self.state in ("listening", "transcribing", "dictation"):
+            self._audio_levels.update("mic", level if is_speech else level * 0.4)
+
+    def _publish_hud_event(self, event) -> None:
+        bus = getattr(self.jake_core, "event_bus", None)
+        publish = getattr(bus, "publish", None)
+        if callable(publish):
+            try:
+                publish(event)
+            except Exception:
+                self._logger.exception("Errore pubblicando un evento HUD")
 
     # ---- voce -------------------------------------------------------------------------
 

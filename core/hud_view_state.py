@@ -65,6 +65,8 @@ class HudViewState:
     # verificata, error = fallita). Separato da `state`: l'orb lo mostra brevemente, senza anticipare
     # un successo ne' nascondere un'attesa o un errore del turno in corso.
     last_outcome: str = ""
+    audio_source: str = ""
+    audio_level: float = 0.0
     last_sequence_id: int = 0
     ignored: int = 0
     incompatible: bool = False
@@ -168,6 +170,10 @@ class HudViewState:
                 self.confirmation_trace_id = ""
                 if self.state == "WAITING":
                     self.state = "IDLE"
+        elif event_type == "AUDIO_LEVEL":
+            level = payload.get("level")
+            self.audio_level = min(1.0, max(0.0, float(level))) if isinstance(level, (int, float)) and not isinstance(level, bool) else 0.0
+            self.audio_source = _text(payload, "source")
         elif event_type in ("ACTION_RECEIPT", "UNDO_AVAILABLE"):
             self._activity(event_type, payload, trace_id)
         elif event_type == "SELECTOR_INSPECTION":

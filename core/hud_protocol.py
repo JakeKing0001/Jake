@@ -71,6 +71,10 @@ class EventType(str, Enum):
     # F4.6.3: un'azione e' annullabile fino a `expires_at` (epoch s). Payload: {"action_id",
     # "compensating_intent", "expires_at"}. Si unisce alla ricevuta con lo stesso action_id.
     UNDO_AVAILABLE = "UNDO_AVAILABLE"
+    # F4.4.4: livello audio per l'orb, MAI audio. Payload: {"source": "mic"|"voice", "level": float 0..1}.
+    # Il microfono solo mentre Jake ascolta un comando (mai durante l'ascolto della parola di
+    # attivazione), la voce solo mentre Jake parla; limitato a circa 10 eventi al secondo.
+    AUDIO_LEVEL = "AUDIO_LEVEL"
 
 
 # Traduce gli stati gia' in uso da WakeWordSession/SessionHooks.set_state (stringhe libere,

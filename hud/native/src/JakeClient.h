@@ -44,6 +44,7 @@ class JakeClient : public QObject {
     Q_PROPERTY(QString lastActivitySummary READ lastActivitySummary NOTIFY viewChanged)
     Q_PROPERTY(qint64 lastUndoExpiresAt READ lastUndoExpiresAt NOTIFY viewChanged)
     Q_PROPERTY(QString lastOutcome READ lastOutcome NOTIFY viewChanged)
+    Q_PROPERTY(double audioLevel READ audioLevel NOTIFY viewChanged)
 
 public:
     explicit JakeClient(QObject *parent = nullptr);
@@ -69,6 +70,7 @@ public:
     QString lastActivitySummary() const;
     qint64 lastUndoExpiresAt() const;
     QString lastOutcome() const { return m_reducer.view().lastOutcome; }
+    double audioLevel() const { return m_reducer.view().audioLevel; }
 
     // baseUrl es. "http://127.0.0.1:8765" (vedi companion_server_port in config.json).
     // F7/F4.8.2: credenziale per-dispositivo consegnata dal core (vedi main.cpp): Authorization Bearer

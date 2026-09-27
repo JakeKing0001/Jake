@@ -261,7 +261,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F4.1` | Protocol Architecture (26/09/2026: riduttore di riferimento Python e riduttore C++ superano la stessa suite di 18 fixture, ctest nella CI; sequence_id/trace_id consumati anche lato C++) | `DONE` |
 | `F4.2` | Native HUD (F4.2.1/F4.2.4 chiusi, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026; F4.2.5/F4.2.6 e resto di F4.2.3 richiedono test interattivi/visivi) | `DOING` |
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
-| `F4.4` | Interaction Design (26/09/2026: orb 3D Qt Quick 3D con nucleo volumetrico e particle shell, comportamento per stato interrupt-safe, reduced motion di Windows, qualita' high/low, fallback 2D; livelli audio reali e verifica visiva degli stati ancora da fare) | `DOING` |
+| `F4.4` | Interaction Design (26/09/2026: orb 3D Qt Quick 3D con nucleo volumetrico e particle shell, comportamento per stato interrupt-safe, reduced motion di Windows, qualita' high/low, fallback 2D; livelli audio reali di microfono e voce di Jake collegati all'orb; verifica visiva degli stati ancora da fare) | `DOING` |
 | `F4.5` | Interaction Design (26/09/2026: trascrizione live, permission card, prove, diagnosi, notifiche nell'HUD nativo; verifica visiva da fare) | `DOING` |
 | `F4.6` | Trust UX (26/09/2026: kill switch visibile; action center con ultima azione, esito, verifica e undo con scadenza; retry/dettagli/precondizioni non ancora) | `DOING` |
 | `F4.7` | Accessibility (26/09/2026: nomi accessibili, focus ring, scrittura reale nella barra comandi di un overlay no-activate, scorciatoie globali Ctrl+Shift+J / Ctrl+Alt+Fine, reduced motion di sistema; screen reader, scaling e alto contrasto da verificare) | `DOING` |
@@ -8808,7 +8808,13 @@ o il solo prototipo 2D non chiudono il requisito. La verifica dell'handoff dipen
   l'impostazione di Windows "Mostra animazioni" (o `JAKE_HUD_REDUCED_MOTION=1`); qualita' con
   `JAKE_HUD_QUALITY=low`; fallback 2D se Qt Quick 3D manca in build o a runtime (`JAKE_HUD_ORB=2d`).
   Verificato con screenshot reali dell'HUD collegato al companion (THINKING/LISTENING). Resta `VERIFY` il
-  giudizio visivo umano; restano da fare i livelli audio reali (F4.4.4).
+  giudizio visivo umano.
+- 26/09/2026, sera (F4.4.4): nuovo evento `AUDIO_LEVEL` (solo `source` mic/voice e un livello 0..1, mai
+  campioni). Il microfono si pubblica SOLO mentre Jake ascolta un comando (mai durante l'ascolto della parola
+  di attivazione: un client companion non deve sapere che in stanza qualcuno parla); la voce di Jake dal
+  riferimento di riproduzione gia' usato per l'AEC. Al massimo ~10 eventi al secondo e solo se il livello
+  cambia; nell'HUD il livello decade a zero dopo 400 ms senza aggiornamenti. Stessa regola nei due
+  riduttori (fixture condivise). L'orb espande il guscio in LISTENING/SPEAKING in base al livello.
 - 26/09/2026, sera (layout): l'orb e' la presenza principale e prende lo spazio libero; pannelli con un solo
   materiale (`Theme.qml`/`GlassPanel.qml`, riempimento pieno finche' non c'e' blur di sistema: con il vetro
   semitrasparente il testo delle finestre sotto rendeva i pannelli illeggibili); conversazione compatta

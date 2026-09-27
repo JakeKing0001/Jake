@@ -400,7 +400,10 @@ class BargeInSessionTests(VoiceSessionTestCase):
     def test_the_session_hooks_the_listener_and_the_provider(self):
         session, tts, vad = _session()
         self.assertEqual(vad.on_speaking_frame, session._on_speaking_frame)
-        self.assertEqual(tts.reference_sink, session.playback_aec.push_reference)
+        # quello che il provider riproduce arriva all'AEC (il sink lo avvolge per il livello dell'orb, F4.4.4)
+        self.assertFalse(session.playback_aec.has_reference)
+        tts.reference_sink(np.full(1600, 0.2, dtype=np.float32), 16000)
+        self.assertTrue(session.playback_aec.has_reference)
 
     def test_sustained_user_speech_stops_jake_and_starts_capturing(self):
         session, tts, vad = _speaking_session()

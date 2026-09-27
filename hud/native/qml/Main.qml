@@ -121,6 +121,16 @@ ApplicationWindow {
         }
         Binding { target: orb.item; property: "state"; value: jake.state; when: orb.item !== null }
         Binding { target: orb.item; property: "outcome"; value: jake.lastOutcome; when: orb.item !== null }
+        // F4.4.4: livello audio reale (mai audio); decade a zero se non arrivano aggiornamenti
+        Binding { target: orb.item; property: "level"; value: levelDecay.level
+                  when: orb.item !== null && orb.item.hasOwnProperty("level") }
+        QtObject {
+            id: levelDecay
+            property real level: 0
+            property real incoming: jake.audioLevel
+            onIncomingChanged: { level = incoming; decayTimer.restart(); }
+        }
+        Timer { id: decayTimer; interval: 400; onTriggered: levelDecay.level = 0 }
         Binding { target: orb.item; property: "reducedMotion"; value: window.reducedMotion
                   when: orb.item !== null && orb.item.hasOwnProperty("reducedMotion") }
         Binding { target: orb.item; property: "quality"; value: window.orbQuality
