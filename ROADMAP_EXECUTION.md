@@ -473,6 +473,9 @@ Dipende da: F0.2 e F0.3.
   meno di 2 GB liberi, HUD nativo abilitato ma non compilato o senza companion server); INFO per la VRAM libera.
   Eseguito su questa macchina: tutto OK (Ollama con qwen2.5:7b, 9 ingressi audio, ~7 GB di VRAM libera); con
   `JAKE_OLLAMA_URL` su una porta chiusa -> ATTENZIONE su Ollama, uscita 0. Installer/upgrade/repair ancora da fare.
+  27/09/2026 notte: controllo "Memoria GPU" - modello di Ollama (dimensione reale da /api/tags + contesto) + Whisper
+  (misurato: 1118 MB int8_float16 / 2061 MB float16) + voce/HUD, confrontato con la memoria totale; ATTENZIONE sopra il
+  90% (la situazione della prova reale). Qui: ~6,9 GB su 8,2 GB, OK.
 
 Criterio di uscita: installazione, update fallito e rollback passano su una VM Windows pulita.
 

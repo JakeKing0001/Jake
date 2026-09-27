@@ -127,6 +127,31 @@ def check_gpu(detect=None) -> Check:
     return Check("GPU", INFO, f"{info.available_vram_mb} MB di VRAM libera")
 
 
+# stima di cio' che occupa la GPU oltre ai pesi del modello: contesto (8192 token) del 7B, voce RVC e HUD 3D
+KV_CACHE_MB = 600
+VOICE_AND_HUD_MB = 700
+
+
+def check_gpu_budget(model: str, tags: dict | None, total_vram_mb: int | None, whisper_mb: int | None) -> Check | None:
+    """Prova reale del 27/09/2026: qwen2.5:7b (~4,8 GB in GPU) + Whisper su CUDA + voce + HUD 3D su una GPU da 8 GB hanno
+    esaurito la memoria video e ogni risposta del modello e' scaduta. Qui si somma cio' che dovra' convivere sulla
+    GPU e lo si confronta con la memoria totale, PRIMA di scoprirlo parlando."""
+    if total_vram_mb is None or not isinstance(tags, dict):
+        return None
+    size = next((m.get("size") for m in tags.get("models", []) if isinstance(m, dict)
+                 and m.get("name") in (model, f"{model}:latest")), None)
+    if not isinstance(size, int):
+        return None
+    model_mb = size // (1024 * 1024) + KV_CACHE_MB
+    need = model_mb + (whisper_mb or 0) + VOICE_AND_HUD_MB
+    detail = (f"modello {model} ~{model_mb} MB + Whisper ~{whisper_mb or 0} MB + voce/HUD ~{VOICE_AND_HUD_MB} MB "
+              f"= ~{need} MB su {total_vram_mb} MB")
+    if need > total_vram_mb * 0.9:
+        return Check("Memoria GPU", WARN, detail + ": troppo stretta, le risposte rischiano di essere lentissime. "
+                     "Usa un modello piu' piccolo (ollama_model) o chiudi altri programmi che usano la GPU")
+    return Check("Memoria GPU", OK, detail)
+
+
 def run_all(config: dict) -> list[Check]:
     from core.native_hud import DEFAULT_EXE
     from core.ollama_client import DEFAULT_BASE_URL
@@ -142,6 +167,17 @@ def run_all(config: dict) -> list[Check]:
         check_microphone(),
         check_gpu(),
     ]
+    try:
+        from core.voice.stt_provider import WhisperSttProvider, _gpu_total_vram_mb
+
+        total = _gpu_total_vram_mb()
+        whisper_mb = 1118 if WhisperSttProvider._cuda_compute_type(total) == "int8_float16" else 2061  # misurati
+        tags = json.loads(request.urlopen(f"{DEFAULT_BASE_URL}/api/tags", timeout=2).read().decode("utf-8"))
+        budget = check_gpu_budget(str(config.get("ollama_model") or "qwen2.5:7b"), tags, total, whisper_mb)
+    except Exception:
+        budget = None
+    if budget is not None:
+        checks.append(budget)
     hud = check_native_hud(config, DEFAULT_EXE)
     if hud is not None:
         checks.append(hud)
