@@ -165,3 +165,16 @@ class WhisperGpuMemoryTests(unittest.TestCase):
         self.assertEqual(WhisperSttProvider._cuda_compute_type(8188), "int8_float16")
         self.assertEqual(WhisperSttProvider._cuda_compute_type(24576), "float16")
         self.assertEqual(WhisperSttProvider._cuda_compute_type(None) in ("float16", "int8_float16"), True)
+
+    def test_an_unsupported_reduced_format_falls_back_to_float16_on_the_gpu(self):
+        from unittest import mock
+
+        from core.voice.stt_provider import WhisperSttProvider
+
+        model = mock.MagicMock(side_effect=[ValueError("Requested int8_float16 compute type, but the target device "
+                                                       "or backend do not support efficient int8_float16 computation."),
+                                            mock.MagicMock()])
+        with mock.patch.dict("sys.modules", {"faster_whisper": mock.MagicMock(WhisperModel=model)}), \
+                mock.patch("core.voice.stt_provider._gpu_total_vram_mb", return_value=8188):
+            provider = WhisperSttProvider(device="cuda")
+        self.assertEqual((provider.device, provider.compute_type), ("cuda", "float16"))

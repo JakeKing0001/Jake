@@ -101,10 +101,11 @@ class WhisperSttProvider(SttProvider):
         try:
             try:
                 self._model = WhisperModel(self.model_size, device=self.device, compute_type=self.compute_type)
-            except Exception:
-                if not use_cuda or compute_type is not None or self.compute_type == "float16":
+            except Exception as exc:
+                if (not use_cuda or compute_type is not None or self.compute_type == "float16"
+                        or "compute type" not in str(exc).lower()):
                     raise
-                # int8_float16 non supportato da questa GPU: si torna al float16 di prima
+                # int8_float16 non supportato da questa GPU (e solo quello): si torna al float16 di prima
                 self.compute_type = "float16"
                 self._model = WhisperModel(self.model_size, device=self.device, compute_type=self.compute_type)
         except Exception:
