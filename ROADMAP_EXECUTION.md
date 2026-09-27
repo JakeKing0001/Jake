@@ -270,7 +270,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F5.2` | Memory Platform | `DOING` |
 | `F5.3` | Knowledge Model | `DOING` |
 | `F5.4` | Memory Reliability | `DOING` |
-| `F5.5` | Retrieval Quality | `DOING` |
+| `F5.5` | Retrieval Quality (27/09/2026: ricordi pertinenti con fonte anche nelle risposte libere, budget di contesto, grafo a un salto; agente e metriche ancora da fare) | `DOING` |
 | `F5.6` | Context Runtime | `DOING` |
 | `F5.7` | Privacy Engineering (libreria completa il 21/09/2026; dal 26/09/2026 nel percorso reale: "dimentica" cancella anche registro e indici con ricevuta, l'uso dei ricordi viene registrato, "da dove sai X" spiega la provenienza; purge/export/backup non ancora esposti a voce/HUD) | `DOING` |
 | `F6.1` | Proactivity Platform (26/09/2026: promemoria, automazioni e avvisi passano dagli stessi freni in `JakeCore.notify` - duplicati, budget orario, quiet hours, conversazione in corso - e si sospendono insieme durante prove e benchmark) | `DOING` |
@@ -9031,8 +9031,16 @@ Criterio di uscita: ogni risposta di memoria ha almeno una fonte oppure è marca
 - 26/09/2026 (F5.5.3/F5.5.4 per `RECALL`): ogni ricordo nella risposta porta la provenienza - "me l'hai
   detto tu il GG/MM/AAAA", "l'ho dedotto io, non me l'hai detto tu", "salvato da un agente" o la fonte
   registrata. Prima la risposta era solo "chiave: valore" e un'inferenza sembrava un fatto detto
-  dall'utente. Prova in `tests/test_memory_privacy_integration.py`. Restano citazioni per le altre
-  risposte che usano la memoria (agente, domande libere) e le metriche precision/recall.
+  dall'utente. Prova in `tests/test_memory_privacy_integration.py`.
+- 27/09/2026 (F5.5.1/F5.5.3/F5.6, memoria nelle risposte normali): la memoria entrava SOLO nel comando
+  RECALL; una domanda libera ("quando e' il compleanno di Giulia?") andava al modello senza ricordi.
+  `MemoryManager.relevant_for` sceglie i ricordi pertinenti (frase esatta > parole in comune pesate per
+  importanza/recenza; semantica solo se le parole non trovano nulla; un salto nel grafo delle relazioni;
+  scaduti esclusi; budget di 700 caratteri) e ASK_QUESTION li passa al modello come fonti [M1]..; nella
+  risposta i ricordi usati (marcatore o valore citato) sono dichiarati con la stessa provenienza di
+  RECALL ("Dai miei ricordi: ... (me l'hai detto tu il ...)", un'inferenza resta un'inferenza) e ne viene
+  registrato l'uso, mai in modalita' privata. Prova: `tests/test_memory_in_answers.py`. Restano l'agente
+  a passi e le metriche precision/recall.
 
 ### F5.6 — Context engine event-driven
 

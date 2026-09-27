@@ -237,7 +237,7 @@ def _format_error(intent: str, result: SkillResult) -> str:
 
 
 
-def _memory_provenance(entry: dict) -> str:
+def memory_provenance(entry: dict) -> str:
     """F5.5 ("ogni risposta di memoria ha almeno una fonte oppure e' marcata come inferenza"): da dove
     viene il ricordo, in poche parole. Un'inferenza di Jake non si presenta mai come un fatto detto
     dall'utente."""
@@ -271,7 +271,7 @@ def _format_success(intent: str, result: SkillResult, registry=None) -> str | No
                 extra = "; ".join(f"{r['predicate']} {r['key']}" for r in related if r.get("value") is not None)
                 if extra:
                     line += f" ({extra})"
-            return line + _memory_provenance(entry)
+            return line + memory_provenance(entry)
         formatted = "; ".join(_entry_line(entry) for entry in data["results"])
         return f"Ecco cosa ricordo: {formatted}"
     if intent == "FORGET":

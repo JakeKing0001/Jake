@@ -33,9 +33,15 @@ class AskQuestionSkill:
         },
     }
 
-    def __init__(self, conversation_state=None, model: str = "qwen2.5:7b", base_url: str = None, timeout: float = 40):
+    def __init__(self, conversation_state=None, model: str = "qwen2.5:7b", base_url: str = None, timeout: float = 40,
+                 memory_manager=None, embedding_provider=None, dashboard=None):
         self.conversation_state = conversation_state
         self.model = model
+        # F5.5/F5.6: le risposte libere usano i ricordi pertinenti (con fonte), non solo il comando RECALL.
+        self.memory_manager = memory_manager
+        self.embedding_provider = embedding_provider
+        self.dashboard = dashboard
+        self.private_mode_provider = lambda: False
         self.base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
         self.timeout = timeout
 
@@ -45,18 +51,68 @@ class AskQuestionSkill:
         if not question:
             return SkillResult(success=False, data={}, error="MISSING_PARAMETERS")
 
+        memories = self._relevant_memories(question)
+        self._memories = memories
         answer = self._ask(question)
         if answer is None:
             return SkillResult(success=False, data={}, error="OLLAMA_UNAVAILABLE")
+        answer, cited = self._cite(answer, memories)
         kept, drifted = keep_reply_language(answer, question)
         if drifted and len(kept) < self.MIN_KEPT_CHARS:
             # la deriva e' arrivata presto: un solo nuovo tentativo, deterministico e con la lingua ribadita
             retry = self._ask(question, temperature=0.0, insist_language=True)
             if retry is not None:
                 kept, _ = keep_reply_language(retry, question)
+                kept, cited = self._cite(kept, memories)
         if drifted and not kept:
             kept = "Scusa, non sono riuscito a formulare bene la risposta. Puoi ripetere la domanda?"
-        return SkillResult(success=True, data={"answer": kept})
+        if cited and kept:
+            from core.response_formatter import memory_provenance
+
+            self._record_use(cited)
+            sources = "; ".join(f"{m['key']}{memory_provenance(m)}" for m in cited)
+            kept = f"{kept}\n(Dai miei ricordi: {sources})"
+        return SkillResult(success=True, data={"answer": kept, "memories_used": [m["key"] for m in cited]})
+
+    MAX_MEMORY_CHARS = 700
+
+    def _relevant_memories(self, question: str) -> list[dict]:
+        if self.memory_manager is None or not hasattr(self.memory_manager, "relevant_for"):
+            return []
+        try:
+            memories = self.memory_manager.relevant_for(question, budget_chars=self.MAX_MEMORY_CHARS)
+            if not memories and self.embedding_provider is not None:
+                embedding = self.embedding_provider.embed(question)
+                if embedding is not None:
+                    memories = self.memory_manager.relevant_for(question, query_embedding=embedding,
+                                                                budget_chars=self.MAX_MEMORY_CHARS)
+            return memories
+        except Exception:
+            return []  # la memoria non deve mai impedire di rispondere
+
+    @staticmethod
+    def _cite(answer: str, memories: list[dict]) -> tuple[str, list[dict]]:
+        """Quali ricordi la risposta ha usato davvero: il marcatore [M#] chiesto al modello, oppure il valore
+        del ricordo citato alla lettera. I marcatori si tolgono dal testo (la risposta viene letta ad alta voce)."""
+        import re
+
+        cited_indexes = {int(n) for n in re.findall(r"\[M(\d+)\]", answer)}
+        clean = re.sub(r"\s*\[M\d+\]", "", answer).strip()
+        cited = []
+        for index, memory in enumerate(memories, start=1):
+            value = str(memory.get("value") or "").strip().lower()
+            if index in cited_indexes or (len(value) >= 4 and value in clean.lower()):
+                cited.append(memory)
+        return clean, cited
+
+    def _record_use(self, cited: list[dict]) -> None:
+        if self.dashboard is None or self.private_mode_provider():
+            return
+        for memory in cited:
+            try:
+                self.dashboard.record_use(memory["key"], memory.get("category", "fact"), actor="jake", context="answer")
+            except Exception:
+                pass
 
     # Sotto questa lunghezza la parte italiana rimasta dopo una deriva di lingua non basta come risposta.
     MIN_KEPT_CHARS = 80
@@ -77,6 +133,14 @@ class AskQuestionSkill:
                 ),
             }
         ]
+        memories = getattr(self, "_memories", None) or []
+        if memories:
+            from core.response_formatter import memory_provenance
+
+            lines = "\n".join(f"[M{i}] {m['key']}: {m['value']}{memory_provenance(m)}" for i, m in enumerate(memories, start=1))
+            messages.append({"role": "system", "content": (
+                "Ricordi dell'utente che potrebbero servire (usali SOLO se pertinenti, non inventare altro sull'utente; "
+                "se ne usi uno scrivi il suo marcatore, per esempio [M1], subito dopo l'informazione):\n" + lines)})
         history = self.conversation_state.get_short_term_history() if self.conversation_state else []
         for turn in history[-6:]:
             role = "assistant" if turn["role"] == "jake" else "user"
