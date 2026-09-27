@@ -47,5 +47,46 @@ class MemoryConflictTests(unittest.TestCase):
         self.assertEqual(self.memory.versions("indirizzo di prova"), [])
 
 
+
+class ImportantConflictConfirmationTests(unittest.TestCase):
+    """F5.4.3 sul JakeCore vero: cambiare un ricordo importante passa dalla conferma normale ("si'"/"no")."""
+
+    def setUp(self):
+        from core.command import Command
+        from tests.test_jake_core_pipeline import FakeRegistry, FakeRouter, _bare_core
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.memory = MemoryManager(Path(tmp.name) / "memory.db")
+        self.addCleanup(self.memory.close)
+        self.core = _bare_core(ledger_path=Path(tmp.name) / "ledger.jsonl",
+                               skill_registry=FakeRegistry({"REMEMBER": RememberSkill(self.memory)}))
+        self.Command, self.FakeRouter = Command, FakeRouter
+
+    def say(self, text, parameters=None):
+        if parameters is not None:
+            self.core.router = self.FakeRouter(self.Command("REMEMBER", parameters))
+        return self.core.answer(text)
+
+    def test_an_important_memory_is_replaced_only_after_yes_and_stays_important(self):
+        self.memory.remember("indirizzo di casa", "via Roma 1", importance=5)
+        question = self.say("il mio indirizzo e' via Milano 2", {"key": "indirizzo di casa", "value": "via Milano 2"})
+        self.assertIn('"via Roma 1"', question)
+        self.assertEqual(self.memory.entry("indirizzo di casa")["value"], "via Roma 1", "niente prima del si'")
+        self.assertIn("prima era via Roma 1", self.say("si"))
+        current = self.memory.entry("indirizzo di casa")
+        self.assertEqual((current["value"], current["importance"]), ("via Milano 2", 5))
+        self.assertEqual(self.memory.versions("indirizzo di casa")[0]["value"], "via Roma 1")
+
+    def test_no_keeps_the_important_memory_and_ordinary_ones_update_directly(self):
+        self.memory.remember("gruppo sanguigno", "A+", importance=4)
+        self.say("il mio gruppo e' B+", {"key": "gruppo sanguigno", "value": "B+"})
+        self.say("no")
+        self.assertEqual(self.memory.entry("gruppo sanguigno")["value"], "A+")
+
+        self.memory.remember("snack preferito", "grissini")
+        self.assertIn("prima era grissini", self.say("ora preferisco i taralli", {"key": "snack preferito", "value": "taralli"}))
+
+
 if __name__ == "__main__":
     unittest.main()

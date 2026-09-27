@@ -192,6 +192,14 @@ class MemoryManager:
             "VALUES (?, ?, ?, ?, ?, ?, ?)", (key, category, value, source or "unknown", at, at, reason),
         )
 
+    def entry(self, key: str, category: str = "fact") -> dict | None:
+        """Il ricordo attuale con i campi che decidono quanto pesa cambiarlo (F5.4.3): importanza e pin."""
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT value, importance, pinned, source FROM memories WHERE key = ? AND category = ?", (key, category),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
     def versions(self, key: str, category: str = "fact") -> list[dict]:
         """F5.4.2: le versioni precedenti di un ricordo (e le inferenze rifiutate), dalla piu' recente."""
         with self._lock:

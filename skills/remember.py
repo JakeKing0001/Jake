@@ -1,4 +1,12 @@
+from core.memory_manager import MemoryManager
 from core.skill_result import SkillResult
+
+# F5.4.3: sostituire un ricordo importante (importanza 4-5 o fissato) con un valore diverso si conferma prima
+IMPORTANT_CONFLICT_THRESHOLD = 4
+
+
+def _same(a: str, b: str) -> bool:
+    return " ".join(str(a).lower().split()) == " ".join(str(b).lower().split())
 
 
 class RememberSkill:
@@ -54,11 +62,24 @@ class RememberSkill:
         value = (parameters.get("value") or "").strip()
         category = (parameters.get("category") or "fact").strip()
         project = (parameters.get("project") or "").strip() or None
-        importance = parameters.get("importance") or 1
         ttl_days = self._parse_ttl_days(parameters.get("ttl_days"))
 
         if not key or not value:
             return SkillResult(success=False, data={"key": key, "value": value}, error="MISSING_PARAMETERS")
+
+        entry = getattr(self.memory_manager, "entry", None)
+        current = entry(key, category) if callable(entry) else None
+        current = current if isinstance(current, dict) else None
+        # aggiornare il testo non declassa un ricordo: senza un'importanza detta dall'utente resta quella di prima
+        importance = parameters.get("importance") or (current or {}).get("importance") or 1
+        if parameters.get("confirmed") is not True and category in MemoryManager.KNOWLEDGE_CATEGORIES:
+            if current and not _same(current["value"], value) and (
+                    (current.get("importance") or 1) >= IMPORTANT_CONFLICT_THRESHOLD or current.get("pinned")):
+                return SkillResult(success=False, error="CONFIRMATION_REQUIRED", data={
+                    "message": (f"Per me {key} è \"{current['value']}\" e l'avevi segnato come importante. "
+                                f"Lo sostituisco con \"{value}\"? La versione di prima resta nello storico."),
+                    "confirm_parameters": {**parameters, "confirmed": True},
+                })
 
         embedding = None
         if self.embedding_provider is not None:
