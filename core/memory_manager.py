@@ -456,7 +456,7 @@ class MemoryManager:
         if then.tzinfo is None:
             then = then.replace(tzinfo=timezone.utc)
         age_days = max(0.0, (datetime.now(timezone.utc) - then).total_seconds() / 86400)
-        half_life = self.HALF_LIFE_DAYS.get(entry.get("category"), self.DEFAULT_HALF_LIFE_DAYS)
+        half_life = self.HALF_LIFE_DAYS.get(str(entry.get("category") or ""), self.DEFAULT_HALF_LIFE_DAYS)
         return 0.5 + 0.5 * 0.5 ** (age_days / half_life)
 
     def purge_expired(self) -> int:

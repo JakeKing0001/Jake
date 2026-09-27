@@ -3109,6 +3109,12 @@ class JakeCore:
         self._release_previous_model(chosen)
         return chosen
 
+    @model.setter
+    def model(self, value: str) -> None:
+        """SET_MODEL: il modello configurato cambia e il router riparte dal nuovo catalogo."""
+        self._configured_model = value
+        self._model_router = None
+
     def _release_previous_model(self, chosen: str) -> None:
         """F8.4.4: quando il router passa a un altro modello (es. quello leggero a batteria bassa), il precedente
         viene scaricato in background: resterebbe in VRAM/RAM per tutto il keep_alive (ore) senza servire a nulla,
@@ -3130,12 +3136,6 @@ class JakeCore:
                     logger.warning("Non sono riuscito a scaricare il modello %s", previous)
 
         threading.Thread(target=unload, name="jake-model-unload", daemon=True).start()
-
-    @model.setter
-    def model(self, value: str) -> None:
-        """SET_MODEL: il modello configurato cambia e il router riparte dal nuovo catalogo."""
-        self._configured_model = value
-        self._model_router = None
 
     # ---- sospensione della proattivita' ----------------------------------------------------
 
