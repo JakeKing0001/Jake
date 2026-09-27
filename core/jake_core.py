@@ -286,6 +286,8 @@ class JakeCore:
             tls_fingerprint=self.companion_tls_fingerprint,
             pairing_service=self.pairing_service, conversation_state=self.skill_registry.conversation_state,
             on_pairing_requested=self._on_pairing_requested,
+            # F7.2.5: i file dal telefono (solo dispositivi con accesso "file") finiscono qui, uno per dispositivo
+            files_dir=Path(config.get("companion_files_dir") or Path.home() / "Documents" / "Jake" / "Dal telefono"),
         )
         self.native_hud = None
         if bool(config.get("companion_server_enabled", False)):

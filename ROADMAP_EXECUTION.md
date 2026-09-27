@@ -281,7 +281,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F6.6` | Meeting Experience (libreria di regole il 21/09/2026: brief senza dati inventati, consenso e indicatore, follow-up gated; dal 27/09/2026 "com'e' la mia giornata" usa il brief con promemoria e todo reali; nessun connettore reale) | `DOING` |
 | `F6.7` | Runtime Reliability (monitor/housekeeping il 22/09/2026; task monitor collegato a JakeCore/EventBus/HUD lo stesso giorno - vedi F6.3; dal 27/09/2026 "avvisami quando finisce la build" su un processo reale, notifica dalla pipeline unica; housekeeping senza connettori reali ne' pilot) | `DOING` |
 | `F7.1` | Companion Security (F7.1.1/.4/.5/.6/.7 il 22/09/2026; F7.1.2 - pairing HTTP - chiuso il 22/09/2026, vedi F7.2; TLS reale generato/persistito dal server il 22/09/2026; capability persistenti F7.1.3 dal 27/09/2026 - impostabili a voce con SET_DEVICE_ACCESS, valide subito e dopo un riavvio, riga corrotta = nessun permesso; manca la distribuzione del certificato al telefono oltre al pairing) | `DOING` |
-| `F7.2` | Mobile Companion (pairing/chat live/approve-deny sullo stesso task end-to-end il 22/09/2026; lista/revoca dispositivi via HTTP e prima app Android reale - MAI compilata/eseguita in questo ambiente - il 22/09/2026; dal 27/09/2026 revoca/rotazione chiudono anche lo stream gia' aperto; senza file share/offline queue/wipe lato app) | `DOING` |
+| `F7.2` | Mobile Companion (pairing/chat live/approve-deny sullo stesso task end-to-end il 22/09/2026; lista/revoca dispositivi via HTTP e prima app Android reale - MAI compilata/eseguita in questo ambiente - il 22/09/2026; dal 27/09/2026 revoca/rotazione chiudono anche lo stream gia' aperto; file dal telefono al PC con permesso esplicito; senza offline queue/wipe lato app) | `DOING` |
 | `F7.3` | Voice Devices | `BACKLOG` |
 | `F7.4` | Presence Runtime (27/09/2026: lease del dispositivo attivo - scade senza segni di vita, rinnovato da richieste e stream aperto, rilasciato alla revoca) | `DOING` |
 | `F7.5` | Home Integration | `DOING` |
@@ -9719,6 +9719,13 @@ una notifica apre il task corretto e un'eventuale risposta aggiorna la stessa se
   (lo stream aperto si chiude entro un secondo, vedi sopra) e toglie le chiavi di sincronizzazione del
   dispositivo dal portachiavi F7.6. L'HUD nativo di questo PC non e' mai un bersaglio. Test: stesso server
   reale, frase -> skill -> stream chiuso, evento successivo non ricevuto, chiavi rimosse, richieste nuove 401.
+- 27/09/2026 sera (F7.2.5, file share esplicito e con scope): `POST /files/<nome>` - corpo binario fino a 25 MB,
+  solo con credenziale per-dispositivo e capability `FILE` (non di default; livello "file" di `SET_DEVICE_ACCESS`),
+  nome ripulito (niente cartelle, nomi nascosti o riservati di Windows, niente eseguibili/script), salvataggio in
+  `Documenti\Jake\Dal telefono\<dispositivo>` (o `companion_files_dir`) senza sovrascrivere, scrittura atomica
+  tramite `.part`, riga di audit e notifica all'HUD (redatta in modalita' privata). Test con server reale: senza
+  permesso 403 e nulla scritto; con permesso file salvato e duplicato rinominato; percorsi, nomi nascosti, script
+  e nomi riservati 400. Resta da fare il lato app (pulsante "invia al PC") e la direzione PC -> telefono.
 
 - `F7.2.1`/`F7.2.2`/`F7.2.3`/`F7.2.4`/`F7.2.8` (Companion Mobile MVP end-to-end, riuso di F7.1/F7.6/F6 senza sistemi
   paralleli) — 22/09/2026: `core/pairing_service.py` (esteso), `core/companion_guard.py`/`core/companion_server.py`
