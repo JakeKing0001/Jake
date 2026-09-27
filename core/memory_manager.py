@@ -410,11 +410,21 @@ class MemoryManager:
                 if freshness < 0.75 and not exact:
                     entry["why"] += ", ma non usato da tempo"
                 candidates[(entry["key"], entry["category"])] = entry
-        if not candidates and query_embedding is not None:
+        if query_embedding is not None:
+            # F5.5 (retrieval ibrido): la similarita' semantica conta SEMPRE, non solo quando le parole non trovano
+            # nulla - altrimenti una parola in comune con un ricordo sbagliato nascondeva quello giusto per significato.
             for entry in self.semantic_recall(query_embedding, limit=limit):
-                if entry["score"] >= semantic_threshold:
-                    entry["why"] = f"simile per significato ({entry['score']:.2f})"
-                    candidates[(entry["key"], entry["category"])] = entry
+                if entry["score"] < semantic_threshold:
+                    continue
+                similarity = entry["score"]
+                key = (entry["key"], entry["category"])
+                if key in candidates:
+                    candidates[key]["score"] += similarity
+                    candidates[key]["why"] += f" e simile per significato ({similarity:.2f})"
+                else:
+                    entry["score"] = similarity * self._freshness(entry)
+                    entry["why"] = f"simile per significato ({similarity:.2f})"
+                    candidates[key] = entry
         ranked = sorted(candidates.values(), key=lambda e: (e["score"], e.get("updated_at") or ""), reverse=True)
         if ranked:
             top = ranked[0]
