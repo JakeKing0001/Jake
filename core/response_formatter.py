@@ -260,6 +260,9 @@ def _format_success(intent: str, result: SkillResult, registry=None) -> str | No
         # ulteriore da applicare, a differenza di ogni altro intent qui sotto.
         return data.get("response", "")
     if intent == "REMEMBER":
+        if data.get("status") == "updated" and data.get("previous"):
+            # F5.4: un aggiornamento non e' mai silenzioso - la versione precedente resta nello storico
+            return f"Ok, ho aggiornato {data['key']}: ora è {data['value']} (prima era {data['previous']})."
         return f"Ok, ricorderò che {data['key']} è {data['value']}."
     if intent == "RECALL":
         def _entry_line(entry: dict) -> str:

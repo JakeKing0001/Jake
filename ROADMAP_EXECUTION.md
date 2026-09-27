@@ -269,7 +269,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F5.1` | Memory Platform (F5.1.1/F5.1.3-F5.1.6 il 21/09/2026: schema versionato, migrazioni transazionali con backup, metadati, recupero; resta F5.1.2 separare entita'/episodi/procedure e la prova su una copia del database reale) | `DOING` |
 | `F5.2` | Memory Platform | `DOING` |
 | `F5.3` | Knowledge Model | `DOING` |
-| `F5.4` | Memory Reliability | `DOING` |
+| `F5.4` | Memory Reliability (27/09/2026: nessuna sovrascrittura silenziosa di fatti/preferenze - versione precedente conservata e dichiarata, un'inferenza non sostituisce un fatto detto dall'utente, conflitti registrati, "dimentica" cancella anche le versioni; conferma sui conflitti importanti e consolidamento non ancora) | `DOING` |
 | `F5.5` | Retrieval Quality (27/09/2026: ricordi pertinenti con fonte anche nelle risposte libere, budget di contesto, grafo a un salto; agente e metriche ancora da fare) | `DOING` |
 | `F5.6` | Context Runtime | `DOING` |
 | `F5.7` | Privacy Engineering (libreria completa il 21/09/2026; dal 26/09/2026 nel percorso reale: "dimentica" cancella anche registro e indici con ricevuta, l'uso dei ricordi viene registrato, "da dove sai X" spiega la provenienza; purge/export/backup non ancora esposti a voce/HUD) | `DOING` |

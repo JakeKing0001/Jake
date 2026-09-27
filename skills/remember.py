@@ -64,11 +64,12 @@ class RememberSkill:
         if self.embedding_provider is not None:
             embedding = self.embedding_provider.embed(f"{key}: {value}")
 
-        self.memory_manager.remember(
+        outcome = self.memory_manager.remember(
             key, value, category=category, importance=importance, embedding=embedding, project=project,
             ttl_days=ttl_days,
-        )
-        return SkillResult(success=True, data={"key": key, "value": value, "category": category, "ttl_days": ttl_days})
+        ) or {}
+        return SkillResult(success=True, data={"key": key, "value": value, "category": category, "ttl_days": ttl_days,
+                                               "status": outcome.get("status"), "previous": outcome.get("previous")})
 
     @staticmethod
     def _parse_ttl_days(raw) -> float | None:

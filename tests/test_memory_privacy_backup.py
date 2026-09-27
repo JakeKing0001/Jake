@@ -13,6 +13,7 @@ from core.memory_backup import (
     verify_backup,
 )
 from core.memory_manager import MemoryManager
+from core.memory_schema import SCHEMA_VERSION
 from core.memory_privacy import (
     CONFIRM_PHRASE, MemoryPrivacyDashboard, RetentionPolicy, apply_retention, policy_for_profile,
 )
@@ -149,8 +150,8 @@ class DeletionTests(Base):
         self.memory.link("password wifi", "fact", "di", "router", "fact")
         receipt = self.dash.delete("password wifi", actor="davide")
         assert receipt is not None
-        self.assertEqual(receipt.rows_removed, {"memory_relations": 1, "memory_audit": 1, "memories": 1,
-                                               "conversation_history_redacted": 0})
+        self.assertEqual(receipt.rows_removed, {"memory_relations": 1, "memory_audit": 1, "memory_versions": 0,
+                                               "memories": 1, "conversation_history_redacted": 0})
         self.assertTrue(receipt.verified)
         self.assertEqual(receipt.residue_check, "clean")
         self.assertIsNone(self.dash.get("password wifi"))
@@ -361,7 +362,7 @@ class ExportTests(Base):
     def test_json_export_is_valid_machine_readable_json(self):
         path = self.dash.export_json(self.dir / "export.json")
         loaded = json.loads(path.read_text(encoding="utf-8"))
-        self.assertEqual(loaded["schema_version"], 2)
+        self.assertEqual(loaded["schema_version"], SCHEMA_VERSION)
         self.assertEqual(len(loaded["records"]), 2)
 
     def test_markdown_export_is_readable_and_omits_secrets(self):

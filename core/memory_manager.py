@@ -103,7 +103,7 @@ class MemoryManager:
         valid_from: str | None = None,
         valid_until: str | None = None,
         created_by: str | None = None,
-    ) -> None:
+    ) -> dict:
         """Salva o aggiorna un ricordo (upsert su key+category). Se e' fornito un embedding e
         un ricordo esistente nella stessa categoria/progetto e' semanticamente quasi identico
         (v3.4, vedi DEDUP_SIMILARITY_THRESHOLD), aggiorna QUELLO invece di crearne uno nuovo con
@@ -139,9 +139,27 @@ class MemoryManager:
                 if duplicate_key is not None:
                     key = duplicate_key
 
-            existed = self._connection.execute(
-                "SELECT 1 FROM memories WHERE key = ? AND category = ?", (key, category),
-            ).fetchone() is not None
+            previous_row = self._connection.execute(
+                "SELECT value, source FROM memories WHERE key = ? AND category = ?", (key, category),
+            ).fetchone()
+            existed = previous_row is not None
+            # F5.4.1/F5.4.2 (solo per la conoscenza: fatti e preferenze, non i record JSON di procedure, automazioni,
+            # contatti o riassunti che per costruzione si sostituiscono): mai una sovrascrittura silenziosa.
+            outcome = {"status": "created" if not existed else "unchanged", "previous": None}
+            changed = existed and " ".join(str(previous_row["value"]).lower().split()) != " ".join(value.lower().split())
+            if changed and category not in self.KNOWLEDGE_CATEGORIES:
+                outcome["status"] = "updated"  # record strutturato: si sostituisce, senza versioni
+            if changed and category in self.KNOWLEDGE_CATEGORIES:
+                old_value, old_source = previous_row["value"], previous_row["source"]
+                outcome["previous"] = old_value
+                if old_source == "user" and source != "user":
+                    # un'inferenza (di Jake o di un agente) non cancella cio' che l'utente ha detto
+                    self._record_version(key, category, value, source, now, "conflict_rejected")
+                    self._audit(key, category, "conflict", source, "inferenza in conflitto con un fatto dell'utente")
+                    self._connection.commit()
+                    return {"status": "conflict", "previous": old_value}
+                self._record_version(key, category, old_value, old_source, now, "superseded")
+                outcome["status"] = "updated"
             self._connection.execute(
                 """
                 INSERT INTO memories
@@ -164,6 +182,24 @@ class MemoryManager:
             self._apply_metadata(key, category, sensitivity, owner, confidence, valid_from, valid_until, author)
             self._audit(key, category, "updated" if existed else "created", created_by or source)
             self._connection.commit()
+            return outcome
+
+    KNOWLEDGE_CATEGORIES = frozenset({"fact", "preference"})
+
+    def _record_version(self, key: str, category: str, value: str, source: str, at: str, reason: str) -> None:
+        self._connection.execute(
+            "INSERT INTO memory_versions (memory_key, memory_category, value, source, valid_until, recorded_at, reason) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)", (key, category, value, source or "unknown", at, at, reason),
+        )
+
+    def versions(self, key: str, category: str = "fact") -> list[dict]:
+        """F5.4.2: le versioni precedenti di un ricordo (e le inferenze rifiutate), dalla piu' recente."""
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT value, source, valid_until, reason FROM memory_versions WHERE memory_key = ? AND memory_category = ? "
+                "ORDER BY id DESC", (key, category),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     @staticmethod
     def _validate_metadata(sensitivity, confidence, valid_from, valid_until) -> None:
