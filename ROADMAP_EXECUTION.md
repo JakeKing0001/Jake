@@ -281,7 +281,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F6.6` | Meeting Experience (libreria di regole il 21/09/2026: brief senza dati inventati, consenso e indicatore, follow-up gated; dal 27/09/2026 "com'e' la mia giornata" usa il brief con promemoria e todo reali; nessun connettore reale) | `DOING` |
 | `F6.7` | Runtime Reliability (monitor/housekeeping il 22/09/2026; task monitor collegato a JakeCore/EventBus/HUD lo stesso giorno - vedi F6.3; dal 27/09/2026 "avvisami quando finisce la build" su un processo reale, notifica dalla pipeline unica; housekeeping senza connettori reali ne' pilot) | `DOING` |
 | `F7.1` | Companion Security (F7.1.1/.4/.5/.6/.7 il 22/09/2026; F7.1.2 - pairing HTTP - chiuso il 22/09/2026, vedi F7.2; TLS reale generato/persistito dal server il 22/09/2026; capability persistenti F7.1.3 dal 27/09/2026 - impostabili a voce con SET_DEVICE_ACCESS, valide subito e dopo un riavvio, riga corrotta = nessun permesso; manca la distribuzione del certificato al telefono oltre al pairing) | `DOING` |
-| `F7.2` | Mobile Companion (pairing/chat live/approve-deny sullo stesso task end-to-end il 22/09/2026; lista/revoca dispositivi via HTTP e prima app Android reale - MAI compilata/eseguita in questo ambiente - il 22/09/2026; senza file share/offline queue/wipe via companion) | `DOING` |
+| `F7.2` | Mobile Companion (pairing/chat live/approve-deny sullo stesso task end-to-end il 22/09/2026; lista/revoca dispositivi via HTTP e prima app Android reale - MAI compilata/eseguita in questo ambiente - il 22/09/2026; dal 27/09/2026 revoca/rotazione chiudono anche lo stream gia' aperto; senza file share/offline queue/wipe lato app) | `DOING` |
 | `F7.3` | Voice Devices | `BACKLOG` |
 | `F7.4` | Presence Runtime | `DOING` |
 | `F7.5` | Home Integration | `DOING` |
@@ -9581,6 +9581,17 @@ Dipende da: F7.1.
 
 Criterio di uscita: tutti i comandi mobile attraversano lo stesso policy kernel del PC;
 una notifica apre il task corretto e un'eventuale risposta aggiorna la stessa sessione.
+
+- 27/09/2026 (F7.2.7 lato server, bug di sicurezza reale): revocare un dispositivo (telefono perso) invalidava
+  le richieste NUOVE, ma uno stream SSE `/events` gia' aperto non ricontrollava mai la credenziale e continuava a
+  ricevere ogni evento (risposte, trascrizioni, notifiche) fino a una riconnessione. Ora lo stream verifica al
+  massimo ogni secondo, con una lettura economica senza decifratura
+  (`DeviceCredentialStore.active_credential_issued_at`), che la credenziale con cui si e' autenticato valga
+  ancora - revocata, scaduta o RUOTATA (nuova credenziale = la vecchia non vale piu') -> stream chiuso, con riga
+  di audit `stream_closed_credential_invalid`. Trovato anche perche' la chiusura non arrivava al client: lo
+  stream dichiara `Connection: keep-alive`, quindi il gestore deve chiudere la connessione esplicitamente. Test
+  con server companion reale su loopback, credenziali reali, stream aperto durante revoca e rotazione. La
+  cancellazione delle chiavi sul telefono (app) resta da fare.
 
 - `F7.2.1`/`F7.2.2`/`F7.2.3`/`F7.2.4`/`F7.2.8` (Companion Mobile MVP end-to-end, riuso di F7.1/F7.6/F6 senza sistemi
   paralleli) — 22/09/2026: `core/pairing_service.py` (esteso), `core/companion_guard.py`/`core/companion_server.py`

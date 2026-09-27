@@ -75,5 +75,62 @@ class DeviceAccessTests(unittest.TestCase):
         self.assertEqual(CompanionGuard(audit=None, capability_store=self.store).capabilities_of("phone-1"), frozenset())
 
 
+
+class OpenStreamRevocationTests(unittest.TestCase):
+    """F7.2.7: uno stream SSE gia' aperto non sopravvive alla revoca (telefono perso) ne' alla rotazione della
+    credenziale. Prima continuava a ricevere ogni evento fino alla riconnessione."""
+
+    setUp = DeviceAccessTests.setUp  # stesso server reale e stesso database temporaneo, senza rieseguirne i test
+    _start = DeviceAccessTests._start
+
+    def _open_stream(self, token):
+        import threading
+
+        received, closed = [], threading.Event()
+
+        def read():
+            request = urllib.request.Request(f"http://127.0.0.1:{self.server.port}/events")
+            request.add_header("Authorization", f"Bearer {token}")
+            try:
+                with urllib.request.urlopen(request, timeout=10) as response:
+                    for raw in response:
+                        line = raw.decode("utf-8").strip()
+                        if line.startswith("data: "):
+                            received.append(json.loads(line[len("data: "):])["payload"].get("text"))
+            except OSError:
+                pass
+            closed.set()
+
+        threading.Thread(target=read, daemon=True).start()
+        return received, closed
+
+    def _publish(self, text):
+        from core.hud_protocol import EventType, HudEvent
+
+        self.server.event_bus.publish(HudEvent(EventType.JAKE_MESSAGE, {"text": text}))
+
+    def _wait_for(self, predicate, timeout=5.0):
+        import time
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline and not predicate():
+            time.sleep(0.05)
+        return predicate()
+
+    def test_revoking_a_lost_phone_closes_its_open_stream(self):
+        received, closed = self._open_stream(self.token)
+        self.assertTrue(self._wait_for(lambda: (self._publish("prima"), "prima" in received)[1]))
+        self.assertTrue(self.store.revoke("phone-1"))
+        self.assertTrue(closed.wait(4), "lo stream del dispositivo revocato e' rimasto aperto")
+        self._publish("dopo la revoca")
+        self.assertNotIn("dopo la revoca", received)
+
+    def test_rotating_the_credential_closes_the_stream_opened_with_the_old_one(self):
+        received, closed = self._open_stream(self.token)
+        self.assertTrue(self._wait_for(lambda: (self._publish("prima"), "prima" in received)[1]))
+        self.store.rotate_credential("phone-1")
+        self.assertTrue(closed.wait(4), "il vecchio token non vale piu', il suo stream nemmeno")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -682,7 +682,23 @@ class _Handler(BaseHTTPRequestHandler):
         finally:
             guard.close_stream(self._identity)
 
+    # F7.2.7: ogni quanto uno stream aperto ricontrolla che la credenziale del dispositivo valga ancora
+    STREAM_CREDENTIAL_CHECK_S = 1.0
+
+    def _stream_credential_still_valid(self, device_id: str | None, issued_at) -> bool:
+        """Uno stream SSE resta aperto a lungo: senza questo controllo un dispositivo revocato (telefono perso) o con
+        la credenziale ruotata o scaduta continuava a ricevere ogni evento fino alla riconnessione. Solo per gli
+        stream autenticati con una credenziale per-dispositivo (il token globale legacy non identifica nessuno)."""
+        store = self.companion.credential_store
+        if device_id is None or store is None:
+            return True
+        return store.active_credential_issued_at(device_id) == issued_at
+
     def _stream_events_locked(self):
+        device_id = self._authenticated_device_id
+        store = self.companion.credential_store
+        issued_at = store.active_credential_issued_at(device_id) if (device_id and store) else None
+        next_check = time.monotonic() + self.STREAM_CREDENTIAL_CHECK_S
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
@@ -715,12 +731,25 @@ class _Handler(BaseHTTPRequestHandler):
             for event in replayed:
                 self.wfile.write(f"id: {event.sequence_id}\ndata: {event.to_json()}\n\n".encode("utf-8"))
             self.wfile.flush()
+            next_keepalive = time.monotonic() + SSE_KEEPALIVE_SECONDS
             while True:
                 try:
-                    event = subscriber.get(timeout=SSE_KEEPALIVE_SECONDS)
+                    event = subscriber.get(timeout=min(SSE_KEEPALIVE_SECONDS, self.STREAM_CREDENTIAL_CHECK_S))
                 except queue.Empty:
-                    self.wfile.write(b": keep-alive\n\n")
-                    self.wfile.flush()
+                    event = None
+                now = time.monotonic()
+                if now >= next_check:
+                    next_check = now + self.STREAM_CREDENTIAL_CHECK_S
+                    if not self._stream_credential_still_valid(device_id, issued_at):
+                        self._audit("stream_closed_credential_invalid", status=401)
+                        # lo stream ha dichiarato keep-alive: senza questo la connessione resterebbe aperta in attesa
+                        self.close_connection = True
+                        return
+                if event is None:
+                    if now >= next_keepalive:
+                        next_keepalive = now + SSE_KEEPALIVE_SECONDS
+                        self.wfile.write(b": keep-alive\n\n")
+                        self.wfile.flush()
                     continue
                 self.wfile.write(f"id: {event.sequence_id}\ndata: {event.to_json()}\n\n".encode("utf-8"))
                 self.wfile.flush()
