@@ -967,6 +967,39 @@ class JakeCore:
         return self._answer_counted(normalized, raw_text)
 
 
+    # Intent che gestiscono gia' da soli un impegno con scadenza: niente domanda in piu'
+    COMMITMENT_HANDLED_INTENTS = frozenset({"SET_REMINDER", "ADD_TODO", "SET_DAILY_REMINDER", "SET_TIMER"})
+
+    def _propose_commitment_reminder(self, raw_text: str, response: str) -> str:
+        """F6.4.1/F6.4.2: "devo X entro venerdi'" -> Jake propone un promemoria e aspetta il si'/no normale
+        (conferma della pipeline, stessa policy di un comando). Mai creato da solo, mai in modalita' privata, mai se
+        il turno ha gia' una domanda in sospeso o ha gia' creato un promemoria/una todo."""
+        from datetime import datetime as _datetime
+
+        from core.commitments import describe, detect_commitment
+
+        if self.private_mode or self.conversation_state.get_pending_action() is not None:
+            return response
+        last = getattr(self, "last_exchange", None) or {}
+        command = last.get("command")
+        if command is not None and command.intent in self.COMMITMENT_HANDLED_INTENTS:
+            return response
+        now = getattr(self, "commitment_clock", _datetime.now)()  # iniettabile nei test
+        commitment = detect_commitment(raw_text, now)
+        if commitment is None:
+            return response
+        minutes = max(1, round((commitment.remind_at - now).total_seconds() / 60))
+        self.conversation_state.set_pending_action({
+            "intent": "SET_REMINDER",
+            "parameters": {"text": commitment.what, "in_minutes": minutes},
+            "reason": "confirmation_required",
+            "text": raw_text,
+            "trace_id": new_trace_id(),
+            "proposed_by": "commitment",
+        })
+        question = f"Vuoi che te lo ricordi {describe(commitment.remind_at, now)}?"
+        return f"{response} {question}".strip() if response else question
+
     def _run_in_current_profile(self, callback):
         """
         Esegue callback nello spazio memoria/conversazione del profilo vocale
@@ -1091,6 +1124,7 @@ class JakeCore:
 
         if response is None:
             response = ""
+        response = self._propose_commitment_reminder(raw_text, response)
         # La cronologia in RAM (self.conversation_state) resta attiva anche in modalita' privata
         # (v5.6, Privacy Engine): serve alla sessione corrente per pronomi/riferimenti e sparisce
         # comunque al riavvio. Cio' che la modalita' privata sospende e' la scrittura su DISCO E

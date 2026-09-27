@@ -276,7 +276,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F6.1` | Proactivity Platform (26/09/2026: promemoria, automazioni e avvisi passano dagli stessi freni in `JakeCore.notify` - duplicati, budget orario, quiet hours, conversazione in corso - e si sospendono insieme durante prove e benchmark) | `DOING` |
 | `F6.2` | Proactivity Quality | `DOING` |
 | `F6.3` | Notification UX (libreria di decisione il 21/09/2026; collegata a JakeCore/EventBus/HUD il 22/09/2026; dal 27/09/2026 "meno notifiche cosi'", "non mostrarmelo piu'", "mostramelo di nuovo" e "rimandala" sull'ultima notifica, a voce e dai pulsanti del toast HUD, persistenti; nessuna consegna reale di call/companion) | `DOING` |
-| `F6.4` | Goal Runtime | `DOING` |
+| `F6.4` | Goal Runtime (27/09/2026: "devo X entro <giorno>" diventa una proposta di promemoria confermata col si'/no normale) | `DOING` |
 | `F6.5` | Automation Runtime | `DOING` |
 | `F6.6` | Meeting Experience (libreria di regole il 21/09/2026: brief senza dati inventati, consenso e indicatore, follow-up gated; dal 27/09/2026 "com'e' la mia giornata" usa il brief con promemoria e todo reali; nessun connettore reale) | `DOING` |
 | `F6.7` | Runtime Reliability (monitor/housekeeping il 22/09/2026; task monitor collegato a JakeCore/EventBus/HUD lo stesso giorno - vedi F6.3; dal 27/09/2026 "avvisami quando finisce la build" su un processo reale, notifica dalla pipeline unica; housekeeping senza connettori reali ne' pilot) | `DOING` |
@@ -9351,6 +9351,15 @@ Dipende da: F5.2 e F6.2.
 7. `F6.4.7` Visualizzare dipendenze e blocker nell'HUD.
 
 Criterio di uscita: una demo attraversa creazione, blocco, revisione e completamento verificato.
+
+- 27/09/2026 (F6.4.1/F6.4.2): `core/commitments.py` riconosce la sola forma esplicita "devo / prometto di / mi sono
+  impegnato a <cosa> entro <oggi|stasera|domani|dopodomani|giorno della settimana>" e `JakeCore` risponde come
+  sempre aggiungendo "Vuoi che te lo ricordi venerdì alle 9?": la PROPOSTA e' un'azione in sospeso `SET_REMINDER`
+  che passa dal si'/no normale (policy e ricevute come un comando). Mai creata da sola, mai in modalita' privata,
+  mai se il turno ha gia' una domanda aperta o ha gia' creato promemoria/todo; senza scadenza nessuna domanda. Il
+  promemoria arriva la mattina del giorno di scadenza (alle 17/18 per oggi/stasera) e conserva le parole
+  dell'utente con maiuscole e accenti. Test sul JakeCore reale con SetReminderSkill e ReminderManager veri.
+  Milestone, rinegoziazione e blocker (F6.4.3-F6.4.7) non ancora.
 
 ### F6.5 — Routine apprese e focus assistant
 
