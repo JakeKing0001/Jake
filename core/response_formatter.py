@@ -132,6 +132,8 @@ def _format_control_error(intent: str, error: str | None, data: dict) -> str | N
 def _format_control_success(intent: str, data: dict) -> str | None:
     if intent == "WATCH_PROCESS":
         return f"Ok, ti avviso quando {data['process']} finisce."
+    if intent == "DAILY_BRIEF":
+        return str(data.get("text") or "")
     if intent == "RETRY_LAST_ACTION":
         return str(data.get("response") or "")  # la risposta del comando ripetuto, gia' formattata
     if intent == "LESS_NOTIFICATIONS_LIKE_THIS":

@@ -278,7 +278,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F6.3` | Notification UX (libreria di decisione il 21/09/2026; collegata a JakeCore/EventBus/HUD il 22/09/2026; dal 27/09/2026 "meno notifiche cosi'", "non mostrarmelo piu'", "mostramelo di nuovo" e "rimandala" sull'ultima notifica, a voce e dai pulsanti del toast HUD, persistenti; nessuna consegna reale di call/companion) | `DOING` |
 | `F6.4` | Goal Runtime | `DOING` |
 | `F6.5` | Automation Runtime | `DOING` |
-| `F6.6` | Meeting Experience (libreria di regole il 21/09/2026: brief senza dati inventati, consenso e indicatore, follow-up gated; nessun connettore reale) | `DOING` |
+| `F6.6` | Meeting Experience (libreria di regole il 21/09/2026: brief senza dati inventati, consenso e indicatore, follow-up gated; dal 27/09/2026 "com'e' la mia giornata" usa il brief con promemoria e todo reali; nessun connettore reale) | `DOING` |
 | `F6.7` | Runtime Reliability (monitor/housekeeping il 22/09/2026; task monitor collegato a JakeCore/EventBus/HUD lo stesso giorno - vedi F6.3; dal 27/09/2026 "avvisami quando finisce la build" su un processo reale, notifica dalla pipeline unica; housekeeping senza connettori reali ne' pilot) | `DOING` |
 | `F7.1` | Companion Security (F7.1.1/.4/.5/.6/.7 il 22/09/2026; F7.1.2 - pairing HTTP - chiuso il 22/09/2026, vedi F7.2; TLS reale generato/persistito dal server il 22/09/2026; capability persistenti F7.1.3 dal 27/09/2026 - impostabili a voce con SET_DEVICE_ACCESS, valide subito e dopo un riavvio, riga corrotta = nessun permesso; manca la distribuzione del certificato al telefono oltre al pairing) | `DOING` |
 | `F7.2` | Mobile Companion (pairing/chat live/approve-deny sullo stesso task end-to-end il 22/09/2026; lista/revoca dispositivi via HTTP e prima app Android reale - MAI compilata/eseguita in questo ambiente - il 22/09/2026; senza file share/offline queue/wipe via companion) | `DOING` |
@@ -9364,6 +9364,15 @@ Dipende da: connettori autorizzati, F5 e F6.3.
 7. `F6.6.7` Applicare redazione a dati di partecipanti e organizzazioni.
 
 Criterio di uscita: brief privo di dati inventati e meeting workflow conforme al consenso.
+
+- 27/09/2026 (F6.6.1-F6.6.3 nel runtime): `core/daily_brief.py` non era usato da nessun comando. `DAILY_BRIEF`
+  ("com'e' la mia giornata", "cosa ho oggi", "... con i dettagli") costruisce il brief dalle fonti locali reali
+  (promemoria delle prossime 24 ore dal `ReminderManager` del registro, attivita' aperte dal `TodoManager`), breve o
+  dettagliato con fonte ed eta' di ogni riga; una fonte guasta viene detta, non riempita. Bug reale nella libreria:
+  una giornata senza impegni rispondeva "Non ho dati da nessuna fonte per questa mattina" (falso: le fonti avevano
+  risposto; e a qualsiasi ora "mattina") - ora "Niente in programma: promemoria e todo non riportano nulla.", e
+  "nessuna fonte collegata" resta per il caso vero. Test con database temporanei e dati sintetici. Agenda, meteo,
+  viaggio e casa restano senza connettore; brief proattivo del mattino non ancora.
 
 - `F6.6.1`-`F6.6.7` (libreria di regole, senza connettori reali) — 21/09/2026: `core/daily_brief.py`, `core/meeting_copilot.py`.
   I connettori (calendario, posta, viaggio) dipendono da F7 e NON esistono: qui c'e' il contratto (`BriefSource`, `related()`) e gli

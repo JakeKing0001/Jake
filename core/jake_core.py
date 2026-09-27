@@ -553,6 +553,10 @@ class JakeCore:
         # F4.6.2: "riprova" - l'ultima azione fallita, di nuovo attraverso questa stessa pipeline
         from skills.retry_last import RetryLastActionSkill
         self.skill_registry.register_skill("RETRY_LAST_ACTION", RetryLastActionSkill(self))
+        # F6.6: "com'e' la mia giornata" - il brief con fonti dichiarate, dalle fonti locali reali
+        from skills.daily_brief import DailyBriefSkill
+        self.skill_registry.register_skill("DAILY_BRIEF", DailyBriefSkill(
+            self.skill_registry.reminder_manager, self.skill_registry.todo_manager))
         # F6.3.4: controllo dell'utente sull'ultima notifica proattiva mostrata
         from skills.notification_feedback import (LessNotificationsLikeThisSkill, MuteNotificationSkill,
                                                   SnoozeNotificationSkill, UnmuteNotificationSkill)

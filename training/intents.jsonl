@@ -686,3 +686,6 @@
 {"text": "riprova l'ultima azione", "intent": "RETRY_LAST_ACTION", "parameters": {}}
 {"text": "riprova", "intent": "RETRY_LAST_ACTION", "parameters": {}}
 {"text": "prova di nuovo", "intent": "RETRY_LAST_ACTION", "parameters": {}}
+{"text": "com'è la mia giornata", "intent": "DAILY_BRIEF", "parameters": {}}
+{"text": "cosa ho oggi", "intent": "DAILY_BRIEF", "parameters": {}}
+{"text": "fammi il punto della giornata con i dettagli", "intent": "DAILY_BRIEF", "parameters": {"detailed": true}}
