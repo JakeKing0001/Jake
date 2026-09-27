@@ -12,11 +12,13 @@ GlassPanel {
     property string transcriptText: ""
     property bool transcriptFinal: false
     property string stepDescription: ""
+    // F4.5.2: i passi del compito corrente con stato e durata (vuoto = mostra solo stepDescription)
+    property var planSteps: []
     property string evidenceSummary: ""
     property string inspectionReason: ""
     property string lastUser: ""
     property string lastJake: ""
-    readonly property bool hasContent: model.count > 0 || transcriptText.length > 0 || stepDescription.length > 0
+    readonly property bool hasContent: model.count > 0 || transcriptText.length > 0 || stepDescription.length > 0 || planSteps.length > 0
         || evidenceSummary.length > 0 || inspectionReason.length > 0
     implicitHeight: expanded ? 320 : Math.min(150, header.implicitHeight + summary.implicitHeight + live.implicitHeight + 28)
 
@@ -131,9 +133,26 @@ GlassPanel {
                 font.pixelSize: Theme.fontSmall
                 Accessible.name: qsTr("Sto sentendo: ") + text
             }
+            Repeater {
+                model: root.planSteps
+                delegate: Text {
+                    required property var modelData
+                    width: parent ? parent.width : 0
+                    readonly property string mark: modelData.status === "done" ? "✓"
+                        : modelData.status === "failed" ? "✗" : "…"
+                    text: qsTr("%1 %2. %3%4").arg(mark).arg(modelData.step).arg(modelData.description)
+                        .arg(modelData.status === "running" ? "" : qsTr(" (%1 s)").arg((modelData.duration_ms / 1000).toFixed(1)))
+                    color: modelData.status === "done" ? Theme.ok : modelData.status === "failed" ? Theme.danger : Theme.warn
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: Theme.fontSmall
+                    Accessible.name: qsTr("Passo %1, %2: %3").arg(modelData.step).arg(
+                        modelData.status === "done" ? qsTr("fatto") : modelData.status === "failed" ? qsTr("fallito") : qsTr("in corso"))
+                        .arg(modelData.description)
+                }
+            }
             Text {
                 width: parent.width
-                visible: root.stepDescription.length > 0
+                visible: root.stepDescription.length > 0 && root.planSteps.length === 0
                 text: qsTr("Passo: %1").arg(root.stepDescription)
                 color: Theme.warn
                 wrapMode: Text.WordWrap

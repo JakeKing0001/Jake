@@ -50,6 +50,8 @@ class HudViewState:
     last_error: str = ""
     step_index: int = 0
     step_description: str = ""
+    # F4.5.2: i passi del compito corrente [{step, description, status, duration_ms}], al massimo MAX_PLAN_STEPS
+    plan_steps: list[dict[str, Any]] = field(default_factory=list)
     evidence: list[dict[str, str]] = field(default_factory=list)
     inspection_verdict: str = ""
     inspection_reason: str = ""
@@ -132,9 +134,7 @@ class HudViewState:
             else:
                 self.state = "SPEAKING"
         elif event_type == "AGENT_STEP":
-            self.step_index = _int(payload, "step")
-            self.step_description = _text(payload, "description")
-            self.state = "EXECUTING"
+            self._plan_step(payload)
         elif event_type == "ERROR":
             self.last_error = _text(payload, "detail")
             self.state = "ERROR"
@@ -185,6 +185,27 @@ class HudViewState:
             inspection = inspection if isinstance(inspection, dict) else {}
             self.inspection_verdict = _text(inspection, "verdict")
             self.inspection_reason = _text(inspection, "reason") or _text(payload, "error")
+
+    MAX_PLAN_STEPS = 8
+
+    def _plan_step(self, payload: dict[str, Any]) -> None:
+        step, description = _int(payload, "step"), _text(payload, "description")
+        status = _text(payload, "status") or "running"
+        if status not in ("running", "done", "failed"):
+            self.ignored += 1
+            return
+        if status == "running":
+            if step <= 1 or any(item["step"] >= step for item in self.plan_steps):
+                self.plan_steps = []  # un compito nuovo riparte dal primo passo
+            self.plan_steps.append({"step": step, "description": description, "status": "running", "duration_ms": 0})
+            del self.plan_steps[:-self.MAX_PLAN_STEPS]
+            self.step_index, self.step_description, self.state = step, description, "EXECUTING"
+            return
+        duration = payload.get("duration_ms")
+        for item in self.plan_steps:
+            if item["step"] == step and item["status"] == "running":
+                item["status"] = status
+                item["duration_ms"] = int(duration) if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration >= 0 else 0
 
     def _transcript(self, payload: dict[str, Any]) -> None:
         kind = payload.get("kind")

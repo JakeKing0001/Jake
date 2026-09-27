@@ -182,6 +182,8 @@ ApplicationWindow {
             transcriptText: jake.transcriptText
             transcriptFinal: jake.transcriptFinal
             stepDescription: jake.state === "EXECUTING" ? jake.stepDescription : ""
+            // il piano resta visibile finche' si lavora e mentre si attende una conferma a meta' compito
+            planSteps: jake.state === "EXECUTING" || jake.state === "WAITING" ? jake.planSteps : []
             evidenceSummary: jake.evidenceSummary
             inspectionReason: jake.inspectionReason
         }

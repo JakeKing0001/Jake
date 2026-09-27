@@ -822,7 +822,10 @@ class JakeCore:
 
     def _on_agent_step(self, step_index: int, description: str) -> None:
         self.session_hooks.call("set_state", "working", description)
-        self.event_bus.publish(HudEvent(EventType.AGENT_STEP, {"step": step_index, "description": description}))
+        # F4.5.2: il passo in corso; l'esito e la durata arrivano da _on_agent_step_completed
+        self._running_step = (step_index, description, time.monotonic())
+        self.event_bus.publish(HudEvent(EventType.AGENT_STEP, {"step": step_index, "description": description,
+                                                               "status": "running"}))
 
     def _publish_plan_outcome_effect_proof_events(self, outcome) -> None:
         """Estrae da un `PlanOutcome` (core/plan_executor.py) le stesse due liste che
@@ -870,6 +873,17 @@ class JakeCore:
         intent/parametri/esito di ogni passo vengono salvati (mai l'intero `SkillResult` - i dati
         grezzi di una skill potrebbero contenere contenuto esterno/sensibile che non ha senso
         duplicare su un secondo file, il ledger e' gia' la fonte di verita' per quello)."""
+        running, self._running_step = getattr(self, "_running_step", None), None
+        if running is not None and outcome.steps:
+            # F4.5.2: piano e passi live - esito e durata del passo appena finito (un passo senza parametri non
+            # e' mai partito: non ha un "running" da chiudere)
+            step_index, description, started = running
+            last = outcome.steps[-1]
+            self.event_bus.publish(HudEvent(EventType.AGENT_STEP, {
+                "step": step_index, "description": description,
+                "status": "done" if last.result is not None and last.result.success else "failed",
+                "duration_ms": round((time.monotonic() - started) * 1000),
+            }))
         if outcome.trace_id is None or outcome.request is None or outcome.agent_name is None:
             return
         checkpoint = AgentCheckpoint(

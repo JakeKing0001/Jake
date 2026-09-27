@@ -239,6 +239,31 @@
       "expect": {"private_mode": false}
     },
     {
+      "name": "piano live: ogni passo con stato e durata, lo stato resta EXECUTING finche' serve",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "AGENT_STEP", "payload": {"step": 1, "description": "Cerco il file", "status": "running"}, "sequence_id": 1}},
+        {"event": {"type": "AGENT_STEP", "payload": {"step": 1, "description": "Cerco il file", "status": "done", "duration_ms": 420}, "sequence_id": 2}},
+        {"event": {"type": "AGENT_STEP", "payload": {"step": 2, "description": "Lo apro"}, "sequence_id": 3}},
+        {"event": {"type": "AGENT_STEP", "payload": {"step": 2, "description": "Lo apro", "status": "failed", "duration_ms": 90}, "sequence_id": 4}},
+        {"event": {"type": "AGENT_STEP", "payload": {"step": 3, "description": "x", "status": "boh"}, "sequence_id": 5}}
+      ],
+      "expect": {"state": "EXECUTING", "step_index": 2, "ignored": 1, "plan_steps": [
+        {"step": 1, "description": "Cerco il file", "status": "done", "duration_ms": 420},
+        {"step": 2, "description": "Lo apro", "status": "failed", "duration_ms": 90}
+      ]}
+    },
+    {
+      "name": "piano live: un compito nuovo riparte dal passo 1",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "AGENT_STEP", "payload": {"step": 1, "description": "vecchio", "status": "running"}, "sequence_id": 1}},
+        {"event": {"type": "AGENT_STEP", "payload": {"step": 2, "description": "vecchio 2", "status": "running"}, "sequence_id": 2}},
+        {"event": {"type": "AGENT_STEP", "payload": {"step": 1, "description": "nuovo", "status": "running"}, "sequence_id": 3}}
+      ],
+      "expect": {"plan_steps": [{"step": 1, "description": "nuovo", "status": "running", "duration_ms": 0}]}
+    },
+    {
       "name": "livello audio fuori scala limitato a 1",
       "steps": [
         {"connect": true},

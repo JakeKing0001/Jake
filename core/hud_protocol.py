@@ -75,6 +75,8 @@ class EventType(str, Enum):
     # Il microfono solo mentre Jake ascolta un comando (mai durante l'ascolto della parola di
     # attivazione), la voce solo mentre Jake parla; limitato a circa 10 eventi al secondo.
     AUDIO_LEVEL = "AUDIO_LEVEL"
+    # (AGENT_STEP, F4.5.2: payload {"step", "description", "status": "running"|"done"|"failed", "duration_ms"} -
+    # "running" all'inizio del passo, poi un secondo evento con l'esito e la durata. Senza "status" = "running".)
     # F4.5.7: la modalita' privata e' attiva/disattiva. Payload: {"enabled": bool}. Mentre e' attiva ogni
     # evento esce dal bus gia' redatto (vedi redact_private): l'HUD mostra solo l'indicatore e "(privato)".
     PRIVACY_MODE = "PRIVACY_MODE"

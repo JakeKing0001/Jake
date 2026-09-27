@@ -24,6 +24,7 @@ struct HudViewState {
     QString lastError;
     int stepIndex = 0;
     QString stepDescription;
+    QJsonArray planSteps;      // F4.5.2: [{step, description, status, duration_ms}] del compito corrente
     QJsonArray evidence;       // [{kind, intent, verified}, ...]
     QString inspectionVerdict;
     QString inspectionReason;
@@ -66,6 +67,7 @@ private:
     Result ignore();
     void reduce(const QString &type, const QJsonObject &payload, const QString &traceId);
     void reduceTranscript(const QJsonObject &payload);
+    void reducePlanStep(const QJsonObject &payload);
     void reduceActivity(const QString &type, const QJsonObject &payload, const QString &traceId);
     static void push(QJsonArray &items, const QJsonValue &item);
 
