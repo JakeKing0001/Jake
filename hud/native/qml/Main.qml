@@ -28,6 +28,8 @@ ApplicationWindow {
     palette.base: Theme.control
     palette.highlight: Theme.accent
     palette.mid: Theme.controlHover
+    // F4.7.4: i controlli (pulsanti, campo di testo) ereditano il font della finestra: stessa scala del resto
+    font.pixelSize: Theme.fontBody
     palette.light: Theme.controlHover
 
     // 127.0.0.1:8765 e' il default di companion_server_port; il core passa quello reale (--jake-url).
@@ -38,6 +40,7 @@ ApplicationWindow {
     // Impostati da src/main.cpp: accessibilita' e qualita' dell'orb (F4.4.5, F4.3.5).
     property bool reducedMotion: false
     property bool highContrast: false
+    property real textScale: 1.0
     property string orbQuality: "high"
     property bool orb3d: false
 
@@ -78,6 +81,7 @@ ApplicationWindow {
 
     Component.onCompleted: {
         Theme.highContrast = highContrast
+        Theme.textScale = textScale
         if (jakeToken.length > 0)
             jake.setCredentials(jakeDeviceId, jakeToken)
         jake.connectToJake(jakeBaseUrl)
@@ -159,7 +163,7 @@ ApplicationWindow {
                     text: jake.confirmationAuth ? qsTr("Serve l'autenticazione") : qsTr("Serve la tua conferma")
                     color: Theme.attention
                     font.bold: true
-                    font.pixelSize: 13
+                    font.pixelSize: Theme.fontLabel
                 }
                 Text {
                     id: permissionDetail
@@ -262,13 +266,13 @@ ApplicationWindow {
                 spacing: 6
                 Button {
                     text: qsTr("Meno così")
-                    font.pixelSize: 11
+                    font.pixelSize: Theme.fontTiny
                     Accessible.name: qsTr("Mostra meno notifiche come questa")
                     onClicked: { jake.sendCommand("meno notifiche così"); toast.opacity = 0; }
                 }
                 Button {
                     text: qsTr("Non più")
-                    font.pixelSize: 11
+                    font.pixelSize: Theme.fontTiny
                     Accessible.name: qsTr("Non mostrare più notifiche come questa")
                     onClicked: { jake.sendCommand("non mostrarmelo più"); toast.opacity = 0; }
                 }

@@ -39,7 +39,7 @@ GlassPanel {
         anchors.margins: 12
         text: root.activityDetails
         color: Theme.textMuted
-        font.pixelSize: 11
+        font.pixelSize: Theme.fontTiny
         wrapMode: Text.WordWrap
         Accessible.name: text
     }

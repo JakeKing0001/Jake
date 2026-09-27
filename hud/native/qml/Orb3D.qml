@@ -125,7 +125,7 @@ Item {
         anchors.horizontalCenter: parent.horizontalCenter
         text: root.stateLabel
         color: "#e5e7eb"
-        font.pixelSize: 13
+        font.pixelSize: Theme.fontLabel
         style: Text.Raised
         styleColor: "#80000000"
         z: 1

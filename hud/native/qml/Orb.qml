@@ -104,6 +104,6 @@ Item {
         anchors.horizontalCenter: parent.horizontalCenter
         text: root.stateLabel
         color: "#d1d5db"
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontSmall
     }
 }

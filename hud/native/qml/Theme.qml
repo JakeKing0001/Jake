@@ -9,6 +9,10 @@ QtObject {
     // F4.7.3: impostato da Main.qml (src/main.cpp legge "Contrasto elevato" di Windows). Stesso materiale e stessa
     // forma di ogni pannello; cambiano solo i colori: nero pieno, testo bianco, bordi e focus ben visibili.
     property bool highContrast: false
+    // F4.7.4: "Dimensioni testo" di Windows (Accessibilita', 100-225%), impostato da Main.qml; Qt non lo applica da
+    // solo al QML. Tutte le dimensioni del testo passano da qui.
+    property real textScale: 1.0
+    function font(size) { return Math.round(size * textScale) }
 
     // Riempimento pieno finche' non c'e' il blur di sistema (F4.3): con un vetro semitrasparente il testo delle
     // finestre sotto trapelava e rendeva i pannelli illeggibili (screenshot reale del 26/09/2026).
@@ -31,6 +35,8 @@ QtObject {
 
     readonly property color control: highContrast ? "#000000" : "#262b36"
     readonly property color controlHover: highContrast ? "#1f1f1f" : "#323846"
-    readonly property int fontSmall: 12
-    readonly property int fontBody: 14
+    readonly property int fontTiny: font(11)
+    readonly property int fontSmall: font(12)
+    readonly property int fontLabel: font(13)
+    readonly property int fontBody: font(14)
 }

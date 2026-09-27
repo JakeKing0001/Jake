@@ -104,7 +104,7 @@ GlassPanel {
                 spacing: 2
                 Text {
                     text: senderRole === "user" ? qsTr("Tu") : qsTr("Jake")
-                    font.pixelSize: 11
+                    font.pixelSize: Theme.fontTiny
                     font.bold: true
                     color: senderRole === "user" ? Theme.accent : Theme.ok
                 }
