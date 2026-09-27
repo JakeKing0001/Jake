@@ -124,6 +124,9 @@ class AgentOutcome:
 
 class TaskAgent:
     MAX_STEPS = 6
+    # F8.5.5: lo stesso strumento fallito tante volte (anche con parametri diversi) e' un vicolo cieco, non un
+    # piano: osservato dal vivo su "trova il file X" senza cartella - passi bruciati a indovinare percorsi.
+    MAX_FAILURES_PER_INTENT = 3
     OBSERVATION_MAX_CHARS = 700
     # Budget di tempo per l'intero compito (v3.3), non solo per la singola chiamata al modello
     # (quella ha gia' il suo timeout=60 piu' sotto): un compito che continua a ragionare senza
@@ -465,6 +468,7 @@ class TaskAgent:
         # derivarlo - il campo non e' oggi consultato da nessuna delle sei regole (vedi il
         # docstring della dataclass), quindi il valore esatto non cambia alcun comportamento.
         risk_budget = TaskRiskBudget(max_authorized_risk=RiskLevel.READ_ONLY)
+        failures_by_intent: dict[str, int] = {}
 
         for step_index in range(1, self.MAX_STEPS + 1):
             if current_turn_cancelled():
@@ -727,6 +731,19 @@ class TaskAgent:
                     # indebuggabile quanto lo era un HUD bloccato prima di quella correzione.
                     if self.logger:
                         self.logger.exception("Errore nella callback on_step_completed dell'agente")
+
+            failed = step.result is None or not step.result.success
+            failures_by_intent[intent] = failures_by_intent.get(intent, 0) + 1 if failed else 0
+            if failures_by_intent[intent] >= self.MAX_FAILURES_PER_INTENT:
+                # vicolo cieco: invece di consumare i passi rimasti si chiede all'utente, con cio' che e' successo
+                label = valid[intent].get("description", intent).split(".")[0] if intent in valid else intent
+                outcome.question = (
+                    f"Ho provato {failures_by_intent[intent]} volte ({label}) senza riuscirci; l'ultima volta: "
+                    f"{step.observation[:160]} Come vuoi che proceda?"
+                )
+                if self.logger:
+                    self.logger.info("Agente: %s fallito %d volte, mi fermo e chiedo", intent, failures_by_intent[intent])
+                break
 
             messages.append({"role": "assistant", "content": json.dumps(payload, ensure_ascii=False)})
             messages.append({

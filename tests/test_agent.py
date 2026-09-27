@@ -1790,5 +1790,37 @@ class ExternalContentTaintMarkerTests(unittest.TestCase):
         self.assertNotIn("[CONTENUTO ESTERNO", observation)
 
 
+
+class RepeatedFailureSupervisorTests(unittest.TestCase):
+    """F8.5.5: lo stesso strumento che fallisce di fila (con parametri diversi, quindi non un passo identico
+    ripetuto) e' un vicolo cieco - l'agente si ferma e chiede invece di consumare i passi rimasti."""
+
+    @staticmethod
+    def _note(text):
+        return {"thought": "", "action": {"intent": "ADD_NOTE", "parameters": {"text": text}}, "final_answer": "", "ask_user": ""}
+
+    def test_three_failures_of_the_same_tool_stop_the_run_with_a_question(self):
+        failure = SkillResult(success=False, data={}, error="INVALID_PARAMETERS")
+        registry = FakeRegistry(add_note_results=[failure] * 6)
+        client = ScriptedOllamaClient([self._note(f"tentativo {i}") for i in range(6)])
+        outcome = _agent(registry, client).run("salva l'appunto")
+
+        self.assertEqual(len(registry.calls), 3, "niente passi bruciati dopo il terzo fallimento")
+        self.assertEqual(client.calls, 3)
+        self.assertIn("Ho provato 3 volte (Aggiunge un appunto)", outcome.question)
+        self.assertIsNone(outcome.error)
+
+    def test_a_success_in_between_resets_the_count(self):
+        failure, success = SkillResult(success=False, data={}, error="INVALID_PARAMETERS"), SkillResult(success=True, data={})
+        registry = FakeRegistry(add_note_results=[failure, failure, success, failure, failure])
+        client = ScriptedOllamaClient([self._note(f"n{i}") for i in range(5)]
+                                      + [{"thought": "", "action": {"intent": "NONE", "parameters": {}}, "final_answer": "Fatto in parte.", "ask_user": ""}])
+        outcome = _agent(registry, client).run("salva gli appunti")
+
+        self.assertEqual(len(registry.calls), 5)
+        self.assertIsNone(outcome.question)
+        self.assertEqual(outcome.final_answer, "Fatto in parte.")
+
+
 if __name__ == "__main__":
     unittest.main()

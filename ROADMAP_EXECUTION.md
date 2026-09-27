@@ -291,7 +291,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F8.2` | Supply-chain Security (pacchetti firmati, catalogo, quarantena/revoca, pin/rollback il 22/09/2026; dal 27/09/2026 nel runtime: caricamento all'avvio con ricontrollo di firma/hash, installazione in due passi PLAN_SKILL_INSTALL -> INSTALL_SKILL_PACKAGE (ADMIN) legata al digest mostrato; UI HUD e distribuzione non ancora) | `DOING` |
 | `F8.3` | Skill Forge | `DOING` |
 | `F8.4` | Model Runtime (router con capability/inventario/eval/warm-unload/redazione il 22/09/2026; dal 27/09/2026 JakeCore sceglie il modello col router: catalogo da config, modelli installati, telemetria reale di batteria/VRAM, osservazioni reali di successo/latenza di ogni chiamata; warmup/unload non ancora guidati dal router) | `DOING` |
-| `F8.5` | Agent Runtime | `DOING` |
+| `F8.5` | Agent Runtime (27/09/2026: il supervisore ferma anche lo stesso strumento fallito 3 volte di fila con parametri diversi e chiede all'utente) | `DOING` |
 | `F8.6` | Release Safety (golden/security set, confronto, canary, rollback, canali firmati il 22/09/2026; senza runner reali ne' collegamento HUD) | `DOING` |
 
 ## 6. F0 — Baseline verde e release riproducibile
@@ -9978,6 +9978,13 @@ Dipende da: F1 e F8.4.
 7. `F8.5.7` Mostrare deleghe e risultati nell'HUD.
 
 Criterio di uscita: routing supera il general agent sull'eval senza regressione di sicurezza.
+
+- 27/09/2026 (F8.5.5, loop/vicolo cieco): `TaskAgent` fermava solo un passo IDENTICO ripetuto (stessa firma
+  intent+parametri). Il caso reale gia' osservato - "trova il file X" senza cartella, passi bruciati a indovinare
+  percorsi diversi - sfuggiva. Ora lo stesso intent fallito 3 volte di fila (`MAX_FAILURES_PER_INTENT`, anche con
+  parametri diversi; un successo in mezzo azzera il conto) ferma il compito con una domanda all'utente che dice
+  cosa e' stato provato e l'ultimo esito, invece di consumare i passi rimasti. Vale per i tre agenti (general,
+  coding, research: stessa classe). Test con modello scriptato e registro finto.
 
 ### F8.6 — Eval, canary e aggiornamenti
 
