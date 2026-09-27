@@ -601,7 +601,8 @@ class JakeCore:
             ("CREATE_SKILL", CreateSkillSkill(self.skill_forge)),
             ("LIST_CREATED_SKILLS", ListCreatedSkillsSkill(self.skill_forge)),
             ("DELETE_CREATED_SKILL", DeleteCreatedSkillSkill(self.skill_forge, self.learning)),
-            ("SET_NOTIFICATION_MODE", SetNotificationModeSkill(self.notification_center)),
+            ("SET_NOTIFICATION_MODE", SetNotificationModeSkill(self.notification_center,
+                                                               on_restored=self._timed_notification_mode_ended)),
             ("GET_NOTIFICATION_MODE", GetNotificationModeSkill(self.notification_center)),
             ("UNDO_LAST_ACTION", UndoLastActionSkill(self)),
             ("APPROVE_PAIRING", ApprovePairingSkill(self.pairing_service, self.sync_keyring)),
@@ -3017,6 +3018,16 @@ class JakeCore:
             self.native_hud = None
             self._revoke_native_hud_credential()
 
+    def _timed_notification_mode_ended(self, previous, released: list[str]) -> None:
+        """F6.5.6: "non disturbare per 30 minuti" e' finito da solo. Lo si dice, con cio' che e' stato trattenuto,
+        dalla stessa strada delle altre notifiche (e' una richiesta esplicita dell'utente: puntuale come un promemoria)."""
+        from core.notification_center import MODE_LABELS_IT
+
+        message = f"Tempo scaduto: torno alla modalità {MODE_LABELS_IT.get(previous, previous.value)}."
+        if released:
+            message += " Nel frattempo: " + " ".join(released)
+        self.present_notification("reminder", message)
+
     def _native_hud_gave_up(self, crashes: int) -> None:
         """F4.8: l'HUD nativo continua a chiudersi e non viene piu' riavviato. Prima lo diceva solo il log: l'HUD
         spariva senza spiegazione e la sua credenziale restava valida. Ora la credenziale si revoca (nessuno la usa
@@ -3103,15 +3114,39 @@ class JakeCore:
         if getattr(self, "ollama", None) is None:
             return configured
         try:
-            return choose_model(self.model_router, Capability.REASON, configured)
+            chosen = choose_model(self.model_router, Capability.REASON, configured)
         except Exception:
             return configured
+        self._release_previous_model(chosen)
+        return chosen
 
     @model.setter
     def model(self, value: str) -> None:
         """SET_MODEL: il modello configurato cambia e il router riparte dal nuovo catalogo."""
         self._configured_model = value
         self._model_router = None
+
+    def _release_previous_model(self, chosen: str) -> None:
+        """F8.4.4: quando il router passa a un altro modello (es. quello leggero a batteria bassa), il precedente
+        viene scaricato in background: resterebbe in VRAM/RAM per tutto il keep_alive (ore) senza servire a nulla,
+        proprio quando l'energia conta. Mai bloccante, mai un'eccezione: nel peggiore dei casi resta caricato."""
+        previous = getattr(self, "_last_routed_model", None)
+        self._last_routed_model = chosen
+        if previous is None or previous == chosen:
+            return
+
+        logger = getattr(self, "logger", None)
+
+        def unload():
+            try:
+                self.ollama.unload(previous)
+                if logger is not None:
+                    logger.info("Modello %s scaricato: il router ora usa %s", previous, chosen)
+            except Exception:
+                if logger is not None:
+                    logger.warning("Non sono riuscito a scaricare il modello %s", previous)
+
+        threading.Thread(target=unload, name="jake-model-unload", daemon=True).start()
 
     # ---- sospensione della proattivita' ----------------------------------------------------
 

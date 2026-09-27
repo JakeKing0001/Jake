@@ -174,6 +174,10 @@ class FakeOllamaClient:
     def __init__(self, available=True):
         self._available = available
         self.chat_calls = []
+        self.unloaded = []
+
+    def unload(self, model):
+        self.unloaded.append(model)
 
     def is_available(self):
         return self._available
@@ -193,9 +197,10 @@ class OllamaAdapterTests(unittest.TestCase):
         OllamaProviderAdapter(client).warm("qwen2.5:7b")
         self.assertEqual(client.chat_calls, [("qwen2.5:7b", {"num_predict": 0})])
 
-    def test_unload_is_a_declared_gap_not_a_silent_no_op(self):
-        with self.assertRaises(NotImplementedError):
-            OllamaProviderAdapter(FakeOllamaClient()).unload("qwen2.5:7b")
+    def test_unload_delegates_to_the_client(self):
+        client = FakeOllamaClient()
+        OllamaProviderAdapter(client).unload("qwen2.5:7b")  # F8.4.4: prima era un gap dichiarato
+        self.assertEqual(client.unloaded, ["qwen2.5:7b"])
 
 
 class SelectionTests(unittest.TestCase):

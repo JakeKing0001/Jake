@@ -270,12 +270,7 @@ class OllamaProviderAdapter:
         self._client.chat(model, [{"role": "user", "content": ""}], options={"num_predict": 0})
 
     def unload(self, model: str) -> None:
-        # Ollama scarica un modello impostando keep_alive a 0 su una chat vuota: nessuna chiamata di unload
-        # dedicata esiste nell'API REST. `OllamaClient.chat` non espone ancora un keep_alive per chiamata (solo
-        # quello fissato nel costruttore) - richiederebbe un parametro in piu' su un modulo condiviso da tutto
-        # Jake, fuori scopo qui: il contratto resta esplicito e testabile con un client finto nei test, senza
-        # dipendere da un dettaglio dell'implementazione HTTP non ancora presente.
-        raise NotImplementedError("OllamaClient non espone ancora un keep_alive per chiamata (F8.4.4)")
+        self._client.unload(model)  # keep_alive 0 (vedi OllamaClient.unload)
 
 
 class WindowsAIProvider:

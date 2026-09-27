@@ -392,7 +392,7 @@ class MemoryManager:
             params = [p for w in words for p in (f"%{w}%", f"%{w}%")]
             with self._lock:
                 rows = self._connection.execute(
-                    f"SELECT {self._RETURNED_COLUMNS} FROM memories WHERE ({clauses}) "
+                    f"SELECT {self._RETURNED_COLUMNS}, pinned, last_used_at FROM memories WHERE ({clauses}) "
                     "AND (expires_at IS NULL OR expires_at >= ?) ORDER BY updated_at DESC LIMIT 50",
                     (*params, self._now()),
                 ).fetchall()
@@ -402,8 +402,13 @@ class MemoryManager:
                 haystack = f"{entry['key']} {entry['value']}".lower()
                 hits = sum(1 for w in words if w in haystack)
                 exact = entry["key"].lower() in lowered
-                entry["score"] = (2.0 if exact else 0.0) + hits / len(words) + 0.05 * int(entry.get("importance") or 0)
+                base = hits / len(words) + 0.05 * int(entry.get("importance") or 0)
+                freshness = self._freshness(entry)
+                # F5.4.5: il decadimento pesa sulle parole in comune, mai su una chiave citata esplicitamente
+                entry["score"] = (2.0 if exact else 0.0) + base * freshness
                 entry["why"] = "chiave citata nella domanda" if exact else f"{hits} parole in comune"
+                if freshness < 0.75 and not exact:
+                    entry["why"] += ", ma non usato da tempo"
                 candidates[(entry["key"], entry["category"])] = entry
         if not candidates and query_embedding is not None:
             for entry in self.semantic_recall(query_embedding, limit=limit):
@@ -429,6 +434,30 @@ class MemoryManager:
             chosen.append(entry)
             used += size
         return chosen
+
+    # F5.4.5 (decadimento per categoria): dopo quanti giorni senza uso ne' aggiornamenti un ricordo pesa la meta' nella
+    # scelta dei ricordi pertinenti. Solo un peso nel ranking: nessun ricordo viene cancellato o nascosto per questo
+    # (la cancellazione resta una scelta dell'utente o una scadenza dichiarata, F6.7.5).
+    HALF_LIFE_DAYS = {"preference": 365.0, "fact": 180.0}
+    DEFAULT_HALF_LIFE_DAYS = 90.0
+
+    def _freshness(self, entry: dict) -> float:
+        """Tra 0.5 e 1: 1 per un ricordo usato o aggiornato di recente, fino a 0.5 per uno dimenticato. I ricordi
+        fissati (pinned) non decadono (F5.4.6)."""
+        from datetime import datetime, timezone
+
+        if entry.get("pinned"):
+            return 1.0
+        last = max(str(entry.get("updated_at") or ""), str(entry.get("last_used_at") or ""))
+        try:
+            then = datetime.fromisoformat(last)
+        except ValueError:
+            return 1.0
+        if then.tzinfo is None:
+            then = then.replace(tzinfo=timezone.utc)
+        age_days = max(0.0, (datetime.now(timezone.utc) - then).total_seconds() / 86400)
+        half_life = self.HALF_LIFE_DAYS.get(str(entry.get("category") or ""), self.DEFAULT_HALF_LIFE_DAYS)
+        return 0.5 + 0.5 * 0.5 ** (age_days / half_life)
 
     def purge_expired(self) -> int:
         """Rimuove per davvero i ricordi la cui scadenza (expires_at, vedi remember() ttl_days)

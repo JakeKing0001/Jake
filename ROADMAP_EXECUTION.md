@@ -269,15 +269,15 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F5.1` | Memory Platform (F5.1.1/F5.1.3-F5.1.6 il 21/09/2026: schema versionato, migrazioni transazionali con backup, metadati, recupero; resta F5.1.2 separare entita'/episodi/procedure e la prova su una copia del database reale) | `DOING` |
 | `F5.2` | Memory Platform | `DOING` |
 | `F5.3` | Knowledge Model | `DOING` |
-| `F5.4` | Memory Reliability (27/09/2026: nessuna sovrascrittura silenziosa di fatti/preferenze - versione precedente conservata e dichiarata, un'inferenza non sostituisce un fatto detto dall'utente, conflitti registrati, "dimentica" cancella anche le versioni; conferma prima di cambiare un ricordo importante o fissato; consolidamento non ancora) | `DOING` |
+| `F5.4` | Memory Reliability (27/09/2026: nessuna sovrascrittura silenziosa di fatti/preferenze - versione precedente conservata e dichiarata, un'inferenza non sostituisce un fatto detto dall'utente, conflitti registrati, "dimentica" cancella anche le versioni; conferma prima di cambiare un ricordo importante o fissato; decadimento per categoria nel ranking, fissati esclusi; consolidamento non ancora) | `DOING` |
 | `F5.5` | Retrieval Quality (27/09/2026: ricordi pertinenti con fonte anche nelle risposte libere, budget di contesto, grafo a un salto; agente e metriche ancora da fare) | `DOING` |
 | `F5.6` | Context Runtime | `DOING` |
-| `F5.7` | Privacy Engineering (libreria completa il 21/09/2026; dal 26/09/2026 nel percorso reale: "dimentica" cancella anche registro e indici con ricevuta, l'uso dei ricordi viene registrato, "da dove sai X" spiega la provenienza; purge/export/backup non ancora esposti a voce/HUD) | `DOING` |
+| `F5.7` | Privacy Engineering (libreria completa il 21/09/2026; dal 26/09/2026 nel percorso reale: "dimentica" cancella anche registro e indici con ricevuta, l'uso dei ricordi viene registrato, "da dove sai X" spiega la provenienza; dal 27/09/2026 "esporta i miei ricordi" e "fissa il ricordo X" a voce; purge/backup non ancora esposti a voce/HUD) | `DOING` |
 | `F6.1` | Proactivity Platform (26/09/2026: promemoria, automazioni e avvisi passano dagli stessi freni in `JakeCore.notify` - duplicati, budget orario, quiet hours, conversazione in corso - e si sospendono insieme durante prove e benchmark) | `DOING` |
 | `F6.2` | Proactivity Quality | `DOING` |
 | `F6.3` | Notification UX (libreria di decisione il 21/09/2026; collegata a JakeCore/EventBus/HUD il 22/09/2026; dal 27/09/2026 "meno notifiche cosi'", "non mostrarmelo piu'", "mostramelo di nuovo" e "rimandala" sull'ultima notifica, a voce e dai pulsanti del toast HUD, persistenti; nessuna consegna reale di call/companion) | `DOING` |
 | `F6.4` | Goal Runtime (27/09/2026: "devo X entro <giorno>" diventa una proposta di promemoria confermata col si'/no normale) | `DOING` |
-| `F6.5` | Automation Runtime | `DOING` |
+| `F6.5` | Automation Runtime (27/09/2026: modalita' di notifica a tempo che torna da sola alla precedente con il riepilogo) | `DOING` |
 | `F6.6` | Meeting Experience (libreria di regole il 21/09/2026: brief senza dati inventati, consenso e indicatore, follow-up gated; dal 27/09/2026 "com'e' la mia giornata" usa il brief con promemoria e todo reali; nessun connettore reale) | `DOING` |
 | `F6.7` | Runtime Reliability (monitor/housekeeping il 22/09/2026; task monitor collegato a JakeCore/EventBus/HUD lo stesso giorno - vedi F6.3; dal 27/09/2026 "avvisami quando finisce la build" su un processo reale, notifica dalla pipeline unica; housekeeping senza connettori reali ne' pilot) | `DOING` |
 | `F7.1` | Companion Security (F7.1.1/.4/.5/.6/.7 il 22/09/2026; F7.1.2 - pairing HTTP - chiuso il 22/09/2026, vedi F7.2; TLS reale generato/persistito dal server il 22/09/2026; capability persistenti F7.1.3 dal 27/09/2026 - impostabili a voce con SET_DEVICE_ACCESS, valide subito e dopo un riavvio, riga corrotta = nessun permesso; manca la distribuzione del certificato al telefono oltre al pairing) | `DOING` |
@@ -290,7 +290,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F8.1` | Skill Platform (manifest validato e loader che rifiuta prima dell'import il 22/09/2026; dal 27/09/2026 il rischio dichiarato da un pacchetto verificato e approvato arriva a `risk_of`/PolicyEngine, mai sopra un intent integrato; hook non eseguiti) | `DOING` |
 | `F8.2` | Supply-chain Security (pacchetti firmati, catalogo, quarantena/revoca, pin/rollback il 22/09/2026; dal 27/09/2026 nel runtime: caricamento all'avvio con ricontrollo di firma/hash, installazione in due passi PLAN_SKILL_INSTALL -> INSTALL_SKILL_PACKAGE (ADMIN) legata al digest mostrato; UI HUD e distribuzione non ancora) | `DOING` |
 | `F8.3` | Skill Forge (27/09/2026: scansione dei segreti prima della sandbox - chiavi private, token per formato, credenziali letterali) | `DOING` |
-| `F8.4` | Model Runtime (router con capability/inventario/eval/warm-unload/redazione il 22/09/2026; dal 27/09/2026 JakeCore sceglie il modello col router: catalogo da config, modelli installati, telemetria reale di batteria/VRAM, osservazioni reali di successo/latenza di ogni chiamata; warmup/unload non ancora guidati dal router) | `DOING` |
+| `F8.4` | Model Runtime (router con capability/inventario/eval/warm-unload/redazione il 22/09/2026; dal 27/09/2026 JakeCore sceglie il modello col router: catalogo da config, modelli installati, telemetria reale di batteria/VRAM, osservazioni reali di successo/latenza di ogni chiamata; dal 27/09/2026 il modello lasciato dal router viene scaricato davvero da Ollama) | `DOING` |
 | `F8.5` | Agent Runtime (27/09/2026: il supervisore ferma anche lo stesso strumento fallito 3 volte di fila con parametri diversi e chiede all'utente) | `DOING` |
 | `F8.6` | Release Safety (golden/security set, confronto, canary, rollback, canali firmati il 22/09/2026; senza runner reali ne' collegamento HUD) | `DOING` |
 
@@ -9058,6 +9058,15 @@ Criterio di uscita: il corpus conflitti supera la policy review senza sovrascrit
   com'era. Bug reale corretto insieme: un aggiornamento senza importanza esplicita riportava il ricordo a
   importanza 1 (e quindi gli toglieva anche questa protezione); ora resta quella di prima. Test sul JakeCore
   vero con database temporaneo e dati sintetici.
+- 27/09/2026 (F5.4.5/F5.4.6, decadimento): nella scelta dei ricordi pertinenti per una risposta libera, un ricordo
+  mai usato ne' aggiornato da tempo pesa meno (emivita 365 giorni per le preferenze, 180 per i fatti, 90 per il
+  resto; il peso non scende sotto la meta') e la motivazione lo dice ("non usato da tempo"). Solo ranking: nessun
+  ricordo viene cancellato o nascosto per questo (F6.7.5). I ricordi fissati non decadono; una chiave citata nella
+  domanda vince sempre. Test su database temporaneo che fallisce senza il decadimento.
+- 27/09/2026 (F5.7 a voce): `EXPORT_MEMORIES` ("esporta i miei ricordi") scrive in Documenti\Jake una copia
+  Markdown e una JSON dalla privacy dashboard, senza i ricordi segreti (e dice quanti ne ha esclusi); `PIN_MEMORY`
+  ("fissa il ricordo X", `pinned=false` per toglierlo) usa `MemoryPrivacyDashboard.pin`: un ricordo fissato non
+  decade e cambiarlo chiede conferma. Test su memoria reale con export in cartella temporanea.
 
 ### F5.5 — Retrieval con citazioni locali
 
@@ -9374,6 +9383,12 @@ Dipende da: F3.8, F5 procedural e F6.2.
 7. `F6.5.7` Versionare routine e richiedere consenso se cambiano capability.
 
 Criterio di uscita: routine non parte fuori contesto e ripristina lo stato dopo stop o fallimento.
+
+- 27/09/2026 (F6.5.6, prima fetta): "non disturbarmi per mezz'ora", "modalita' studio per due ore" -
+  `SET_NOTIFICATION_MODE` accetta `minutes`: finito il tempo torna da sola la modalita' di PRIMA (solo se nel
+  frattempo l'utente non ne ha scelta un'altra, anche fuori dalla skill; una nuova scelta annulla il ritorno) e
+  cio' che era stato trattenuto arriva in un riepilogo da `present_notification`, come un promemoria richiesto.
+  Test con `NotificationCenter` reale e timer manuale. Volume e finestre non ancora ripristinati.
 
 ### F6.6 — Daily brief e meeting copilot
 
@@ -9985,6 +10000,14 @@ Dipende da: G0.
 7. `F8.4.7` Misurare ogni scelta con eval, non con nome o moda del modello.
 
 Criterio di uscita: perdita del modello principale non blocca i comandi locali semplici.
+
+- 27/09/2026 (F8.4.4, unload reale): `OllamaProviderAdapter.unload` era un `NotImplementedError` dichiarato.
+  `OllamaClient.unload` usa l'API reale di Ollama (richiesta senza prompt con `keep_alive: 0`) e
+  `OllamaClient.loaded_models` legge `/api/ps`. `JakeCore.model` ricorda l'ultimo modello scelto dal router: quando
+  la scelta cambia (batteria bassa -> modello leggero, oppure `SET_MODEL`) il precedente viene scaricato in un
+  thread daemon, una sola volta, senza bloccare ne' sollevare. Verificato su Ollama reale su questa macchina:
+  `nomic-embed-text` caricato -> `/api/ps` lo elenca -> `unload` -> `/api/ps` vuoto. Test del collegamento con
+  router reale e telemetria iniettata (100% -> 15% a batteria).
 
 - `F8.4.1`-`F8.4.7` (instradamento dei modelli, senza collegamento a `JakeCore`) — 22/09/2026: `core/model_router.py`. Oggi il nome del
   modello (`qwen2.5:7b`) e' ripetuto hardcoded in `core/jake_core.py`, `core/router.py` e `core/skill_catalog.py`: questo modulo e' il

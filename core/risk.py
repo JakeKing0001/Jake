@@ -287,7 +287,10 @@ SKILL_RISK: dict[str, RiskLevel] = {
     "WATCH_PROCESS": RiskLevel.READ_ONLY,
     # F4.6.2: di per se' non cambia nulla; il comando ripetuto passa di nuovo dalla policy col SUO rischio
     "RETRY_LAST_ACTION": RiskLevel.READ_ONLY,
-    "DAILY_BRIEF": RiskLevel.READ_ONLY,  # legge promemoria e todo locali  # osserva la fine di un processo, non lo tocca
+    "DAILY_BRIEF": RiskLevel.READ_ONLY,  # legge promemoria e todo locali
+    # F5.7: una copia dei ricordi in Documenti (senza i segreti) e il fissaggio di un ricordo, entrambi reversibili
+    "EXPORT_MEMORIES": RiskLevel.LOCAL_REVERSIBLE,
+    "PIN_MEMORY": RiskLevel.LOCAL_REVERSIBLE,  # osserva la fine di un processo, non lo tocca
     # F7.1.3: cambia chi puo' comandare Jake da un altro dispositivo -> impostazione di sicurezza
     "SET_DEVICE_ACCESS": RiskLevel.ADMIN,
     "REVOKE_DEVICE": RiskLevel.ADMIN,  # irreversibile senza un nuovo pairing: conferma/autenticazione della policy
