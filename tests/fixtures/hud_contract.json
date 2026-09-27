@@ -207,6 +207,26 @@
       "expect": {"state": "EXECUTING", "last_outcome": "warning"}
     },
     {
+      "name": "livello audio: solo un numero 0..1, non cambia lo stato",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "LISTENING", "sequence_id": 1}},
+        {"event": {"type": "AUDIO_LEVEL", "payload": {"source": "mic", "level": 0.42}, "sequence_id": 2}},
+        {"event": {"type": "AUDIO_LEVEL", "payload": {"source": "voice", "level": 3.5}, "sequence_id": 3}},
+        {"event": {"type": "AUDIO_LEVEL", "payload": {"source": "mic", "level": "forte"}, "sequence_id": 4}},
+        {"event": {"type": "AUDIO_LEVEL", "payload": {"source": "mic", "level": 0.25}, "sequence_id": 5}}
+      ],
+      "expect": {"state": "LISTENING", "audio_source": "mic", "audio_level": 0.25}
+    },
+    {
+      "name": "livello audio fuori scala limitato a 1",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "AUDIO_LEVEL", "payload": {"source": "voice", "level": 3.5}, "sequence_id": 1}}
+      ],
+      "expect": {"audio_source": "voice", "audio_level": 1.0}
+    },
+    {
       "name": "eventi senza sequence_id (client o test locali) si applicano comunque",
       "steps": [
         {"connect": true},

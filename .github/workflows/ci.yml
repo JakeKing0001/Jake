@@ -106,6 +106,8 @@ jobs:
         with:
           version: "6.7.3"
           arch: "win64_msvc2019_64"
+          # F4.4.7: l'orb 3D usa Qt Quick 3D (+ shadertools per i materiali); senza, l'HUD compila solo il fallback 2D.
+          modules: "qtquick3d qtshadertools"
 
       - name: Configura (CMakePresets.json)
         working-directory: hud/native

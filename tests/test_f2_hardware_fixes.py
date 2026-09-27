@@ -231,6 +231,36 @@ class NoInterruptionWhileSpeakingTests(VoiceSessionTestCase):
         core.notify.assert_called_once_with("advisory", "Disco quasi pieno")
 
 
+class AudioLevelTests(unittest.TestCase):
+    """F4.4.4: l'orb riceve solo un livello (mai audio), limitato nel tempo e solo quando serve."""
+
+    def test_levels_are_throttled_and_only_sent_when_they_change(self):
+        from core.voice.wake_word_session import AudioLevelPublisher
+
+        now = {"t": 0.0}
+        sent = []
+        publisher = AudioLevelPublisher(lambda source, level: sent.append((source, level)), clock=lambda: now["t"])
+        self.assertTrue(publisher.update("mic", 0.5))
+        self.assertFalse(publisher.update("mic", 0.9), "entro 100 ms: niente")
+        now["t"] = 0.2
+        self.assertFalse(publisher.update("mic", 0.52), "variazione invisibile: niente")
+        self.assertTrue(publisher.update("mic", 1.7))
+        self.assertEqual(sent, [("mic", 0.5), ("mic", 1.0)])
+
+    def test_the_microphone_level_is_published_only_while_jake_listens_to_a_command(self):
+        core = SimpleNamespace(conversation_state=SimpleNamespace(has_pending_action=lambda: False),
+                               kill_switch=KillSwitch(), EXIT_SENTINEL="__exit__", event_bus=mock.MagicMock())
+        vad = SimpleNamespace(on_level=None, muted=False, SAMPLE_RATE=16000)
+        session = WakeWordSession(core, mock.MagicMock(), mock.MagicMock(), vad_listener=vad)
+        session._set_state("idle", "")
+        session._on_frame_level(0.8, True)
+        core.event_bus.publish.assert_not_called()  # ascolto della parola di attivazione: nulla esce
+        session._set_state("listening", "")
+        session._on_frame_level(0.8, True)
+        event = core.event_bus.publish.call_args.args[0]
+        self.assertEqual((event.type.value, event.payload), ("AUDIO_LEVEL", {"source": "mic", "level": 0.8}))
+
+
 def _wait(predicate, timeout=2.0):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:

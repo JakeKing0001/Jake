@@ -100,12 +100,18 @@ class SessionWiringTests(VoiceSessionTestCase):
         session._handle_utterance(np.zeros(320, dtype=np.float32))
         self.assertEqual(metrics.snapshot()["wake"]["echo_ignored"], 1)
 
-    def test_without_metrics_the_reference_sink_is_the_aec_itself(self):
+    def test_without_metrics_the_reference_sink_feeds_the_aec_and_the_voice_level(self):
+        """Senza metriche il riferimento arriva comunque all'AEC; il sink lo avvolge solo per il livello
+        della voce mostrato dall'orb (F4.4.4), mai per registrare audio."""
         core = mock.MagicMock(EXIT_SENTINEL="ESCI")
         tts = SimpleNamespace(reference_sink=None)
         vad = SimpleNamespace(on_level=None, muted=False, SAMPLE_RATE=16000)
         session = track(WakeWordSession(core, mock.MagicMock(), tts, vad_listener=vad))
-        self.assertEqual(tts.reference_sink, session.playback_aec.push_reference)
+        self.assertFalse(session.playback_aec.has_reference)
+        tts.reference_sink(np.full(1600, 0.2, dtype=np.float32), 16000)
+        self.assertTrue(session.playback_aec.has_reference)
+        event = core.event_bus.publish.call_args.args[0]
+        self.assertEqual((event.type.value, event.payload["source"]), ("AUDIO_LEVEL", "voice"))
 
     def test_final_transcripts_feed_the_duplicate_counter(self):
         session, stt, tts, metrics = self._session()

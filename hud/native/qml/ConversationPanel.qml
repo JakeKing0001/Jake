@@ -1,148 +1,159 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Layouts
+import JakeHud
 
-// Conversation panel (fase 4.9.2): cronologia USER_MESSAGE/JAKE_MESSAGE/NOTIFICATION ricevuta
-// dal bus eventi (core/event_bus.py) via SSE. Nessuna persistenza qui: e' solo la sessione
-// visibile in questa finestra, la cronologia vera resta in MemoryManager sul lato Python.
-Rectangle {
+// Conversazione (F4.5.1): di default solo l'ultimo scambio e la riga "live" (trascrizione, passo in corso,
+// prova, diagnosi) - l'orb resta la presenza principale. "Cronologia" apre l'elenco completo della sessione
+// visibile; la cronologia vera resta nella memoria di Jake, qui niente persistenza.
+GlassPanel {
     id: root
-    color: "#1a1c22"
-    radius: 10
-    border.color: "#2c2f38"
-    // F4.2.1: vedi lo stesso alias in StatusPanel.qml.
-    property alias hovered: hoverHandler.hovered
-
-    HoverHandler {
-        id: hoverHandler
-    }
-
-    // F2.2.7/F4.5.1: trascrizione live (partial provvisorio in corsivo, final normale), passo in
-    // corso, ultima prova e diagnosi del selettore - dal riduttore condiviso via JakeClient.
+    property bool expanded: false
     property string transcriptText: ""
     property bool transcriptFinal: false
     property string stepDescription: ""
     property string evidenceSummary: ""
     property string inspectionReason: ""
-    // F4.6.1/F4.6.3: ultima attivita' e scadenza del suo undo (epoch s; 0 = non annullabile).
-    property string activitySummary: ""
-    property real undoExpiresAt: 0
-    property real nowSeconds: Date.now() / 1000
-    readonly property bool undoAvailable: undoExpiresAt > nowSeconds
-    signal undoRequested()
-
-    Timer {
-        interval: 1000
-        repeat: true
-        running: root.undoExpiresAt > 0
-        onTriggered: root.nowSeconds = Date.now() / 1000
-    }
+    property string lastUser: ""
+    property string lastJake: ""
+    readonly property bool hasContent: model.count > 0 || transcriptText.length > 0 || stepDescription.length > 0
+        || evidenceSummary.length > 0 || inspectionReason.length > 0
+    implicitHeight: expanded ? 320 : Math.min(150, header.implicitHeight + summary.implicitHeight + live.implicitHeight + 28)
 
     function append(senderRole, messageText) {
-        // Nomi dei campi del modello deliberatamente diversi da proprieta' comuni di Item/Text
-        // (es. "text"): "text: text" dentro un delegate Text{} si legherebbe a se stesso invece
-        // che al ruolo del modello, un bug classico e silenzioso di QML.
+        // "senderRole"/"messageText": nomi diversi da proprieta' di Text, evita il binding su se stessi.
         model.append({ senderRole: senderRole, messageText: messageText });
+        if (senderRole === "user") { lastUser = messageText; lastJake = ""; }
+        if (senderRole === "jake") lastJake = messageText;
         list.positionViewAtEnd();
     }
 
     ListModel { id: model }
 
-    Column {
-        id: live
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        anchors.margins: 10
-        spacing: 2
+    ColumnLayout {
+        anchors.fill: parent
+        anchors.margins: 12
+        spacing: 6
 
-        Text {
-            width: parent.width
-            visible: root.transcriptText.length > 0
-            text: root.transcriptText
-            font.italic: !root.transcriptFinal
-            color: root.transcriptFinal ? "#e5e7eb" : "#9ca3af"
-            wrapMode: Text.WordWrap
-            font.pixelSize: 13
-            Accessible.name: (root.transcriptFinal ? qsTr("Hai detto: ") : qsTr("Sto sentendo: ")) + text
-        }
-        Text {
-            width: parent.width
-            visible: root.stepDescription.length > 0
-            text: qsTr("Passo: %1").arg(root.stepDescription)
-            color: "#facc15"
-            wrapMode: Text.WordWrap
-            font.pixelSize: 12
-        }
-        Text {
-            width: parent.width
-            visible: root.evidenceSummary.length > 0
-            text: root.evidenceSummary
-            color: "#3ddc84"
-            wrapMode: Text.WordWrap
-            font.pixelSize: 12
-        }
-        Row {
-            width: parent.width
-            spacing: 8
-            visible: root.activitySummary.length > 0
+        RowLayout {
+            id: header
+            Layout.fillWidth: true
             Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: qsTr("Ultima azione: %1").arg(root.activitySummary)
-                    + (root.undoAvailable ? qsTr(" · annullabile per %1 s").arg(Math.max(0, Math.floor(root.undoExpiresAt - root.nowSeconds))) : "")
-                color: "#cbd5e1"
-                font.pixelSize: 12
-                Accessible.name: text
+                text: root.expanded ? qsTr("Cronologia") : qsTr("Conversazione")
+                color: Theme.textFaint
+                font.pixelSize: Theme.fontSmall
+                font.bold: true
+                Layout.fillWidth: true
             }
             Button {
-                visible: root.undoAvailable
-                text: qsTr("Annulla")
-                Accessible.name: qsTr("Annulla l'ultima azione")
-                onClicked: root.undoRequested()
+                id: toggle
+                flat: true
+                visible: model.count > 2
+                text: root.expanded ? qsTr("Riduci") : qsTr("Cronologia (%1)").arg(model.count)
+                font.pixelSize: Theme.fontSmall
+                Accessible.name: root.expanded ? qsTr("Riduci la cronologia") : qsTr("Apri la cronologia")
+                onClicked: root.expanded = !root.expanded
             }
         }
-        Text {
-            width: parent.width
-            visible: root.inspectionReason.length > 0
-            text: qsTr("Non trovato: %1").arg(root.inspectionReason)
-            color: "#fb923c"
-            wrapMode: Text.WordWrap
-            font.pixelSize: 12
-        }
-    }
 
-    ListView {
-        id: list
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.bottom: live.top
-        anchors.margins: 10
-        spacing: 8
-        clip: true
-        model: model
-        delegate: Column {
-            width: list.width
+        // ultimo scambio (compatto)
+        Column {
+            id: summary
+            visible: !root.expanded
+            Layout.fillWidth: true
+            spacing: 4
+            Text {
+                width: parent.width
+                visible: root.lastUser.length > 0
+                text: qsTr("Tu: %1").arg(root.lastUser)
+                color: Theme.accent
+                font.pixelSize: Theme.fontSmall
+                elide: Text.ElideRight
+            }
+            Text {
+                width: parent.width
+                visible: root.lastJake.length > 0
+                text: root.lastJake
+                color: Theme.text
+                font.pixelSize: Theme.fontBody
+                wrapMode: Text.WordWrap
+                maximumLineCount: 3
+                elide: Text.ElideRight
+            }
+            Text {
+                visible: !root.hasContent
+                text: qsTr("Di' \"Jake\" o scrivi un comando qui sotto.")
+                color: Theme.textFaint
+                font.pixelSize: Theme.fontSmall
+            }
+        }
+
+        ListView {
+            id: list
+            visible: root.expanded
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: 8
+            clip: true
+            model: model
+            ScrollBar.vertical: ScrollBar {}
+            delegate: Column {
+                width: list.width - 8
+                spacing: 2
+                Text {
+                    text: senderRole === "user" ? qsTr("Tu") : qsTr("Jake")
+                    font.pixelSize: 11
+                    font.bold: true
+                    color: senderRole === "user" ? Theme.accent : Theme.ok
+                }
+                Text {
+                    width: parent.width
+                    text: messageText
+                    wrapMode: Text.WordWrap
+                    color: Theme.text
+                    font.pixelSize: Theme.fontBody
+                }
+            }
+        }
+
+        // riga live: trascrizione (partial in corsivo), passo, prova, diagnosi (F2.2.7, F4.5.2, F4.5.4)
+        Column {
+            id: live
+            Layout.fillWidth: true
             spacing: 2
             Text {
-                text: senderRole === "user" ? qsTr("Tu") : senderRole === "jake" ? qsTr("Jake") : senderRole
-                font.pixelSize: 11
-                font.bold: true
-                color: senderRole === "user" ? "#4fd1ff" : senderRole === "errore" ? "#f87171" : "#3ddc84"
+                width: parent.width
+                visible: root.transcriptText.length > 0 && !root.transcriptFinal
+                text: root.transcriptText
+                font.italic: true
+                color: Theme.textMuted
+                wrapMode: Text.WordWrap
+                font.pixelSize: Theme.fontSmall
+                Accessible.name: qsTr("Sto sentendo: ") + text
             }
             Text {
-                width: list.width
-                text: messageText
+                width: parent.width
+                visible: root.stepDescription.length > 0
+                text: qsTr("Passo: %1").arg(root.stepDescription)
+                color: Theme.warn
                 wrapMode: Text.WordWrap
-                color: "#e5e7eb"
-                font.pixelSize: 14
+                font.pixelSize: Theme.fontSmall
+            }
+            Text {
+                width: parent.width
+                visible: root.evidenceSummary.length > 0
+                text: root.evidenceSummary
+                color: Theme.ok
+                font.pixelSize: Theme.fontSmall
+            }
+            Text {
+                width: parent.width
+                visible: root.inspectionReason.length > 0
+                text: qsTr("Non trovato: %1").arg(root.inspectionReason)
+                color: Theme.attention
+                wrapMode: Text.WordWrap
+                font.pixelSize: Theme.fontSmall
             }
         }
-    }
-
-    Text {
-        anchors.centerIn: parent
-        visible: model.count === 0
-        text: qsTr("Nessun messaggio ancora")
-        color: "#6b7280"
     }
 }

@@ -5,6 +5,23 @@
 #include <QJsonObject>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QtGlobal>
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
+
+namespace {
+// F4.4.5/F4.7.2: "reduced motion" segue l'impostazione di Windows "Mostra animazioni" (Accessibilita').
+bool systemPrefersReducedMotion() {
+#ifdef Q_OS_WIN
+    BOOL animations = TRUE;
+    if (SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0))
+        return animations == FALSE;
+#endif
+    return false;
+}
+} // namespace
 
 int main(int argc, char *argv[]) {
     QGuiApplication app(argc, argv);
@@ -27,6 +44,17 @@ int main(int argc, char *argv[]) {
     parser.process(app);
 
     QVariantMap initial;
+    initial.insert(QStringLiteral("reducedMotion"),
+                   systemPrefersReducedMotion() || qEnvironmentVariable("JAKE_HUD_REDUCED_MOTION") == QLatin1String("1"));
+    // JAKE_HUD_QUALITY=low per GPU deboli/batteria (F4.3.5); JAKE_HUD_ORB=2d forza l'orb 2D.
+    initial.insert(QStringLiteral("orbQuality"), qEnvironmentVariable("JAKE_HUD_QUALITY") == QLatin1String("low")
+                   ? QStringLiteral("low") : QStringLiteral("high"));
+#ifdef JAKE_HAS_QUICK3D
+    const bool use3d = qEnvironmentVariable("JAKE_HUD_ORB") != QLatin1String("2d");
+#else
+    const bool use3d = false;
+#endif
+    initial.insert(QStringLiteral("orb3d"), use3d);
     if (parser.isSet(jakeUrl))
         initial.insert(QStringLiteral("jakeBaseUrl"), parser.value(jakeUrl));
     if (parser.isSet(credentialsStdin)) {
@@ -39,8 +67,7 @@ int main(int argc, char *argv[]) {
     }
 
     QQmlApplicationEngine engine;
-    if (!initial.isEmpty())
-        engine.setInitialProperties(initial);
+    engine.setInitialProperties(initial);
     // JakeClient e' registrato tramite QML_ELEMENT (vedi src/JakeClient.h) nel modulo QML
     // "JakeHud" dichiarato in CMakeLists.txt: da QML basta "import JakeHud" e "JakeClient { }".
     engine.loadFromModule("JakeHud", "Main");

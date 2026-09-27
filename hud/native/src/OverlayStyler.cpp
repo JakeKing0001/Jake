@@ -39,6 +39,24 @@ void OverlayStyler::setClickThrough(QQuickWindow *window, bool enabled) {
 #endif
 }
 
+void OverlayStyler::beginKeyboardInput(QQuickWindow *window) {
+#ifdef Q_OS_WIN
+    if (!window)
+        return;
+    HWND hwnd = reinterpret_cast<HWND>(window->winId());
+    LONG_PTR exStyle = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
+    SetWindowLongPtr(hwnd, GWL_EXSTYLE, exStyle & ~(WS_EX_NOACTIVATE | WS_EX_TRANSPARENT));
+    ShowWindow(hwnd, SW_SHOW);
+    SetForegroundWindow(hwnd);
+#endif
+    if (window)
+        window->requestActivate();
+}
+
+void OverlayStyler::endKeyboardInput(QQuickWindow *window) {
+    makeNoActivate(window);
+}
+
 void OverlayStyler::forceVisibility(QQuickWindow *window, bool visible) {
 #ifdef Q_OS_WIN
     if (!window)
