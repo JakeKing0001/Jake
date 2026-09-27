@@ -30,6 +30,11 @@ Item {
     property real level: 0            // 0..1, livello audio reale (mai audio), se disponibile
     property bool reducedMotion: false
     property string quality: "high"    // "high" | "low"
+    // F4.3 (qualita' adattiva): se in qualita' alta i fotogrammi restano sotto ~40 fps per 3 s (GPU debole, sistema
+    // carico) l'orb scende da solo alla qualita' bassa e ci resta per la sessione; mai il contrario da solo.
+    property bool autoLowered: false
+    readonly property string effectiveQuality: quality === "high" && !autoLowered ? "high" : "low"
+    property real slowSeconds: 0
     property alias hovered: hoverHandler.hovered
     width: 220
     height: 220
@@ -175,6 +180,13 @@ Item {
         running: !root.reducedMotion && root.visible
         onTriggered: {
             root.clock += frameTime;
+            if (root.effectiveQuality === "high" && frameTime > 0 && frameTime < 1) {
+                root.slowSeconds = frameTime > 1 / 40 ? root.slowSeconds + frameTime : Math.max(0, root.slowSeconds - frameTime);
+                if (root.slowSeconds > 3) {
+                    root.autoLowered = true;
+                    console.warn("Orb 3D: fotogrammi lenti per 3 s, passo alla qualita' bassa");
+                }
+            }
             root.angle = (root.angle + (8 + root.outerOrbit * 0.2) * frameTime) % 360;
             root.breath = Math.sin(root.clock * 2 * Math.PI * 1000 / root.breathPeriod);
         }
@@ -220,7 +232,7 @@ Item {
         anchors.bottomMargin: 18
         environment: SceneEnvironment {
             backgroundMode: SceneEnvironment.Transparent
-            antialiasingMode: root.quality === "high" ? SceneEnvironment.MSAA : SceneEnvironment.NoAA
+            antialiasingMode: root.effectiveQuality === "high" ? SceneEnvironment.MSAA : SceneEnvironment.NoAA
             antialiasingQuality: SceneEnvironment.High
         }
 
@@ -261,7 +273,7 @@ Item {
         ParticleSystem3D {
             id: particles
             running: root.visible
-            readonly property bool high: root.quality === "high"
+            readonly property bool high: root.effectiveQuality === "high"
 
             SpriteParticle3D {
                 id: outerSprite

@@ -260,7 +260,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F3.8` | Demonstration Learning (dimostrazione vera -> passi semantici, parametri, descrizione, versione/app/undo, sospensione su drift, ri-approvazione; sopravvive a riavvio, resize e dati diversi - 25/09/2026) | `DONE` |
 | `F4.1` | Protocol Architecture (26/09/2026: riduttore di riferimento Python e riduttore C++ superano la stessa suite di 18 fixture, ctest nella CI; sequence_id/trace_id consumati anche lato C++) | `DONE` |
 | `F4.2` | Native HUD (F4.2.1/F4.2.4 chiusi, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026; F4.2.5/F4.2.6 e resto di F4.2.3 richiedono test interattivi/visivi) | `DOING` |
-| `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
+| `F4.3` | Native HUD (27/09/2026: qualita' adattiva dell'orb - batteria e fotogrammi lenti; blur di sistema per pannello provato e scartato con evidenza: serve una finestra nativa non-layered per pannello) | `DOING` |
 | `F4.4` | Interaction Design (26/09/2026: orb 3D Qt Quick 3D con nucleo volumetrico e particle shell, comportamento per stato interrupt-safe, reduced motion di Windows, qualita' high/low, fallback 2D; livelli audio reali di microfono e voce di Jake collegati all'orb; 27/09/2026 sera: particelle come massa viva a tre strati con moto individuale, orbite differenziali, componente radiale e reazioni per stato/audio/esito, modalita' demo JAKE_HUD_DEMO=1; giudizio estetico `VERIFY` dall'utente) | `DOING` |
 | `F4.5` | Interaction Design (26/09/2026: trascrizione live, permission card, prove, diagnosi, notifiche nell'HUD nativo; 27/09/2026: modalita' privata = nessun contenuto verso HUD/companion/replay, con indicatore; piano live con stato e durata di ogni passo; modalita' di notifica e notifiche in attesa visibili; verifica visiva da fare) | `DOING` |
 | `F4.6` | Trust UX (26/09/2026: kill switch visibile e scorciatoia globale; action center con ultima azione, esito, verifica e undo con scadenza; 27/09/2026: dettagli dell'azione per l'utente - origine, esito/categoria, verifica, annullabilita', traccia - e motivo quando l'undo non e' piu' disponibile; retry sicuro dell'ultima azione fallita a voce e dal pulsante "Riprova"; undo rifiutato se il file/la cartella da cancellare e' cambiato dopo) | `DOING` |
@@ -8737,6 +8737,18 @@ Dipende da: F4.2; integrazione con l'orb dopo base 3D e particle shell di F4.4.
 Criterio di uscita: 60 FPS sul profilo consigliato e input latency invariata entro il budget,
 misurati anche con orb particellare, pannelli e liquid-glass attivi insieme; qualità ridotta e
 reduced motion restano utilizzabili.
+
+- 27/09/2026 (F4.3.5, qualita' adattiva): l'orb 3D misura il tempo reale dei fotogrammi e, se in qualita' alta
+  resta sotto ~40 fps per 3 s, scende da solo alla qualita' bassa per la sessione (meno particelle, niente strato
+  intermedio, niente MSAA; avviso su stderr); a batteria, senza `JAKE_HUD_QUALITY` esplicito, parte gia' in qualita'
+  bassa. Su questa macchina (in carica, fotogrammi veloci) il declassamento non scatta: non osservato dal vivo.
+- 27/09/2026 (F4.3.1-F4.3.3, esperimento scartato con evidenza): blur di sistema solo dietro i pannelli ritagliando
+  la finestra (`SetWindowRgn` sull'unione dei pannelli arrotondati + cerchio dell'orb) e attivando l'accent di DWM
+  (`SetWindowCompositionAttribute`, blur-behind e acrilico). Risultato a schermo: tutta la finestra diventa nera e la
+  regione non ritaglia la superficie. Causa: Qt crea l'overlay trasparente come finestra `WS_EX_LAYERED`
+  (exstyle letto: 0x080800a8), su cui l'accent di DWM non compone il blur. Il vetro vero richiede una finestra
+  nativa NON layered per ogni pannello (o DirectComposition): e' il blocco architetturale del track HUD, non un
+  incremento. Codice dell'esperimento non tenuto; resta il riempimento pieno leggibile.
 
 ### F4.4 — State machine e Orb 2.0
 
