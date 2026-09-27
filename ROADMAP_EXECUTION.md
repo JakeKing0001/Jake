@@ -9495,6 +9495,9 @@ Criterio di uscita: 30 giorni di pilot senza loop di notifica o azione distrutti
   voce nella sessione vocale, che rimanda gli avvisi non richiesti mentre Jake parla ma dice subito quelli chiesti esplicitamente.
   Test con un processo figlio vero (psutil vero, attesa vera, uscita 0 e 3), il figlio resta vivo finche' il test non lo lascia finire.
   Non registrato nel `TaskMonitorRegistry`: oggi nessuno ne legge i compiti attivi, sarebbe un collegamento a vuoto.
+  Stesso giorno (F6.7.7): "cosa stai sorvegliando?" (`LIST_WATCHES`) e "smetti di sorvegliare npm" (`STOP_WATCH`,
+  toglie solo l'avviso, il processo non si tocca). Test con processo figlio reale: annullata la sorveglianza, il
+  processo finisce normalmente e nessun avviso parte.
 - 27/09/2026 (bug reale trovato qui): le skill aggiunte per F6.3.4, F7.1.3 e F8.2 (feedback sulle notifiche, `SET_DEVICE_ACCESS`,
   `PLAN_SKILL_INSTALL`/`INSTALL_SKILL_PACKAGE`) non avevano frasi in `core/response_formatter.py`: l'utente avrebbe sentito il
   dizionario grezzo (`{'message': ..., 'multiplier': 0.5}`) o "Si e' verificato un errore" per rifiuti con un motivo preciso (firma

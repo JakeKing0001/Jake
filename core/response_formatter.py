@@ -116,6 +116,8 @@ def _format_control_error(intent: str, error: str | None, data: dict) -> str | N
     if error == "NOT_FOUND":
         if intent == "WATCH_PROCESS":
             return f"Non vedo nessun processo '{data.get('process', '')}' in esecuzione da sorvegliare."
+        if intent == "STOP_WATCH":
+            return f"Non sto sorvegliando nessun processo '{data.get('process', '')}'."
         if intent in ("SET_DEVICE_ACCESS", "REVOKE_DEVICE"):
             return f"Non trovo nessun dispositivo associato chiamato '{data.get('device', '')}'."
         if intent == "PIN_MEMORY":
@@ -138,6 +140,12 @@ def _format_control_error(intent: str, error: str | None, data: dict) -> str | N
 def _format_control_success(intent: str, data: dict) -> str | None:
     if intent == "WATCH_PROCESS":
         return f"Ok, ti avviso quando {data['process']} finisce."
+    if intent == "LIST_WATCHES":
+        processes = data.get("processes") or []
+        return ("Sto aspettando che finiscano: " + ", ".join(processes) + ".") if processes else \
+            "Non sto sorvegliando nessun processo."
+    if intent == "STOP_WATCH":
+        return f"Ok, non ti avviso più per {', '.join(data['processes'])}: il processo continua normalmente."
     if intent == "DAILY_BRIEF":
         return str(data.get("text") or "")
     if intent == "EXPORT_MEMORIES":

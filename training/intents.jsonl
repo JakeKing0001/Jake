@@ -698,3 +698,5 @@
 {"text": "modalita' studio per due ore", "intent": "SET_NOTIFICATION_MODE", "parameters": {"mode": "study", "minutes": 120}}
 {"text": "perché me l'hai detto", "intent": "EXPLAIN_LAST_NOTIFICATION", "parameters": {}}
 {"text": "perché questo avviso", "intent": "EXPLAIN_LAST_NOTIFICATION", "parameters": {}}
+{"text": "cosa stai sorvegliando", "intent": "LIST_WATCHES", "parameters": {}}
+{"text": "smetti di sorvegliare npm", "intent": "STOP_WATCH", "parameters": {"process": "npm"}}

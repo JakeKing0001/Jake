@@ -552,8 +552,11 @@ class JakeCore:
         # Skill che hanno bisogno del core (non solo del registry): registrate qui.
         self.skill_registry.register_skill("LIST_MODELS", ListModelsSkill())
         # F6.7: "avvisami quando finisce la build" - sorveglia un processo gia' in esecuzione
-        from skills.watch_process import WatchProcessSkill
-        self.skill_registry.register_skill("WATCH_PROCESS", WatchProcessSkill(self))
+        from skills.watch_process import ListWatchesSkill, StopWatchSkill, WatchProcessSkill
+        watcher = WatchProcessSkill(self)
+        self.skill_registry.register_skill("WATCH_PROCESS", watcher)
+        self.skill_registry.register_skill("LIST_WATCHES", ListWatchesSkill(watcher))
+        self.skill_registry.register_skill("STOP_WATCH", StopWatchSkill(watcher))
         # F4.6.2: "riprova" - l'ultima azione fallita, di nuovo attraverso questa stessa pipeline
         from skills.retry_last import RetryLastActionSkill
         self.skill_registry.register_skill("RETRY_LAST_ACTION", RetryLastActionSkill(self))
