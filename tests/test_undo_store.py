@@ -64,11 +64,12 @@ class GenerateUndoDescriptorTests(unittest.TestCase):
     def test_default_ttl_is_five_minutes(self):
         self.assertEqual(DEFAULT_UNDO_TTL_SECONDS, 5 * 60)
 
-    def test_preconditions_are_deliberately_none(self):
-        """F1.1.7 gia' rifiutato lo stesso giudizio caso per caso per ActionProposal.preconditions
-        - non inventato nemmeno qui."""
-        descriptor = generate_undo_descriptor("action-9", "CREATE_PATH", {"path": "x"})
-        self.assertIsNone(descriptor.preconditions)
+    def test_only_undos_that_delete_carry_the_state_they_must_find(self):
+        """F4.6.4: non un giudizio caso per caso inventato, ma lo stato osservabile di cio' che l'undo cancellerebbe
+        (CREATE_PATH, EXTRACT_ARCHIVE); un rename annullato non cancella nulla e non ne ha bisogno."""
+        self.assertIn('"path": "x"', generate_undo_descriptor("action-9", "CREATE_PATH", {"path": "x"}).preconditions)
+        renamed = generate_undo_descriptor("action-11", "RENAME_PATH", {"path": "a/x.txt", "new_path": "a/y.txt"})
+        self.assertIsNone(renamed.preconditions)
 
     def test_a_freshly_generated_descriptor_is_usable(self):
         descriptor = generate_undo_descriptor("action-10", "CREATE_PATH", {"path": "x"})

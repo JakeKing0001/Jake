@@ -263,7 +263,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
 | `F4.4` | Interaction Design (26/09/2026: orb 3D Qt Quick 3D con nucleo volumetrico e particle shell, comportamento per stato interrupt-safe, reduced motion di Windows, qualita' high/low, fallback 2D; livelli audio reali di microfono e voce di Jake collegati all'orb; verifica visiva degli stati ancora da fare) | `DOING` |
 | `F4.5` | Interaction Design (26/09/2026: trascrizione live, permission card, prove, diagnosi, notifiche nell'HUD nativo; 27/09/2026: modalita' privata = nessun contenuto verso HUD/companion/replay, con indicatore; piano live con stato e durata di ogni passo; verifica visiva da fare) | `DOING` |
-| `F4.6` | Trust UX (26/09/2026: kill switch visibile e scorciatoia globale; action center con ultima azione, esito, verifica e undo con scadenza; 27/09/2026: dettagli dell'azione per l'utente - origine, esito/categoria, verifica, annullabilita', traccia - e motivo quando l'undo non e' piu' disponibile; retry sicuro dell'ultima azione fallita a voce e dal pulsante "Riprova") | `DOING` |
+| `F4.6` | Trust UX (26/09/2026: kill switch visibile e scorciatoia globale; action center con ultima azione, esito, verifica e undo con scadenza; 27/09/2026: dettagli dell'azione per l'utente - origine, esito/categoria, verifica, annullabilita', traccia - e motivo quando l'undo non e' piu' disponibile; retry sicuro dell'ultima azione fallita a voce e dal pulsante "Riprova"; undo rifiutato se il file/la cartella da cancellare e' cambiato dopo) | `DOING` |
 | `F4.7` | Accessibility (26/09/2026: nomi accessibili, focus ring, scrittura reale nella barra comandi di un overlay no-activate, scorciatoie globali Ctrl+Shift+J / Ctrl+Alt+Fine, reduced motion; 27/09/2026: alto contrasto da Windows o JAKE_HUD_HIGH_CONTRAST, verificato a schermo; "Dimensioni testo" di Windows applicata a tutto l'HUD (o JAKE_HUD_TEXT_SCALE), verificata a schermo al 150% di sistema; screen reader, scaling e alto contrasto da verificare) | `DOING` |
 | `F4.8` | Release Engineering (26/09/2026: core e HUD nativo avviati in ordine come processi separati, riavvio dell'HUD solo dopo un crash e con un tetto; installer/crash dump/rollback non iniziati; 27/09/2026: quando il supervisore smette di riavviare un HUD in crash revoca la sua credenziale e lo dice all'utente) | `DOING` |
 | `F5.1` | Memory Platform (F5.1.1/F5.1.3-F5.1.6 il 21/09/2026: schema versionato, migrazioni transazionali con backup, metadati, recupero; resta F5.1.2 separare entita'/episodi/procedure e la prova su una copia del database reale) | `DOING` |
@@ -8896,6 +8896,13 @@ Criterio di uscita: undo end-to-end verificato per file, finestra e workflow fix
   stato applicato in parte: Jake lo dice e chiede prima; il "si'" riprova esattamente l'azione mostrata
   (`action_id`), non quella diventata ultima nel frattempo. Il meta-comando non sostituisce il turno del comando
   vero (`META_TURN_INTENTS`, come la correzione). Test sul JakeCore vero (policy reale, dialogo reale, "si'").
+- 27/09/2026 (F4.6.4, rischio reale di perdita dati): l'undo di `CREATE_PATH` e' un `DELETE_PATH` confermato e
+  quello di `EXTRACT_ARCHIVE` cancella la cartella estratta. Se nei 5 minuti di validita' l'utente aveva scritto
+  nel file o aggiunto file nella cartella, "annulla l'ultima azione" (o il pulsante Annulla) avrebbe cancellato
+  anche il suo lavoro. Ora questi undo portano nelle `preconditions` l'impronta osservabile di cio' che hanno
+  creato (nomi, dimensioni, date di modifica; max 2000 file) e se e' cambiata l'undo non parte e Jake spiega
+  perche' (`UNDO_STATE_CHANGED`). Un rename/move annullato non cancella nulla e non ne ha bisogno. Test su file e
+  cartelle reali. Limite dichiarato: un cambiamento tra la domanda di conferma e il "si'" non e' ricontrollato.
 
 - 26/09/2026 (F4.6.5, prima fetta): pulsante "Ferma tutto" sempre visibile nell'HUD nativo, che
   invia `ferma tutto` (corsia a corrispondenza esatta -> `KILL_SWITCH`, nessun modello in mezzo).

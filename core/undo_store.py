@@ -20,11 +20,13 @@ Deliberatamente NON affrontato qui (passo successivo dichiarato, stesso principi
 meccanismo, poi l'adozione" gia' seguito per ResourceLockManager/TaskRiskBudget in questa
 sessione): nessun collegamento ai tre chokepoint reali (JakeCore/TaskAgent/PlanExecutor) che
 potrebbero popolare questo store dopo un'azione riuscita, ne' una skill "ANNULLA" che lo
-consumi; `UndoDescriptor.preconditions` resta sempre `None` - descrivere COSA deve restare vero
-perche' l'undo abbia senso dipende dai parametri della singola chiamata, lo stesso giudizio caso
-per caso gia' rifiutato per `ActionProposal.preconditions`/`expected_effect` (F1.1.7)."""
+consumi. (Aggiornamento F4.6.4: `UndoDescriptor.preconditions` porta ora l'impronta osservabile di cio' che un
+undo CANCELLEREBBE - vedi FINGERPRINTED_TARGETS - non un giudizio caso per caso sui parametri.)"""
+import json
+import os
 import threading
 import time
+from pathlib import Path
 from typing import Optional
 
 from core.action_contracts import UndoDescriptor
@@ -36,6 +38,49 @@ from core.execution_safety import INTENT_SAFETY_REGISTRY, UNDO_PARAMS_BY_INTENT
 # d'ora, quindi non esiste un valore "corretto" da scoprire, solo uno ragionevole da dichiarare
 # esplicitamente.
 DEFAULT_UNDO_TTL_SECONDS = 5 * 60
+
+# F4.6.4 ("impedire undo quando lo stato e' cambiato e spiegarne il motivo"): gli undo che CANCELLANO (il file creato,
+# la cartella estratta) portano l'impronta di cio' che hanno creato. Se da allora e' cambiato (l'utente ci ha
+# scritto, ha aggiunto file) l'undo non si fa: cancellerebbe lavoro dell'utente, non solo l'effetto di Jake.
+FINGERPRINTED_TARGETS = {"CREATE_PATH": "path", "EXTRACT_ARCHIVE": "destination"}
+MAX_FINGERPRINT_ENTRIES = 2000
+
+
+def fingerprint(path: Path) -> list | None:
+    """Stato osservabile di un file o di una cartella (nomi, dimensioni, date di modifica); None se non esiste."""
+    try:
+        if path.is_file():
+            stat = path.stat()
+            return [[".", stat.st_size, stat.st_mtime_ns]]
+        if not path.is_dir():
+            return None
+        entries = []
+        for root, dirs, files in os.walk(path):
+            dirs.sort()
+            for name in sorted(files):
+                full = Path(root) / name
+                stat = full.stat()
+                entries.append([str(full.relative_to(path)), stat.st_size, stat.st_mtime_ns])
+                if len(entries) > MAX_FINGERPRINT_ENTRIES:
+                    return [["troppi file", len(entries), 0]]
+            entries.extend([[str((Path(root) / d).relative_to(path)) + os.sep, 0, 0] for d in dirs])
+        return entries
+    except OSError:
+        return None
+
+
+def undo_state_problem(descriptor, intent_of_original: str | None = None) -> str | None:
+    """Il percorso cambiato dopo l'azione (None se l'undo si puo' fare)."""
+    if not descriptor.preconditions:
+        return None
+    try:
+        expected = json.loads(descriptor.preconditions)
+    except ValueError:
+        return None
+    target = Path(expected.get("path", ""))
+    if fingerprint(target) != expected.get("fingerprint"):
+        return str(target)
+    return None
 
 
 def generate_undo_descriptor(
@@ -56,11 +101,17 @@ def generate_undo_descriptor(
     except (KeyError, TypeError):
         return None
     effective_now = now if now is not None else time.time()
+    preconditions = None
+    target_key = FINGERPRINTED_TARGETS.get(intent)
+    if target_key and data.get(target_key):
+        target = Path(str(data[target_key]))
+        preconditions = json.dumps({"path": str(target), "fingerprint": fingerprint(target)})
     return UndoDescriptor(
         action_id=action_id,
         compensating_intent=safety_entry.rollback.compensating_intent,
         compensating_parameters=compensating_parameters,
         expires_at=effective_now + ttl_seconds,
+        preconditions=preconditions,
     )
 
 

@@ -67,6 +67,12 @@ class UndoLastActionSkill:
         descriptor = self.core.undo_store.most_recent_usable()
         if descriptor is None:
             return SkillResult(success=False, data={}, error="NO_UNDO_AVAILABLE")
+        from core.undo_store import undo_state_problem
+
+        changed = undo_state_problem(descriptor)
+        if changed is not None:
+            # F4.6.4: annullare cancellerebbe anche le modifiche fatte dopo - non si fa, e si dice perche'
+            return SkillResult(success=False, data={"path": changed}, error="UNDO_STATE_CHANGED")
         description = _describe_undo(descriptor.compensating_intent, descriptor.compensating_parameters)
         return SkillResult(
             success=False,

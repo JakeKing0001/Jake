@@ -206,6 +206,9 @@ def _format_error(intent: str, result: SkillResult) -> str:
         return "Mancano delle informazioni per eseguire questa azione."
     if error == "NO_UNDO_AVAILABLE":
         return "Non c'è nessuna azione recente che posso annullare."
+    if error == "UNDO_STATE_CHANGED":
+        return (f"Non annullo: {data.get('path', '')} è cambiato dopo la mia azione, e annullare cancellerebbe anche "
+                "le modifiche fatte dopo. Se vuoi davvero toglierlo, chiedimelo esplicitamente.")
     if error == "NOT_FOUND":
         if intent == "RESUME_INTERRUPTED_TASK":
             return "Non ho nessun compito interrotto da riprendere."
