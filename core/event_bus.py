@@ -26,8 +26,15 @@ class EventBus:
         # personale, non un log illimitato): una disconnessione piu' lunga del buffer produce un
         # gap dichiarato onestamente (vedi "gap" sotto), mai un replay finto completo.
         self._replay_buffer: collections.deque = collections.deque(maxlen=replay_buffer_size)
+        # F4.5.7: con la modalita' privata attiva JakeCore imposta qui core.hud_protocol.redact_private. E' il
+        # punto unico per cui passa ogni evento verso HUD e companion (e il buffer di replay): nessun produttore
+        # (risposte, trascrizioni della voce, notifiche, passi degli agenti) deve ricordarsi di farlo da se'.
+        self.redactor = None
 
     def publish(self, event) -> None:
+        redactor = self.redactor
+        if redactor is not None:
+            event = redactor(event)
         with self._lock:
             if hasattr(event, "sequence_id"):
                 event.sequence_id = self._next_sequence_id

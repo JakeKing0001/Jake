@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from core.companion_guard import CompanionGuard
 from core.companion_server import CompanionServer
 from core.device_credential_store import DeviceCredentialStore
+from core.response_formatter import format_skill_result
 from skills.device_access import SetDeviceAccessSkill
 
 
@@ -49,6 +50,8 @@ class DeviceAccessTests(unittest.TestCase):
         core = SimpleNamespace(companion_server=self.server)
         result = SetDeviceAccessSkill(core).execute({"device": "telefono", "level": "sola lettura"})
         self.assertTrue(result.success, result)
+        self.assertEqual(format_skill_result("SET_DEVICE_ACCESS", result),
+                         'Fatto: Telefono di prova ora ha accesso "sola lettura".')
         self.assertEqual(self._request(self.server, "POST", "/command", {"text": "che ore sono"}), 403)
         self.assertEqual(self._request(self.server, "GET", "/status"), 200)
 
@@ -70,6 +73,76 @@ class DeviceAccessTests(unittest.TestCase):
                 "INSERT INTO device_capabilities (device_id, classes, updated_at) VALUES ('phone-1', 'non json', 0)")
             self.store._connection.commit()
         self.assertEqual(CompanionGuard(audit=None, capability_store=self.store).capabilities_of("phone-1"), frozenset())
+
+
+
+class OpenStreamRevocationTests(unittest.TestCase):
+    """F7.2.7: uno stream SSE gia' aperto non sopravvive alla revoca (telefono perso) ne' alla rotazione della
+    credenziale. Prima continuava a ricevere ogni evento fino alla riconnessione."""
+
+    setUp = DeviceAccessTests.setUp  # stesso server reale e stesso database temporaneo, senza rieseguirne i test
+    _start = DeviceAccessTests._start
+    _request = DeviceAccessTests._request
+
+    def _open_stream(self, token):
+        import threading
+
+        received, closed = [], threading.Event()
+
+        def read():
+            request = urllib.request.Request(f"http://127.0.0.1:{self.server.port}/events")
+            request.add_header("Authorization", f"Bearer {token}")
+            try:
+                with urllib.request.urlopen(request, timeout=10) as response:
+                    for raw in response:
+                        line = raw.decode("utf-8").strip()
+                        if line.startswith("data: "):
+                            received.append(json.loads(line[len("data: "):])["payload"].get("text"))
+            except OSError:
+                pass
+            closed.set()
+
+        threading.Thread(target=read, daemon=True).start()
+        return received, closed
+
+    def _publish(self, text):
+        from core.hud_protocol import EventType, HudEvent
+
+        self.server.event_bus.publish(HudEvent(EventType.JAKE_MESSAGE, {"text": text}))
+
+    def _wait_for(self, predicate, timeout=5.0):
+        import time
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline and not predicate():
+            time.sleep(0.05)
+        return predicate()
+
+    def test_i_lost_my_phone_revokes_it_and_closes_its_open_stream(self):
+        from core.response_formatter import format_skill_result
+        from core.sync_crypto import DeviceKeys, Keyring
+        from skills.device_access import RevokeDeviceSkill
+
+        keyring = Keyring()
+        keyring.add("phone-1", DeviceKeys.generate().public)
+        received, closed = self._open_stream(self.token)
+        self.assertTrue(self._wait_for(lambda: (self._publish("prima"), "prima" in received)[1]))
+
+        result = RevokeDeviceSkill(SimpleNamespace(companion_server=self.server, sync_keyring=keyring)).execute(
+            {"device": "telefono"})
+        self.assertEqual((result.data["revoked"], result.data["sync_keys_removed"]), (True, True))
+        self.assertIn("non vede più nulla", format_skill_result("REVOKE_DEVICE", result))
+        self.assertTrue(closed.wait(4), "lo stream del dispositivo revocato e' rimasto aperto")
+        self._publish("dopo la revoca")
+        self.assertNotIn("dopo la revoca", received)
+        self.assertFalse(keyring.is_active("phone-1"))
+        self.assertEqual(self._request(self.server, "GET", "/status"), 401)
+
+    def test_rotating_the_credential_closes_the_stream_opened_with_the_old_one(self):
+        received, closed = self._open_stream(self.token)
+        self.assertTrue(self._wait_for(lambda: (self._publish("prima"), "prima" in received)[1]))
+        self.store.rotate_credential("phone-1")
+        self.assertTrue(closed.wait(4), "il vecchio token non vale piu', il suo stream nemmeno")
 
 
 if __name__ == "__main__":

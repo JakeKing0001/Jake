@@ -8,6 +8,7 @@ USAGE = f"""Jake {VERSION} - assistente personale locale
   python main.py                 modalita' Jarvis (default): HUD in vetro + tray + voce continua
   python main.py --no-voice      solo HUD e barra comandi (Ctrl+Shift+J), senza microfono
   python main.py --cli           modalita' testo nel terminale
+  python main.py --preflight     controlla cosa serve a Jake su questa macchina
   python main.py --voice         push-to-talk nel terminale (tieni premuto F9)
   python main.py --voice --wake-word   voce continua nel terminale, senza HUD
   python main.py --tray          vecchia icona tray con pannello Tk (v1.1)
@@ -47,6 +48,11 @@ def _dispatch():
     if "--version" in sys.argv:
         print(f"Jake {VERSION} (protocollo {PROTOCOL_VERSION})")
         return
+    if "--preflight" in sys.argv:
+        # F0.6.2: controlla cosa serve a Jake su questa macchina, senza avviarlo
+        from tools.preflight import main as preflight
+
+        sys.exit(preflight())
     if "--help" in sys.argv or "-h" in sys.argv:
         print(USAGE)
         return

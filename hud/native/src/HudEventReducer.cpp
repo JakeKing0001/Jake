@@ -57,6 +57,7 @@ QJsonObject HudViewState::snapshot() const {
         {"last_error", lastError},
         {"step_index", stepIndex},
         {"step_description", stepDescription},
+        {"plan_steps", planSteps},
         {"evidence", evidence},
         {"inspection_verdict", inspectionVerdict},
         {"inspection_reason", inspectionReason},
@@ -71,6 +72,7 @@ QJsonObject HudViewState::snapshot() const {
         {"last_outcome", lastOutcome},
         {"audio_source", audioSource},
         {"audio_level", audioLevel},
+        {"private_mode", privateMode},
         {"last_sequence_id", lastSequenceId},
         {"ignored", ignored},
         {"incompatible", incompatible},
@@ -152,9 +154,7 @@ void HudEventReducer::reduce(const QString &type, const QJsonObject &payload, co
             m_view.state = QStringLiteral("SPEAKING");
         }
     } else if (isType(type, AGENT_STEP)) {
-        m_view.stepIndex = integer(payload, "step");
-        m_view.stepDescription = text(payload, "description");
-        m_view.state = QStringLiteral("EXECUTING");
+        reducePlanStep(payload);
     } else if (isType(type, ERROR)) {
         m_view.lastError = text(payload, "detail");
         m_view.state = QStringLiteral("ERROR");
@@ -202,6 +202,8 @@ void HudEventReducer::reduce(const QString &type, const QJsonObject &payload, co
         m_view.audioSource = text(payload, "source");
     } else if (isType(type, ACTION_RECEIPT) || isType(type, UNDO_AVAILABLE)) {
         reduceActivity(type, payload, traceId);
+    } else if (isType(type, PRIVACY_MODE)) {
+        m_view.privateMode = payload.value(QStringLiteral("enabled")) == QJsonValue(true);
     } else if (isType(type, SELECTOR_INSPECTION)) {
         const QJsonValue inspectionValue = payload.value(QStringLiteral("inspection"));
         const QJsonObject inspection = inspectionValue.isObject() ? inspectionValue.toObject() : QJsonObject();
@@ -250,6 +252,43 @@ void HudEventReducer::reduceActivity(const QString &type, const QJsonObject &pay
         m_view.activities.replace(index, item);
     else
         push(m_view.activities, item);
+}
+
+void HudEventReducer::reducePlanStep(const QJsonObject &payload) {
+    constexpr int kMaxPlanSteps = 8;
+    const int step = integer(payload, "step");
+    const QString description = text(payload, "description");
+    QString status = text(payload, "status");
+    if (status.isEmpty())
+        status = QStringLiteral("running");
+    if (status != QLatin1String("running") && status != QLatin1String("done") && status != QLatin1String("failed")) {
+        m_view.ignored += 1;
+        return;
+    }
+    if (status == QLatin1String("running")) {
+        bool restart = step <= 1;
+        for (const QJsonValue &item : std::as_const(m_view.planSteps))
+            restart = restart || item.toObject().value("step").toInt() >= step;
+        if (restart)
+            m_view.planSteps = QJsonArray(); // un compito nuovo riparte dal primo passo
+        m_view.planSteps.append(QJsonObject{{"step", step}, {"description", description},
+                                            {"status", QStringLiteral("running")}, {"duration_ms", 0}});
+        while (m_view.planSteps.size() > kMaxPlanSteps)
+            m_view.planSteps.removeFirst();
+        m_view.stepIndex = step;
+        m_view.stepDescription = description;
+        m_view.state = QStringLiteral("EXECUTING");
+        return;
+    }
+    const QJsonValue duration = payload.value(QStringLiteral("duration_ms"));
+    for (int i = 0; i < m_view.planSteps.size(); ++i) {
+        QJsonObject item = m_view.planSteps.at(i).toObject();
+        if (item.value("step").toInt() == step && item.value("status").toString() == QLatin1String("running")) {
+            item.insert("status", status);
+            item.insert("duration_ms", duration.isDouble() && duration.toDouble() >= 0 ? static_cast<qint64>(duration.toDouble()) : 0);
+            m_view.planSteps.replace(i, item);
+        }
+    }
 }
 
 void HudEventReducer::reduceTranscript(const QJsonObject &payload) {

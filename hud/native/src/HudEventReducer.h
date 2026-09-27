@@ -24,6 +24,7 @@ struct HudViewState {
     QString lastError;
     int stepIndex = 0;
     QString stepDescription;
+    QJsonArray planSteps;      // F4.5.2: [{step, description, status, duration_ms}] del compito corrente
     QJsonArray evidence;       // [{kind, intent, verified}, ...]
     QString inspectionVerdict;
     QString inspectionReason;
@@ -37,6 +38,7 @@ struct HudViewState {
     QString lastOutcome;       // F4.4.1: success | warning | error (ultima ricevuta)
     QString audioSource;       // F4.4.4: "mic" | "voice"
     double audioLevel = 0.0;   // 0..1, mai audio
+    bool privateMode = false;  // F4.5.7: eventi gia' redatti dal core, qui solo l'indicatore
     QJsonArray activities;     // [{action_id, intent, outcome, verified, trace_id, undo_intent, undo_expires_at}, ...]
     qint64 lastSequenceId = 0;
     int ignored = 0;
@@ -65,6 +67,7 @@ private:
     Result ignore();
     void reduce(const QString &type, const QJsonObject &payload, const QString &traceId);
     void reduceTranscript(const QJsonObject &payload);
+    void reducePlanStep(const QJsonObject &payload);
     void reduceActivity(const QString &type, const QJsonObject &payload, const QString &traceId);
     static void push(QJsonArray &items, const QJsonValue &item);
 

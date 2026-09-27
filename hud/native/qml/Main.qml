@@ -37,6 +37,7 @@ ApplicationWindow {
     property string jakeToken: ""
     // Impostati da src/main.cpp: accessibilita' e qualita' dell'orb (F4.4.5, F4.3.5).
     property bool reducedMotion: false
+    property bool highContrast: false
     property string orbQuality: "high"
     property bool orb3d: false
 
@@ -76,6 +77,7 @@ ApplicationWindow {
     onPointerOverAnyPanelChanged: if (!typing) overlayStyler.setClickThrough(window, !pointerOverAnyPanel)
 
     Component.onCompleted: {
+        Theme.highContrast = highContrast
         if (jakeToken.length > 0)
             jake.setCredentials(jakeDeviceId, jakeToken)
         jake.connectToJake(jakeBaseUrl)
@@ -98,6 +100,7 @@ ApplicationWindow {
             activeDevice: jake.activeDevice
             micOpen: jake.micOpen
             micDiscarding: jake.micDiscarding
+            privateMode: jake.privateMode
         }
 
         // F4.4.7: orb 3D (Qt Quick 3D) se disponibile, altrimenti l'orb 2D con la stessa interfaccia.
@@ -179,6 +182,8 @@ ApplicationWindow {
             transcriptText: jake.transcriptText
             transcriptFinal: jake.transcriptFinal
             stepDescription: jake.state === "EXECUTING" ? jake.stepDescription : ""
+            // il piano resta visibile finche' si lavora e mentre si attende una conferma a meta' compito
+            planSteps: jake.state === "EXECUTING" || jake.state === "WAITING" ? jake.planSteps : []
             evidenceSummary: jake.evidenceSummary
             inspectionReason: jake.inspectionReason
         }
@@ -189,8 +194,10 @@ ApplicationWindow {
             activitySummary: jake.lastActivitySummary
             activityDetails: jake.lastActivityDetails
             undoExpiresAt: jake.lastUndoExpiresAt
-            // undo e stop passano dagli stessi skill del comando vocale (scadenza, policy, controlli)
+            retryAvailable: jake.lastOutcome === "error"
+            // undo, riprova e stop passano dagli stessi skill del comando vocale (scadenza, policy, controlli)
             onUndoRequested: jake.sendCommand("annulla l'ultima azione")
+            onRetryRequested: jake.sendCommand("riprova l'ultima azione")
             onStopRequested: jake.sendCommand("ferma tutto")
         }
 

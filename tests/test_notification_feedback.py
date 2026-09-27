@@ -10,6 +10,7 @@ from unittest import mock
 from core.event_bus import EventBus
 from core.notification_center import NotificationCenter
 from core.notification_policy import FeedbackStore, NotificationPolicy
+from core.response_formatter import format_skill_result
 from core.proactive_gate import ProactiveGate, notification_key
 from skills.notification_feedback import (LessNotificationsLikeThisSkill, MuteNotificationSkill, SnoozeNotificationSkill,
                                           UnmuteNotificationSkill)
@@ -36,7 +37,9 @@ class NotificationFeedbackTests(unittest.TestCase):
 
     def test_never_again_silences_that_type_until_it_is_restored_and_survives_a_restart(self):
         self.assertEqual(self.core.notify("advisory", "Batteria al 12%"), "Batteria al 12%")
-        self.assertTrue(MuteNotificationSkill(self.core).execute().success)
+        muted = MuteNotificationSkill(self.core).execute()
+        self.assertTrue(muted.success)
+        self.assertIn("non te la mostro più", format_skill_result("MUTE_NOTIFICATION", muted))
         self.assertIsNone(self.core.notify("advisory", "Batteria al 9%"))
         self.assertEqual(self.core.notification_center.pending_count(), 0, "silenziata, non rimandata")
         self.assertTrue(FeedbackStore(self.path).is_muted(notification_key("advisory", "Batteria al 3%")), "persistente")
@@ -53,14 +56,19 @@ class NotificationFeedbackTests(unittest.TestCase):
 
     def test_reminders_cannot_be_silenced_from_here_and_snooze_waits(self):
         self.core.notify("reminder", "Promemoria: medicina")
-        self.assertEqual(MuteNotificationSkill(self.core).execute().error, "REMINDER_NOT_MUTABLE")
-        self.assertTrue(SnoozeNotificationSkill(self.core).execute({"minutes": 30}).success)
+        refused = MuteNotificationSkill(self.core).execute()
+        self.assertEqual(refused.error, "REMINDER_NOT_MUTABLE")
+        self.assertIn("promemoria che hai chiesto tu", format_skill_result("MUTE_NOTIFICATION", refused))
+        snoozed = SnoozeNotificationSkill(self.core).execute({"minutes": 30})
+        self.assertEqual(format_skill_result("SNOOZE_NOTIFICATION", snoozed), "Ok, te la ripropongo tra 30 minuti.")
         self.assertEqual(self.core.notification_center.take_deferred(), [], "non prima di 30 minuti")
         with mock.patch("time.time", return_value=time.time() + 31 * 60):
             self.assertEqual([i["message"] for i in self.core.notification_center.take_deferred()], ["Promemoria: medicina"])
 
     def test_without_a_recent_notification_nothing_happens(self):
-        self.assertEqual(MuteNotificationSkill(self.core).execute().error, "NO_RECENT_NOTIFICATION")
+        result = MuteNotificationSkill(self.core).execute()
+        self.assertEqual(result.error, "NO_RECENT_NOTIFICATION")
+        self.assertIn("nessuna notifica di recente", format_skill_result("MUTE_NOTIFICATION", result))
 
 
 if __name__ == "__main__":

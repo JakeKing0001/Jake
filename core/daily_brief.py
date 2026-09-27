@@ -192,12 +192,14 @@ class BriefBuilder:
         collected: list[BriefItem] = []
         unavailable: list[tuple[str, str]] = []
         rejected: list[tuple[str, str]] = []
+        answered: list[str] = []
         for source in self.sources:
             try:
                 fetched = source.fetch(now)
             except Exception as exc:  # una fonte guasta non deve far sparire le altre ne' far inventare i suoi dati
                 unavailable.append((getattr(source, "name", type(source).__name__), f"{type(exc).__name__}: {exc}"))
                 continue
+            answered.append(getattr(source, "name", type(source).__name__))
             for item in fetched:
                 problem = self._validate(item, now)
                 if problem:
@@ -222,7 +224,7 @@ class BriefBuilder:
                 rendered = rendered[:SHORT_LIMIT_PER_SECTION]
             if rendered:
                 sections[section] = rendered
-        text = self._render(sections, format, unavailable, omitted_stale, rejected)
+        text = self._render(sections, format, unavailable, omitted_stale, rejected, answered)
         spoken = self._spoken(sections, text, format)
         return Brief(format, now, sections, unavailable, rejected, omitted_stale, text, spoken)
 
@@ -238,9 +240,13 @@ class BriefBuilder:
             return f"sensibilita' sconosciuta: {item.sensitivity!r}"
         return None
 
-    def _render(self, sections, format, unavailable, omitted_stale, rejected) -> str:
+    def _render(self, sections, format, unavailable, omitted_stale, rejected, answered=()) -> str:
         if not sections and not unavailable:
-            return "Non ho dati da nessuna fonte per questa mattina."
+            if answered and not omitted_stale and not rejected:
+                # le fonti hanno risposto e non c'e' nulla: e' un'informazione, non una mancanza di dati
+                names = answered[0] if len(answered) == 1 else f"{', '.join(answered[:-1])} e {answered[-1]}"
+                return f"Niente in programma: {names} non {'riporta' if len(answered) == 1 else 'riportano'} nulla."
+            return "Non ho dati da nessuna fonte collegata."
         lines = []
         for section, items in sections.items():
             lines.append(f"{SECTION_LABELS.get(section, section)}:")

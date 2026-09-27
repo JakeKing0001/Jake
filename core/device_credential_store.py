@@ -249,6 +249,21 @@ class DeviceCredentialStore:
                 return row["device_id"]
             return None
 
+    def active_credential_issued_at(self, device_id: str) -> float | None:
+        """Quando e' stata emessa la credenziale ANCORA valida di device_id (None se revocata, scaduta o assente).
+        Controllo economico (nessuna decifratura) per chi ha gia' autenticato il dispositivo e deve sapere se lo e'
+        ancora: una connessione aperta (lo stream SSE) confronta questo valore con quello del momento dell'accesso,
+        quindi si accorge anche di una rotazione (nuova credenziale = la vecchia non vale piu')."""
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT issued_at, expires_at, revoked_at FROM device_credentials WHERE device_id = ?", (device_id,),
+            ).fetchone()
+        if row is None or row["revoked_at"] is not None:
+            return None
+        if row["expires_at"] is not None and row["expires_at"] <= self._time_source():
+            return None
+        return row["issued_at"]
+
     def set_capabilities(self, device_id: str, classes) -> None:
         import json
 

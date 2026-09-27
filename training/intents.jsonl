@@ -681,3 +681,13 @@
 {"text": "mostramelo di nuovo", "intent": "UNMUTE_NOTIFICATION", "parameters": {}}
 {"text": "rimandala di un'ora", "intent": "SNOOZE_NOTIFICATION", "parameters": {"minutes": 60}}
 {"text": "ricordamelo tra dieci minuti", "intent": "SNOOZE_NOTIFICATION", "parameters": {"minutes": 10}}
+{"text": "avvisami quando finisce la build", "intent": "WATCH_PROCESS", "parameters": {"process": "msbuild"}}
+{"text": "avvisami quando finisce npm", "intent": "WATCH_PROCESS", "parameters": {"process": "npm"}}
+{"text": "riprova l'ultima azione", "intent": "RETRY_LAST_ACTION", "parameters": {}}
+{"text": "riprova", "intent": "RETRY_LAST_ACTION", "parameters": {}}
+{"text": "prova di nuovo", "intent": "RETRY_LAST_ACTION", "parameters": {}}
+{"text": "com'è la mia giornata", "intent": "DAILY_BRIEF", "parameters": {}}
+{"text": "cosa ho oggi", "intent": "DAILY_BRIEF", "parameters": {}}
+{"text": "fammi il punto della giornata con i dettagli", "intent": "DAILY_BRIEF", "parameters": {"detailed": true}}
+{"text": "ho perso il telefono", "intent": "REVOKE_DEVICE", "parameters": {"device": "telefono"}}
+{"text": "scollega il tablet", "intent": "REVOKE_DEVICE", "parameters": {"device": "tablet"}}

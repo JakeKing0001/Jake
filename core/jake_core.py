@@ -103,6 +103,11 @@ def _parse_quiet_hours(start: str | None, end: str | None) -> QuietHours | None:
         return None
 
 
+# Meta-comandi che eseguono DENTRO di se' il vero comando (correzione, "riprova"): il turno e l'ultimo scambio
+# restano quelli del comando vero, non del meta-comando che l'ha lanciato.
+META_TURN_INTENTS = frozenset({"CORRECT_LAST", "RETRY_LAST_ACTION"})
+
+
 class JakeCore:
     EXIT_SENTINEL = "l'utente vuole uscire"
     NO_PLAN = "Non so ancora fare questa cosa"
@@ -542,6 +547,19 @@ class JakeCore:
 
         # Skill che hanno bisogno del core (non solo del registry): registrate qui.
         self.skill_registry.register_skill("LIST_MODELS", ListModelsSkill())
+        # F6.7: "avvisami quando finisce la build" - sorveglia un processo gia' in esecuzione
+        from skills.watch_process import WatchProcessSkill
+        self.skill_registry.register_skill("WATCH_PROCESS", WatchProcessSkill(self))
+        # F4.6.2: "riprova" - l'ultima azione fallita, di nuovo attraverso questa stessa pipeline
+        from skills.retry_last import RetryLastActionSkill
+        self.skill_registry.register_skill("RETRY_LAST_ACTION", RetryLastActionSkill(self))
+        # F6.6: "com'e' la mia giornata" - il brief con fonti dichiarate, dalle fonti locali reali
+        from skills.daily_brief import DailyBriefSkill
+        # F7.2.7: "ho perso il telefono" - revoca subito il dispositivo (anche lo stream aperto)
+        from skills.device_access import RevokeDeviceSkill
+        self.skill_registry.register_skill("REVOKE_DEVICE", RevokeDeviceSkill(self))
+        self.skill_registry.register_skill("DAILY_BRIEF", DailyBriefSkill(
+            self.skill_registry.reminder_manager, self.skill_registry.todo_manager))
         # F6.3.4: controllo dell'utente sull'ultima notifica proattiva mostrata
         from skills.notification_feedback import (LessNotificationsLikeThisSkill, MuteNotificationSkill,
                                                   SnoozeNotificationSkill, UnmuteNotificationSkill)
@@ -715,6 +733,23 @@ class JakeCore:
         callback(digest)
         return digest
 
+    def present_notification(self, kind: str, message: str) -> str | None:
+        """F6.1: UNA strada per mostrare una notifica - gate (modalita', duplicati, budget, quiet hours,
+        preferenze) e poi un unico presentatore: stampa in CLI, voce nella sessione vocale (che la rimanda se
+        Jake sta parlando). Usata dalle fonti nuove (es. WATCH_PROCESS) invece di un callback per ciascuna."""
+        gated = self.notify(kind, message)
+        if gated is None:
+            return None
+        presenter = getattr(self, "notification_presenter", None)
+        if presenter is not None:
+            try:
+                presenter(kind, gated)
+            except Exception:
+                self.logger.exception("Errore presentando una notifica")
+        else:
+            print(f"\nJake > {gated}\nTu > ", end="", flush=True)
+        return gated
+
     def _default_on_reminder_due(self, reminder: dict) -> None:
         message = self.notify("reminder", self.format_due_reminder(reminder))
         if message is None:
@@ -787,7 +822,10 @@ class JakeCore:
 
     def _on_agent_step(self, step_index: int, description: str) -> None:
         self.session_hooks.call("set_state", "working", description)
-        self.event_bus.publish(HudEvent(EventType.AGENT_STEP, {"step": step_index, "description": description}))
+        # F4.5.2: il passo in corso; l'esito e la durata arrivano da _on_agent_step_completed
+        self._running_step: tuple[int, str, float] | None = (step_index, description, time.monotonic())
+        self.event_bus.publish(HudEvent(EventType.AGENT_STEP, {"step": step_index, "description": description,
+                                                               "status": "running"}))
 
     def _publish_plan_outcome_effect_proof_events(self, outcome) -> None:
         """Estrae da un `PlanOutcome` (core/plan_executor.py) le stesse due liste che
@@ -835,6 +873,17 @@ class JakeCore:
         intent/parametri/esito di ogni passo vengono salvati (mai l'intero `SkillResult` - i dati
         grezzi di una skill potrebbero contenere contenuto esterno/sensibile che non ha senso
         duplicare su un secondo file, il ledger e' gia' la fonte di verita' per quello)."""
+        running, self._running_step = getattr(self, "_running_step", None), None
+        if running is not None and outcome.steps:
+            # F4.5.2: piano e passi live - esito e durata del passo appena finito (un passo senza parametri non
+            # e' mai partito: non ha un "running" da chiudere)
+            step_index, description, started = running
+            last = outcome.steps[-1]
+            self.event_bus.publish(HudEvent(EventType.AGENT_STEP, {
+                "step": step_index, "description": description,
+                "status": "done" if last.result is not None and last.result.success else "failed",
+                "duration_ms": round((time.monotonic() - started) * 1000),
+            }))
         if outcome.trace_id is None or outcome.request is None or outcome.agent_name is None:
             return
         checkpoint = AgentCheckpoint(
@@ -917,6 +966,39 @@ class JakeCore:
 
         return self._answer_counted(normalized, raw_text)
 
+
+    # Intent che gestiscono gia' da soli un impegno con scadenza: niente domanda in piu'
+    COMMITMENT_HANDLED_INTENTS = frozenset({"SET_REMINDER", "ADD_TODO", "SET_DAILY_REMINDER", "SET_TIMER"})
+
+    def _propose_commitment_reminder(self, raw_text: str, response: str) -> str:
+        """F6.4.1/F6.4.2: "devo X entro venerdi'" -> Jake propone un promemoria e aspetta il si'/no normale
+        (conferma della pipeline, stessa policy di un comando). Mai creato da solo, mai in modalita' privata, mai se
+        il turno ha gia' una domanda in sospeso o ha gia' creato un promemoria/una todo."""
+        from datetime import datetime as _datetime
+
+        from core.commitments import describe, detect_commitment
+
+        if self.private_mode or self.conversation_state.get_pending_action() is not None:
+            return response
+        last = getattr(self, "last_exchange", None) or {}
+        command = last.get("command")
+        if command is not None and command.intent in self.COMMITMENT_HANDLED_INTENTS:
+            return response
+        now = getattr(self, "commitment_clock", _datetime.now)()  # iniettabile nei test
+        commitment = detect_commitment(raw_text, now)
+        if commitment is None:
+            return response
+        minutes = max(1, round((commitment.remind_at - now).total_seconds() / 60))
+        self.conversation_state.set_pending_action({
+            "intent": "SET_REMINDER",
+            "parameters": {"text": commitment.what, "in_minutes": minutes},
+            "reason": "confirmation_required",
+            "text": raw_text,
+            "trace_id": new_trace_id(),
+            "proposed_by": "commitment",
+        })
+        question = f"Vuoi che te lo ricordi {describe(commitment.remind_at, now)}?"
+        return f"{response} {question}".strip() if response else question
 
     def _run_in_current_profile(self, callback):
         """
@@ -1042,6 +1124,7 @@ class JakeCore:
 
         if response is None:
             response = ""
+        response = self._propose_commitment_reminder(raw_text, response)
         # La cronologia in RAM (self.conversation_state) resta attiva anche in modalita' privata
         # (v5.6, Privacy Engine): serve alla sessione corrente per pronomi/riferimenti e sparisce
         # comunque al riavvio. Cio' che la modalita' privata sospende e' la scrittura su DISCO E
@@ -1132,7 +1215,7 @@ class JakeCore:
     ) -> None:
         # CORRECT_LAST è un meta-comando.
         # Il vero turno corretto viene registrato separatamente.
-        if command.intent == "CORRECT_LAST":
+        if command.intent in META_TURN_INTENTS:
             return
 
         effective_scope = scope or self._dialogue_scope()
@@ -2095,7 +2178,7 @@ class JakeCore:
                 scope=scope,
             )
 
-            if resolved.intent != "CORRECT_LAST":
+            if resolved.intent not in META_TURN_INTENTS:
                 self._remember_exchange(
                     text,
                     resolved,
@@ -2184,7 +2267,7 @@ class JakeCore:
         # CORRECT_LAST contiene internamente il vero comando corretto:
         # non deve sovrascrivere last_exchange dopo che quel comando
         # ha appena scritto il proprio stato.
-        if resolved.intent != "CORRECT_LAST":
+        if resolved.intent not in META_TURN_INTENTS:
             self._remember_exchange(
                 text,
                 resolved,
@@ -2928,10 +3011,20 @@ class JakeCore:
         port = int(getattr(self.companion_server, "port", 0) or config.get("companion_server_port", 8765) or 8765)
         exe = Path(config.get("hud_native_path") or DEFAULT_EXE)
         credentials = self._provision_native_hud_credential()
-        self.native_hud = NativeHudSupervisor(exe, f"http://127.0.0.1:{port}", credentials=credentials)
+        self.native_hud = NativeHudSupervisor(exe, f"http://127.0.0.1:{port}", credentials=credentials,
+                                              on_gave_up=self._native_hud_gave_up)
         if not self.native_hud.start():
             self.native_hud = None
             self._revoke_native_hud_credential()
+
+    def _native_hud_gave_up(self, crashes: int) -> None:
+        """F4.8: l'HUD nativo continua a chiudersi e non viene piu' riavviato. Prima lo diceva solo il log: l'HUD
+        spariva senza spiegazione e la sua credenziale restava valida. Ora la credenziale si revoca (nessuno la usa
+        piu') e l'utente lo sa dalla stessa strada delle altre notifiche."""
+        self._revoke_native_hud_credential()
+        self.present_notification(
+            "advisory", f"L'HUD si è chiuso in modo anomalo {crashes} volte in pochi minuti: lo lascio spento. "
+                        "Jake continua a funzionare; i dettagli sono nel log.")
 
     def _provision_native_hud_credential(self) -> dict | None:
         """L'HUD nativo e' un client companion come un altro: si autentica con una credenziale
@@ -2961,6 +3054,26 @@ class JakeCore:
             store.revoke(NATIVE_HUD_DEVICE_ID)
         except Exception:
             self.logger.exception("Errore revocando la credenziale dell'HUD nativo")
+
+    @property
+    def private_mode(self) -> bool:
+        return getattr(self, "_private_mode", False)
+
+    @private_mode.setter
+    def private_mode(self, enabled: bool) -> None:
+        """F4.5.7: oltre a non registrare nulla (answer()), la modalita' privata toglie il contenuto da ogni
+        evento verso HUD e companion (EventBus.redactor) e lo dice all'HUD, che mostra l'indicatore."""
+        enabled = bool(enabled)
+        changed = enabled != self.private_mode
+        self._private_mode = enabled
+        bus = getattr(self, "event_bus", None)
+        if bus is None:
+            return  # all'avvio il bus non esiste ancora: parte comunque senza redazione (modalita' spenta)
+        from core.hud_protocol import redact_private
+
+        bus.redactor = redact_private if enabled else None
+        if changed:
+            bus.publish(HudEvent(EventType.PRIVACY_MODE, {"enabled": enabled}))
 
     @property
     def model_router(self):

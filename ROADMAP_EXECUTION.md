@@ -234,7 +234,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F0.3` | Architecture | `VERIFY` |
 | `F0.4` | Quality Engineering (dipendenza F0.1 `DONE` dall'11/09: `BLOCKED` era stantio; parti esistono - contract test degli eventi HUD, molti fault test - ma nessuna matrice pubblicata) | `DOING` |
 | `F0.5` | Performance Engineering (dipendenza F0.1 `DONE`: `BLOCKED` era stantio; baseline esistenti per NLU, STT, VAD, barge-in, pipeline vocale e 100 task Computer Use; manca il corpus audio consensuale e le soglie in CI) | `DOING` |
-| `F0.6` | Release Engineering | `DOING` |
+| `F0.6` | Release Engineering (27/09/2026: preflight `python main.py --preflight` - Python, dipendenze, cartella dati, disco, Ollama/modello, microfono, GPU, HUD nativo; installer non ancora) | `DOING` |
 | `F1.1` | Trust Core | `DONE` |
 | `F1.2` | Security Architecture | `DONE` |
 | `F1.3` | Execution Reliability (F1.3.5 chiuso per intero il 16/09/2026; F1.3.4 trovato gia' chiuso in una sessione precedente, riga corretta il 22/09/2026; 80% undo su azioni reversibili raggiunto lo stesso giorno - 10 nuove coppie oltre alle 4 filesystem; browser N/A dichiarato, da riverificare con F3.6) | `DONE` |
@@ -262,36 +262,36 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F4.2` | Native HUD (F4.2.1/F4.2.4 chiusi, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026; F4.2.5/F4.2.6 e resto di F4.2.3 richiedono test interattivi/visivi) | `DOING` |
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
 | `F4.4` | Interaction Design (26/09/2026: orb 3D Qt Quick 3D con nucleo volumetrico e particle shell, comportamento per stato interrupt-safe, reduced motion di Windows, qualita' high/low, fallback 2D; livelli audio reali di microfono e voce di Jake collegati all'orb; verifica visiva degli stati ancora da fare) | `DOING` |
-| `F4.5` | Interaction Design (26/09/2026: trascrizione live, permission card, prove, diagnosi, notifiche nell'HUD nativo; verifica visiva da fare) | `DOING` |
-| `F4.6` | Trust UX (26/09/2026: kill switch visibile e scorciatoia globale; action center con ultima azione, esito, verifica e undo con scadenza; 27/09/2026: dettagli dell'azione per l'utente - origine, esito/categoria, verifica, annullabilita', traccia - e motivo quando l'undo non e' piu' disponibile; retry sicuro non ancora) | `DOING` |
-| `F4.7` | Accessibility (26/09/2026: nomi accessibili, focus ring, scrittura reale nella barra comandi di un overlay no-activate, scorciatoie globali Ctrl+Shift+J / Ctrl+Alt+Fine, reduced motion di sistema; screen reader, scaling e alto contrasto da verificare) | `DOING` |
-| `F4.8` | Release Engineering (26/09/2026: core e HUD nativo avviati in ordine come processi separati, riavvio dell'HUD solo dopo un crash e con un tetto; installer/crash dump/rollback non iniziati) | `DOING` |
+| `F4.5` | Interaction Design (26/09/2026: trascrizione live, permission card, prove, diagnosi, notifiche nell'HUD nativo; 27/09/2026: modalita' privata = nessun contenuto verso HUD/companion/replay, con indicatore; piano live con stato e durata di ogni passo; verifica visiva da fare) | `DOING` |
+| `F4.6` | Trust UX (26/09/2026: kill switch visibile e scorciatoia globale; action center con ultima azione, esito, verifica e undo con scadenza; 27/09/2026: dettagli dell'azione per l'utente - origine, esito/categoria, verifica, annullabilita', traccia - e motivo quando l'undo non e' piu' disponibile; retry sicuro dell'ultima azione fallita a voce e dal pulsante "Riprova") | `DOING` |
+| `F4.7` | Accessibility (26/09/2026: nomi accessibili, focus ring, scrittura reale nella barra comandi di un overlay no-activate, scorciatoie globali Ctrl+Shift+J / Ctrl+Alt+Fine, reduced motion; 27/09/2026: alto contrasto da Windows o JAKE_HUD_HIGH_CONTRAST, verificato a schermo di sistema; screen reader, scaling e alto contrasto da verificare) | `DOING` |
+| `F4.8` | Release Engineering (26/09/2026: core e HUD nativo avviati in ordine come processi separati, riavvio dell'HUD solo dopo un crash e con un tetto; installer/crash dump/rollback non iniziati; 27/09/2026: quando il supervisore smette di riavviare un HUD in crash revoca la sua credenziale e lo dice all'utente) | `DOING` |
 | `F5.1` | Memory Platform (F5.1.1/F5.1.3-F5.1.6 il 21/09/2026: schema versionato, migrazioni transazionali con backup, metadati, recupero; resta F5.1.2 separare entita'/episodi/procedure e la prova su una copia del database reale) | `DOING` |
 | `F5.2` | Memory Platform | `DOING` |
 | `F5.3` | Knowledge Model | `DOING` |
-| `F5.4` | Memory Reliability (27/09/2026: nessuna sovrascrittura silenziosa di fatti/preferenze - versione precedente conservata e dichiarata, un'inferenza non sostituisce un fatto detto dall'utente, conflitti registrati, "dimentica" cancella anche le versioni; conferma sui conflitti importanti e consolidamento non ancora) | `DOING` |
+| `F5.4` | Memory Reliability (27/09/2026: nessuna sovrascrittura silenziosa di fatti/preferenze - versione precedente conservata e dichiarata, un'inferenza non sostituisce un fatto detto dall'utente, conflitti registrati, "dimentica" cancella anche le versioni; conferma prima di cambiare un ricordo importante o fissato; consolidamento non ancora) | `DOING` |
 | `F5.5` | Retrieval Quality (27/09/2026: ricordi pertinenti con fonte anche nelle risposte libere, budget di contesto, grafo a un salto; agente e metriche ancora da fare) | `DOING` |
 | `F5.6` | Context Runtime | `DOING` |
 | `F5.7` | Privacy Engineering (libreria completa il 21/09/2026; dal 26/09/2026 nel percorso reale: "dimentica" cancella anche registro e indici con ricevuta, l'uso dei ricordi viene registrato, "da dove sai X" spiega la provenienza; purge/export/backup non ancora esposti a voce/HUD) | `DOING` |
 | `F6.1` | Proactivity Platform (26/09/2026: promemoria, automazioni e avvisi passano dagli stessi freni in `JakeCore.notify` - duplicati, budget orario, quiet hours, conversazione in corso - e si sospendono insieme durante prove e benchmark) | `DOING` |
 | `F6.2` | Proactivity Quality | `DOING` |
 | `F6.3` | Notification UX (libreria di decisione il 21/09/2026; collegata a JakeCore/EventBus/HUD il 22/09/2026; dal 27/09/2026 "meno notifiche cosi'", "non mostrarmelo piu'", "mostramelo di nuovo" e "rimandala" sull'ultima notifica, a voce e dai pulsanti del toast HUD, persistenti; nessuna consegna reale di call/companion) | `DOING` |
-| `F6.4` | Goal Runtime | `DOING` |
+| `F6.4` | Goal Runtime (27/09/2026: "devo X entro <giorno>" diventa una proposta di promemoria confermata col si'/no normale) | `DOING` |
 | `F6.5` | Automation Runtime | `DOING` |
-| `F6.6` | Meeting Experience (libreria di regole il 21/09/2026: brief senza dati inventati, consenso e indicatore, follow-up gated; nessun connettore reale) | `DOING` |
-| `F6.7` | Runtime Reliability (monitor/housekeeping il 22/09/2026; task monitor collegato a JakeCore/EventBus/HUD lo stesso giorno - vedi F6.3; housekeeping senza connettori reali ne' pilot) | `DOING` |
+| `F6.6` | Meeting Experience (libreria di regole il 21/09/2026: brief senza dati inventati, consenso e indicatore, follow-up gated; dal 27/09/2026 "com'e' la mia giornata" usa il brief con promemoria e todo reali; nessun connettore reale) | `DOING` |
+| `F6.7` | Runtime Reliability (monitor/housekeeping il 22/09/2026; task monitor collegato a JakeCore/EventBus/HUD lo stesso giorno - vedi F6.3; dal 27/09/2026 "avvisami quando finisce la build" su un processo reale, notifica dalla pipeline unica; housekeeping senza connettori reali ne' pilot) | `DOING` |
 | `F7.1` | Companion Security (F7.1.1/.4/.5/.6/.7 il 22/09/2026; F7.1.2 - pairing HTTP - chiuso il 22/09/2026, vedi F7.2; TLS reale generato/persistito dal server il 22/09/2026; capability persistenti F7.1.3 dal 27/09/2026 - impostabili a voce con SET_DEVICE_ACCESS, valide subito e dopo un riavvio, riga corrotta = nessun permesso; manca la distribuzione del certificato al telefono oltre al pairing) | `DOING` |
-| `F7.2` | Mobile Companion (pairing/chat live/approve-deny sullo stesso task end-to-end il 22/09/2026; lista/revoca dispositivi via HTTP e prima app Android reale - MAI compilata/eseguita in questo ambiente - il 22/09/2026; senza file share/offline queue/wipe via companion) | `DOING` |
+| `F7.2` | Mobile Companion (pairing/chat live/approve-deny sullo stesso task end-to-end il 22/09/2026; lista/revoca dispositivi via HTTP e prima app Android reale - MAI compilata/eseguita in questo ambiente - il 22/09/2026; dal 27/09/2026 revoca/rotazione chiudono anche lo stream gia' aperto; senza file share/offline queue/wipe lato app) | `DOING` |
 | `F7.3` | Voice Devices | `BACKLOG` |
-| `F7.4` | Presence Runtime | `DOING` |
+| `F7.4` | Presence Runtime (27/09/2026: lease del dispositivo attivo - scade senza segni di vita, rinnovato da richieste e stream aperto, rilasciato alla revoca) | `DOING` |
 | `F7.5` | Home Integration | `DOING` |
 | `F7.6` | Sync and Crypto (motore cifrato con conflitti deterministici, revoca, wipe e coda limitata il 21/09/2026; senza trasporto ne' collegamento a memoria/pairing) | `DOING` |
 | `F7.7` | Edge Devices | `BACKLOG` |
 | `F8.1` | Skill Platform (manifest validato e loader che rifiuta prima dell'import il 22/09/2026; dal 27/09/2026 il rischio dichiarato da un pacchetto verificato e approvato arriva a `risk_of`/PolicyEngine, mai sopra un intent integrato; hook non eseguiti) | `DOING` |
 | `F8.2` | Supply-chain Security (pacchetti firmati, catalogo, quarantena/revoca, pin/rollback il 22/09/2026; dal 27/09/2026 nel runtime: caricamento all'avvio con ricontrollo di firma/hash, installazione in due passi PLAN_SKILL_INSTALL -> INSTALL_SKILL_PACKAGE (ADMIN) legata al digest mostrato; UI HUD e distribuzione non ancora) | `DOING` |
-| `F8.3` | Skill Forge | `DOING` |
+| `F8.3` | Skill Forge (27/09/2026: scansione dei segreti prima della sandbox - chiavi private, token per formato, credenziali letterali) | `DOING` |
 | `F8.4` | Model Runtime (router con capability/inventario/eval/warm-unload/redazione il 22/09/2026; dal 27/09/2026 JakeCore sceglie il modello col router: catalogo da config, modelli installati, telemetria reale di batteria/VRAM, osservazioni reali di successo/latenza di ogni chiamata; warmup/unload non ancora guidati dal router) | `DOING` |
-| `F8.5` | Agent Runtime | `DOING` |
+| `F8.5` | Agent Runtime (27/09/2026: il supervisore ferma anche lo stesso strumento fallito 3 volte di fila con parametri diversi e chiede all'utente) | `DOING` |
 | `F8.6` | Release Safety (golden/security set, confronto, canary, rollback, canali firmati il 22/09/2026; senza runner reali ne' collegamento HUD) | `DOING` |
 
 ## 6. F0 — Baseline verde e release riproducibile
@@ -465,6 +465,14 @@ Dipende da: F0.2 e F0.3.
 5. `F0.6.5` Firmare binari e pacchetti; verificare la firma prima dell'aggiornamento.
 6. `F0.6.6` Usare aggiornamenti atomici con health check e rollback automatico.
 7. `F0.6.7` Offrire canali stable/beta/dev e portable mode.
+
+- 27/09/2026 (`F0.6.2` preflight): `tools/preflight.py` (`python main.py --preflight`), sola lettura. ERRORE solo
+  per cio' che impedisce a Jake di funzionare (Python < 3.11, dipendenze base mancanti con il comando per
+  installarle, cartella dati non scrivibile; codice d'uscita 1); ATTENZIONE per cio' che limita una parte (Ollama
+  spento o modello configurato non scaricato con il `ollama pull` da eseguire, dipendenze voce, nessun microfono,
+  meno di 2 GB liberi, HUD nativo abilitato ma non compilato o senza companion server); INFO per la VRAM libera.
+  Eseguito su questa macchina: tutto OK (Ollama con qwen2.5:7b, 9 ingressi audio, ~7 GB di VRAM libera); con
+  `JAKE_OLLAMA_URL` su una porta chiusa -> ATTENZIONE su Ollama, uscita 0. Installer/upgrade/repair ancora da fare.
 
 Criterio di uscita: installazione, update fallito e rollback passano su una VM Windows pulita.
 
@@ -8845,6 +8853,26 @@ pannelli contestuali restano coerenti con l'orb, senza coprire controlli, prove 
   verificato/annullato) e diagnosi del selettore; permission card con azione, rischio e fonte
   esterna; indicatore del microfono sempre visibile. Nessun parametro dell'azione nelle preview
   (F4.5.7). Verifica visiva/interattiva `VERIFY`.
+- 27/09/2026 (F4.5.7, bug reale): la modalita' privata ("modalita' privata", `SET_PRIVATE_MODE`) toglieva
+  solo la registrazione dello scambio in `answer()`. La trascrizione della voce, i passi degli agenti, le
+  notifiche (anche quelle del task monitor con etichetta, messaggio e azioni fatte) e i dettagli degli stati
+  arrivavano comunque in chiaro all'HUD nativo, al telefono associato e al buffer di replay SSE. Ora il setter
+  di `JakeCore.private_mode` imposta `EventBus.redactor = core.hud_protocol.redact_private`: ogni evento esce dal
+  bus gia' senza contenuto (testo, descrizioni, etichette, messaggi, nomi di elementi UI -> "(privato)";
+  parametri, azioni fatte, alternative del selettore -> vuoti; payload `private: true`), mentre restano i
+  metadati che servono all'HUD (tipo, stato, intent, rischio, id, livelli, esito). Un punto unico: nessun
+  produttore deve ricordarsene. Il replay resta redatto anche dopo lo spegnimento. Nuovo evento
+  `PRIVACY_MODE {"enabled"}` nei due riduttori (fixture condivisa) e chip "Privato" nella riga di stato.
+  Test: skill reale, produttori reali (trascrizione, passo agente, notifica), server companion reale su
+  loopback, stream SSE letto come lo legge l'HUD. Limite dichiarato: `reason` (codici di policy/diagnosi) non
+  e' redatto. Verifica visiva del chip `VERIFY`.
+- 27/09/2026 (F4.5.2, piano e passi live): l'HUD vedeva solo il passo in corso, poi piu' nulla. Ora
+  `AGENT_STEP` porta `status` (`running` all'inizio del passo; `done`/`failed` con `duration_ms` quando finisce,
+  pubblicato da `JakeCore._on_agent_step_completed`) e i due riduttori tengono il piano del compito corrente
+  (`plan_steps`, max 8, azzerato quando un compito nuovo riparte dal passo 1; uno stato sconosciuto e' ignorato e
+  contato). Il pannello conversazione mostra ogni passo con ✓/✗/… e secondi, anche durante una conferma a meta'
+  compito. Fixture condivisa Python/C++ (ctest verde); test end-to-end agente scriptato -> callback del core ->
+  bus -> riduttore. Verifica visiva `VERIFY`.
 
 ### F4.6 — Action center e undo
 
@@ -8858,6 +8886,16 @@ Dipende da: F1.3 e F4.5.
 6. `F4.6.6` Separare audit tecnico da testo user-facing.
 
 Criterio di uscita: undo end-to-end verificato per file, finestra e workflow fixture.
+
+- 27/09/2026 (F4.6.2, retry sicuro): `RETRY_LAST_ACTION` ("riprova", "prova di nuovo", pulsante "Riprova"
+  dell'Action Center quando l'ultima ricevuta e' un fallimento). Ripete SOLO l'ultima azione fallita della
+  conversazione (mai una riuscita: niente effetti doppi; mai una frase non capita o un meta-comando), entro 15
+  minuti, attraverso `_execute_command` - policy, conferme, ricevute e undo come un comando nuovo. I marcatori
+  `confirmed`/`authenticated` del tentativo precedente vengono tolti: la skill richiede di nuovo la sua conferma.
+  Un intent non sicuro da ritentare (non READ_ONLY ne' idempotente per `is_safe_to_auto_retry`) potrebbe essere
+  stato applicato in parte: Jake lo dice e chiede prima; il "si'" riprova esattamente l'azione mostrata
+  (`action_id`), non quella diventata ultima nel frattempo. Il meta-comando non sostituisce il turno del comando
+  vero (`META_TURN_INTENTS`, come la correzione). Test sul JakeCore vero (policy reale, dialogo reale, "si'").
 
 - 26/09/2026 (F4.6.5, prima fetta): pulsante "Ferma tutto" sempre visibile nell'HUD nativo, che
   invia `ferma tutto` (corsia a corrispondenza esatta -> `KILL_SWITCH`, nessun modello in mezzo).
@@ -9013,6 +9051,13 @@ Dipende da: F5.2 e F5.3.
 7. `F5.4.7` Rendere reversibile la consolidazione finché le sorgenti esistono.
 
 Criterio di uscita: il corpus conflitti supera la policy review senza sovrascritture silenziose.
+
+- 27/09/2026 (F5.4.3): cambiare con un valore diverso un fatto o una preferenza con importanza 4-5 o fissato
+  (pinned) passa dalla conferma normale del core: "Per me X e' 'V' e l'avevi segnato come importante. Lo
+  sostituisco con 'N'?" - "si'" aggiorna (la versione di prima resta nello storico, F5.4.2), "no" lascia tutto
+  com'era. Bug reale corretto insieme: un aggiornamento senza importanza esplicita riportava il ricordo a
+  importanza 1 (e quindi gli toglieva anche questa protezione); ora resta quella di prima. Test sul JakeCore
+  vero con database temporaneo e dati sintetici.
 
 ### F5.5 — Retrieval con citazioni locali
 
@@ -9307,6 +9352,15 @@ Dipende da: F5.2 e F6.2.
 
 Criterio di uscita: una demo attraversa creazione, blocco, revisione e completamento verificato.
 
+- 27/09/2026 (F6.4.1/F6.4.2): `core/commitments.py` riconosce la sola forma esplicita "devo / prometto di / mi sono
+  impegnato a <cosa> entro <oggi|stasera|domani|dopodomani|giorno della settimana>" e `JakeCore` risponde come
+  sempre aggiungendo "Vuoi che te lo ricordi venerdì alle 9?": la PROPOSTA e' un'azione in sospeso `SET_REMINDER`
+  che passa dal si'/no normale (policy e ricevute come un comando). Mai creata da sola, mai in modalita' privata,
+  mai se il turno ha gia' una domanda aperta o ha gia' creato promemoria/todo; senza scadenza nessuna domanda. Il
+  promemoria arriva la mattina del giorno di scadenza (alle 17/18 per oggi/stasera) e conserva le parole
+  dell'utente con maiuscole e accenti. Test sul JakeCore reale con SetReminderSkill e ReminderManager veri.
+  Milestone, rinegoziazione e blocker (F6.4.3-F6.4.7) non ancora.
+
 ### F6.5 — Routine apprese e focus assistant
 
 Dipende da: F3.8, F5 procedural e F6.2.
@@ -9334,6 +9388,15 @@ Dipende da: connettori autorizzati, F5 e F6.3.
 7. `F6.6.7` Applicare redazione a dati di partecipanti e organizzazioni.
 
 Criterio di uscita: brief privo di dati inventati e meeting workflow conforme al consenso.
+
+- 27/09/2026 (F6.6.1-F6.6.3 nel runtime): `core/daily_brief.py` non era usato da nessun comando. `DAILY_BRIEF`
+  ("com'e' la mia giornata", "cosa ho oggi", "... con i dettagli") costruisce il brief dalle fonti locali reali
+  (promemoria delle prossime 24 ore dal `ReminderManager` del registro, attivita' aperte dal `TodoManager`), breve o
+  dettagliato con fonte ed eta' di ogni riga; una fonte guasta viene detta, non riempita. Bug reale nella libreria:
+  una giornata senza impegni rispondeva "Non ho dati da nessuna fonte per questa mattina" (falso: le fonti avevano
+  risposto; e a qualsiasi ora "mattina") - ora "Niente in programma: promemoria e todo non riportano nulla.", e
+  "nessuna fonte collegata" resta per il caso vero. Test con database temporanei e dati sintetici. Agenda, meteo,
+  viaggio e casa restano senza connettore; brief proattivo del mattino non ancora.
 
 - `F6.6.1`-`F6.6.7` (libreria di regole, senza connettori reali) — 21/09/2026: `core/daily_brief.py`, `core/meeting_copilot.py`.
   I connettori (calendario, posta, viaggio) dipendono da F7 e NON esistono: qui c'e' il contratto (`BriefSource`, `related()`) e gli
@@ -9378,6 +9441,20 @@ Dipende da: F6.1–F6.3.
 7. `F6.7.7` Chiudere monitor completati e riprendere quelli interrotti con checkpoint.
 
 Criterio di uscita: 30 giorni di pilot senza loop di notifica o azione distruttiva autonoma.
+
+- 27/09/2026 (F6.7.1/F6.7.2 su processi reali): `WATCH_PROCESS` ("avvisami quando finisce la build/npm") sorveglia un processo
+  GIA' in esecuzione (il piu' recente con quel nome, mai Jake stesso; al massimo 5 insieme) con un thread daemon che ne aspetta la
+  fine - nessun polling, nessuna notifica intermedia - e avvisa UNA volta con durata ed esito (codice d'uscita diverso da zero =
+  errore). Rischio READ_ONLY: osserva, non tocca il processo. La notifica passa da `JakeCore.present_notification`, la strada unica
+  nuova per le fonti proattive: gate (modalita', duplicati, budget, quiet hours, feedback) e poi UN presentatore - stampa in CLI,
+  voce nella sessione vocale, che rimanda gli avvisi non richiesti mentre Jake parla ma dice subito quelli chiesti esplicitamente.
+  Test con un processo figlio vero (psutil vero, attesa vera, uscita 0 e 3), il figlio resta vivo finche' il test non lo lascia finire.
+  Non registrato nel `TaskMonitorRegistry`: oggi nessuno ne legge i compiti attivi, sarebbe un collegamento a vuoto.
+- 27/09/2026 (bug reale trovato qui): le skill aggiunte per F6.3.4, F7.1.3 e F8.2 (feedback sulle notifiche, `SET_DEVICE_ACCESS`,
+  `PLAN_SKILL_INSTALL`/`INSTALL_SKILL_PACKAGE`) non avevano frasi in `core/response_formatter.py`: l'utente avrebbe sentito il
+  dizionario grezzo (`{'message': ..., 'multiplier': 0.5}`) o "Si e' verificato un errore" per rifiuti con un motivo preciso (firma
+  mancante, digest diverso dal piano, promemoria non silenziabile). Ora hanno risposte proprie, verificate dentro i test reali gia'
+  esistenti (pacchetto firmato vero, server companion vero su loopback, pipeline notifiche vera).
 
 - `F6.7.1`-`F6.7.7` (monitor e housekeeping, senza connettori reali) — 22/09/2026: `core/task_monitor.py`. Il criterio di uscita ("30
   giorni di pilot") non si simula in un test: qui si prova la STRUTTURA che lo rende possibile - idempotenza delle notifiche e un
@@ -9529,6 +9606,23 @@ Dipende da: F7.1.
 Criterio di uscita: tutti i comandi mobile attraversano lo stesso policy kernel del PC;
 una notifica apre il task corretto e un'eventuale risposta aggiorna la stessa sessione.
 
+- 27/09/2026 (F7.2.7 lato server, bug di sicurezza reale): revocare un dispositivo (telefono perso) invalidava
+  le richieste NUOVE, ma uno stream SSE `/events` gia' aperto non ricontrollava mai la credenziale e continuava a
+  ricevere ogni evento (risposte, trascrizioni, notifiche) fino a una riconnessione. Ora lo stream verifica al
+  massimo ogni secondo, con una lettura economica senza decifratura
+  (`DeviceCredentialStore.active_credential_issued_at`), che la credenziale con cui si e' autenticato valga
+  ancora - revocata, scaduta o RUOTATA (nuova credenziale = la vecchia non vale piu') -> stream chiuso, con riga
+  di audit `stream_closed_credential_invalid`. Trovato anche perche' la chiusura non arrivava al client: lo
+  stream dichiara `Connection: keep-alive`, quindi il gestore deve chiudere la connessione esplicitamente. Test
+  con server companion reale su loopback, credenziali reali, stream aperto durante revoca e rotazione. La
+  cancellazione delle chiavi sul telefono (app) resta da fare.
+- 27/09/2026 (F7.2.7, comando dal PC): prima si poteva revocare un dispositivo solo DAL dispositivo stesso
+  (`DELETE /devices/<id>`, "revoco me stesso") - inutile per un telefono perso. `REVOKE_DEVICE` ("ho perso il
+  telefono", "scollega il tablet"; rischio ADMIN -> conferma/autenticazione della policy) revoca la credenziale
+  (lo stream aperto si chiude entro un secondo, vedi sopra) e toglie le chiavi di sincronizzazione del
+  dispositivo dal portachiavi F7.6. L'HUD nativo di questo PC non e' mai un bersaglio. Test: stesso server
+  reale, frase -> skill -> stream chiuso, evento successivo non ricevuto, chiavi rimosse, richieste nuove 401.
+
 - `F7.2.1`/`F7.2.2`/`F7.2.3`/`F7.2.4`/`F7.2.8` (Companion Mobile MVP end-to-end, riuso di F7.1/F7.6/F6 senza sistemi
   paralleli) — 22/09/2026: `core/pairing_service.py` (esteso), `core/companion_guard.py`/`core/companion_server.py`
   (nuovi endpoint), `skills/pairing.py`, `core/task_notification_bridge.py` (esteso). **Criterio di uscita provato
@@ -9650,6 +9744,14 @@ Dipende da: F7.2, F7.3 e F5.6.
 Criterio di uscita: fault test coprono crash, rete persa, claim simultanei e lease scaduto;
 scenari S5/S8 dimostrano andata e ritorno sullo stesso task/sessione, un solo active responder,
 nessuna azione duplicata e ripresa di contesto, decisioni e ricevute sul PC.
+
+- 27/09/2026 (F7.4.3, lease): il dispositivo attivo (`DeviceRegistry`) restava tale per sempre se il telefono si
+  bloccava o perdeva la rete senza `release`. Ora ha un lease di 120 s rinnovato da ogni richiesta autenticata del
+  dispositivo e, ogni secondo, dal suo stream di eventi aperto (uno stream aperto e' presenza); alla scadenza non
+  e' piu' attivo e il server pubblica `DEVICE_HANDOFF` verso nessuno (l'HUD toglie il chip). Revocare un
+  dispositivo (dall'HTTP o con `REVOKE_DEVICE`) lo rilascia subito. Reclamare dopo la scadenza non genera un
+  handoff da se stesso. Test: registro con orologio finto; server reale con claim -> silenzio -> scaduto con
+  handoff, stream aperto oltre il lease -> resta attivo, revoca -> stream chiuso e dispositivo rilasciato.
 
 ### F7.5 — Home Assistant profondo
 
@@ -9863,6 +9965,13 @@ Dipende da: F8.1, F1.5 e F1.6.
 
 Criterio di uscita: una skill generata non può agire fuori manifest anche se il codice è ostile.
 
+- 27/09/2026 (F8.3.4, secret scan): la Forge aveva lista nera testuale, controllo AST delle fughe, moduli
+  ammessi e sandbox a integrita' ridotta, ma nessun controllo sui segreti: una credenziale copiata dal modello nel
+  codice generato sarebbe finita in chiaro in `plugins/` (e nei backup). `SECRET_PATTERNS` rifiuta prima della
+  sandbox chiavi private PEM, chiavi AWS/Google, token GitHub/Slack, chiavi `sk-...` e assegnazioni letterali di
+  8+ caratteri a nomi da segreto (api_key/secret/token/password), con un messaggio che il modello riceve per
+  riscrivere il file. Test: cinque forme di segreto rifiutate, parole comuni ("risk-...", `token_count`) no.
+
 ### F8.4 — Model router
 
 Dipende da: G0.
@@ -9925,6 +10034,13 @@ Dipende da: F1 e F8.4.
 7. `F8.5.7` Mostrare deleghe e risultati nell'HUD.
 
 Criterio di uscita: routing supera il general agent sull'eval senza regressione di sicurezza.
+
+- 27/09/2026 (F8.5.5, loop/vicolo cieco): `TaskAgent` fermava solo un passo IDENTICO ripetuto (stessa firma
+  intent+parametri). Il caso reale gia' osservato - "trova il file X" senza cartella, passi bruciati a indovinare
+  percorsi diversi - sfuggiva. Ora lo stesso intent fallito 3 volte di fila (`MAX_FAILURES_PER_INTENT`, anche con
+  parametri diversi; un successo in mezzo azzera il conto) ferma il compito con una domanda all'utente che dice
+  cosa e' stato provato e l'ultimo esito, invece di consumare i passi rimasti. Vale per i tre agenti (general,
+  coding, research: stessa classe). Test con modello scriptato e registro finto.
 
 ### F8.6 — Eval, canary e aggiornamenti
 

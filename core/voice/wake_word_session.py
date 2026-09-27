@@ -476,6 +476,8 @@ class WakeWordSession:
         hooks.stop_dictation = self.stop_dictation
         hooks.speak = self.speak
         hooks.set_state = self._set_state
+        # F6.1: presentatore unico delle notifiche passate da JakeCore.present_notification
+        self.jake_core.notification_presenter = self._present_notification
         scheduler = getattr(self.jake_core, "scheduler", None)
         if scheduler is not None:
             scheduler.on_due = self._on_reminder_due
@@ -506,6 +508,14 @@ class WakeWordSession:
         center.defer(kind, message)
         self._logger.info("Notifica %s rimandata: Jake sta parlando o lavorando", kind)
         return True
+
+    def _present_notification(self, kind: str, message: str) -> None:
+        """Gia' passata dal gate di JakeCore: qui resta solo il "quando" - mentre Jake parla o lavora una
+        notifica non richiesta va in coda (F6.3), una richiesta esplicita (reminder) si dice comunque."""
+        if kind != "reminder" and self._defer_while_busy(kind, message):
+            return
+        self._set_state("notify", message)
+        self.speak(message)
 
     def _on_advisory(self, message: str) -> None:
         if self._defer_while_busy("advisory", message):
