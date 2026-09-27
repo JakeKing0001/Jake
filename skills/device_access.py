@@ -86,6 +86,7 @@ class RevokeDeviceSkill:
         if error is not None:
             return error
         revoked = server.credential_store.revoke(device.device_id)
+        server.devices.release(device.device_id)  # non resta il dispositivo attivo (F7.4.3)
         keyring = getattr(self.core, "sync_keyring", None)
         keys_removed = bool(keyring.revoke(device.device_id)) if keyring is not None else False
         return SkillResult(success=True, data={"device": device.name or device.device_id, "revoked": revoked,

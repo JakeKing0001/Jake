@@ -120,7 +120,7 @@ class CompanionServer:
     ):
         self.event_bus = event_bus or EventBus()
         self.command_handler = command_handler or (lambda text: "")
-        self.devices = DeviceRegistry()
+        self.devices = DeviceRegistry(on_expired=self._active_device_expired)
         self.host = host
         self.port = port
         self.token = token
@@ -145,6 +145,11 @@ class CompanionServer:
     @property
     def running(self) -> bool:
         return self._httpd is not None
+
+    def _active_device_expired(self, device_id: str) -> None:
+        """F7.4.3: il dispositivo attivo non da' piu' segni di vita (crash, rete persa): non lo e' piu', e chi mostra
+        il dispositivo attivo (HUD, altri companion) lo sa con lo stesso evento di un handoff, verso nessuno."""
+        self.event_bus.publish(HudEvent(EventType.DEVICE_HANDOFF, {"from": device_id, "to": ""}))
 
     def start(self) -> None:
         if self._httpd is not None:
@@ -292,6 +297,7 @@ class _Handler(BaseHTTPRequestHandler):
             return self._reject(401, "unauthorized", event="auth_failed")
         if self._authenticated_device_id is not None:
             self._identity = f"dev:{self._authenticated_device_id}"
+            self.companion.devices.renew(self._authenticated_device_id)  # F7.4.3: segno di vita
         ok, wait = guard.rate_limiter.allow(self._identity, self._cls or EndpointClass.READ_ONLY)
         if not ok:
             return self._reject(429, "rate_limited", retry_after=wait)
@@ -553,6 +559,7 @@ class _Handler(BaseHTTPRequestHandler):
             # revocare "se stessa" - stesso principio gia' applicato a _handle_approval per lo stesso motivo.
             return self._reject_body(403, "device_identity_required")
         revoked = self.companion.credential_store.revoke(device_id)
+        self.companion.devices.release(device_id)  # un dispositivo revocato non resta quello attivo
         self._audit("device_revoked", status=200, target_device=device_id, revoked=revoked)
         self._json_response(200, {"revoked": revoked})
         return None
@@ -740,6 +747,7 @@ class _Handler(BaseHTTPRequestHandler):
                 now = time.monotonic()
                 if now >= next_check:
                     next_check = now + self.STREAM_CREDENTIAL_CHECK_S
+                    self.companion.devices.renew(device_id)  # F7.4.3: uno stream aperto e' presenza
                     if not self._stream_credential_still_valid(device_id, issued_at):
                         self._audit("stream_closed_credential_invalid", status=401)
                         # lo stream ha dichiarato keep-alive: senza questo la connessione resterebbe aperta in attesa

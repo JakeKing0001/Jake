@@ -283,7 +283,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F7.1` | Companion Security (F7.1.1/.4/.5/.6/.7 il 22/09/2026; F7.1.2 - pairing HTTP - chiuso il 22/09/2026, vedi F7.2; TLS reale generato/persistito dal server il 22/09/2026; capability persistenti F7.1.3 dal 27/09/2026 - impostabili a voce con SET_DEVICE_ACCESS, valide subito e dopo un riavvio, riga corrotta = nessun permesso; manca la distribuzione del certificato al telefono oltre al pairing) | `DOING` |
 | `F7.2` | Mobile Companion (pairing/chat live/approve-deny sullo stesso task end-to-end il 22/09/2026; lista/revoca dispositivi via HTTP e prima app Android reale - MAI compilata/eseguita in questo ambiente - il 22/09/2026; dal 27/09/2026 revoca/rotazione chiudono anche lo stream gia' aperto; senza file share/offline queue/wipe lato app) | `DOING` |
 | `F7.3` | Voice Devices | `BACKLOG` |
-| `F7.4` | Presence Runtime | `DOING` |
+| `F7.4` | Presence Runtime (27/09/2026: lease del dispositivo attivo - scade senza segni di vita, rinnovato da richieste e stream aperto, rilasciato alla revoca) | `DOING` |
 | `F7.5` | Home Integration | `DOING` |
 | `F7.6` | Sync and Crypto (motore cifrato con conflitti deterministici, revoca, wipe e coda limitata il 21/09/2026; senza trasporto ne' collegamento a memoria/pairing) | `DOING` |
 | `F7.7` | Edge Devices | `BACKLOG` |
@@ -9735,6 +9735,14 @@ Dipende da: F7.2, F7.3 e F5.6.
 Criterio di uscita: fault test coprono crash, rete persa, claim simultanei e lease scaduto;
 scenari S5/S8 dimostrano andata e ritorno sullo stesso task/sessione, un solo active responder,
 nessuna azione duplicata e ripresa di contesto, decisioni e ricevute sul PC.
+
+- 27/09/2026 (F7.4.3, lease): il dispositivo attivo (`DeviceRegistry`) restava tale per sempre se il telefono si
+  bloccava o perdeva la rete senza `release`. Ora ha un lease di 120 s rinnovato da ogni richiesta autenticata del
+  dispositivo e, ogni secondo, dal suo stream di eventi aperto (uno stream aperto e' presenza); alla scadenza non
+  e' piu' attivo e il server pubblica `DEVICE_HANDOFF` verso nessuno (l'HUD toglie il chip). Revocare un
+  dispositivo (dall'HTTP o con `REVOKE_DEVICE`) lo rilascia subito. Reclamare dopo la scadenza non genera un
+  handoff da se stesso. Test: registro con orologio finto; server reale con claim -> silenzio -> scaduto con
+  handoff, stream aperto oltre il lease -> resta attivo, revoca -> stream chiuso e dispositivo rilasciato.
 
 ### F7.5 — Home Assistant profondo
 

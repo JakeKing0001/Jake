@@ -15,12 +15,24 @@ core/request_context.py::current_session_id per come viaggia lungo la catena di 
 core/policy_engine.py per la capability che lo usa per restringere i permessi ALLA sessione
 corrente, non al dispositivo per sempre."""
 import threading
+import time
 
 from core.logger import new_trace_id
 
+# F7.4.3 ("lease con timeout; niente ownership eterna dopo crash"): un dispositivo resta attivo solo finche' da'
+# segni di vita (richieste autenticate, stream di eventi aperto). Un telefono che si blocca o perde la rete senza
+# fare release non tiene la sessione per sempre.
+DEFAULT_LEASE_S = 120.0
+
 
 class DeviceRegistry:
-    def __init__(self):
+    def __init__(self, lease_s: float = DEFAULT_LEASE_S, clock=time.monotonic, on_expired=None):
+        self._lease_s = lease_s
+        self._clock = clock
+        self._lease_until = 0.0
+        # chiamato (fuori dal lock) con il device_id il cui lease e' scaduto: chi mostra il dispositivo attivo lo
+        # deve sapere (core/companion_server.py pubblica un DEVICE_HANDOFF verso nessuno)
+        self._on_expired = on_expired
         self._active_device_id: str | None = None
         self._known_devices: dict[str, dict] = {}
         # F1.8.7: claim() legge e scrive _active_device_id in due passi separati (non atomici) -
@@ -62,9 +74,31 @@ class DeviceRegistry:
             return previous, new_trace_id()
 
     def _swap_active_device_locked(self, device_id: str) -> str | None:
-        previous = self._active_device_id
+        previous = self._expire_locked()[0]
         self._active_device_id = device_id
+        self._lease_until = self._clock() + self._lease_s
         return previous if previous != device_id else None
+
+    def _expire_locked(self) -> tuple[str | None, str | None]:
+        """(attivo dopo il controllo, device_id appena scaduto o None)."""
+        if self._active_device_id is not None and self._clock() >= self._lease_until:
+            expired, self._active_device_id = self._active_device_id, None
+            return None, expired
+        return self._active_device_id, None
+
+    def _notify_expired(self, expired: str | None) -> None:
+        if expired is not None and self._on_expired is not None:
+            self._on_expired(expired)
+
+    def renew(self, device_id: str | None) -> bool:
+        """Un segno di vita di device_id: se e' il dispositivo attivo, il suo lease riparte. Vero se lo era."""
+        with self._lock:
+            active, expired = self._expire_locked()
+            renewed = device_id is not None and active == device_id
+            if renewed:
+                self._lease_until = self._clock() + self._lease_s
+        self._notify_expired(expired)
+        return renewed
 
     def release(self, device_id: str) -> bool:
         """Il dispositivo rinuncia a essere quello attivo (es. l'app companion va in background).
@@ -78,11 +112,16 @@ class DeviceRegistry:
     @property
     def active_device_id(self) -> str | None:
         with self._lock:
-            return self._active_device_id
+            active, expired = self._expire_locked()
+        self._notify_expired(expired)
+        return active
 
     def list_devices(self) -> list[dict]:
         with self._lock:
-            return [
-                {"id": device_id, "name": info.get("name", ""), "active": device_id == self._active_device_id}
+            active, expired = self._expire_locked()
+            devices = [
+                {"id": device_id, "name": info.get("name", ""), "active": device_id == active}
                 for device_id, info in self._known_devices.items()
             ]
+        self._notify_expired(expired)
+        return devices
