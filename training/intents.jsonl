@@ -691,3 +691,6 @@
 {"text": "fammi il punto della giornata con i dettagli", "intent": "DAILY_BRIEF", "parameters": {"detailed": true}}
 {"text": "ho perso il telefono", "intent": "REVOKE_DEVICE", "parameters": {"device": "telefono"}}
 {"text": "scollega il tablet", "intent": "REVOKE_DEVICE", "parameters": {"device": "tablet"}}
+{"text": "esporta i miei ricordi", "intent": "EXPORT_MEMORIES", "parameters": {}}
+{"text": "fissa il ricordo indirizzo di casa", "intent": "PIN_MEMORY", "parameters": {"key": "indirizzo di casa"}}
+{"text": "non dimenticare mai il compleanno di Giulia", "intent": "PIN_MEMORY", "parameters": {"key": "compleanno di Giulia"}}

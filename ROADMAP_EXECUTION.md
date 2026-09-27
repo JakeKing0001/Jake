@@ -272,7 +272,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F5.4` | Memory Reliability (27/09/2026: nessuna sovrascrittura silenziosa di fatti/preferenze - versione precedente conservata e dichiarata, un'inferenza non sostituisce un fatto detto dall'utente, conflitti registrati, "dimentica" cancella anche le versioni; conferma prima di cambiare un ricordo importante o fissato; decadimento per categoria nel ranking, fissati esclusi; consolidamento non ancora) | `DOING` |
 | `F5.5` | Retrieval Quality (27/09/2026: ricordi pertinenti con fonte anche nelle risposte libere, budget di contesto, grafo a un salto; agente e metriche ancora da fare) | `DOING` |
 | `F5.6` | Context Runtime | `DOING` |
-| `F5.7` | Privacy Engineering (libreria completa il 21/09/2026; dal 26/09/2026 nel percorso reale: "dimentica" cancella anche registro e indici con ricevuta, l'uso dei ricordi viene registrato, "da dove sai X" spiega la provenienza; purge/export/backup non ancora esposti a voce/HUD) | `DOING` |
+| `F5.7` | Privacy Engineering (libreria completa il 21/09/2026; dal 26/09/2026 nel percorso reale: "dimentica" cancella anche registro e indici con ricevuta, l'uso dei ricordi viene registrato, "da dove sai X" spiega la provenienza; dal 27/09/2026 "esporta i miei ricordi" e "fissa il ricordo X" a voce; purge/backup non ancora esposti a voce/HUD) | `DOING` |
 | `F6.1` | Proactivity Platform (26/09/2026: promemoria, automazioni e avvisi passano dagli stessi freni in `JakeCore.notify` - duplicati, budget orario, quiet hours, conversazione in corso - e si sospendono insieme durante prove e benchmark) | `DOING` |
 | `F6.2` | Proactivity Quality | `DOING` |
 | `F6.3` | Notification UX (libreria di decisione il 21/09/2026; collegata a JakeCore/EventBus/HUD il 22/09/2026; dal 27/09/2026 "meno notifiche cosi'", "non mostrarmelo piu'", "mostramelo di nuovo" e "rimandala" sull'ultima notifica, a voce e dai pulsanti del toast HUD, persistenti; nessuna consegna reale di call/companion) | `DOING` |
@@ -9063,6 +9063,10 @@ Criterio di uscita: il corpus conflitti supera la policy review senza sovrascrit
   resto; il peso non scende sotto la meta') e la motivazione lo dice ("non usato da tempo"). Solo ranking: nessun
   ricordo viene cancellato o nascosto per questo (F6.7.5). I ricordi fissati non decadono; una chiave citata nella
   domanda vince sempre. Test su database temporaneo che fallisce senza il decadimento.
+- 27/09/2026 (F5.7 a voce): `EXPORT_MEMORIES` ("esporta i miei ricordi") scrive in Documenti\Jake una copia
+  Markdown e una JSON dalla privacy dashboard, senza i ricordi segreti (e dice quanti ne ha esclusi); `PIN_MEMORY`
+  ("fissa il ricordo X", `pinned=false` per toglierlo) usa `MemoryPrivacyDashboard.pin`: un ricordo fissato non
+  decade e cambiarlo chiede conferma. Test su memoria reale con export in cartella temporanea.
 
 ### F5.5 — Retrieval con citazioni locali
 

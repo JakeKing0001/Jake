@@ -118,8 +118,14 @@ def _format_control_error(intent: str, error: str | None, data: dict) -> str | N
             return f"Non vedo nessun processo '{data.get('process', '')}' in esecuzione da sorvegliare."
         if intent in ("SET_DEVICE_ACCESS", "REVOKE_DEVICE"):
             return f"Non trovo nessun dispositivo associato chiamato '{data.get('device', '')}'."
+        if intent == "PIN_MEMORY":
+            return f"Non ricordo nulla che si chiami '{data.get('key', '')}'."
         if intent in ("PLAN_SKILL_INSTALL", "INSTALL_SKILL_PACKAGE"):
             return f"Non trovo il pacchetto {data.get('package_path', '')}."
+    if error == "EXPORT_FAILED":
+        return f"Non sono riuscito a scrivere l'export in {data.get('path', '')}: {data.get('reason', '')}."
+    if error == "AMBIGUOUS" and intent == "PIN_MEMORY":
+        return f"Più ricordi corrispondono: {', '.join(data.get('candidates') or [])}. Quale fisso?"
     if error == "AMBIGUOUS" and intent in ("SET_DEVICE_ACCESS", "REVOKE_DEVICE"):
         return f"Più dispositivi corrispondono: {', '.join(data.get('candidates') or [])}. Quale intendi?"
     if error == "INVALID_PARAMETERS" and intent == "SET_DEVICE_ACCESS":
@@ -134,6 +140,14 @@ def _format_control_success(intent: str, data: dict) -> str | None:
         return f"Ok, ti avviso quando {data['process']} finisce."
     if intent == "DAILY_BRIEF":
         return str(data.get("text") or "")
+    if intent == "EXPORT_MEMORIES":
+        excluded = data.get("excluded_secret") or 0
+        return (f"Ho esportato {data['count']} ricordi in {data['markdown']} (e in JSON accanto)."
+                + (f" {excluded} ricordi segreti non sono inclusi." if excluded else ""))
+    if intent == "PIN_MEMORY":
+        if data.get("pinned"):
+            return f"Ok, {data['key']} è fissato: non perde importanza col tempo e per cambiarlo ti chiederò conferma."
+        return f"Ok, {data['key']} non è più fissato."
     if intent == "RETRY_LAST_ACTION":
         return str(data.get("response") or "")  # la risposta del comando ripetuto, gia' formattata
     if intent == "LESS_NOTIFICATIONS_LIKE_THIS":
