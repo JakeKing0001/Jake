@@ -59,7 +59,8 @@ class ReminderScheduler:
 
     def tick(self, now: datetime | None = None) -> None:
         now = now or datetime.now(timezone.utc)
-        missed, timely = [], []
+        missed: list[dict] = []
+        timely: list[dict] = []
         for reminder in self.reminder_manager.due_reminders():
             try:
                 due_at = datetime.fromisoformat(reminder["due_at"])
