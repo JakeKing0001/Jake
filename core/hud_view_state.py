@@ -30,13 +30,16 @@ from core.hud_protocol import PROTOCOL_VERSION, EventType
 
 MAX_ITEMS = 20
 
-_STATE_EVENTS = {"IDLE", "LISTENING", "THINKING", "EXECUTING", "DICTATION", "PAUSED"}
+_STATE_EVENTS = {"IDLE", "LISTENING", "TRANSCRIBING", "THINKING", "EXECUTING", "DICTATION", "PAUSED"}
 _KNOWN_TYPES = {event_type.value for event_type in EventType}
 
 
 @dataclass
 class HudViewState:
     state: str = "IDLE"
+    # stato leggibile che accompagna lo stato (es. "Sto aspettando il modello locale..."): payload "status" di un
+    # evento di stato; un nuovo stato senza "status" lo cancella
+    state_status: str = ""
     visible: bool = True
     mic_open: bool = False
     mic_discarding: bool = False
@@ -118,7 +121,10 @@ class HudViewState:
                 return self._ignore()  # duplicato o fuori ordine nella stessa connessione
             self.last_sequence_id = sequence_id  # (su una connessione nuova: server ripartito)
         trace_id = data.get("trace_id")
+        previous_state = self.state
         self._reduce(event_type, payload, trace_id if isinstance(trace_id, str) else "")
+        if self.state != previous_state and event_type not in _STATE_EVENTS:
+            self.state_status = ""  # la frase apparteneva allo stato di prima
         return "applied"
 
     def _ignore(self) -> str:
@@ -130,6 +136,7 @@ class HudViewState:
     def _reduce(self, event_type: str, payload: dict[str, Any], trace_id: str) -> None:
         if event_type in _STATE_EVENTS:
             self.state = event_type
+            self.state_status = _text(payload, "status")
         elif event_type == "USER_MESSAGE":
             self._push(self.messages, ["user", _text(payload, "text")])
         elif event_type == "JAKE_MESSAGE":

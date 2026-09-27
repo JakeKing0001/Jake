@@ -41,13 +41,20 @@ Item {
 
     HoverHandler { id: hoverHandler }
 
+    // Audio SOLO quando la frase e' rivolta a Jake (ascolto del comando, dettatura) o quando Jake parla: in IDLE il
+    // microfono puo' essere aperto per la parola di attivazione, ma TV, musica e voci intorno non muovono l'orb.
     readonly property bool audioState: state === "LISTENING" || state === "SPEAKING" || state === "DICTATION"
-    readonly property real audio: audioState ? level : 0
+    readonly property real rawAudio: audioState ? Math.max(0, Math.min(1, level)) : 0
+    // inviluppo del livello (prova reale del 27/09/2026: reazione quasi invisibile e "a scatti"): attacco rapido
+    // (~60 ms) perche' la voce si veda subito, rilascio morbido (~450 ms) perche' il silenzio riporti l'orb alla sua
+    // base senza cadute secche; aggiornato a ogni fotogramma, non a ogni pacchetto (~10 al secondo).
+    property real audio: 0
 
-    // ---- parametri per stato ----------------------------------------------------------------------
+    // ---- parametri per stato: ogni stato si riconosce dal MOVIMENTO, non solo dal colore -------------------
     readonly property color stateColor: {
         switch (state) {
         case "LISTENING": return "#4fd1ff";
+        case "TRANSCRIBING": return "#7dd3fc";
         case "THINKING": return "#a78bfa";
         case "EXECUTING": return "#facc15";
         case "SPEAKING": return "#38bdf8";
@@ -58,73 +65,80 @@ Item {
         default: return "#3ddc84";
         }
     }
+    // raggio del guscio (1 = riposo): l'ascolto si apre, la trascrizione raccoglie, il pensiero stringe
     readonly property real targetShell: {
         switch (state) {
-        case "LISTENING": return 1.08 + audio * 0.3;
-        case "SPEAKING": return 1.04 + audio * 0.22;
-        case "DICTATION": return 1.06 + audio * 0.25;
-        case "THINKING": return 0.9;
-        case "EXECUTING": return 1.0;
-        case "ERROR": return 1.12;
-        case "PAUSED": return 0.88;
+        case "LISTENING": return 1.12 + audio * 0.3;
+        case "DICTATION": return 1.08 + audio * 0.35;
+        case "SPEAKING": return 1.02 + audio * 0.28;
+        case "TRANSCRIBING": return 0.8;
+        case "THINKING": return 0.86;
+        case "EXECUTING": return 0.98;
+        case "WAITING": return 0.94;
+        case "ERROR": return 1.2;
+        case "PAUSED": return 0.85;
         default: return 1.0;
         }
     }
-    // orbita dello strato esterno e di quello interno (gradi al secondo): segni opposti = contro-rotazione viva,
-    // stesso segno e interno piu' veloce = vortice
+    // orbita dello strato esterno e interno (gradi al secondo): segni opposti = contro-rotazione organica,
+    // stesso segno con l'interno piu' veloce = vortice
     readonly property real targetOuterOrbit: {
         switch (state) {
-        case "THINKING": return 95;
-        case "EXECUTING": return 55;
-        case "LISTENING": case "DICTATION": return 22 + audio * 40;
-        case "SPEAKING": return 26 + audio * 30;
-        case "WAITING": return 7;
-        case "PAUSED": return 3;
-        case "ERROR": return 4;
-        default: return 14;
+        case "THINKING": return 150;
+        case "TRANSCRIBING": return 70;
+        case "EXECUTING": return 75;
+        case "LISTENING": case "DICTATION": return 40 + audio * 90;
+        case "SPEAKING": return 32 + audio * 70;
+        case "WAITING": return 9;
+        case "PAUSED": return 4;
+        case "ERROR": return 6;
+        default: return 30;
         }
     }
     readonly property real targetInnerOrbit: {
         switch (state) {
-        case "THINKING": return 170;
-        case "EXECUTING": return 55;
-        case "LISTENING": case "DICTATION": return -16 - audio * 30;
-        case "SPEAKING": return -18 - audio * 24;
-        case "WAITING": return -5;
-        case "PAUSED": return -2;
-        case "ERROR": return -6;
-        default: return -10;
+        case "THINKING": return 300;
+        case "TRANSCRIBING": return 110;
+        case "EXECUTING": return 75;
+        case "LISTENING": case "DICTATION": return -32 - audio * 70;
+        case "SPEAKING": return -24 - audio * 50;
+        case "WAITING": return -6;
+        case "PAUSED": return -3;
+        case "ERROR": return -10;
+        default: return -22;
         }
     }
-    // velocita' radiale alla nascita (unita'/s): >0 verso l'esterno, <0 verso il nucleo (spirale del vortice)
+    // velocita' radiale alla nascita (unita'/s): >0 verso l'esterno, <0 verso il nucleo
     readonly property real targetRadial: {
         switch (state) {
-        case "THINKING": return -14;
+        case "TRANSCRIBING": return -38;
+        case "THINKING": return -18;
         case "EXECUTING": return 0;
-        case "LISTENING": case "DICTATION": return 5 + audio * 70;
-        case "SPEAKING": return 4 + audio * 55;
+        case "LISTENING": case "DICTATION": return 10 + audio * 42;
+        case "SPEAKING": return 6 + audio * 38;
         case "WAITING": return 2;
-        case "ERROR": return 30;
-        default: return 4;
+        case "ERROR": return 45;
+        default: return 8;
         }
     }
-    // moto individuale: ampiezza (unita') e ritmo (cicli al secondo) unici per particella
+    // moto individuale: ampiezza (unita') e ritmo (cicli al secondo) unici per ogni particella
     readonly property real targetWander: {
         switch (state) {
-        case "THINKING": return 12;
-        case "EXECUTING": return 3;
-        case "LISTENING": case "DICTATION": return 8 + audio * 26;
-        case "SPEAKING": return 7 + audio * 20;
-        case "WAITING": return 5;
-        case "ERROR": return 28;
-        case "PAUSED": return 2;
-        default: return 7;
+        case "THINKING": return 14;
+        case "TRANSCRIBING": return 6;
+        case "EXECUTING": return 4;
+        case "LISTENING": case "DICTATION": return 16 + audio * 40;
+        case "SPEAKING": return 12 + audio * 45;
+        case "WAITING": return 4;
+        case "ERROR": return 45;
+        case "PAUSED": return 3;
+        default: return 14;
         }
     }
-    readonly property real targetWanderPace: state === "ERROR" ? 2.2 : state === "THINKING" ? 0.9
-        : audioState ? 0.45 + audio : state === "WAITING" ? 0.18 : 0.3
-    readonly property real targetFlow: state === "EXECUTING" ? 16 : 0       // flusso ordinato verso l'alto, dentro il campo
-    readonly property real breathPeriod: state === "WAITING" ? 2600 : state === "IDLE" ? 4200 : 1800
+    readonly property real targetWanderPace: state === "ERROR" ? 3.0 : state === "THINKING" ? 1.2
+        : audioState ? 0.6 + audio * 1.6 : state === "WAITING" ? 0.12 : state === "TRANSCRIBING" ? 0.5 : 0.35
+    readonly property real targetFlow: state === "EXECUTING" ? 24 : 0       // flusso ordinato verso l'alto
+    readonly property real breathPeriod: state === "WAITING" ? 3400 : state === "IDLE" ? 4200 : 1800
 
     property real shell: targetShell
     property real outerOrbit: reducedMotion ? 0 : targetOuterOrbit
@@ -134,11 +148,12 @@ Item {
     property real wanderPace: targetWanderPace
     property real flow: reducedMotion ? 0 : targetFlow
     property color glowColor: stateColor
-    Behavior on shell { NumberAnimation { duration: 380; easing.type: Easing.OutCubic } }
-    Behavior on outerOrbit { NumberAnimation { duration: 700; easing.type: Easing.InOutQuad } }
-    Behavior on innerOrbit { NumberAnimation { duration: 700; easing.type: Easing.InOutQuad } }
-    Behavior on radial { NumberAnimation { duration: 260 } }
-    Behavior on wander { NumberAnimation { duration: 400 } }
+    // le grandezze guidate dall'audio seguono gia' l'inviluppo: animarle ancora le renderebbe molli
+    Behavior on shell { enabled: !root.audioState; NumberAnimation { duration: 380; easing.type: Easing.OutCubic } }
+    Behavior on outerOrbit { enabled: !root.audioState; NumberAnimation { duration: 700; easing.type: Easing.InOutQuad } }
+    Behavior on innerOrbit { enabled: !root.audioState; NumberAnimation { duration: 700; easing.type: Easing.InOutQuad } }
+    Behavior on radial { enabled: !root.audioState; NumberAnimation { duration: 260 } }
+    Behavior on wander { enabled: !root.audioState; NumberAnimation { duration: 400 } }
     Behavior on wanderPace { NumberAnimation { duration: 400 } }
     Behavior on flow { NumberAnimation { duration: 600 } }
     Behavior on glowColor { ColorAnimation { duration: 350 } }
@@ -157,11 +172,11 @@ Item {
     function react() {
         if (outcome.length === 0 || reducedMotion) return;
         if (outcome === "success") {
-            outcomeKick = 0.16; outcomeRadial = -45; glitch = 0;
+            outcomeKick = 0.2; outcomeRadial = -70; glitch = 0;
         } else if (outcome === "warning") {
-            outcomeKick = -0.1; outcomeRadial = 35; glitch = 0;
+            outcomeKick = -0.14; outcomeRadial = 60; glitch = 0;
         } else {
-            outcomeKick = -0.14; outcomeRadial = 70; glitch = 1;
+            outcomeKick = -0.18; outcomeRadial = 110; glitch = 1;
         }
         kickRelease.restart();
     }
@@ -169,7 +184,7 @@ Item {
         id: kickRelease
         interval: 380
         // success: dopo la compressione una piccola espansione oltre il riposo, poi il rientro
-        onTriggered: { root.outcomeKick = root.outcome === "success" ? -0.05 : 0; root.outcomeRadial = 0; kickReset.restart(); }
+        onTriggered: { root.outcomeKick = root.outcome === "success" ? -0.08 : 0; root.outcomeRadial = 0; kickReset.restart(); }
     }
     Timer { id: kickReset; interval: 420; onTriggered: { root.outcomeKick = 0; root.glitch = 0; } }
 
@@ -187,21 +202,28 @@ Item {
                     console.warn("Orb 3D: fotogrammi lenti per 3 s, passo alla qualita' bassa");
                 }
             }
+            const target = root.rawAudio;
+            const tau = target > root.audio ? 0.06 : 0.45;
+            root.audio += (target - root.audio) * (1 - Math.exp(-Math.min(frameTime, 0.1) / tau));
             root.angle = (root.angle + (8 + root.outerOrbit * 0.2) * frameTime) % 360;
             root.breath = Math.sin(root.clock * 2 * Math.PI * 1000 / root.breathPeriod);
         }
     }
     // l'asse delle orbite oscilla lentamente: il moto non si ripete uguale
-    readonly property vector3d outerAxis: Qt.vector3d(Math.sin(clock * 0.21) * 0.35, 1, Math.cos(clock * 0.17) * 0.25)
-    readonly property vector3d innerAxis: Qt.vector3d(0.45 + Math.sin(clock * 0.33) * 0.3, 1, -0.3)
+    readonly property vector3d outerAxis: Qt.vector3d(Math.sin(clock * 0.21) * 0.45, 1, Math.cos(clock * 0.17) * 0.35)
+    readonly property vector3d innerAxis: Qt.vector3d(0.5 + Math.sin(clock * 0.33) * 0.35, 1, -0.35)
 
-    readonly property real coreScale: 0.6 * (1 + (reducedMotion ? 0 : breath * 0.04 + audio * 0.08)) * (1 - outcomeKick * 0.6)
-    readonly property real shellRadius: 80 * (shell - outcomeKick)
-    readonly property real coreJitter: glitch > 0 ? (Math.random() - 0.5) * 6 * glitch : 0
+    // nucleo piu' piccolo e piu' luminoso: la presenza e' la massa di particelle, non una sfera solida
+    readonly property real coreScale: 0.42 * (1 + (reducedMotion ? 0 : breath * 0.05 + audio * 0.25)) * (1 - outcomeKick * 0.6)
+    readonly property real shellRadius: 82 * (shell - outcomeKick)
+    readonly property real coreJitter: glitch > 0 ? (Math.random() - 0.5) * 8 * glitch : 0
 
+    property string status: ""       // frase che accompagna lo stato (es. "Sto aspettando il modello locale...")
     readonly property string stateLabel: {
+        if (status.length > 0) return status;
         switch (state) {
         case "LISTENING": return qsTr("In ascolto");
+        case "TRANSCRIBING": return qsTr("Sto capendo");
         case "THINKING": return qsTr("Sto pensando");
         case "EXECUTING": return qsTr("Sto eseguendo");
         case "SPEAKING": return qsTr("Sto parlando");
@@ -238,7 +260,7 @@ Item {
 
         PerspectiveCamera { position: Qt.vector3d(0, 0, 320); clipNear: 1; clipFar: 1000 }
         DirectionalLight { eulerRotation.x: -30; eulerRotation.y: -40; brightness: 1.2 }
-        PointLight { position: Qt.vector3d(0, 0, 60); color: root.glowColor; brightness: 1.1 + root.audio * 0.8 }
+        PointLight { position: Qt.vector3d(0, 0, 60); color: root.glowColor; brightness: 1.1 + root.audio * 1.8 }
 
         // nucleo volumetrico: sfera emissiva + guscio traslucido che da' profondita'
         Node {
@@ -251,8 +273,8 @@ Item {
                 scale: Qt.vector3d(root.coreScale, root.coreScale, root.coreScale)
                 materials: PrincipledMaterial {
                     baseColor: root.glowColor
-                    emissiveFactor: Qt.vector3d(root.glowColor.r * (0.45 + root.audio * 0.4), root.glowColor.g * (0.45 + root.audio * 0.4),
-                                                root.glowColor.b * (0.45 + root.audio * 0.4))
+                    emissiveFactor: Qt.vector3d(root.glowColor.r * (0.55 + root.audio * 0.9), root.glowColor.g * (0.55 + root.audio * 0.9),
+                                                root.glowColor.b * (0.55 + root.audio * 0.9))
                     roughness: 0.35
                     metalness: 0.0
                 }
@@ -261,7 +283,7 @@ Item {
                 source: "#Sphere"
                 scale: Qt.vector3d(root.coreScale * 1.35, root.coreScale * 1.35, root.coreScale * 1.35)
                 materials: PrincipledMaterial {
-                    baseColor: Qt.rgba(root.glowColor.r, root.glowColor.g, root.glowColor.b, 0.18)
+                    baseColor: Qt.rgba(root.glowColor.r, root.glowColor.g, root.glowColor.b, 0.1)
                     emissiveFactor: Qt.vector3d(root.glowColor.r * 0.35, root.glowColor.g * 0.35, root.glowColor.b * 0.35)
                     alphaMode: PrincipledMaterial.Blend
                     cullMode: Material.FrontFaceCulling
@@ -314,10 +336,10 @@ Item {
                 particle: outerSprite
                 shape: ParticleShape3D { type: ParticleShape3D.Sphere; fill: false
                     extents: Qt.vector3d(root.shellRadius, root.shellRadius, root.shellRadius) }
-                emitRate: (particles.high ? 440 : 150) * (1 + root.audio * 0.8) * (root.state === "THINKING" ? 1.3 : 1)
-                // vita breve: il colore nasce con la particella, un cambio di stato deve vedersi in fretta
-                lifeSpan: 1900
-                lifeSpanVariation: 600
+                emitRate: (particles.high ? 460 : 160) * (1 + root.audio * 1.8) * (root.state === "THINKING" ? 1.3 : 1)
+                // abbastanza lunga da vedere la traiettoria, abbastanza breve da cambiare colore col nuovo stato
+                lifeSpan: 2300
+                lifeSpanVariation: 700
                 particleScale: particles.high ? 1.5 : 2.1
                 particleScaleVariation: 0.8
                 velocity: TargetDirection3D {
@@ -333,7 +355,7 @@ Item {
                 enabled: particles.high
                 shape: ParticleShape3D { type: ParticleShape3D.Sphere; fill: true
                     extents: Qt.vector3d(root.shellRadius * 0.82, root.shellRadius * 0.82, root.shellRadius * 0.82) }
-                emitRate: 150 * (1 + root.audio * 0.5)
+                emitRate: 170 * (1 + root.audio * 1.2)
                 lifeSpan: 2600
                 lifeSpanVariation: 700
                 particleScale: 2.6
@@ -350,7 +372,7 @@ Item {
                 particle: innerSprite
                 shape: ParticleShape3D { type: ParticleShape3D.Sphere; fill: false
                     extents: Qt.vector3d(root.shellRadius * 0.52, root.shellRadius * 0.52, root.shellRadius * 0.52) }
-                emitRate: (particles.high ? 170 : 70) * (1 + root.audio)
+                emitRate: (particles.high ? 180 : 80) * (1 + root.audio * 2)
                 lifeSpan: 1800
                 lifeSpanVariation: 500
                 particleScale: particles.high ? 1.2 : 1.8
@@ -398,7 +420,7 @@ Item {
                 particles: [outerSprite, midSprite]
                 radius: root.shellRadius * 0.6
                 outerRadius: root.shellRadius * 1.4
-                strength: root.reducedMotion ? 0 : root.audio * 90 + (root.state === "ERROR" ? 25 : 0)
+                strength: root.reducedMotion ? 0 : root.audio * 150 + (root.state === "ERROR" ? 50 : 0)
             }
             // EXECUTING: flusso ordinato verso l'alto
             Gravity3D {

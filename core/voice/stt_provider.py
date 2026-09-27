@@ -48,6 +48,17 @@ def cuda_available() -> bool:
         return False
 
 
+def _gpu_total_vram_mb() -> int | None:
+    import subprocess
+
+    try:
+        completed = subprocess.run(["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+                                   capture_output=True, text=True, timeout=3)
+        return int(completed.stdout.split()[0]) if completed.returncode == 0 and completed.stdout.strip() else None
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        return None
+
+
 class WhisperSttProvider(SttProvider):
     """Riconoscimento vocale offline via faster-whisper (nessuna chiamata di rete a runtime).
 
@@ -66,6 +77,17 @@ class WhisperSttProvider(SttProvider):
     ]
     MAX_PROMPT_CHARS = 600  # initial_prompt: max ~224 token
 
+    # Prova reale del 27/09/2026: su una GPU da 8 GB Whisper in float16 (~1,6 GB), qwen2.5:7b (~4,8 GB), voce RVC e HUD 3D
+    # insieme hanno esaurito la memoria video e il modello linguistico e' crollato a ~40 token/s (ogni risposta scaduta).
+    # Su GPU fino a 8 GB Whisper usa int8_float16: circa meta' memoria, qualita' praticamente invariata.
+    SHARED_GPU_MAX_MB = 8192
+
+    @classmethod
+    def _cuda_compute_type(cls, total_vram_mb=None) -> str:
+        if total_vram_mb is None:
+            total_vram_mb = _gpu_total_vram_mb()
+        return "int8_float16" if total_vram_mb is not None and total_vram_mb <= cls.SHARED_GPU_MAX_MB else "float16"
+
     def __init__(self, model_size: str = None, language: str = "it", device: str = None,
                  compute_type: str = None, hotwords: list[str] = None):
         from faster_whisper import WhisperModel
@@ -75,9 +97,17 @@ class WhisperSttProvider(SttProvider):
         use_cuda = device == "cuda" or (device is None and cuda_available())
         self.device = "cuda" if use_cuda else "cpu"
         self.model_size = model_size or (self.GPU_MODEL if use_cuda else self.CPU_MODEL)
-        self.compute_type = compute_type or ("float16" if use_cuda else "int8")
+        self.compute_type = compute_type or (self._cuda_compute_type() if use_cuda else "int8")
         try:
-            self._model = WhisperModel(self.model_size, device=self.device, compute_type=self.compute_type)
+            try:
+                self._model = WhisperModel(self.model_size, device=self.device, compute_type=self.compute_type)
+            except Exception as exc:
+                if (not use_cuda or compute_type is not None or self.compute_type == "float16"
+                        or "compute type" not in str(exc).lower()):
+                    raise
+                # int8_float16 non supportato da questa GPU (e solo quello): si torna al float16 di prima
+                self.compute_type = "float16"
+                self._model = WhisperModel(self.model_size, device=self.device, compute_type=self.compute_type)
         except Exception:
             if not use_cuda:
                 raise

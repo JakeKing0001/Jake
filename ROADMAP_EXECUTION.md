@@ -8858,6 +8858,40 @@ o il solo prototipo 2D non chiudono il requisito. La verifica dell'handoff dipen
   Verificato: build Release + ctest, binario avviato senza errori QML su stderr, scatti a schermo di ascolto,
   pensiero, esecuzione ed errore. Giudizio estetico `VERIFY` dall'utente.
 
+- 27/09/2026 notte (prova REALE dell'utente con HUD nativo e voce continua; log di Jake e di Ollama).
+  * Orb: "una sfera con puntini", IDLE quasi fermo, ascolto poco diverso da IDLE. Cause: ampiezze sotto la soglia
+    di percezione, nucleo solido dominante, livello audio senza inviluppo (pacchetti a ~10 Hz e caduta secca a 0
+    dopo 400 ms), TRANSCRIBING schiacciato su LISTENING dal protocollo. Ora: ampiezze molto maggiori per stato,
+    nucleo piu' piccolo e traslucido, inviluppo per fotogramma (attacco ~60 ms, rilascio ~450 ms) che guida
+    turbolenza, velocita' orbitale, spinta radiale, emissione, luminosita' e raggio; nuovo stato `TRANSCRIBING`
+    (raccoglimento verso il centro) nel protocollo e nei due riduttori; IDLE non reagisce all'audio ambientale
+    (livello considerato solo in LISTENING/DICTATION/SPEAKING). Scatti a schermo della modalita' demo: IDLE, ascolto,
+    trascrizione, pensiero, attesa, voce ed errore distinguibili dalla forma. Giudizio estetico `VERIFY`.
+  * B7: un errore del modello veniva subito coperto dalla risposta (JAKE_MESSAGE -> IDLE): ora ERROR resta visibile
+    almeno 2,5 s; uno stato puo' portare una frase (`status`, es. "Sto aspettando il modello locale...") che l'orb
+    mostra come etichetta, cancellata al cambio di stato (fixture condivisa).
+- 27/09/2026 notte (voce, stessa prova; F2 resta `VERIFY`).
+  * B1/B2: "Jake, io ero sono." (trascrizione rotta) -> classificatore LLM -> CHITCHAT inventata. Il filtro sulla
+    confidenza esisteva solo per le frasi SENZA "Jake". Ora `JakeCore._unclear_voice_turn`: turno vocale con
+    confidenza STT reale sotto 0,62 (frasi di <= 4 parole) o 0,5 (piu' lunghe) e nessun comando deterministico
+    (esempi esatti: "che ore sono" resta veloce) -> "Non ho capito bene, puoi ripetere?" SENZA chiamare il modello.
+    Conferme in sospeso e testo scritto non toccati. La confidenza ora compare nel log ("Sentito: ... (confidenza
+    0.xx)") per tarare le soglie sulle prove reali.
+  * B4 (causa reale dai log): Ollama rispondeva ma ogni `/api/chat` e' finita con 500 esattamente allo scadere del
+    timeout del client (25, 60, 40, 40 s); prompt elaborato a ~40 token/s con qwen2.5:7b tutto su GPU da 8 GB insieme
+    a Whisper large-v3-turbo su CUDA, voce RVC e HUD 3D (anche Whisper e' crollato: partial da 184 s). Nessuno
+    scaricamento del modello durante la prova. Il turno ha provato in cascata classificatore, agente e risposta
+    diretta (quasi 3 minuti di THINKING) e ha detto "non riesco a contattare Ollama", falso.
+  * B5/B6: `core/model_health.py` classifica i fallimenti (spento / troppo lento con server vivo / modello mancante /
+    errore interno) e, dopo un timeout, diagnostica il perche' (`/api/ps`: modello solo in parte sulla GPU; VRAM
+    libera < 700 MB). Il primo timeout vale per tutto il turno: le chiamate successive (OllamaClient e ASK_QUESTION)
+    falliscono subito invece di ripetere l'attesa. Messaggi distinti con "riprova"; dopo 8 s di lavoro l'HUD mostra
+    "Sto aspettando il modello locale...". Nessun aumento dei timeout, nessun retry in cascata, nessuna risposta
+    inventata. Test con un finto Ollama HTTP (lento, spento, modello mancante, caricamento parziale) e prova reale
+    con l'Ollama installato: risposta normale in 8,6 s; con timeout forzato seconda chiamata del turno in 0,4 s.
+  * Causa a monte (memoria video): su GPU fino a 8 GB Whisper large-v3-turbo usa ora `int8_float16` invece di
+    `float16` (misurato qui: 1118 MB invece di 2061 MB), con ripiego automatico su float16 se non supportato.
+
 ### F4.5 — Pannelli contestuali
 
 Dipende da: F4.1 e contratti F1.

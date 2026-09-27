@@ -34,7 +34,8 @@ class InitTests(unittest.TestCase):
     def test_explicit_cuda_device_uses_the_gpu_model(self):
         fake_model_class = mock.MagicMock()
         fake_module = mock.MagicMock(WhisperModel=fake_model_class)
-        with mock.patch.dict("sys.modules", {"faster_whisper": fake_module}):
+        # GPU di dimensione ignota (come in CI): float16 come prima; su <= 8 GB vedi test_real_session_voice_fixes
+        with mock.patch.dict("sys.modules", {"faster_whisper": fake_module}),                 mock.patch("core.voice.stt_provider._gpu_total_vram_mb", return_value=None):
             provider = WhisperSttProvider(device="cuda")
         self.assertEqual(provider.device, "cuda")
         self.assertEqual(provider.model_size, WhisperSttProvider.GPU_MODEL)
@@ -43,7 +44,8 @@ class InitTests(unittest.TestCase):
     def test_a_gpu_load_failure_falls_back_to_cpu(self):
         fake_model_class = mock.MagicMock(side_effect=[RuntimeError("no vram"), mock.MagicMock()])
         fake_module = mock.MagicMock(WhisperModel=fake_model_class)
-        with mock.patch.dict("sys.modules", {"faster_whisper": fake_module}):
+        # anche con il formato ridotto (GPU da 8 GB): un errore vero di GPU va sulla CPU, non su un formato piu' pesante
+        with mock.patch.dict("sys.modules", {"faster_whisper": fake_module}),                 mock.patch("core.voice.stt_provider._gpu_total_vram_mb", return_value=8188):
             provider = WhisperSttProvider(device="cuda")
         self.assertEqual(provider.device, "cpu")
         self.assertEqual(provider.model_size, WhisperSttProvider.CPU_MODEL)

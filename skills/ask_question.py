@@ -45,6 +45,20 @@ class AskQuestionSkill:
         self.base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
         self.timeout = timeout
 
+    _failure = None
+
+    def _model_failure_result(self) -> SkillResult:
+        """Il motivo vero, non sempre "non riesco a contattare Ollama" (prova reale del 27/09/2026: Ollama rispondeva,
+        era la GPU piena a renderlo lentissimo)."""
+        failed = self._failure
+        if failed is None or failed.kind == "server_error":
+            return SkillResult(success=False, data={}, error="MODEL_ERROR")
+        if failed.kind == "timeout":
+            return SkillResult(success=False, data={"seconds": self.timeout, "hint": failed.hint}, error="MODEL_TIMEOUT")
+        if failed.kind == "model_missing":
+            return SkillResult(success=False, data={"model": self.model}, error="MODEL_MISSING")
+        return SkillResult(success=False, data={}, error="OLLAMA_UNAVAILABLE")
+
     def execute(self, parameters: dict = None):
         parameters = parameters or {}
         question = (parameters.get("question") or "").strip()
@@ -53,9 +67,10 @@ class AskQuestionSkill:
 
         memories = self._relevant_memories(question)
         self._memories = memories
+        self._failure = None
         answer = self._ask(question)
         if answer is None:
-            return SkillResult(success=False, data={}, error="OLLAMA_UNAVAILABLE")
+            return self._model_failure_result()
         answer, cited = self._cite(answer, memories)
         kept, drifted = keep_reply_language(answer, question)
         if drifted and len(kept) < self.MIN_KEPT_CHARS:
@@ -149,14 +164,27 @@ class AskQuestionSkill:
 
         payload = {"model": self.model, "stream": False,
             "keep_alive": "30m", "options": {"num_ctx": 8192, "temperature": temperature}, "messages": messages}
+        from core import model_health
+
+        failed = model_health.failure()
+        if failed is not None:  # stesso turno, stesso problema: nessuna nuova attesa
+            self._failure = failed
+            return None
         body = json.dumps(payload).encode("utf-8")
         http_request = request.Request(
             f"{self.base_url}/api/chat", data=body, headers={"Content-Type": "application/json"}, method="POST",
         )
         try:
-            result = json.loads(read_url(http_request, self.timeout).decode("utf-8"))
+            with model_health.calling():
+                result = json.loads(read_url(http_request, self.timeout).decode("utf-8"))
             return result["message"]["content"].strip() or None
-        except (error.URLError, TimeoutError, json.JSONDecodeError, KeyError, TypeError):
+        except (error.URLError, TimeoutError, OSError) as exc:
+            kind = model_health.classify(exc)
+            self._failure = (model_health.ModelFailure(kind) if kind == model_health.MODEL_MISSING
+                             else model_health.diagnose(self.base_url, kind))
+            model_health.record(self._failure)
+            return None
+        except (json.JSONDecodeError, KeyError, TypeError):
             # F1: buco reale (corretto insieme a core/vision_provider.py in questa sessione) -
             # un corpo JSON valido ma non nella forma attesa ("null", "[]", un numero,
             # {"message": null}) fa sollevare un TypeError da questo indicizzamento, non un
