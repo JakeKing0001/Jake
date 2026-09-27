@@ -27,7 +27,7 @@ class AgentStepEventTests(unittest.TestCase):
 
         event = subscriber.get_nowait()
         self.assertEqual(event.type, EventType.AGENT_STEP)
-        self.assertEqual(event.payload, {"step": 2, "description": "Cerco il file tesi.pdf"})
+        self.assertEqual(event.payload, {"step": 2, "description": "Cerco il file tesi.pdf", "status": "running"})  # F4.5.2
 
 
 class NotifyEventTests(unittest.TestCase):
