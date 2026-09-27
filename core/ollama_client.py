@@ -85,7 +85,8 @@ class OllamaClient:
             headers={"Content-Type": "application/json"}, method="POST",
         )
         try:
-            parsed = json.loads(cancellable_call(self._read, http_request, timeout or self.timeout, name="jake-ollama-http").decode("utf-8"))
+            with model_health.calling():
+                parsed = json.loads(cancellable_call(self._read, http_request, timeout or self.timeout, name="jake-ollama-http").decode("utf-8"))
         except error.HTTPError as exc:
             if model_health.classify(exc) == model_health.MODEL_MISSING:
                 raise OllamaModelMissing(f"modello non installato: {payload.get('model', '')}") from exc

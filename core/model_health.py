@@ -40,6 +40,27 @@ def end_turn(token: contextvars.Token) -> None:
     _TURN.reset(token)
 
 
+def current() -> dict | None:
+    """Lo stato del turno (condiviso per riferimento: un timer di un altro thread puo' leggerlo)."""
+    return _TURN.get()
+
+
+class calling:
+    """Contesto attorno a una chiamata al modello: il turno sa che sta aspettando il modello (per l'HUD)."""
+
+    def __enter__(self):
+        state = _TURN.get()
+        if state is not None:
+            state["calling"] = state.get("calling", 0) + 1
+        return self
+
+    def __exit__(self, *exc):
+        state = _TURN.get()
+        if state is not None:
+            state["calling"] = max(0, state.get("calling", 0) - 1)
+        return False
+
+
 def failure() -> ModelFailure | None:
     state = _TURN.get()
     return state.get("failure") if state is not None else None

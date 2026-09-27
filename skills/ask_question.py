@@ -175,7 +175,8 @@ class AskQuestionSkill:
             f"{self.base_url}/api/chat", data=body, headers={"Content-Type": "application/json"}, method="POST",
         )
         try:
-            result = json.loads(read_url(http_request, self.timeout).decode("utf-8"))
+            with model_health.calling():
+                result = json.loads(read_url(http_request, self.timeout).decode("utf-8"))
             return result["message"]["content"].strip() or None
         except (error.URLError, TimeoutError, OSError) as exc:
             kind = model_health.classify(exc)

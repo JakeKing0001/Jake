@@ -116,6 +116,29 @@ class ModelFailureTests(FakeOllamaCase):
         self.assertNotIsInstance(caught.exception, OllamaTimeout)
 
 
+class SlowTurnNoticeTests(FakeOllamaCase):
+    def test_after_a_few_seconds_the_hud_says_what_the_turn_is_waiting_for(self):
+        from core.event_bus import EventBus
+        from core.hud_protocol import EventType
+
+        _FakeOllama.mode = "slow"
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        ask = AskQuestionSkill(base_url=self.url, timeout=5)
+        core = _bare_core(ledger_path=Path(tmp.name) / "ledger.jsonl", skill_registry=FakeRegistry({"ASK_QUESTION": ask}),
+                          router=FakeRouter(Command("ASK_QUESTION", {"question": "cos'e' una CPU?"})),
+                          event_bus=EventBus())
+        core.SLOW_TURN_NOTICE_S = 0.5
+        events = core.event_bus.subscribe()
+        core.answer("cos'e' una CPU?")
+        statuses = []
+        while not events.empty():
+            event = events.get_nowait()
+            if event.type == EventType.THINKING:
+                statuses.append(event.payload.get("status"))
+        self.assertIn("Sto aspettando il modello locale...", statuses)
+
+
 class UnclearTranscriptTests(unittest.TestCase):
     def _core(self, exact=None):
         tmp = tempfile.TemporaryDirectory()

@@ -1198,8 +1198,10 @@ class JakeCore:
         # prova reale del 27/09/2026: il primo timeout del modello vale per tutto il turno (niente cascata di attese)
         health_token = model_health.begin_turn()
         # B5: una chiamata al modello lunga non deve sembrare un blocco: dopo qualche secondo l'HUD dice cosa aspetta
-        slow_notice = threading.Timer(self.SLOW_TURN_NOTICE_S, lambda: self.event_bus.publish(
-            HudEvent(EventType.THINKING, {"status": "Sto aspettando il modello locale..."})))
+        turn_state = model_health.current()
+        slow_notice = threading.Timer(self.SLOW_TURN_NOTICE_S, lambda: self.event_bus.publish(HudEvent(
+            EventType.THINKING, {"status": "Sto aspettando il modello locale..." if (turn_state or {}).get("calling")
+                                 else "Ci sto ancora lavorando..."})))
         slow_notice.daemon = True
         slow_notice.start()
         try:
