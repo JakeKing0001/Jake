@@ -19,7 +19,7 @@ const QSet<QString> &knownTypes() {
 const QSet<QString> &stateEvents() {
     static const QSet<QString> states = {
         QString::fromLatin1(JakeHudEventType::IDLE), QString::fromLatin1(JakeHudEventType::LISTENING),
-        QString::fromLatin1(JakeHudEventType::THINKING), QString::fromLatin1(JakeHudEventType::EXECUTING),
+        QString::fromLatin1(JakeHudEventType::TRANSCRIBING), QString::fromLatin1(JakeHudEventType::THINKING), QString::fromLatin1(JakeHudEventType::EXECUTING),
         QString::fromLatin1(JakeHudEventType::DICTATION), QString::fromLatin1(JakeHudEventType::PAUSED),
     };
     return states;
@@ -44,6 +44,7 @@ bool isType(const QString &type, const char *name) { return type == QLatin1Strin
 QJsonObject HudViewState::snapshot() const {
     return QJsonObject{
         {"state", state},
+        {"state_status", stateStatus},
         {"visible", visible},
         {"mic_open", micOpen},
         {"mic_discarding", micDiscarding},
@@ -131,7 +132,10 @@ HudEventReducer::Result HudEventReducer::apply(const QJsonObject &event) {
         m_view.lastSequenceId = sequenceId; // su una connessione nuova: server ripartito da capo
     }
     const QJsonValue traceValue = event.value(QStringLiteral("trace_id"));
+    const QString previousState = m_view.state;
     reduce(type, payload, traceValue.isString() ? traceValue.toString() : QString());
+    if (m_view.state != previousState && !stateEvents().contains(type))
+        m_view.stateStatus.clear(); // la frase apparteneva allo stato di prima
     m_lastType = type;
     m_lastPayload = payload;
     return Result::Applied;
@@ -147,6 +151,7 @@ void HudEventReducer::reduce(const QString &type, const QJsonObject &payload, co
     using namespace JakeHudEventType;
     if (stateEvents().contains(type)) {
         m_view.state = type;
+        m_view.stateStatus = text(payload, "status");
     } else if (isType(type, USER_MESSAGE)) {
         push(m_view.messages, QJsonArray{QStringLiteral("user"), text(payload, "text")});
     } else if (isType(type, JAKE_MESSAGE)) {

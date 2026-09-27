@@ -23,6 +23,7 @@ Item {
     readonly property color stateColor: {
         switch (state) {
         case "LISTENING": return "#4fd1ff";
+        case "TRANSCRIBING": return "#7dd3fc";
         case "THINKING": return "#a78bfa";
         case "EXECUTING": return "#facc15";
         case "SPEAKING": return "#38bdf8";

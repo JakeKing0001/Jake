@@ -48,6 +48,7 @@ class JakeClient : public QObject {
     Q_PROPERTY(QString lastActivityDetails READ lastActivityDetails NOTIFY viewChanged)
     Q_PROPERTY(QString lastOutcome READ lastOutcome NOTIFY viewChanged)
     Q_PROPERTY(int outcomeSerial READ outcomeSerial NOTIFY viewChanged)
+    Q_PROPERTY(QString stateStatus READ stateStatus NOTIFY viewChanged)
     Q_PROPERTY(double audioLevel READ audioLevel NOTIFY viewChanged)
     Q_PROPERTY(bool privateMode READ privateMode NOTIFY viewChanged)
     Q_PROPERTY(QVariantList planSteps READ planSteps NOTIFY viewChanged)
@@ -81,6 +82,7 @@ public:
     QString lastActivityDetails() const;
     QString lastOutcome() const { return m_reducer.view().lastOutcome; }
     int outcomeSerial() const { return m_reducer.view().outcomeSerial; }
+    QString stateStatus() const { return m_reducer.view().stateStatus; }
     double audioLevel() const { return m_reducer.view().audioLevel; }
     bool privateMode() const { return m_reducer.view().privateMode; }
     QVariantList planSteps() const { return m_reducer.view().planSteps.toVariantList(); }

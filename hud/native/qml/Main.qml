@@ -130,6 +130,20 @@ ApplicationWindow {
     Connections { target: Qt.application; function onScreensChanged() { window.chooseScreen(); } }
     onScreenChanged: Qt.callLater(place)
 
+    // B7 (prova reale del 27/09/2026): un errore del modello era subito coperto dalla risposta (JAKE_MESSAGE -> IDLE)
+    // e l'orb non mostrava mai ERROR. Lo stato ERROR resta visibile almeno 2,5 s prima di tornare a IDLE; qualunque
+    // stato attivo (ascolto, pensiero, voce) lo sostituisce subito.
+    property bool holdingError: false
+    readonly property string displayState: holdingError && jake.state === "IDLE" ? "ERROR" : jake.state
+    Connections {
+        target: jake
+        function onStateChanged() {
+            if (jake.state === "ERROR") { window.holdingError = true; errorHold.restart(); }
+            else if (jake.state !== "IDLE") window.holdingError = false;
+        }
+    }
+    Timer { id: errorHold; interval: 2500; onTriggered: window.holdingError = false }
+
     readonly property bool pointerOverAnyPanel: statusPanel.hovered || orb.hovered || permissionCard.hovered
         || conversation.hovered || actionCenter.hovered || commandBar.hovered || toast.hovered
     property bool typing: false
@@ -215,7 +229,9 @@ ApplicationWindow {
             onStatusChanged: if (status === Loader.Error && source.toString().indexOf("Orb3D") >= 0) source = "Orb.qml"
         }
         }
-        Binding { target: orb.item; property: "state"; value: window.orbDemo ? demo.state : jake.state; when: orb.item !== null }
+        Binding { target: orb.item; property: "state"; value: window.orbDemo ? demo.state : window.displayState; when: orb.item !== null }
+        Binding { target: orb.item; property: "status"; value: window.orbDemo ? "" : jake.stateStatus
+                  when: orb.item !== null && orb.item.hasOwnProperty("status") }
         Binding { target: orb.item; property: "outcome"; value: window.orbDemo ? demo.outcome : jake.lastOutcome; when: orb.item !== null }
         Binding { target: orb.item; property: "outcomeSerial"; value: window.orbDemo ? demo.index : jake.outcomeSerial
                   when: orb.item !== null && orb.item.hasOwnProperty("outcomeSerial") }
@@ -225,7 +241,7 @@ ApplicationWindow {
         QtObject {
             id: demo
             readonly property var steps: [
-                ["IDLE", ""], ["LISTENING", ""], ["THINKING", ""], ["EXECUTING", ""], ["IDLE", "success"],
+                ["IDLE", ""], ["LISTENING", ""], ["TRANSCRIBING", ""], ["THINKING", ""], ["EXECUTING", ""], ["IDLE", "success"],
                 ["SPEAKING", ""], ["WAITING", ""], ["IDLE", "warning"], ["ERROR", "error"], ["PAUSED", ""]]
             property int index: 0
             property string state: steps[index][0]

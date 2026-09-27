@@ -11,6 +11,7 @@
 // JakeClient lo usa per ogni riga SSE; le proprieta' QML leggono da qui.
 struct HudViewState {
     QString state = QStringLiteral("IDLE");
+    QString stateStatus;       // stato leggibile che accompagna lo stato (payload "status")
     bool visible = true;
     bool micOpen = false;
     bool micDiscarding = false;

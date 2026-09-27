@@ -753,7 +753,8 @@ class WakeWordSession:
             if self.state == "transcribing":
                 self._set_state("listening" if now < self._awaiting_command_until else "idle", "")
             return
-        self._logger.info("Sentito: %s", text)
+        self._logger.info("Sentito: %s (confidenza %s)", text,
+                          f"{self.last_confidence:.2f}" if isinstance(self.last_confidence, float) else "n/d")
         self._publish_final_transcript(text)
 
         # F2.3.4: una frase che e' (quasi) tutta cio' che Jake ha appena detto e' il suo stesso eco; una frase

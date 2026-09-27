@@ -282,6 +282,25 @@
       "expect": {"last_outcome": "success", "outcome_serial": 2}
     },
     {
+      "name": "uno stato puo' portare una frase leggibile; lo stato successivo senza frase la cancella",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "THINKING", "payload": {"status": "Sto aspettando il modello locale..."}, "sequence_id": 1}},
+        {"event": {"type": "THINKING", "payload": {"status": "Sto aspettando il modello locale..."}, "sequence_id": 2}},
+        {"event": {"type": "ERROR", "payload": {"detail": "modello lento"}, "sequence_id": 3}}
+      ],
+      "expect": {"state": "ERROR", "state_status": ""}
+    },
+    {
+      "name": "TRANSCRIBING e' uno stato proprio, distinto da LISTENING",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "LISTENING", "sequence_id": 1}},
+        {"event": {"type": "TRANSCRIBING", "sequence_id": 2}}
+      ],
+      "expect": {"state": "TRANSCRIBING"}
+    },
+    {
       "name": "livello audio fuori scala limitato a 1",
       "steps": [
         {"connect": true},

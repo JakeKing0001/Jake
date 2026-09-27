@@ -32,6 +32,19 @@ class OllamaResponseError(OllamaError):
     """Ollama ha risposto, ma con qualcosa di inatteso (modello mancante, JSON non valido)."""
 
 
+class OllamaTimeout(OllamaUnavailable):
+    """Il server risponde ma il modello non ha finito in tempo (troppo lento: vedi core/model_health.py)."""
+
+
+class OllamaModelMissing(OllamaResponseError):
+    """Il modello richiesto non e' installato."""
+
+
+def _failure_error(failure) -> OllamaError:
+    message = failure.detail + (f" ({failure.hint})" if failure.hint else "")
+    return OllamaTimeout(message) if failure.kind == "timeout" else OllamaUnavailable(message)
+
+
 class OllamaClient:
     """Wrapper minimale su /api/chat, /api/embed e /api/tags. Nessuna dipendenza esterna.
 
@@ -60,6 +73,12 @@ class OllamaClient:
             return response.read()
 
     def _post(self, path: str, payload: dict, timeout: float | None = None) -> dict:
+        from core import model_health
+
+        failed = model_health.failure()
+        if failed is not None:
+            # stesso turno, stesso problema: non si ripete la stessa attesa (prova reale del 27/09/2026)
+            raise _failure_error(failed)
         body = json.dumps(payload).encode("utf-8")
         http_request = request.Request(
             f"{self.base_url}{path}", data=body,
@@ -68,14 +87,13 @@ class OllamaClient:
         try:
             parsed = json.loads(cancellable_call(self._read, http_request, timeout or self.timeout, name="jake-ollama-http").decode("utf-8"))
         except error.HTTPError as exc:
-            detail = ""
-            try:
-                detail = exc.read().decode("utf-8", errors="replace")[:300]
-            except Exception:
-                pass
-            raise OllamaResponseError(f"HTTP {exc.code}: {detail}") from exc
+            if model_health.classify(exc) == model_health.MODEL_MISSING:
+                raise OllamaModelMissing(f"modello non installato: {payload.get('model', '')}") from exc
+            raise OllamaResponseError(f"HTTP {exc.code}") from exc
         except (error.URLError, TimeoutError, ConnectionError, OSError) as exc:
-            raise OllamaUnavailable(str(exc)) from exc
+            failed = model_health.diagnose(self.base_url, model_health.classify(exc))
+            model_health.record(failed)
+            raise _failure_error(failed) from exc
         except json.JSONDecodeError as exc:
             raise OllamaResponseError("risposta non JSON") from exc
         # F1: un corpo JSON valido ma non un dizionario (proxy/porta sbagliata che risponde con

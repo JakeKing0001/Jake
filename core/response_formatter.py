@@ -295,7 +295,16 @@ def _format_error(intent: str, result: SkillResult) -> str:
     if error == "NETWORK_UNAVAILABLE":
         return "Non ho accesso a internet in questo momento."
     if error == "OLLAMA_UNAVAILABLE":
-        return "Non riesco a contattare Ollama in questo momento."
+        return "Ollama non risponde: sembra spento. Avvialo e dimmi \"riprova\"."
+    if error == "MODEL_TIMEOUT":
+        hint = data.get("hint") or ""
+        return ("Il modello locale è troppo lento in questo momento" + (f": {hint}" if hint else "")
+                + ". Ho smesso di aspettare; quando vuoi dimmi \"riprova\".")
+    if error == "MODEL_MISSING":
+        model = data.get("model", "")
+        return f"Il modello {model} non è installato: installalo con \"ollama pull {model}\"."
+    if error == "MODEL_ERROR":
+        return "Il modello locale ha restituito un errore. Puoi dirmi \"riprova\"."
     if error == "MISSING_API_KEY":
         return f"Per usarlo devi configurare '{data.get('setting', '')}' in config/settings.json (vedi config/settings.example.json)."
     if error == "CITY_NOT_FOUND":

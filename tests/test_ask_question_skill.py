@@ -66,7 +66,8 @@ class DegradesGracefullyTests(unittest.TestCase):
         for body in (b"null", b"[]", b"42", b'{"message": null}'):
             with mock.patch("urllib.request.urlopen", return_value=_fake_response(body)):
                 result = AskQuestionSkill().execute({"question": "ciao"})
-            self.assertEqual(result.error, "OLLAMA_UNAVAILABLE", msg=body)
+            # Ollama HA risposto (male): "e' spento" sarebbe falso; e' un errore del modello (prova reale 27/09/2026)
+            self.assertEqual(result.error, "MODEL_ERROR", msg=body)
 
 
 if __name__ == "__main__":

@@ -1067,6 +1067,29 @@ class JakeCore:
         question = f"Vuoi che te lo ricordi {describe(commitment.remind_at, now)}?"
         return f"{response} {question}".strip() if response else question
 
+    # Confidenza STT (exp della media di avg_logprob di Whisper, 0-1) sotto la quale una frase che non e' un comando
+    # deterministico non viene interpretata: si chiede di ripetere. Frasi brevi: soglia piu' alta (una trascrizione
+    # rotta di 2-3 parole e' la piu' facile da scambiare per una chiacchiera, e ripeterla costa poco).
+    UNCLEAR_CONFIDENCE = 0.5
+    SLOW_TURN_NOTICE_S = 8.0
+    UNCLEAR_CONFIDENCE_SHORT = 0.62
+    SHORT_UTTERANCE_WORDS = 4
+
+    def _unclear_voice_turn(self, text: str) -> bool:
+        """Solo per i turni vocali con una confidenza reale (testo scritto e provider senza confidenza: mai). La corsia
+        deterministica (esempi esatti: "che ore sono", date, calcoli) passa sempre: la' non si interpreta nulla."""
+        confidence = current_stt_confidence()
+        if confidence is None:
+            return False
+        if self.example_store.find_exact(text) is not None:
+            return False
+        threshold = self.UNCLEAR_CONFIDENCE_SHORT if len(text.split()) <= self.SHORT_UTTERANCE_WORDS else self.UNCLEAR_CONFIDENCE
+        if confidence >= threshold:
+            return False
+        self.logger.info("Trascrizione incerta (confidenza %.2f < %.2f): chiedo di ripetere invece di interpretare '%s'",
+                         confidence, threshold, text)
+        return True
+
     def _run_in_current_profile(self, callback):
         """
         Esegue callback nello spazio memoria/conversazione del profilo vocale
@@ -1170,8 +1193,22 @@ class JakeCore:
         # precedente (es. un turno che non passa da _execute_command - chitchat, agente,
         # conferma) non finisce per etichettare per errore la risposta di QUESTO turno.
         source_intent_token = set_current_command_source_intent(None)
+        from core import model_health
+
+        # prova reale del 27/09/2026: il primo timeout del modello vale per tutto il turno (niente cascata di attese)
+        health_token = model_health.begin_turn()
+        # B5: una chiamata al modello lunga non deve sembrare un blocco: dopo qualche secondo l'HUD dice cosa aspetta
+        slow_notice = threading.Timer(self.SLOW_TURN_NOTICE_S, lambda: self.event_bus.publish(
+            HudEvent(EventType.THINKING, {"status": "Sto aspettando il modello locale..."})))
+        slow_notice.daemon = True
+        slow_notice.start()
         try:
             response = self._process(text)
+            failed = model_health.failure()
+            if failed is not None:
+                self.logger.warning("Modello locale non disponibile in questo turno: %s %s %s", failed.kind, failed.detail,
+                                    failed.hint)
+                self.event_bus.publish(HudEvent(EventType.ERROR, {"detail": failed.detail or "modello non disponibile"}))
         except TurnCancelled:
             reset_current_command_source_intent(source_intent_token)
             raise
@@ -1181,6 +1218,9 @@ class JakeCore:
             self.logger.exception("Errore imprevisto elaborando: %s", text)
             response = "Mi dispiace, si è verificato un errore imprevisto. L'ho registrato nel log."
             self.event_bus.publish(HudEvent(EventType.ERROR, {"detail": "errore imprevisto"}))
+        finally:
+            slow_notice.cancel()
+            model_health.end_turn(health_token)
         if current_turn_cancelled():
             # "Jake, basta" arrivato mentre il turno lavorava: la sua risposta e' vecchia. Non entra
             # in cronologia/memoria/HUD (il prossimo turno non deve riferirsi a qualcosa che l'utente
@@ -1764,6 +1804,13 @@ class JakeCore:
                 ),
                 learn=False,
             )
+
+        if self._unclear_voice_turn(text):
+            # prova reale del 27/09/2026: "Jake, io ero sono." (trascrizione rotta) era diventata una chiacchiera
+            # inventata ("stai cambiando tono?"). Meglio chiedere che indovinare il significato.
+            reply = "Non ho capito bene, puoi ripetere?"
+            self._remember_exchange(text, Command("UNKNOWN", {}), reply)
+            return reply
 
         if len(text.split()) <= 4:
             quick = chitchat.reply(text)

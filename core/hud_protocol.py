@@ -83,6 +83,9 @@ class EventType(str, Enum):
     # F4.5.6: modalita' di notifica e quante notifiche aspettano (trattenute dalla modalita' o rimandate). Payload:
     # {"mode": str, "mode_label": str (italiano, da mostrare), "pending": int}. Solo numeri e nomi, mai i testi.
     NOTIFICATION_STATE = "NOTIFICATION_STATE"
+    # Frase finita, Whisper la sta trascrivendo: prima era schiacciato su LISTENING, quindi l'HUD non distingueva
+    # "ti sto ascoltando" da "sto capendo cosa hai detto" (prova reale del 27/09/2026).
+    TRANSCRIBING = "TRANSCRIBING"
 
 
 # Traduce gli stati gia' in uso da WakeWordSession/SessionHooks.set_state (stringhe libere,
@@ -92,7 +95,7 @@ class EventType(str, Enum):
 LEGACY_STATE_TO_EVENT_TYPE = {
     "idle": EventType.IDLE,
     "listening": EventType.LISTENING,
-    "transcribing": EventType.LISTENING,
+    "transcribing": EventType.TRANSCRIBING,
     "thinking": EventType.THINKING,
     "working": EventType.EXECUTING,
     "responding": EventType.JAKE_MESSAGE,
