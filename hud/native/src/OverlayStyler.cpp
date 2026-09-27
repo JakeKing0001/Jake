@@ -1,6 +1,7 @@
 #include "OverlayStyler.h"
 
 #include <QCursor>
+#include <QScreen>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -75,4 +76,9 @@ QPointF OverlayStyler::cursorInWindow(QQuickWindow *window) const {
     if (!window)
         return QPointF(-1, -1);
     return window->mapFromGlobal(QCursor::pos()).toPointF();
+}
+
+QRectF OverlayStyler::availableGeometry(QQuickWindow *window) const {
+    QScreen *screen = window ? window->screen() : nullptr;
+    return screen ? QRectF(screen->availableGeometry()) : QRectF();
 }

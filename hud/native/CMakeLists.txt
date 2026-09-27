@@ -116,6 +116,7 @@ set(JAKE_HUD_QML_FILES
         qml/ConversationPanel.qml
         qml/StatusPanel.qml
         qml/ActionCenter.qml
+        qml/Ambience.qml
 )
 if(TARGET Qt6::Quick3D)
     list(APPEND JAKE_HUD_QML_FILES qml/Orb3D.qml)

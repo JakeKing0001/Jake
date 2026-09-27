@@ -18,14 +18,21 @@ QtObject {
     property real textScale: 1.0
     function font(size) { return Math.round(size * textScale) }
 
-    // Riempimento pieno finche' non c'e' il blur di sistema (F4.3): con un vetro semitrasparente il testo delle
-    // finestre sotto trapelava e rendeva i pannelli illeggibili (screenshot reale del 26/09/2026).
-    readonly property color glassTop: highContrast ? "#000000" : "#1b1e27"
-    readonly property color glassBottom: highContrast ? "#000000" : "#111319"
-    readonly property color glassBorder: highContrast ? "#ffffff" : Qt.rgba(1, 1, 1, 0.10)
-    readonly property color glassHighlight: highContrast ? "transparent" : Qt.rgba(1, 1, 1, 0.06)
-    readonly property real radius: 16
-    readonly property real smallRadius: 10
+    // Vetro (seconda prova reale del 27/09/2026): tinta scura ma non piena - sotto c'e' la rifrazione della luce
+    // dell'HUD (GlassPanel). Quasi opaca: il testo delle finestre sotto non deve trapelare (screenshot reale del
+    // 26/09/2026, pannelli illeggibili con un vetro troppo trasparente).
+    readonly property color glassTop: highContrast ? "#000000" : Qt.rgba(0.11, 0.12, 0.16, 0.93)
+    readonly property color glassBottom: highContrast ? "#000000" : Qt.rgba(0.06, 0.07, 0.09, 0.95)
+    readonly property color glassBorder: highContrast ? "#ffffff" : Qt.rgba(1, 1, 1, 0.09)
+    readonly property color glassRim: Qt.rgba(1, 1, 1, 0.34)
+    readonly property color glassHighlight: highContrast ? "transparent" : Qt.rgba(1, 1, 1, 0.07)
+    readonly property real radius: 22
+    readonly property real smallRadius: 12
+    // impostati da Main.qml: il colore dello stato di Jake (tinta dei pannelli) e la luce sfocata dietro di loro
+    property color stateColor: "#3ddc84"
+    property Item backdrop: null
+    // rifrazione e ombre: solo in qualita' alta (batteria, GPU debole, JAKE_HUD_QUALITY=low -> no)
+    property bool richGlass: true
 
     readonly property color text: highContrast ? "#ffffff" : "#f3f4f6"
     readonly property color textMuted: highContrast ? "#ffffff" : "#a1a7b3"
