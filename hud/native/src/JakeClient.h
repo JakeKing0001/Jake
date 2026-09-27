@@ -47,6 +47,7 @@ class JakeClient : public QObject {
     // F4.6.2/F4.6.6: dettagli dell'ultima azione per l'utente (non l'audit tecnico completo)
     Q_PROPERTY(QString lastActivityDetails READ lastActivityDetails NOTIFY viewChanged)
     Q_PROPERTY(QString lastOutcome READ lastOutcome NOTIFY viewChanged)
+    Q_PROPERTY(int outcomeSerial READ outcomeSerial NOTIFY viewChanged)
     Q_PROPERTY(double audioLevel READ audioLevel NOTIFY viewChanged)
     Q_PROPERTY(bool privateMode READ privateMode NOTIFY viewChanged)
     Q_PROPERTY(QVariantList planSteps READ planSteps NOTIFY viewChanged)
@@ -79,6 +80,7 @@ public:
     qint64 lastUndoExpiresAt() const;
     QString lastActivityDetails() const;
     QString lastOutcome() const { return m_reducer.view().lastOutcome; }
+    int outcomeSerial() const { return m_reducer.view().outcomeSerial; }
     double audioLevel() const { return m_reducer.view().audioLevel; }
     bool privateMode() const { return m_reducer.view().privateMode; }
     QVariantList planSteps() const { return m_reducer.view().planSteps.toVariantList(); }

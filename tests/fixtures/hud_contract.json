@@ -273,6 +273,15 @@
       "expect": {"notification_mode": "normal", "notification_mode_label": "normale", "notifications_pending": 0}
     },
     {
+      "name": "due successi di fila sono due esiti (outcome_serial), non uno",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "ACTION_RECEIPT", "payload": {"action_id": "a1", "intent": "CREATE_PATH", "outcome": "success", "verified": "verified"}, "sequence_id": 1}},
+        {"event": {"type": "ACTION_RECEIPT", "payload": {"action_id": "a2", "intent": "CREATE_PATH", "outcome": "success", "verified": "verified"}, "sequence_id": 2}}
+      ],
+      "expect": {"last_outcome": "success", "outcome_serial": 2}
+    },
+    {
       "name": "livello audio fuori scala limitato a 1",
       "steps": [
         {"connect": true},

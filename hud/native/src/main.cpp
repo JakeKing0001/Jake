@@ -84,6 +84,7 @@ int main(int argc, char *argv[]) {
     const bool use3d = false;
 #endif
     initial.insert(QStringLiteral("orb3d"), use3d);
+    initial.insert(QStringLiteral("orbDemo"), qEnvironmentVariable("JAKE_HUD_DEMO") == QLatin1String("1"));
     if (parser.isSet(jakeUrl))
         initial.insert(QStringLiteral("jakeBaseUrl"), parser.value(jakeUrl));
     if (parser.isSet(credentialsStdin)) {

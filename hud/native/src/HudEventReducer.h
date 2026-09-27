@@ -36,6 +36,7 @@ struct HudViewState {
     bool confirmationExternal = false;
     QString confirmationTraceId;
     QString lastOutcome;       // F4.4.1: success | warning | error (ultima ricevuta)
+    int outcomeSerial = 0;     // cresce a ogni ricevuta: due esiti uguali di fila restano due eventi
     QString audioSource;       // F4.4.4: "mic" | "voice"
     double audioLevel = 0.0;   // 0..1, mai audio
     bool privateMode = false;  // F4.5.7: eventi gia' redatti dal core, qui solo l'indicatore
