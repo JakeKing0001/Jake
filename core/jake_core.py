@@ -274,7 +274,8 @@ class JakeCore:
             event_bus=self.event_bus, command_handler=self.answer, host=companion_host,
             port=int(config.get("companion_server_port", 8765) or 8765),
             token=config.get("companion_token"), credential_store=self.device_credential_store,
-            guard=CompanionGuard(audit=CompanionAudit()), tls_context=companion_tls_context,
+            guard=CompanionGuard(audit=CompanionAudit(), capability_store=self.device_credential_store),
+            tls_context=companion_tls_context,
             tls_fingerprint=self.companion_tls_fingerprint,
             pairing_service=self.pairing_service, conversation_state=self.skill_registry.conversation_state,
             on_pairing_requested=self._on_pairing_requested,
@@ -548,6 +549,9 @@ class JakeCore:
         self.skill_registry.register_skill("MUTE_NOTIFICATION", MuteNotificationSkill(self))
         self.skill_registry.register_skill("UNMUTE_NOTIFICATION", UnmuteNotificationSkill(self))
         self.skill_registry.register_skill("SNOOZE_NOTIFICATION", SnoozeNotificationSkill(self))
+        # F7.1.3: che cosa puo' fare un dispositivo accoppiato (persistente, vale subito sugli endpoint)
+        from skills.device_access import SetDeviceAccessSkill
+        self.skill_registry.register_skill("SET_DEVICE_ACCESS", SetDeviceAccessSkill(self))
         # F8.2/F8.3: installazione di pacchetti firmati in due passi (piano con digest, poi ADMIN con approvazione)
         from skills.skill_packages import InstallSkillPackageSkill, PlanSkillInstallSkill
         self.skill_registry.register_skill("PLAN_SKILL_INSTALL", PlanSkillInstallSkill(self.skill_store))
