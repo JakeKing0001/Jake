@@ -234,7 +234,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F0.3` | Architecture | `VERIFY` |
 | `F0.4` | Quality Engineering (dipendenza F0.1 `DONE` dall'11/09: `BLOCKED` era stantio; parti esistono - contract test degli eventi HUD, molti fault test - ma nessuna matrice pubblicata) | `DOING` |
 | `F0.5` | Performance Engineering (dipendenza F0.1 `DONE`: `BLOCKED` era stantio; baseline esistenti per NLU, STT, VAD, barge-in, pipeline vocale e 100 task Computer Use; manca il corpus audio consensuale e le soglie in CI) | `DOING` |
-| `F0.6` | Release Engineering | `DOING` |
+| `F0.6` | Release Engineering (27/09/2026: preflight `python main.py --preflight` - Python, dipendenze, cartella dati, disco, Ollama/modello, microfono, GPU, HUD nativo; installer non ancora) | `DOING` |
 | `F1.1` | Trust Core | `DONE` |
 | `F1.2` | Security Architecture | `DONE` |
 | `F1.3` | Execution Reliability (F1.3.5 chiuso per intero il 16/09/2026; F1.3.4 trovato gia' chiuso in una sessione precedente, riga corretta il 22/09/2026; 80% undo su azioni reversibili raggiunto lo stesso giorno - 10 nuove coppie oltre alle 4 filesystem; browser N/A dichiarato, da riverificare con F3.6) | `DONE` |
@@ -465,6 +465,14 @@ Dipende da: F0.2 e F0.3.
 5. `F0.6.5` Firmare binari e pacchetti; verificare la firma prima dell'aggiornamento.
 6. `F0.6.6` Usare aggiornamenti atomici con health check e rollback automatico.
 7. `F0.6.7` Offrire canali stable/beta/dev e portable mode.
+
+- 27/09/2026 (`F0.6.2` preflight): `tools/preflight.py` (`python main.py --preflight`), sola lettura. ERRORE solo
+  per cio' che impedisce a Jake di funzionare (Python < 3.11, dipendenze base mancanti con il comando per
+  installarle, cartella dati non scrivibile; codice d'uscita 1); ATTENZIONE per cio' che limita una parte (Ollama
+  spento o modello configurato non scaricato con il `ollama pull` da eseguire, dipendenze voce, nessun microfono,
+  meno di 2 GB liberi, HUD nativo abilitato ma non compilato o senza companion server); INFO per la VRAM libera.
+  Eseguito su questa macchina: tutto OK (Ollama con qwen2.5:7b, 9 ingressi audio, ~7 GB di VRAM libera); con
+  `JAKE_OLLAMA_URL` su una porta chiusa -> ATTENZIONE su Ollama, uscita 0. Installer/upgrade/repair ancora da fare.
 
 Criterio di uscita: installazione, update fallito e rollback passano su una VM Windows pulita.
 

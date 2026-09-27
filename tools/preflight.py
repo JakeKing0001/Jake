@@ -1,0 +1,176 @@
+"""Preflight (F0.6.2): prima di avviare Jake, controlla cio' che gli serve davvero su QUESTA macchina e dice cosa
+manca con parole chiare, invece di scoprirlo a meta' di un comando. Nessuna modifica al sistema: solo letture.
+
+- ERRORE: Jake non puo' funzionare (Python troppo vecchio, dipendenze base mancanti, cartella dati non scrivibile).
+- ATTENZIONE: una parte non funzionera' (Ollama spento o modello non scaricato, niente microfono, HUD nativo
+  abilitato ma non compilato, poco spazio su disco).
+- OK / INFO: tutto bene, o un dato utile (VRAM libera).
+
+Uso: python main.py --preflight   (oppure python -m tools.preflight). Codice d'uscita 1 solo se c'e' un ERRORE."""
+from __future__ import annotations
+
+import importlib.metadata
+import json
+import re
+import shutil
+import sys
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+from urllib import error, request
+
+ROOT = Path(__file__).resolve().parent.parent
+MIN_PYTHON = (3, 11)
+LOW_DISK_BYTES = 2 * 1024 ** 3  # modelli, database e registri crescono: sotto i 2 GB conviene saperlo prima
+OK, INFO, WARN, FAIL = "OK", "INFO", "ATTENZIONE", "ERRORE"
+
+
+@dataclass(frozen=True)
+class Check:
+    name: str
+    status: str
+    detail: str
+
+
+def check_python(version=sys.version_info) -> Check:
+    found = f"{version[0]}.{version[1]}"
+    if tuple(version[:2]) < MIN_PYTHON:
+        return Check("Python", FAIL, f"serve Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} o piu' recente, trovato {found}")
+    return Check("Python", OK, found)
+
+
+def _requirement_names(path: Path) -> list[str]:
+    names = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line or line.startswith("-"):
+            continue
+        names.append(re.split(r"[<>=!~;\[ ]", line, maxsplit=1)[0])
+    return names
+
+
+def check_requirements(group: str, path: Path, status_if_missing: str, version_of=importlib.metadata.version) -> Check:
+    missing = []
+    for name in _requirement_names(path):
+        try:
+            version_of(name)
+        except importlib.metadata.PackageNotFoundError:
+            missing.append(name)
+    if missing:
+        return Check(f"Dipendenze {group}", status_if_missing,
+                     f"mancano {', '.join(missing)}: installa con pip install -r {path.relative_to(ROOT).as_posix()}")
+    return Check(f"Dipendenze {group}", OK, "installate")
+
+
+def check_data_dir(data_dir: Path) -> Check:
+    try:
+        data_dir.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=data_dir, prefix=".preflight-", delete=True):
+            pass
+    except OSError as exc:
+        return Check("Cartella dati", FAIL, f"{data_dir} non e' scrivibile ({exc.strerror or exc})")
+    return Check("Cartella dati", OK, str(data_dir))
+
+
+def check_disk(data_dir: Path, usage=shutil.disk_usage) -> Check:
+    free = usage(data_dir if data_dir.exists() else data_dir.anchor).free
+    text = f"{free / 1024 ** 3:.1f} GB liberi"
+    return Check("Spazio su disco", WARN if free < LOW_DISK_BYTES else OK,
+                 text + (": sotto i 2 GB, modelli e registri potrebbero non starci" if free < LOW_DISK_BYTES else ""))
+
+
+def check_ollama(base_url: str, model: str, fetch=None) -> Check:
+    fetch = fetch or (lambda url: json.loads(request.urlopen(url, timeout=2).read().decode("utf-8")))
+    try:
+        tags = fetch(f"{base_url}/api/tags")
+    except (error.URLError, OSError, ValueError) as exc:
+        return Check("Ollama", WARN, f"non raggiungibile su {base_url} ({getattr(exc, 'reason', exc)}): Jake parte, "
+                                     "ma non risponde alle domande libere finche' Ollama non e' avviato")
+    installed = {str(m.get("name") or "") for m in tags.get("models", []) if isinstance(m, dict)}
+    if model not in installed and f"{model}:latest" not in installed:
+        return Check("Ollama", WARN, f"attivo, ma il modello configurato '{model}' non e' scaricato: ollama pull {model}")
+    return Check("Ollama", OK, f"attivo, modello '{model}' presente")
+
+
+def check_microphone(query_devices=None) -> Check:
+    try:
+        if query_devices is None:
+            import sounddevice
+
+            query_devices = sounddevice.query_devices
+        devices = query_devices()
+    except Exception as exc:  # driver audio assente/rotto: la voce non partira', il testo si'
+        return Check("Microfono", WARN, f"impossibile leggere i dispositivi audio ({type(exc).__name__}): solo modalita' testo")
+    inputs = [d for d in devices if (d.get("max_input_channels") or 0) > 0]
+    if not inputs:
+        return Check("Microfono", WARN, "nessun dispositivo di ingresso: la modalita' voce non potra' ascoltare")
+    return Check("Microfono", OK, f"{len(inputs)} dispositivi di ingresso")
+
+
+def check_native_hud(config: dict, default_exe: Path) -> Check | None:
+    if not config.get("hud_native_enabled"):
+        return None
+    exe = Path(config.get("hud_native_path") or default_exe)
+    if not exe.is_file():
+        return Check("HUD nativo", WARN, f"abilitato ma {exe} non esiste: compila hud/native (vedi hud/native/README.md)")
+    if not config.get("companion_server_enabled"):
+        return Check("HUD nativo", WARN, "abilitato ma richiede companion_server_enabled: non partira'")
+    return Check("HUD nativo", OK, str(exe))
+
+
+def check_gpu(detect=None) -> Check:
+    if detect is None:
+        from core.model_router import detect_local_hardware as detect
+    info = detect()
+    if info.available_vram_mb is None:
+        return Check("GPU", INFO, "nessuna GPU NVIDIA rilevata: i modelli girano su CPU (piu' lenti)")
+    return Check("GPU", INFO, f"{info.available_vram_mb} MB di VRAM libera")
+
+
+def run_all(config: dict) -> list[Check]:
+    from core.native_hud import DEFAULT_EXE
+    from core.ollama_client import DEFAULT_BASE_URL
+
+    data_dir = ROOT / "data"
+    checks = [
+        check_python(),
+        check_requirements("base", ROOT / "requirements" / "base.txt", FAIL),
+        check_requirements("voce", ROOT / "requirements" / "voice.txt", WARN),
+        check_data_dir(data_dir),
+        check_disk(data_dir),
+        check_ollama(DEFAULT_BASE_URL, str(config.get("ollama_model") or "qwen2.5:7b")),
+        check_microphone(),
+        check_gpu(),
+    ]
+    hud = check_native_hud(config, DEFAULT_EXE)
+    if hud is not None:
+        checks.append(hud)
+    return checks
+
+
+def render(checks: list[Check]) -> str:
+    width = max(len(c.status) for c in checks)
+    lines = [f"[{c.status:<{width}}] {c.name}: {c.detail}" for c in checks]
+    failures = sum(c.status == FAIL for c in checks)
+    warnings = sum(c.status == WARN for c in checks)
+    if failures:
+        lines.append(f"Jake non puo' partire: {failures} {'errore' if failures == 1 else 'errori'} da correggere.")
+    elif warnings:
+        lines.append(f"Jake puo' partire, con {warnings} {'limite indicato' if warnings == 1 else 'limiti indicati'} sopra.")
+    else:
+        lines.append("Tutto pronto.")
+    return "\n".join(lines)
+
+
+def main() -> int:
+    from core.config import Config
+
+    config = Config()
+    checks = run_all({key: config.get(key) for key in (
+        "ollama_model", "hud_native_enabled", "hud_native_path", "companion_server_enabled")})
+    print(render(checks))
+    return 1 if any(c.status == FAIL for c in checks) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
