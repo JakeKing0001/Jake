@@ -75,6 +75,23 @@ class NotificationCenter:
         self._queued: list[dict] = []
         self._lock = threading.Lock()
         self._suspended = 0
+        # F4.5.6: callable(modalita', notifiche in attesa), chiamato (fuori dal lock) solo quando una delle due cambia
+        self.on_state_change = None
+        self._last_state: tuple | None = None
+
+    def _state_changed(self) -> None:
+        callback = self.on_state_change
+        if callback is None:
+            return
+        with self._lock:
+            state = (self.mode, len(self._queued))
+            if state == self._last_state:
+                return
+            self._last_state = state
+        try:
+            callback(*state)
+        except Exception:
+            pass
 
     @property
     def suspended(self) -> bool:
@@ -102,6 +119,7 @@ class NotificationCenter:
         if message:
             with self._lock:
                 self._queued.append({"kind": kind, "message": message})
+            self._state_changed()
         return None
 
     def set_mode(self, mode: NotificationMode) -> list[str]:
@@ -119,7 +137,9 @@ class NotificationCenter:
             for item in self._queued:
                 (released if item["kind"] in allowed else remaining).append(item)
             self._queued = remaining
-            return [item["message"] for item in released]
+            messages = [item["message"] for item in released]
+        self._state_changed()
+        return messages
 
     def defer(self, kind: str, message: str, not_before: float | None = None) -> None:
         """In coda per dopo anche se la modalita' lo ammetterebbe (budget, quiet hours, conversazione
@@ -128,6 +148,7 @@ class NotificationCenter:
         if message:
             with self._lock:
                 self._queued.append({"kind": kind, "message": message, "deferred": True, "not_before": not_before})
+            self._state_changed()
 
     def take_deferred(self) -> list[dict]:
         """Toglie dalla coda e restituisce le voci rimandate da `defer` che la modalita' corrente ammette;
@@ -142,7 +163,9 @@ class NotificationCenter:
             taken = [item for item in self._queued if item.get("deferred") and item["kind"] in allowed
                      and (item.get("not_before") is None or item["not_before"] <= now)]
             self._queued = [item for item in self._queued if item not in taken]
-            return taken
+        if taken:
+            self._state_changed()
+        return taken
 
     def pending_count(self) -> int:
         with self._lock:

@@ -262,7 +262,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F4.2` | Native HUD (F4.2.1/F4.2.4 chiusi, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026; F4.2.5/F4.2.6 e resto di F4.2.3 richiedono test interattivi/visivi) | `DOING` |
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
 | `F4.4` | Interaction Design (26/09/2026: orb 3D Qt Quick 3D con nucleo volumetrico e particle shell, comportamento per stato interrupt-safe, reduced motion di Windows, qualita' high/low, fallback 2D; livelli audio reali di microfono e voce di Jake collegati all'orb; verifica visiva degli stati ancora da fare) | `DOING` |
-| `F4.5` | Interaction Design (26/09/2026: trascrizione live, permission card, prove, diagnosi, notifiche nell'HUD nativo; 27/09/2026: modalita' privata = nessun contenuto verso HUD/companion/replay, con indicatore; piano live con stato e durata di ogni passo; verifica visiva da fare) | `DOING` |
+| `F4.5` | Interaction Design (26/09/2026: trascrizione live, permission card, prove, diagnosi, notifiche nell'HUD nativo; 27/09/2026: modalita' privata = nessun contenuto verso HUD/companion/replay, con indicatore; piano live con stato e durata di ogni passo; modalita' di notifica e notifiche in attesa visibili; verifica visiva da fare) | `DOING` |
 | `F4.6` | Trust UX (26/09/2026: kill switch visibile e scorciatoia globale; action center con ultima azione, esito, verifica e undo con scadenza; 27/09/2026: dettagli dell'azione per l'utente - origine, esito/categoria, verifica, annullabilita', traccia - e motivo quando l'undo non e' piu' disponibile; retry sicuro dell'ultima azione fallita a voce e dal pulsante "Riprova"; undo rifiutato se il file/la cartella da cancellare e' cambiato dopo) | `DOING` |
 | `F4.7` | Accessibility (26/09/2026: nomi accessibili, focus ring, scrittura reale nella barra comandi di un overlay no-activate, scorciatoie globali Ctrl+Shift+J / Ctrl+Alt+Fine, reduced motion; 27/09/2026: alto contrasto da Windows o JAKE_HUD_HIGH_CONTRAST, verificato a schermo; "Dimensioni testo" di Windows applicata a tutto l'HUD (o JAKE_HUD_TEXT_SCALE), verificata a schermo al 150% di sistema; screen reader, scaling e alto contrasto da verificare) | `DOING` |
 | `F4.8` | Release Engineering (26/09/2026: core e HUD nativo avviati in ordine come processi separati, riavvio dell'HUD solo dopo un crash e con un tetto; installer/crash dump/rollback non iniziati; 27/09/2026: quando il supervisore smette di riavviare un HUD in crash revoca la sua credenziale e lo dice all'utente) | `DOING` |
@@ -8873,6 +8873,11 @@ pannelli contestuali restano coerenti con l'orb, senza coprire controlli, prove 
   contato). Il pannello conversazione mostra ogni passo con ✓/✗/… e secondi, anche durante una conferma a meta'
   compito. Fixture condivisa Python/C++ (ctest verde); test end-to-end agente scriptato -> callback del core ->
   bus -> riduttore. Verifica visiva `VERIFY`.
+- 27/09/2026 (F4.5.6, coda notifiche): con "non disturbare" (o durante una conversazione, budget, quiet hours) le
+  notifiche trattenute erano invisibili finche' non uscivano. `NotificationCenter.on_state_change` avvisa quando
+  cambiano modalita' o numero in attesa (mai i testi) e `JakeCore` pubblica `NOTIFICATION_STATE {mode,
+  mode_label, pending}`; i due riduttori (fixture condivisa) e un chip nella riga di stato: "non disturbare · 2 in
+  attesa". Test: skill reale -> notify -> bus -> riduttore, un evento solo quando qualcosa cambia.
 
 ### F4.6 — Action center e undo
 

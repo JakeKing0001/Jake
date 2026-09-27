@@ -50,6 +50,9 @@ class JakeClient : public QObject {
     Q_PROPERTY(double audioLevel READ audioLevel NOTIFY viewChanged)
     Q_PROPERTY(bool privateMode READ privateMode NOTIFY viewChanged)
     Q_PROPERTY(QVariantList planSteps READ planSteps NOTIFY viewChanged)
+    Q_PROPERTY(QString notificationMode READ notificationMode NOTIFY viewChanged)
+    Q_PROPERTY(QString notificationModeLabel READ notificationModeLabel NOTIFY viewChanged)
+    Q_PROPERTY(int notificationsPending READ notificationsPending NOTIFY viewChanged)
 
 public:
     explicit JakeClient(QObject *parent = nullptr);
@@ -79,6 +82,9 @@ public:
     double audioLevel() const { return m_reducer.view().audioLevel; }
     bool privateMode() const { return m_reducer.view().privateMode; }
     QVariantList planSteps() const { return m_reducer.view().planSteps.toVariantList(); }
+    QString notificationMode() const { return m_reducer.view().notificationMode; }
+    QString notificationModeLabel() const { return m_reducer.view().notificationModeLabel; }
+    int notificationsPending() const { return m_reducer.view().notificationsPending; }
 
     // baseUrl es. "http://127.0.0.1:8765" (vedi companion_server_port in config.json).
     // F7/F4.8.2: credenziale per-dispositivo consegnata dal core (vedi main.cpp): Authorization Bearer

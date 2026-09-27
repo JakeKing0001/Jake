@@ -186,6 +186,8 @@ class JakeCore:
         # parte solo se companion_server_enabled e' esplicitamente vero in config.json, stesso
         # pattern gia' usato da system_advisor_enabled.
         self.event_bus = EventBus()
+        # F4.5.6: l'HUD vede modalita' di notifica e quante notifiche aspettano, non solo quelle mostrate
+        self.notification_center.on_state_change = self._publish_notification_state
 
         # F6.3/F6.7 (Notification Intelligence + Task Monitor, primo collegamento reale a
         # JakeCore/EventBus/HUD): entrambi i moduli esistevano gia' come librerie testate ma
@@ -3017,6 +3019,12 @@ class JakeCore:
         if not self.native_hud.start():
             self.native_hud = None
             self._revoke_native_hud_credential()
+
+    def _publish_notification_state(self, mode, pending: int) -> None:
+        from core.notification_center import MODE_LABELS_IT
+
+        self.event_bus.publish(HudEvent(EventType.NOTIFICATION_STATE, {
+            "mode": mode.value, "mode_label": MODE_LABELS_IT.get(mode, mode.value), "pending": pending}))
 
     def _timed_notification_mode_ended(self, previous, released: list[str]) -> None:
         """F6.5.6: "non disturbare per 30 minuti" e' finito da solo. Lo si dice, con cio' che e' stato trattenuto,

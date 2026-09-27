@@ -264,6 +264,15 @@
       "expect": {"plan_steps": [{"step": 1, "description": "nuovo", "status": "running", "duration_ms": 0}]}
     },
     {
+      "name": "stato notifiche: modalita' e quante aspettano, mai negativo",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "NOTIFICATION_STATE", "payload": {"mode": "do_not_disturb", "mode_label": "non disturbare", "pending": 3}, "sequence_id": 1}},
+        {"event": {"type": "NOTIFICATION_STATE", "payload": {"mode": "normal", "mode_label": "normale", "pending": -2}, "sequence_id": 2}}
+      ],
+      "expect": {"notification_mode": "normal", "notification_mode_label": "normale", "notifications_pending": 0}
+    },
+    {
       "name": "livello audio fuori scala limitato a 1",
       "steps": [
         {"connect": true},

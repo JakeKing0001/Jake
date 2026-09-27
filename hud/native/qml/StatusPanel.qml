@@ -13,6 +13,9 @@ GlassPanel {
     property bool micOpen: false
     property bool micDiscarding: false
     property bool privateMode: false
+    property string notificationMode: "normal"
+    property string notificationModeLabel: ""
+    property int notificationsPending: 0
     implicitHeight: 36
     radius: height / 2
 
@@ -47,6 +50,14 @@ GlassPanel {
         Chip {
             dot: !root.micOpen ? Theme.textFaint : root.micDiscarding ? Theme.warn : Theme.danger
             label: !root.micOpen ? qsTr("Mic chiuso") : root.micDiscarding ? qsTr("Mic in pausa") : qsTr("Mic aperto")
+        }
+        Chip {
+            // F4.5.6: una modalita' che trattiene le notifiche, o notifiche che aspettano, non restano invisibili
+            visible: root.notificationMode !== "normal" || root.notificationsPending > 0
+            dot: Theme.attention
+            label: (root.notificationMode !== "normal" ? root.notificationModeLabel : "")
+                + (root.notificationMode !== "normal" && root.notificationsPending > 0 ? " · " : "")
+                + (root.notificationsPending > 0 ? qsTr("%n in attesa", "", root.notificationsPending) : "")
         }
         Chip {
             // i contenuti arrivano gia' nascosti dal core; qui solo il perche' si vede "(privato)"

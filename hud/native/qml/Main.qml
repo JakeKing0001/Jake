@@ -105,6 +105,9 @@ ApplicationWindow {
             micOpen: jake.micOpen
             micDiscarding: jake.micDiscarding
             privateMode: jake.privateMode
+            notificationMode: jake.notificationMode
+            notificationModeLabel: jake.notificationModeLabel
+            notificationsPending: jake.notificationsPending
         }
 
         // F4.4.7: orb 3D (Qt Quick 3D) se disponibile, altrimenti l'orb 2D con la stessa interfaccia.
