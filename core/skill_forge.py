@@ -59,6 +59,20 @@ FORBIDDEN_PATTERNS = [
     (re.compile(r"\bkeyboard\.|pyautogui\."), "controllo di tastiera/mouse (usa le skill esistenti)"),
 ]
 
+# F8.3.4 (secret scan): una skill generata non deve mai avere credenziali scritte nel codice - finirebbero in un file
+# in chiaro in plugins/ e nei backup. Chiavi private, token noti per formato e assegnazioni letterali a nomi da
+# segreto (api_key/token/secret/password). Un plugin che ne ha bisogno le legge dal vault, non dal sorgente.
+SECRET_PATTERNS = [
+    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"), "una chiave privata"),
+    (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "una chiave di accesso AWS"),
+    (re.compile(r"\b(?:ghp|gho|ghs|ghu)_[A-Za-z0-9]{30,}|\bgithub_pat_[A-Za-z0-9_]{30,}"), "un token GitHub"),
+    (re.compile(r"\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}"), "una chiave API"),
+    (re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}"), "un token Slack"),
+    (re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b"), "una chiave API Google"),
+    (re.compile(r"""(?i)\b\w*(?:api_?key|secret|token|passw(?:or)?d)\w*["']?\s*[:=]\s*["'][^"'\s]{8,}["']"""),
+     "una credenziale scritta nel codice"),
+]
+
 ALLOWED_THIRD_PARTY = {"psutil", "PIL", "numpy", "win32gui", "win32con", "win32api", "win32clipboard", "pyperclip", "requests"}
 
 # Controlli statici indipendenti da FORBIDDEN_PATTERNS (v5.3, Self-Improvement controllato):
@@ -256,6 +270,9 @@ class SkillForge:
         for pattern, why in FORBIDDEN_PATTERNS:
             if pattern.search(code):
                 raise ForgeError(f"contiene {why}, non ammesso")
+        for pattern, what in SECRET_PATTERNS:
+            if pattern.search(code):
+                raise ForgeError(f"contiene quello che sembra {what}: una skill non deve avere credenziali nel codice")
         self._check_ast_escapes(tree)
 
         for node in ast.walk(tree):

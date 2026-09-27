@@ -94,6 +94,21 @@ class AstEscapeDetectionTests(unittest.TestCase):
         self._check("t = type(x).__class__")
 
 
+class SecretScanTests(unittest.TestCase):
+    """F8.3.4: una skill generata con una credenziale scritta nel codice viene rifiutata prima della sandbox."""
+
+    def test_hardcoded_secrets_are_rejected_and_ordinary_code_is_not(self):
+        for secret in ('API_KEY = "a1b2c3d4e5f6g7h8"', 'HEADERS = {"token": "abcdefgh12345678"}',
+                       'KEY = "sk-ant-abcdefghijklmnopqrstuv"', 'X = "AKIAABCDEFGHIJKLMNOP"',
+                       'PEM = "-----BEGIN RSA PRIVATE KEY-----"'):
+            with self.subTest(secret=secret), self.assertRaises(ForgeError) as caught:
+                _forge()._validate(VALID_PLUGIN.replace("\nclass ", f"\n{secret}\n\nclass ", 1))
+            self.assertIn("credenziali nel codice", str(caught.exception))
+        # parole comuni che contengono "sk-" o "token" non sono segreti
+        ordinary = VALID_PLUGIN.replace("\nclass ", '\nRISK_LEVEL = "risk-assessment-for-the-user-request"\ntoken_count = 0\n\nclass ', 1)
+        self.assertEqual(_forge()._validate(ordinary)[0], "SAMPLE_TEST_SKILL")
+
+
 class FullValidatePipelineTests(unittest.TestCase):
     def test_legitimate_plugin_passes_validation(self):
         intent, description, examples = _forge()._validate(VALID_PLUGIN)

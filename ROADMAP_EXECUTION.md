@@ -289,7 +289,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F7.7` | Edge Devices | `BACKLOG` |
 | `F8.1` | Skill Platform (manifest validato e loader che rifiuta prima dell'import il 22/09/2026; dal 27/09/2026 il rischio dichiarato da un pacchetto verificato e approvato arriva a `risk_of`/PolicyEngine, mai sopra un intent integrato; hook non eseguiti) | `DOING` |
 | `F8.2` | Supply-chain Security (pacchetti firmati, catalogo, quarantena/revoca, pin/rollback il 22/09/2026; dal 27/09/2026 nel runtime: caricamento all'avvio con ricontrollo di firma/hash, installazione in due passi PLAN_SKILL_INSTALL -> INSTALL_SKILL_PACKAGE (ADMIN) legata al digest mostrato; UI HUD e distribuzione non ancora) | `DOING` |
-| `F8.3` | Skill Forge | `DOING` |
+| `F8.3` | Skill Forge (27/09/2026: scansione dei segreti prima della sandbox - chiavi private, token per formato, credenziali letterali) | `DOING` |
 | `F8.4` | Model Runtime (router con capability/inventario/eval/warm-unload/redazione il 22/09/2026; dal 27/09/2026 JakeCore sceglie il modello col router: catalogo da config, modelli installati, telemetria reale di batteria/VRAM, osservazioni reali di successo/latenza di ogni chiamata; warmup/unload non ancora guidati dal router) | `DOING` |
 | `F8.5` | Agent Runtime (27/09/2026: il supervisore ferma anche lo stesso strumento fallito 3 volte di fila con parametri diversi e chiede all'utente) | `DOING` |
 | `F8.6` | Release Safety (golden/security set, confronto, canary, rollback, canali firmati il 22/09/2026; senza runner reali ne' collegamento HUD) | `DOING` |
@@ -9947,6 +9947,13 @@ Dipende da: F8.1, F1.5 e F1.6.
 8. `F8.3.8` Confrontare eval prima/dopo e rollback automatico.
 
 Criterio di uscita: una skill generata non può agire fuori manifest anche se il codice è ostile.
+
+- 27/09/2026 (F8.3.4, secret scan): la Forge aveva lista nera testuale, controllo AST delle fughe, moduli
+  ammessi e sandbox a integrita' ridotta, ma nessun controllo sui segreti: una credenziale copiata dal modello nel
+  codice generato sarebbe finita in chiaro in `plugins/` (e nei backup). `SECRET_PATTERNS` rifiuta prima della
+  sandbox chiavi private PEM, chiavi AWS/Google, token GitHub/Slack, chiavi `sk-...` e assegnazioni letterali di
+  8+ caratteri a nomi da segreto (api_key/secret/token/password), con un messaggio che il modello riceve per
+  riscrivere il file. Test: cinque forme di segreto rifiutate, parole comuni ("risk-...", `token_count`) no.
 
 ### F8.4 — Model router
 
