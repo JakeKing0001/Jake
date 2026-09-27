@@ -376,7 +376,8 @@ class MemoryManager:
                 related["why"] = f"collegato a '{top['key']}' ({related.get('predicate')})"
                 related["score"] = top["score"] - 0.5
                 ranked.append(related)
-        chosen, used = [], 0
+        chosen: list[dict] = []
+        used = 0
         for entry in ranked[:limit + 2]:
             size = len(str(entry.get("key"))) + len(str(entry.get("value")))
             if len(chosen) >= limit or used + size > budget_chars:
