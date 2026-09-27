@@ -9,6 +9,10 @@ QtObject {
     // F4.7.3: impostato da Main.qml (src/main.cpp legge "Contrasto elevato" di Windows). Stesso materiale e stessa
     // forma di ogni pannello; cambiano solo i colori: nero pieno, testo bianco, bordi e focus ben visibili.
     property bool highContrast: false
+    // i pannelli di vetro presenti (GlassPanel si registra da solo): servono al click-through per pannello
+    property var panels: []
+    function registerPanel(panel) { panels = panels.concat([panel]); }
+    function unregisterPanel(panel) { panels = panels.filter(p => p !== panel); }
     // F4.7.4: "Dimensioni testo" di Windows (Accessibilita', 100-225%), impostato da Main.qml; Qt non lo applica da
     // solo al QML. Tutte le dimensioni del testo passano da qui.
     property real textScale: 1.0

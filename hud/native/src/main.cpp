@@ -35,6 +35,16 @@ double systemTextScale() {
     return 1.0;
 }
 
+// F4.3.5: a batteria (non in carica) l'orb parte in qualita' bassa, salvo scelta esplicita.
+bool systemOnBattery() {
+#ifdef Q_OS_WIN
+    SYSTEM_POWER_STATUS status{};
+    if (GetSystemPowerStatus(&status))
+        return status.ACLineStatus == 0;
+#endif
+    return false;
+}
+
 // F4.7.3: "Contrasto elevato" di Windows (Accessibilita'), letto all'avvio.
 bool systemUsesHighContrast() {
 #ifdef Q_OS_WIN
@@ -75,8 +85,10 @@ int main(int argc, char *argv[]) {
     bool scaleOk = false;
     const double envScale = qEnvironmentVariable("JAKE_HUD_TEXT_SCALE").toDouble(&scaleOk);
     initial.insert(QStringLiteral("textScale"), scaleOk && envScale >= 1.0 && envScale <= 2.25 ? envScale : systemTextScale());
-    // JAKE_HUD_QUALITY=low per GPU deboli/batteria (F4.3.5); JAKE_HUD_ORB=2d forza l'orb 2D.
-    initial.insert(QStringLiteral("orbQuality"), qEnvironmentVariable("JAKE_HUD_QUALITY") == QLatin1String("low")
+    // JAKE_HUD_QUALITY=low|high per GPU deboli/batteria (F4.3.5); senza, a batteria si parte in qualita' bassa.
+    // JAKE_HUD_ORB=2d forza l'orb 2D. L'orb scende comunque da solo se i fotogrammi sono lenti (Orb3D.qml).
+    const QString quality = qEnvironmentVariable("JAKE_HUD_QUALITY");
+    initial.insert(QStringLiteral("orbQuality"), quality == QLatin1String("low") || (quality.isEmpty() && systemOnBattery())
                    ? QStringLiteral("low") : QStringLiteral("high"));
 #ifdef JAKE_HAS_QUICK3D
     const bool use3d = qEnvironmentVariable("JAKE_HUD_ORB") != QLatin1String("2d");

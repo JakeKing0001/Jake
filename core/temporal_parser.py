@@ -104,3 +104,29 @@ def parse_relative_range(text: str, now: datetime | None = None) -> tuple[str, s
         return start.isoformat(), end.isoformat()
 
     return None
+
+
+_PHRASES = sorted(
+    list(_SINGLE_DAY_OFFSETS) + ["questa settimana", "la settimana scorsa", "settimana scorsa", "questo mese",
+                                 "il mese scorso", "mese scorso", "quest'anno", "questo anno", "l'anno scorso",
+                                 "anno scorso"],
+    key=len, reverse=True,
+)
+_EMBEDDED_RELATIVE_RE = re.compile(r"(?:negli |gli )?ultim[ei] \d+ (?:giorni|ore)")
+
+
+def find_relative_range(text: str, now: datetime | None = None) -> tuple[tuple[str, str], str] | None:
+    """F5.5 (retrieval temporale): come parse_relative_range, ma l'espressione puo' stare DENTRO una frase qualsiasi
+    ("cosa ti ho detto ieri sulla palestra?"). Ritorna ((since, until), espressione trovata) o None."""
+    lowered = (text or "").lower().replace("’", "'")
+    match = _EMBEDDED_RELATIVE_RE.search(lowered)
+    if match:
+        parsed = parse_relative_range(match.group(0), now)
+        if parsed is not None:
+            return parsed, match.group(0)
+    for phrase in _PHRASES:
+        if re.search(rf"(?<![\w']){re.escape(phrase)}(?![\w'])", lowered):
+            parsed = parse_relative_range(phrase, now)
+            if parsed is not None:
+                return parsed, phrase
+    return None

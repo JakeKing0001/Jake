@@ -384,7 +384,14 @@ class MemoryManager:
         Ogni voce ha `why` (perche' e' stata scelta). Ricordi scaduti mai inclusi."""
         import re
 
-        words = [w for w in re.findall(r"[\w']+", (question or "").lower())
+        from core.temporal_parser import find_relative_range
+
+        # F5.5 (retrieval temporale): "ieri", "la settimana scorsa"... restringono al periodo, e non sono parole da cercare
+        temporal = find_relative_range(question or "")
+        lowered_question = (question or "").lower()
+        if temporal is not None:
+            lowered_question = lowered_question.replace(temporal[1], " ")
+        words = [w for w in re.findall(r"[\w']+", lowered_question)
                  if len(w) >= 4 and w not in self._STOPWORDS]
         candidates: dict[tuple, dict] = {}
         if words:
@@ -425,6 +432,11 @@ class MemoryManager:
                     entry["score"] = similarity * self._freshness(entry)
                     entry["why"] = f"simile per significato ({similarity:.2f})"
                     candidates[key] = entry
+        if temporal is not None:
+            (since, until), phrase = temporal
+            candidates = {k: e for k, e in candidates.items() if since <= str(e.get("updated_at") or "") <= until}
+            for entry in candidates.values():
+                entry["why"] += f", detto {phrase}"
         ranked = sorted(candidates.values(), key=lambda e: (e["score"], e.get("updated_at") or ""), reverse=True)
         if ranked:
             top = ranked[0]
@@ -603,6 +615,23 @@ class MemoryManager:
                 (limit,),
             ).fetchall()
             return [dict(row) for row in reversed(rows)]
+
+    def history_between(self, since: str, until: str, topic: str | None = None, role: str | None = None) -> list[dict]:
+        """F5.2 (episodica): i turni della cronologia in un periodo [since, until), in ordine, eventualmente su un
+        argomento (testo che lo contiene) e di un solo ruolo."""
+        clauses, params = ["created_at >= ?", "created_at < ?"], [since, until]
+        if topic:
+            clauses.append("lower(text) LIKE ?")
+            params.append(f"%{topic.lower()}%")
+        if role:
+            clauses.append("role = ?")
+            params.append(role)
+        with self._lock:
+            rows = self._connection.execute(
+                f"SELECT role, text, created_at FROM conversation_history WHERE {' AND '.join(clauses)} ORDER BY id ASC",
+                params,
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def summarize_old_history(self, summarizer, keep_recent: int = 50) -> bool:
         """Comprime i turni piu' vecchi di keep_recent in un'unica memoria 'summary', poi li elimina.

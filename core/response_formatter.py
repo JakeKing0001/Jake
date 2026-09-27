@@ -124,6 +124,8 @@ def _format_control_error(intent: str, error: str | None, data: dict) -> str | N
             return f"Non ricordo nulla che si chiami '{data.get('key', '')}'."
         if intent in ("PLAN_SKILL_INSTALL", "INSTALL_SKILL_PACKAGE"):
             return f"Non trovo il pacchetto {data.get('package_path', '')}."
+    if error == "INVALID_TIME_RANGE":
+        return f"Non capisco il periodo '{data.get('when', '')}': prova con 'ieri', 'oggi' o 'la settimana scorsa'."
     if error == "EXPORT_FAILED":
         return f"Non sono riuscito a scrivere l'export in {data.get('path', '')}: {data.get('reason', '')}."
     if error == "AMBIGUOUS" and intent == "PIN_MEMORY":
@@ -151,6 +153,9 @@ def _format_control_success(intent: str, data: dict) -> str | None:
         return f"Ok, non ti avviso più per {', '.join(data['processes'])}: il processo continua normalmente."
     if intent == "DAILY_BRIEF":
         return str(data.get("text") or "")
+    if intent == "RECALL_CONVERSATION":
+        from skills.recall_conversation import format_recall_conversation
+        return format_recall_conversation(data)
     if intent == "EXPORT_MEMORIES":
         excluded = data.get("excluded_secret") or 0
         return (f"Ho esportato {data['count']} ricordi in {data['markdown']} (e in JSON accanto)."

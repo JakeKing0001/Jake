@@ -260,17 +260,17 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F3.8` | Demonstration Learning (dimostrazione vera -> passi semantici, parametri, descrizione, versione/app/undo, sospensione su drift, ri-approvazione; sopravvive a riavvio, resize e dati diversi - 25/09/2026) | `DONE` |
 | `F4.1` | Protocol Architecture (26/09/2026: riduttore di riferimento Python e riduttore C++ superano la stessa suite di 18 fixture, ctest nella CI; sequence_id/trace_id consumati anche lato C++) | `DONE` |
 | `F4.2` | Native HUD (F4.2.1/F4.2.4 chiusi, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026; F4.2.5/F4.2.6 e resto di F4.2.3 richiedono test interattivi/visivi) | `DOING` |
-| `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
+| `F4.3` | Native HUD (27/09/2026: qualita' adattiva dell'orb - batteria e fotogrammi lenti; blur di sistema per pannello provato e scartato con evidenza: serve una finestra nativa non-layered per pannello) | `DOING` |
 | `F4.4` | Interaction Design (26/09/2026: orb 3D Qt Quick 3D con nucleo volumetrico e particle shell, comportamento per stato interrupt-safe, reduced motion di Windows, qualita' high/low, fallback 2D; livelli audio reali di microfono e voce di Jake collegati all'orb; 27/09/2026 sera: particelle come massa viva a tre strati con moto individuale, orbite differenziali, componente radiale e reazioni per stato/audio/esito, modalita' demo JAKE_HUD_DEMO=1; giudizio estetico `VERIFY` dall'utente) | `DOING` |
 | `F4.5` | Interaction Design (26/09/2026: trascrizione live, permission card, prove, diagnosi, notifiche nell'HUD nativo; 27/09/2026: modalita' privata = nessun contenuto verso HUD/companion/replay, con indicatore; piano live con stato e durata di ogni passo; modalita' di notifica e notifiche in attesa visibili; verifica visiva da fare) | `DOING` |
 | `F4.6` | Trust UX (26/09/2026: kill switch visibile e scorciatoia globale; action center con ultima azione, esito, verifica e undo con scadenza; 27/09/2026: dettagli dell'azione per l'utente - origine, esito/categoria, verifica, annullabilita', traccia - e motivo quando l'undo non e' piu' disponibile; retry sicuro dell'ultima azione fallita a voce e dal pulsante "Riprova"; undo rifiutato se il file/la cartella da cancellare e' cambiato dopo) | `DOING` |
-| `F4.7` | Accessibility (26/09/2026: nomi accessibili, focus ring, scrittura reale nella barra comandi di un overlay no-activate, scorciatoie globali Ctrl+Shift+J / Ctrl+Alt+Fine, reduced motion; 27/09/2026: alto contrasto da Windows o JAKE_HUD_HIGH_CONTRAST, verificato a schermo; "Dimensioni testo" di Windows applicata a tutto l'HUD (o JAKE_HUD_TEXT_SCALE), verificata a schermo al 150% di sistema; screen reader, scaling e alto contrasto da verificare) | `DOING` |
+| `F4.7` | Accessibility (26/09/2026: nomi accessibili, focus ring, scrittura reale nella barra comandi di un overlay no-activate, scorciatoie globali Ctrl+Shift+J / Ctrl+Alt+Fine, reduced motion; 27/09/2026: alto contrasto da Windows o JAKE_HUD_HIGH_CONTRAST, verificato a schermo; "Dimensioni testo" di Windows applicata a tutto l'HUD (o JAKE_HUD_TEXT_SCALE), verificata a schermo al 150% di sistema; layout completo/compatto/focus ricordato per monitor, HUD sul bordo destro del monitor scelto, spostamento sull'altro monitor e riposizionamento all'hot-plug; screen reader da verificare) | `DOING` |
 | `F4.8` | Release Engineering (26/09/2026: core e HUD nativo avviati in ordine come processi separati, riavvio dell'HUD solo dopo un crash e con un tetto; installer/crash dump/rollback non iniziati; 27/09/2026: quando il supervisore smette di riavviare un HUD in crash revoca la sua credenziale e lo dice all'utente) | `DOING` |
 | `F5.1` | Memory Platform (F5.1.1/F5.1.3-F5.1.6 il 21/09/2026: schema versionato, migrazioni transazionali con backup, metadati, recupero; resta F5.1.2 separare entita'/episodi/procedure e la prova su una copia del database reale) | `DOING` |
-| `F5.2` | Memory Platform | `DOING` |
+| `F5.2` | Memory Platform (27/09/2026: memoria episodica interrogabile - "di cosa abbiamo parlato ieri?" sulla cronologia reale per periodo e argomento) | `DOING` |
 | `F5.3` | Knowledge Model | `DOING` |
 | `F5.4` | Memory Reliability (27/09/2026: nessuna sovrascrittura silenziosa di fatti/preferenze - versione precedente conservata e dichiarata, un'inferenza non sostituisce un fatto detto dall'utente, conflitti registrati, "dimentica" cancella anche le versioni; conferma prima di cambiare un ricordo importante o fissato; decadimento per categoria nel ranking, fissati esclusi; consolidamento non ancora) | `DOING` |
-| `F5.5` | Retrieval Quality (27/09/2026: ricordi pertinenti con fonte anche nelle risposte libere e nei compiti dei tre agenti, retrieval ibrido parole+significato, budget di contesto, grafo a un salto; metriche ancora da fare) | `DOING` |
+| `F5.5` | Retrieval Quality (27/09/2026: ricordi pertinenti con fonte anche nelle risposte libere e nei compiti dei tre agenti, retrieval ibrido parole+significato+periodo ("ieri", "la settimana scorsa" dentro la domanda), budget di contesto, grafo a un salto; metriche ancora da fare) | `DOING` |
 | `F5.6` | Context Runtime (27/09/2026: segnali non riletti non piu' presentati come attuali; appunti marcati privati da chi li copia mai letti) | `DOING` |
 | `F5.7` | Privacy Engineering (libreria completa il 21/09/2026; dal 26/09/2026 nel percorso reale: "dimentica" cancella anche registro e indici con ricevuta, l'uso dei ricordi viene registrato, "da dove sai X" spiega la provenienza; dal 27/09/2026 "esporta i miei ricordi" e "fissa il ricordo X" a voce; purge/backup non ancora esposti a voce/HUD) | `DOING` |
 | `F6.1` | Proactivity Platform (26/09/2026: promemoria, automazioni e avvisi passano dagli stessi freni in `JakeCore.notify` - duplicati, budget orario, quiet hours, conversazione in corso - e si sospendono insieme durante prove e benchmark) | `DOING` |
@@ -8738,6 +8738,18 @@ Criterio di uscita: 60 FPS sul profilo consigliato e input latency invariata ent
 misurati anche con orb particellare, pannelli e liquid-glass attivi insieme; qualità ridotta e
 reduced motion restano utilizzabili.
 
+- 27/09/2026 (F4.3.5, qualita' adattiva): l'orb 3D misura il tempo reale dei fotogrammi e, se in qualita' alta
+  resta sotto ~40 fps per 3 s, scende da solo alla qualita' bassa per la sessione (meno particelle, niente strato
+  intermedio, niente MSAA; avviso su stderr); a batteria, senza `JAKE_HUD_QUALITY` esplicito, parte gia' in qualita'
+  bassa. Su questa macchina (in carica, fotogrammi veloci) il declassamento non scatta: non osservato dal vivo.
+- 27/09/2026 (F4.3.1-F4.3.3, esperimento scartato con evidenza): blur di sistema solo dietro i pannelli ritagliando
+  la finestra (`SetWindowRgn` sull'unione dei pannelli arrotondati + cerchio dell'orb) e attivando l'accent di DWM
+  (`SetWindowCompositionAttribute`, blur-behind e acrilico). Risultato a schermo: tutta la finestra diventa nera e la
+  regione non ritaglia la superficie. Causa: Qt crea l'overlay trasparente come finestra `WS_EX_LAYERED`
+  (exstyle letto: 0x080800a8), su cui l'accent di DWM non compone il blur. Il vetro vero richiede una finestra
+  nativa NON layered per ogni pannello (o DirectComposition): e' il blocco architetturale del track HUD, non un
+  incremento. Codice dell'esperimento non tenuto; resta il riempimento pieno leggibile.
+
 ### F4.4 — State machine e Orb 2.0
 
 Dipende da: F4.1 e F4.2 per la base nativa; F2 per l'audio reale, F4.5 per il context coupling
@@ -8958,6 +8970,19 @@ Criterio di uscita: checklist accessibilità + test Windows e monitor matrix com
   riporta no-activate/click-through a invio, Esc o focus perso. Ctrl+Alt+Fine (globale) invia "ferma tutto".
   Le scorciatoie sono registrate con RegisterHotKey; se un'altra app le ha gia' prese non vengono finte.
   Focus ring visibile sul campo di testo. Verifica interattiva `VERIFY`.
+
+- 27/09/2026 sera (bug reale, F4.2.1/F4.6.5): con `WS_EX_TRANSPARENT` attivo all'avvio la finestra non riceveva
+  NESSUN evento del mouse, nemmeno l'hover che doveva toglierlo sopra un pannello: i pulsanti ("Ferma tutto",
+  "Annulla", "Riprova") non erano cliccabili col mouse e il click finiva nell'app sotto (riprodotto: un click sul
+  pulsante apriva un popup di VS Code). Ora `OverlayStyler.cursorInWindow` legge la posizione reale del cursore e
+  ogni 60 ms l'HUD attiva/disattiva il click-through confrontandola con le aree dei pannelli registrati e dell'orb.
+  Verificato con click reali del mouse (pyautogui) sul binario Release.
+- 27/09/2026 sera (F4.7.3/F4.7.4): layout completo / compatto (senza conversazione) / focus (anche senza barra
+  comandi, che ricompare con Ctrl+Shift+J); richiesta di conferma e "Ferma tutto" restano sempre visibili. Scelta
+  ricordata PER MONITOR (Settings di QtCore, `HKCU\Software\Jake\Jake HUD\layout`), HUD sul bordo destro del
+  monitor scelto, pulsante per spostarlo sull'altro monitor (visibile solo con piu' monitor) e ritorno alla scelta
+  quando i monitor cambiano (hot-plug). Verificato con click reali: completo -> compatto -> focus, ricordato. Con
+  un solo monitor collegato qui lo spostamento tra monitor non e' stato provato dal vivo (SpaceDesk non attivo).
 
 ### F4.8 — Packaging e migrazione dal legacy
 
@@ -9273,6 +9298,11 @@ monitor rileva un evento fixture senza richiesta dell'utente e senza duplicarlo.
   una sospensione. Nella sessione vocale un avviso o un'automazione arrivati mentre Jake parla o lavora a
   un comando vanno in coda invece di tagliare la risposta in corso (prima `_speak_async` la
   interrompeva). Resta: portare anche il task monitor sulla stessa pipeline.
+- 27/09/2026 (F6.1.5, bug reale): dopo uno spegnimento (o una sospensione del PC) al primo giro dello scheduler ogni
+  promemoria scaduto veniva notificato singolarmente: al riavvio una raffica, a voce una frase dopo l'altra. Ora
+  `ReminderScheduler.tick` separa quelli appena scaduti (restano puntuali) da quelli persi (oltre 3 giri, almeno
+  2 minuti) e questi arrivano in UN riepilogo da `present_notification` con l'ora prevista di ciascuno. Test con
+  ReminderManager reale: tre promemoria (due persi, uno puntuale), nessun doppione al giro successivo.
 - 27/09/2026 (F6.3.4): `FeedbackStore` ("meno notifiche come questa", con recupero in ~30 giorni) esisteva ma
   nessuna notifica reale lo consultava. Ora il gate di `JakeCore.notify` lo usa per TIPO di notifica (numeri
   normalizzati: "Batteria al 12%" e "al 9%" sono lo stesso tipo): un tipo ridotto finisce nel riepilogo, uno

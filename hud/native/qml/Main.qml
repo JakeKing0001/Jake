@@ -1,4 +1,5 @@
 import QtQuick
+import QtCore
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import JakeHud
@@ -14,7 +15,7 @@ import JakeHud
 ApplicationWindow {
     id: window
     width: 440
-    height: 720
+    height: layoutMode === "full" ? 720 : layoutMode === "compact" ? 560 : 470
     visible: true
     title: qsTr("Jake HUD")
     color: "transparent"
@@ -67,6 +68,7 @@ ApplicationWindow {
         onCommandBarRequested: {
             window.visible = true;
             overlayStyler.forceVisibility(window, true);
+            window.typing = true;   // in layout focus la barra e' nascosta finche' non si scrive
             commandBar.focusInput();
         }
         onKillSwitchRequested: {
@@ -77,10 +79,86 @@ ApplicationWindow {
 
     // Click-through ovunque tranne sopra i pannelli (mai calcolato dalla geometria del layout, che
     // includerebbe i vuoti tra un pannello e l'altro).
+    // F4.7.3/F4.7.4: layout completo / compatto / focus, ricordato PER MONITOR, e il monitor scelto. Compatto: niente
+    // conversazione; focus: niente conversazione ne' barra comandi (torna con Ctrl+Shift+J). Richiesta di conferma
+    // e "Ferma tutto" restano sempre visibili. L'HUD sta sul bordo destro del monitor e ci torna se un monitor sparisce.
+    Settings {
+        id: hudSettings
+        category: "layout"
+        property string screenName: ""
+        property string modes: "{}"       // {"nome monitor": "full" | "compact" | "focus"}
+    }
+    readonly property var layoutModes: ["full", "compact", "focus"]
+    property string layoutMode: "full"
+    function modeFor(screenName) {
+        try { return JSON.parse(hudSettings.modes)[screenName] || "full"; } catch (e) { return "full"; }
+    }
+    function cycleLayout() {
+        layoutMode = layoutModes[(layoutModes.indexOf(layoutMode) + 1) % layoutModes.length];
+        let modes = {};
+        try { modes = JSON.parse(hudSettings.modes); } catch (e) {}
+        modes[window.screen.name] = layoutMode;
+        hudSettings.modes = JSON.stringify(modes);
+        Qt.callLater(place);
+    }
+    function nextScreen() {
+        const screens = Qt.application.screens;
+        if (screens.length < 2) return;
+        let index = 0;
+        for (let i = 0; i < screens.length; ++i)
+            if (screens[i].name === window.screen.name) index = i;
+        window.screen = screens[(index + 1) % screens.length];
+        hudSettings.screenName = window.screen.name;
+        layoutMode = modeFor(window.screen.name);
+        Qt.callLater(place);
+    }
+    function place() {
+        const s = window.screen;
+        if (!s) return;
+        // margine per la barra delle applicazioni: il QScreen di QML espone solo la geometria intera del monitor
+        window.x = s.virtualX + s.width - window.width - 24;
+        window.y = s.virtualY + Math.max(12, (s.height - 48 - window.height) / 2);
+    }
+    function chooseScreen() {
+        const screens = Qt.application.screens;
+        for (let i = 0; i < screens.length; ++i)
+            if (screens[i].name === hudSettings.screenName) { window.screen = screens[i]; break; }
+        layoutMode = modeFor(window.screen.name);
+        Qt.callLater(place);
+    }
+    // hot-plug: un monitor collegato o scollegato (il monitor dell'HUD puo' sparire) -> si riparte dalla scelta
+    Connections { target: Qt.application; function onScreensChanged() { window.chooseScreen(); } }
+    onScreenChanged: Qt.callLater(place)
+
     readonly property bool pointerOverAnyPanel: statusPanel.hovered || orb.hovered || permissionCard.hovered
         || conversation.hovered || actionCenter.hovered || commandBar.hovered || toast.hovered
     property bool typing: false
     onPointerOverAnyPanelChanged: if (!typing) overlayStyler.setClickThrough(window, !pointerOverAnyPanel)
+
+    // Click-through deciso dalla posizione REALE del cursore (OverlayStyler.cursorInWindow): con la finestra
+    // trasparente ai click non arriva nessun hover, quindi l'hover da solo non poteva mai riattivare i pannelli.
+    property bool cursorOverPanel: false
+    function panelAt(point) {
+        const items = Theme.panels.concat([orb]);
+        for (let i = 0; i < items.length; ++i) {
+            const item = items[i];
+            if (!item || !item.visible || item.opacity < 0.02) continue;
+            const p = item.mapFromItem(null, point.x, point.y);
+            if (p.x >= 0 && p.y >= 0 && p.x <= item.width && p.y <= item.height) return true;
+        }
+        return false;
+    }
+    Timer {
+        interval: 60; repeat: true; running: window.visible
+        onTriggered: {
+            if (window.typing) return;
+            const over = window.panelAt(overlayStyler.cursorInWindow(window));
+            if (over !== window.cursorOverPanel) {
+                window.cursorOverPanel = over;
+                overlayStyler.setClickThrough(window, !over);
+            }
+        }
+    }
 
     Component.onCompleted: {
         Theme.highContrast = highContrast
@@ -90,6 +168,7 @@ ApplicationWindow {
         jake.connectToJake(jakeBaseUrl)
         overlayStyler.makeNoActivate(window)
         overlayStyler.setClickThrough(window, true)
+        chooseScreen()
     }
 
     ColumnLayout {
@@ -111,6 +190,10 @@ ApplicationWindow {
             notificationMode: jake.notificationMode
             notificationModeLabel: jake.notificationModeLabel
             notificationsPending: jake.notificationsPending
+            layoutMode: window.layoutMode
+            screenCount: Qt.application.screens.length
+            onLayoutRequested: window.cycleLayout()
+            onScreenRequested: window.nextScreen()
         }
 
         // F4.4.7: orb 3D (Qt Quick 3D) se disponibile, altrimenti l'orb 2D con la stessa interfaccia.
@@ -204,6 +287,7 @@ ApplicationWindow {
 
         ConversationPanel {
             id: conversation
+            visible: window.layoutMode === "full"
             Layout.fillWidth: true
             Layout.preferredHeight: implicitHeight
             Layout.fillHeight: expanded
@@ -231,6 +315,8 @@ ApplicationWindow {
 
         CommandBar {
             id: commandBar
+            // in focus ricompare solo mentre si scrive (Ctrl+Shift+J)
+            visible: window.layoutMode !== "focus" || window.typing
             Layout.fillWidth: true
             onCommandSubmitted: (text) => jake.sendCommand(text)
             onKeyboardRequested: {

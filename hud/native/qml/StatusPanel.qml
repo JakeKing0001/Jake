@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import JakeHud
 
@@ -16,6 +17,11 @@ GlassPanel {
     property string notificationMode: "normal"
     property string notificationModeLabel: ""
     property int notificationsPending: 0
+    // F4.7.4: layout dell'HUD e spostamento su un altro monitor
+    property string layoutMode: "full"
+    property int screenCount: 1
+    signal layoutRequested()
+    signal screenRequested()
     implicitHeight: 36
     radius: height / 2
 
@@ -64,6 +70,22 @@ GlassPanel {
             visible: root.privateMode
             dot: Theme.warn
             label: qsTr("Privato: niente testo, niente registro")
+        }
+        ToolButton {
+            text: root.layoutMode === "full" ? "▣" : root.layoutMode === "compact" ? "▤" : "◉"
+            font.pixelSize: Theme.fontSmall
+            Layout.preferredHeight: 26
+            Accessible.name: qsTr("Layout dell'HUD: %1. Cambia layout").arg(
+                root.layoutMode === "full" ? qsTr("completo") : root.layoutMode === "compact" ? qsTr("compatto") : qsTr("focus"))
+            onClicked: root.layoutRequested()
+        }
+        ToolButton {
+            visible: root.screenCount > 1
+            text: "⇆"
+            font.pixelSize: Theme.fontSmall
+            Layout.preferredHeight: 26
+            Accessible.name: qsTr("Sposta l'HUD sull'altro monitor")
+            onClicked: root.screenRequested()
         }
         Chip {
             visible: root.activeDevice.length > 0

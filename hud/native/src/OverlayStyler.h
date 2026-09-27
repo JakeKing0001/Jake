@@ -47,6 +47,12 @@ public:
     // resterebbe all'app sottostante e nella barra comandi non si potrebbe scrivere. Per il tempo della
     // digitazione (click sulla barra o Ctrl+Shift+J) l'HUD diventa attivabile e prende il focus; finita
     // la digitazione (invio, Esc, focus perso) torna no-activate e click-through come prima.
+    // Bug reale (27/09/2026): con WS_EX_TRANSPARENT attivo la finestra non riceve piu' NESSUN evento del mouse,
+    // nemmeno l'hover che dovrebbe toglierlo sopra un pannello: una volta click-through all'avvio, i pulsanti
+    // ("Ferma tutto", "Annulla", "Riprova") non erano mai cliccabili col mouse. La posizione del cursore si legge
+    // qui dal sistema (funziona anche senza eventi), in coordinate della finestra, e Main.qml decide da quella.
+    Q_INVOKABLE QPointF cursorInWindow(QQuickWindow *window) const;
+
     Q_INVOKABLE void beginKeyboardInput(QQuickWindow *window);
     Q_INVOKABLE void endKeyboardInput(QQuickWindow *window);
 };
