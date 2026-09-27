@@ -8889,6 +8889,8 @@ o il solo prototipo 2D non chiudono il requisito. La verifica dell'handoff dipen
     "Sto aspettando il modello locale...". Nessun aumento dei timeout, nessun retry in cascata, nessuna risposta
     inventata. Test con un finto Ollama HTTP (lento, spento, modello mancante, caricamento parziale) e prova reale
     con l'Ollama installato: risposta normale in 8,6 s; con timeout forzato seconda chiamata del turno in 0,4 s.
+  * Causa a monte (memoria video): su GPU fino a 8 GB Whisper large-v3-turbo usa ora `int8_float16` invece di
+    `float16` (misurato qui: 1118 MB invece di 2061 MB), con ripiego automatico su float16 se non supportato.
 
 ### F4.5 — Pannelli contestuali
 

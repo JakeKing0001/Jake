@@ -155,3 +155,13 @@ class UnclearTranscriptTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WhisperGpuMemoryTests(unittest.TestCase):
+    def test_on_a_shared_8gb_gpu_whisper_uses_half_the_memory(self):
+        from core.voice.stt_provider import WhisperSttProvider
+
+        # misurato qui: float16 2061 MB, int8_float16 1118 MB con large-v3-turbo
+        self.assertEqual(WhisperSttProvider._cuda_compute_type(8188), "int8_float16")
+        self.assertEqual(WhisperSttProvider._cuda_compute_type(24576), "float16")
+        self.assertEqual(WhisperSttProvider._cuda_compute_type(None) in ("float16", "int8_float16"), True)
