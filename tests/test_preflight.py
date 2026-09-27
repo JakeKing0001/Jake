@@ -40,6 +40,14 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(hud.status, WARN)
         self.assertIsNone(preflight.check_native_hud({}, Path("x")), "HUD nativo spento: niente da controllare")
 
+    def test_gpu_budget_warns_when_model_whisper_voice_and_hud_do_not_fit(self):
+        tags = {"models": [{"name": "qwen2.5:7b", "size": 4_683_000_000}]}
+        tight = preflight.check_gpu_budget("qwen2.5:7b", tags, 6144, 2061)
+        self.assertEqual(tight.status, WARN)
+        self.assertIn("modello piu' piccolo", tight.detail)
+        self.assertEqual(preflight.check_gpu_budget("qwen2.5:7b", tags, 8188, 1118).status, OK)
+        self.assertIsNone(preflight.check_gpu_budget("qwen2.5:7b", tags, None, 1118), "senza GPU nulla da stimare")
+
     def test_a_real_run_on_this_machine_reports_every_check_and_errors_only_for_blockers(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(preflight.check_data_dir(Path(tmp) / "dati").status, OK)
