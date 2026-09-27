@@ -93,6 +93,10 @@ LEGACY_STATE_TO_EVENT_TYPE = {
 }
 
 
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"HudEvent.from_json: {value} non e' un valore JSON valido")
+
+
 @dataclass
 class HudEvent:
     type: EventType
@@ -141,7 +145,9 @@ class HudEvent:
         # JSON viene validato per FORMA prima di costruire l'oggetto, non solo per presenza,
         # cosi' un input malformato fallisce qui con un errore chiaro invece di produrre un
         # HudEvent con un campo del tipo sbagliato che rompe un chiamante lontano e confuso.
-        data = json.loads(raw)
+        # NaN/Infinity non sono JSON standard: il client C++ (QJsonDocument) li rifiuta, quindi li rifiuta anche
+        # il riferimento Python (delta ripreso dalla PR #143).
+        data = json.loads(raw, parse_constant=_reject_json_constant)
         if not isinstance(data, dict):
             raise ValueError(f"HudEvent.from_json: atteso un oggetto JSON, ricevuto {type(data).__name__}")
         if "type" not in data:
@@ -156,9 +162,15 @@ class HudEvent:
             payload = {}
         elif not isinstance(payload, dict):
             raise ValueError(f"HudEvent.from_json: 'payload' deve essere un oggetto JSON, ricevuto {type(payload).__name__}")
+        sequence_id = data.get("sequence_id", 0)
+        if isinstance(sequence_id, bool) or not isinstance(sequence_id, int) or sequence_id < 0:
+            raise ValueError("HudEvent.from_json: 'sequence_id' deve essere un intero non negativo")
+        trace_id = data.get("trace_id")
+        if trace_id is not None and not isinstance(trace_id, str):
+            raise ValueError("HudEvent.from_json: 'trace_id' deve essere una stringa o null")
         return cls(
             type=EventType(data["type"]), payload=payload, at=data.get("at", time.time()),
-            sequence_id=data.get("sequence_id", 0), trace_id=data.get("trace_id"),
+            sequence_id=sequence_id, trace_id=trace_id,
         )
 
     @classmethod

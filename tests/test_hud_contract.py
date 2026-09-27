@@ -52,6 +52,19 @@ class HudContractFixtureTests(unittest.TestCase):
         self.assertEqual((view.notifications, view.state), ([["advisory", "Batteria al 10%"]], "SPEAKING"))
 
 
+class StrictHeaderParsingTests(unittest.TestCase):
+    """Delta ripreso dalla PR #143: il parser Python non accetta cio' che il client C++ rifiuterebbe."""
+
+    def test_nan_and_wrongly_typed_header_fields_are_rejected(self):
+        base = {"schema_version": PROTOCOL_VERSION, "type": "IDLE", "payload": {}}
+        for bad in ('{"schema_version": %d, "type": "IDLE", "payload": {"x": NaN}}' % PROTOCOL_VERSION,
+                    json.dumps({**base, "sequence_id": "7"}), json.dumps({**base, "sequence_id": -1}),
+                    json.dumps({**base, "sequence_id": True}), json.dumps({**base, "trace_id": 5})):
+            with self.subTest(raw=bad), self.assertRaises(ValueError):
+                HudEvent.from_json(bad)
+        self.assertEqual(HudEvent.from_json(json.dumps({**base, "sequence_id": 3, "trace_id": "t"})).sequence_id, 3)
+
+
 class ConfirmationEventTests(unittest.TestCase):
     def test_a_pending_confirmation_is_published_without_its_parameters(self):
         from core.conversation_state import ConversationStateManager

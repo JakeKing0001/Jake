@@ -10,6 +10,7 @@ companion server e' in ascolto, con l'indirizzo giusto (`--jake-url`). I due pro
 """
 from __future__ import annotations
 
+import json
 import subprocess
 import threading
 import time
@@ -19,6 +20,10 @@ from pathlib import Path
 from core.logger import get_logger
 
 DEFAULT_EXE = Path(__file__).resolve().parent.parent / "hud" / "native" / "build" / "JakeHud.exe"
+# Identita' companion dell'HUD nativo locale: una credenziale per-dispositivo come quella di un telefono
+# accoppiato (F7), ruotata a ogni avvio del core, con capability minime e revocata allo shutdown.
+NATIVE_HUD_DEVICE_ID = "native-hud-local"
+NATIVE_HUD_CREDENTIAL_TTL_S = 30 * 24 * 3600
 
 
 class NativeHudSupervisor:
@@ -32,9 +37,13 @@ class NativeHudSupervisor:
         backoff_s: tuple[float, ...] = (2.0, 5.0, 15.0),
         popen: Callable[..., subprocess.Popen] = subprocess.Popen,
         clock: Callable[[], float] = time.monotonic,
+        credentials: dict | None = None,
     ) -> None:
         self.exe_path = Path(exe_path)
         self.base_url = base_url
+        # {"device_id", "token"}: consegnate all'HUD sul suo stdin (mai nella riga di comando, visibile a
+        # qualunque processo dello stesso utente, ne' in config), una volta per ogni avvio.
+        self._credentials = credentials
         self.max_restarts = max_restarts
         self.window_s = window_s
         self.backoff_s = backoff_s
@@ -66,8 +75,15 @@ class NativeHudSupervisor:
         return True
 
     def _spawn(self) -> bool:
+        args = [str(self.exe_path), "--jake-url", self.base_url]
+        if self._credentials:
+            args.append("--credentials-stdin")
         try:
-            process = self._popen([str(self.exe_path), "--jake-url", self.base_url], cwd=str(self.exe_path.parent))
+            process = self._popen(args, cwd=str(self.exe_path.parent),
+                                  stdin=subprocess.PIPE if self._credentials else None)
+            if self._credentials:
+                process.stdin.write((json.dumps(self._credentials) + "\n").encode("utf-8"))
+                process.stdin.close()
         except OSError:
             self._logger.exception("Impossibile avviare l'HUD nativo")
             return False

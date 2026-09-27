@@ -6,6 +6,7 @@ import QtQuick.Layouts
 RowLayout {
     id: root
     property bool connected: false
+    property string connectionProblem: ""
     property string state: "IDLE"
     property string activeDevice: ""
     // F2.3.5: indicatore del microfono sempre visibile (MIC_STATE): aperto, aperto ma in pausa
@@ -30,7 +31,10 @@ RowLayout {
     }
 
     Text {
-        text: root.connected ? qsTr("Connesso") : qsTr("Non connesso")
+        text: root.connected ? qsTr("Connesso")
+            : root.connectionProblem.length > 0 ? qsTr("Non connesso: %1").arg(root.connectionProblem) : qsTr("Non connesso")
+        elide: Text.ElideRight
+        Layout.maximumWidth: 220
         color: "#9ca3af"
         font.pixelSize: 12
     }

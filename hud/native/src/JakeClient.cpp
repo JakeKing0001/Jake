@@ -42,6 +42,34 @@ void JakeClient::setActiveDevice(const QString &value) {
     emit activeDeviceChanged();
 }
 
+void JakeClient::setCredentials(const QString &deviceId, const QString &token) {
+    if (!deviceId.isEmpty() && deviceId != m_deviceId) {
+        m_deviceId = deviceId;
+        emit deviceIdChanged();
+    }
+    m_authToken = token;
+}
+
+QNetworkRequest JakeClient::makeRequest(const QString &path) const {
+    QNetworkRequest request(QUrl(m_baseUrl + path));
+    if (!m_authToken.isEmpty())
+        request.setRawHeader("Authorization", "Bearer " + m_authToken.toUtf8());
+    return request;
+}
+
+void JakeClient::setConnectionProblem(const QString &problem) {
+    if (m_connectionProblem == problem) return;
+    m_connectionProblem = problem;
+    emit connectionProblemChanged();
+}
+
+QString JakeClient::describeFailure(QNetworkReply *reply) {
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (status == 401) return tr("il core ha rifiutato le credenziali dell'HUD");
+    if (status == 403) return tr("l'HUD non ha il permesso per questa operazione");
+    return reply->errorString();
+}
+
 void JakeClient::connectToJake(const QString &baseUrl) {
     m_baseUrl = baseUrl;
     if (m_baseUrl.endsWith('/')) m_baseUrl.chop(1);
@@ -54,7 +82,7 @@ void JakeClient::connectToJake(const QString &baseUrl) {
     m_protocolMismatchReported = false;
     m_reducer.connectionStarted();
 
-    QNetworkRequest request(QUrl(m_baseUrl + QStringLiteral("/events")));
+    QNetworkRequest request = makeRequest(QStringLiteral("/events"));
     request.setRawHeader("Accept", "text/event-stream");
     // F4.1.3 (lato C++, seconda fetta): sfrutta per davvero il meccanismo di resume gia'
     // costruito lato server (core/event_bus.py::EventBus.subscribe_with_replay, PR #133) -
@@ -70,24 +98,24 @@ void JakeClient::connectToJake(const QString &baseUrl) {
 }
 
 void JakeClient::fetchStatus() {
-    QNetworkRequest request(QUrl(m_baseUrl + QStringLiteral("/status")));
-    QNetworkReply *reply = m_manager->get(request);
+    QNetworkReply *reply = m_manager->get(makeRequest(QStringLiteral("/status")));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         if (reply->error() == QNetworkReply::NoError) {
             const auto doc = QJsonDocument::fromJson(reply->readAll());
             const auto object = doc.object();
             if (object.value("protocol_version").toInt(-1) != JAKE_PROTOCOL_VERSION) {
                 setConnected(false);
-                emit errorOccurred(QStringLiteral("Versione protocollo Jake non compatibile"));
+                setConnectionProblem(tr("versione del protocollo non compatibile"));
                 reply->deleteLater();
                 return;
             }
+            setConnectionProblem(QString());
             setConnected(true);
             if (object.value("active_device").isString())
                 setActiveDevice(object.value("active_device").toString());
         } else {
             setConnected(false);
-            emit errorOccurred(reply->errorString());
+            setConnectionProblem(describeFailure(reply));
         }
         reply->deleteLater();
     });
@@ -126,8 +154,8 @@ void JakeClient::onEventStreamFinished() {
     const bool isCurrentStream = (finishedStream == m_eventStream);
     if (isCurrentStream) {
         setConnected(false);
-        if (finishedStream->error() != QNetworkReply::NoError)
-            emit errorOccurred(finishedStream->errorString());
+        if (finishedStream->error() != QNetworkReply::NoError && finishedStream->error() != QNetworkReply::OperationCanceledError)
+            setConnectionProblem(describeFailure(finishedStream));
         m_eventStream = nullptr;
     }
     finishedStream->deleteLater();
@@ -154,7 +182,7 @@ void JakeClient::handleEventLine(const QString &jsonLine) {
         // interrompe; la riconnessione automatica fallira' di nuovo allo stesso modo.
         if (!m_protocolMismatchReported) {
             m_protocolMismatchReported = true;
-            emit errorOccurred(QStringLiteral("Evento Jake con versione protocollo non compatibile"));
+            setConnectionProblem(tr("versione del protocollo non compatibile"));
         }
         if (m_eventStream != nullptr)
             m_eventStream->abort();
@@ -221,7 +249,7 @@ QString JakeClient::evidenceSummary() const {
 
 void JakeClient::sendCommand(const QString &text) {
     if (text.trimmed().isEmpty()) return;
-    QNetworkRequest request(QUrl(m_baseUrl + QStringLiteral("/command")));
+    QNetworkRequest request = makeRequest(QStringLiteral("/command"));
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     QJsonObject body{{"text", text}};
     QNetworkReply *reply = m_manager->post(request, QJsonDocument(body).toJson());
@@ -233,7 +261,7 @@ void JakeClient::onCommandFinished() {
     auto *reply = qobject_cast<QNetworkReply *>(sender());
     if (reply == nullptr) return;
     if (reply->error() != QNetworkReply::NoError)
-        emit errorOccurred(reply->errorString());
+        emit errorOccurred(tr("Comando non inviato: %1").arg(describeFailure(reply)));
     // La risposta vera arriva via SSE come evento JAKE_MESSAGE (companion_server.py non la
     // pubblica lui stesso, lo fa JakeCore.answer sullo stesso event_bus): qui basta sapere che
     // la richiesta e' stata accettata dal server.
@@ -241,7 +269,7 @@ void JakeClient::onCommandFinished() {
 }
 
 void JakeClient::claimSession() {
-    QNetworkRequest request(QUrl(m_baseUrl + QStringLiteral("/devices/") + m_deviceId + QStringLiteral("/claim")));
+    QNetworkRequest request = makeRequest(QStringLiteral("/devices/") + m_deviceId + QStringLiteral("/claim"));
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     QJsonObject body{{"name", QStringLiteral("HUD nativo")}};
     QNetworkReply *reply = m_manager->post(request, QJsonDocument(body).toJson());
