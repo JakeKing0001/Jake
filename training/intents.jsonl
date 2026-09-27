@@ -683,3 +683,6 @@
 {"text": "ricordamelo tra dieci minuti", "intent": "SNOOZE_NOTIFICATION", "parameters": {"minutes": 10}}
 {"text": "avvisami quando finisce la build", "intent": "WATCH_PROCESS", "parameters": {"process": "msbuild"}}
 {"text": "avvisami quando finisce npm", "intent": "WATCH_PROCESS", "parameters": {"process": "npm"}}
+{"text": "riprova l'ultima azione", "intent": "RETRY_LAST_ACTION", "parameters": {}}
+{"text": "riprova", "intent": "RETRY_LAST_ACTION", "parameters": {}}
+{"text": "prova di nuovo", "intent": "RETRY_LAST_ACTION", "parameters": {}}

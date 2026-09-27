@@ -16,7 +16,10 @@ GlassPanel {
     readonly property bool undoAvailable: undoExpiresAt > nowSeconds
     // F4.6.4: l'undo non sparisce in silenzio - dopo la scadenza si dice perche' non c'e' piu'
     readonly property bool undoExpired: undoExpiresAt > 0 && undoExpiresAt <= nowSeconds
+    // F4.6.2: l'ultima azione e' fallita -> "Riprova" (il core decide se e' sicuro e se chiedere prima)
+    property bool retryAvailable: false
     signal undoRequested()
+    signal retryRequested()
     signal stopRequested()
     implicitHeight: showDetails && activityDetails.length > 0 ? 48 + detailsText.implicitHeight + 10 : 48
 
@@ -69,6 +72,12 @@ GlassPanel {
             text: root.showDetails ? qsTr("Meno") : qsTr("Dettagli")
             Accessible.name: root.showDetails ? qsTr("Nascondi i dettagli dell'ultima azione") : qsTr("Mostra i dettagli dell'ultima azione")
             onClicked: root.showDetails = !root.showDetails
+        }
+        Button {
+            visible: root.retryAvailable
+            text: qsTr("Riprova")
+            Accessible.name: qsTr("Riprova l'ultima azione fallita")
+            onClicked: root.retryRequested()
         }
         Button {
             visible: root.undoAvailable

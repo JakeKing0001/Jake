@@ -98,6 +98,8 @@ _CONTROL_ERRORS = {
     "SIGNATURE_MISSING": "Il pacchetto non ha una firma: non lo installo.",
     "SIGNATURE_INVALID": "La firma del pacchetto non è leggibile: non lo installo.",
     "TOO_MANY_WATCHES": "Sto già sorvegliando troppi processi: aspetta che ne finisca qualcuno.",
+    "NOTHING_TO_RETRY": "Non c'è nessuna azione fallita da riprovare.",
+    "RETRY_EXPIRED": "L'ultima azione fallita è di troppo tempo fa: ripetimi la richiesta.",
 }
 
 _PACKAGE_REJECTED_REASONS = {
@@ -130,6 +132,8 @@ def _format_control_error(intent: str, error: str | None, data: dict) -> str | N
 def _format_control_success(intent: str, data: dict) -> str | None:
     if intent == "WATCH_PROCESS":
         return f"Ok, ti avviso quando {data['process']} finisce."
+    if intent == "RETRY_LAST_ACTION":
+        return str(data.get("response") or "")  # la risposta del comando ripetuto, gia' formattata
     if intent == "LESS_NOTIFICATIONS_LIKE_THIS":
         return "Ok, ti mostrerò meno notifiche come questa."
     if intent == "MUTE_NOTIFICATION":

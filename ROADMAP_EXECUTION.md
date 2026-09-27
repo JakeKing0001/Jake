@@ -263,7 +263,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
 | `F4.4` | Interaction Design (26/09/2026: orb 3D Qt Quick 3D con nucleo volumetrico e particle shell, comportamento per stato interrupt-safe, reduced motion di Windows, qualita' high/low, fallback 2D; livelli audio reali di microfono e voce di Jake collegati all'orb; verifica visiva degli stati ancora da fare) | `DOING` |
 | `F4.5` | Interaction Design (26/09/2026: trascrizione live, permission card, prove, diagnosi, notifiche nell'HUD nativo; 27/09/2026: modalita' privata = nessun contenuto verso HUD/companion/replay, con indicatore; verifica visiva da fare) | `DOING` |
-| `F4.6` | Trust UX (26/09/2026: kill switch visibile e scorciatoia globale; action center con ultima azione, esito, verifica e undo con scadenza; 27/09/2026: dettagli dell'azione per l'utente - origine, esito/categoria, verifica, annullabilita', traccia - e motivo quando l'undo non e' piu' disponibile; retry sicuro non ancora) | `DOING` |
+| `F4.6` | Trust UX (26/09/2026: kill switch visibile e scorciatoia globale; action center con ultima azione, esito, verifica e undo con scadenza; 27/09/2026: dettagli dell'azione per l'utente - origine, esito/categoria, verifica, annullabilita', traccia - e motivo quando l'undo non e' piu' disponibile; retry sicuro dell'ultima azione fallita a voce e dal pulsante "Riprova") | `DOING` |
 | `F4.7` | Accessibility (26/09/2026: nomi accessibili, focus ring, scrittura reale nella barra comandi di un overlay no-activate, scorciatoie globali Ctrl+Shift+J / Ctrl+Alt+Fine, reduced motion di sistema; screen reader, scaling e alto contrasto da verificare) | `DOING` |
 | `F4.8` | Release Engineering (26/09/2026: core e HUD nativo avviati in ordine come processi separati, riavvio dell'HUD solo dopo un crash e con un tetto; installer/crash dump/rollback non iniziati) | `DOING` |
 | `F5.1` | Memory Platform (F5.1.1/F5.1.3-F5.1.6 il 21/09/2026: schema versionato, migrazioni transazionali con backup, metadati, recupero; resta F5.1.2 separare entita'/episodi/procedure e la prova su una copia del database reale) | `DOING` |
@@ -8871,6 +8871,16 @@ Dipende da: F1.3 e F4.5.
 6. `F4.6.6` Separare audit tecnico da testo user-facing.
 
 Criterio di uscita: undo end-to-end verificato per file, finestra e workflow fixture.
+
+- 27/09/2026 (F4.6.2, retry sicuro): `RETRY_LAST_ACTION` ("riprova", "prova di nuovo", pulsante "Riprova"
+  dell'Action Center quando l'ultima ricevuta e' un fallimento). Ripete SOLO l'ultima azione fallita della
+  conversazione (mai una riuscita: niente effetti doppi; mai una frase non capita o un meta-comando), entro 15
+  minuti, attraverso `_execute_command` - policy, conferme, ricevute e undo come un comando nuovo. I marcatori
+  `confirmed`/`authenticated` del tentativo precedente vengono tolti: la skill richiede di nuovo la sua conferma.
+  Un intent non sicuro da ritentare (non READ_ONLY ne' idempotente per `is_safe_to_auto_retry`) potrebbe essere
+  stato applicato in parte: Jake lo dice e chiede prima; il "si'" riprova esattamente l'azione mostrata
+  (`action_id`), non quella diventata ultima nel frattempo. Il meta-comando non sostituisce il turno del comando
+  vero (`META_TURN_INTENTS`, come la correzione). Test sul JakeCore vero (policy reale, dialogo reale, "si'").
 
 - 26/09/2026 (F4.6.5, prima fetta): pulsante "Ferma tutto" sempre visibile nell'HUD nativo, che
   invia `ferma tutto` (corsia a corrispondenza esatta -> `KILL_SWITCH`, nessun modello in mezzo).

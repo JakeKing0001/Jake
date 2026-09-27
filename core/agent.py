@@ -70,6 +70,8 @@ NEVER_FOR_AGENT = {
     # recupero (invece di fermarsi/ritentare/segnalare l'errore, gia' gestiti altrove)
     # produrrebbe un comportamento imprevedibile, mai visto ne' richiesto.
     "UNDO_LAST_ACTION",
+    # F4.6.2: "riprova" e' dell'utente; un agente ha gia' la sua strategia di retry
+    "RETRY_LAST_ACTION",
 }
 NONE_ACTION = "NONE"
 

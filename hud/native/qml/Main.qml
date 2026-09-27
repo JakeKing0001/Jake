@@ -190,8 +190,10 @@ ApplicationWindow {
             activitySummary: jake.lastActivitySummary
             activityDetails: jake.lastActivityDetails
             undoExpiresAt: jake.lastUndoExpiresAt
-            // undo e stop passano dagli stessi skill del comando vocale (scadenza, policy, controlli)
+            retryAvailable: jake.lastOutcome === "error"
+            // undo, riprova e stop passano dagli stessi skill del comando vocale (scadenza, policy, controlli)
             onUndoRequested: jake.sendCommand("annulla l'ultima azione")
+            onRetryRequested: jake.sendCommand("riprova l'ultima azione")
             onStopRequested: jake.sendCommand("ferma tutto")
         }
 

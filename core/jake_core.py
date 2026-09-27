@@ -103,6 +103,11 @@ def _parse_quiet_hours(start: str | None, end: str | None) -> QuietHours | None:
         return None
 
 
+# Meta-comandi che eseguono DENTRO di se' il vero comando (correzione, "riprova"): il turno e l'ultimo scambio
+# restano quelli del comando vero, non del meta-comando che l'ha lanciato.
+META_TURN_INTENTS = frozenset({"CORRECT_LAST", "RETRY_LAST_ACTION"})
+
+
 class JakeCore:
     EXIT_SENTINEL = "l'utente vuole uscire"
     NO_PLAN = "Non so ancora fare questa cosa"
@@ -545,6 +550,9 @@ class JakeCore:
         # F6.7: "avvisami quando finisce la build" - sorveglia un processo gia' in esecuzione
         from skills.watch_process import WatchProcessSkill
         self.skill_registry.register_skill("WATCH_PROCESS", WatchProcessSkill(self))
+        # F4.6.2: "riprova" - l'ultima azione fallita, di nuovo attraverso questa stessa pipeline
+        from skills.retry_last import RetryLastActionSkill
+        self.skill_registry.register_skill("RETRY_LAST_ACTION", RetryLastActionSkill(self))
         # F6.3.4: controllo dell'utente sull'ultima notifica proattiva mostrata
         from skills.notification_feedback import (LessNotificationsLikeThisSkill, MuteNotificationSkill,
                                                   SnoozeNotificationSkill, UnmuteNotificationSkill)
@@ -1152,7 +1160,7 @@ class JakeCore:
     ) -> None:
         # CORRECT_LAST è un meta-comando.
         # Il vero turno corretto viene registrato separatamente.
-        if command.intent == "CORRECT_LAST":
+        if command.intent in META_TURN_INTENTS:
             return
 
         effective_scope = scope or self._dialogue_scope()
@@ -2115,7 +2123,7 @@ class JakeCore:
                 scope=scope,
             )
 
-            if resolved.intent != "CORRECT_LAST":
+            if resolved.intent not in META_TURN_INTENTS:
                 self._remember_exchange(
                     text,
                     resolved,
@@ -2204,7 +2212,7 @@ class JakeCore:
         # CORRECT_LAST contiene internamente il vero comando corretto:
         # non deve sovrascrivere last_exchange dopo che quel comando
         # ha appena scritto il proprio stato.
-        if resolved.intent != "CORRECT_LAST":
+        if resolved.intent not in META_TURN_INTENTS:
             self._remember_exchange(
                 text,
                 resolved,
