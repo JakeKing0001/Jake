@@ -2199,6 +2199,8 @@ class JakeCore:
                     # F2.6
                     "action_id": action_id,
                     "dialogue_scope": scope,
+                    # F4.6.4: un undo porta con se' quale azione annulla (ricontrollo al "si'", poi consumato)
+                    "undo_source_action_id": envelope.get("undo_source_action_id"),
                 }
             )
 
@@ -2643,6 +2645,19 @@ class JakeCore:
             if descriptor is None:
                 self._cancel_dialogue_action(action)
                 return "L'undo non è più disponibile. Non eseguo la versione corretta."
+        elif action.get("undo_source_action_id"):
+            # F4.6.4: tra la domanda e il "si'" l'undo puo' essere scaduto, gia' fatto, o cio' che cancellerebbe
+            # puo' essere cambiato - si ricontrolla ADESSO, non ci si fida della domanda di prima
+            from core.undo_store import undo_state_problem
+
+            descriptor = self.undo_store.get(action["undo_source_action_id"])
+            changed = undo_state_problem(descriptor) if descriptor is not None else None
+            if descriptor is None or changed is not None:
+                self._cancel_dialogue_action(action)
+                if descriptor is None:
+                    return "Quell'annullamento non è più disponibile (scaduto o già fatto): non eseguo nulla."
+                return (f"Non annullo: {changed} è cambiato mentre aspettavo la conferma, e annullare cancellerebbe "
+                        "anche quelle modifiche.")
 
         parameters = {
             **strip_authorization_signals(
@@ -2674,6 +2689,9 @@ class JakeCore:
                 action_id=action_id,
                 private=self.private_mode,
             )
+
+        if action.get("undo_source_action_id") and result is not None and result.success:
+            self.undo_store.mark_used(action["undo_source_action_id"])  # F4.6.4: lo stesso undo non si ripete
 
         # Può servire un secondo gradino di conferma/auth.
         if (

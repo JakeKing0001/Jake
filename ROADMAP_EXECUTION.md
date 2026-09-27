@@ -8907,7 +8907,10 @@ Criterio di uscita: undo end-to-end verificato per file, finestra e workflow fix
   anche il suo lavoro. Ora questi undo portano nelle `preconditions` l'impronta osservabile di cio' che hanno
   creato (nomi, dimensioni, date di modifica; max 2000 file) e se e' cambiata l'undo non parte e Jake spiega
   perche' (`UNDO_STATE_CHANGED`). Un rename/move annullato non cancella nulla e non ne ha bisogno. Test su file e
-  cartelle reali. Limite dichiarato: un cambiamento tra la domanda di conferma e il "si'" non e' ricontrollato.
+  cartelle reali. Chiuso lo stesso giorno anche il limite tra domanda e "si'": l'envelope porta
+  `undo_source_action_id`, `_finalize_pending_action` ricontrolla al "si'" che l'undo sia ancora usabile e che lo
+  stato non sia cambiato, e dopo un undo riuscito lo marca consumato (prima lo stesso undo si poteva chiedere due
+  volte). Test sul JakeCore reale con DeletePathSkill vera.
 
 - 26/09/2026 (F4.6.5, prima fetta): pulsante "Ferma tutto" sempre visibile nell'HUD nativo, che
   invia `ferma tutto` (corsia a corrispondenza esatta -> `KILL_SWITCH`, nessun modello in mezzo).

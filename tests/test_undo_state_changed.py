@@ -48,3 +48,37 @@ class UndoStateChangedTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UndoConfirmationWindowTests(unittest.TestCase):
+    """F4.6.4 al "si'": lo stato si ricontrolla al momento dell'esecuzione e un undo fatto non si ripete. JakeCore
+    reale (policy, conferma), DeletePathSkill vera, file reali."""
+
+    def setUp(self):
+        from core.command import Command
+        from skills.delete_path import DeletePathSkill
+        from tests.test_jake_core_pipeline import FakeRegistry, FakeRouter, _bare_core
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.note = self.root / "creato-da-jake.txt"
+        self.note.write_text("", encoding="utf-8")
+        registry = FakeRegistry({"DELETE_PATH": DeletePathSkill()})
+        self.core = _bare_core(ledger_path=self.root / "ledger.jsonl", skill_registry=registry,
+                               router=FakeRouter(Command("UNDO_LAST_ACTION", {})))
+        registry._skills["UNDO_LAST_ACTION"] = UndoLastActionSkill(self.core)
+        self.core.undo_store.save(generate_undo_descriptor("crea-1", "CREATE_PATH", {"path": str(self.note)}))
+
+    def test_a_change_between_question_and_yes_stops_the_undo(self):
+        self.assertIn("Vuoi annullare", self.core.answer("annulla l'ultima azione"))
+        self.note.write_text("scritto mentre Jake aspettava", encoding="utf-8")
+        os.utime(self.note, (time.time() + 5, time.time() + 5))
+        self.assertIn("è cambiato mentre aspettavo la conferma", self.core.answer("si"))
+        self.assertTrue(self.note.exists())
+
+    def test_an_undo_done_is_consumed_and_cannot_be_repeated(self):
+        self.core.answer("annulla l'ultima azione")
+        self.core.answer("si")
+        self.assertFalse(self.note.exists())
+        self.assertIn("Non c'è nessuna azione recente", self.core.answer("annulla l'ultima azione"))

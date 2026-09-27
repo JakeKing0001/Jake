@@ -43,12 +43,9 @@ class UndoLastActionSkill:
     skill compensatoria lo richiede (stesso calcolo gia' usato per la compensazione automatica su
     verifica fallita, F1.3.3): un solo giro di conferma per l'intero undo, non due.
 
-    Limite dichiarato apertamente: non chiama mai UndoStore.mark_used() (ne' qui ne' altrove) -
-    un utente potrebbe in teoria chiedere lo stesso undo due volte prima che scada. Non un buco di
-    sicurezza (l'intent compensatorio e' idempotente per costruzione, es. DELETE_PATH su un
-    percorso gia' cancellato torna PATH_NOT_FOUND, non un secondo danno), solo una rifinitura UX
-    rimandata: marcare l'undo consumato richiederebbe un callback DOPO che la conferma e' stata
-    eseguita per davvero, che la pipeline di conferma generica non supporta ancora."""
+    F4.6.4: l'envelope porta `undo_source_action_id`; JakeCore._finalize_pending_action, al "si'", ricontrolla
+    che l'undo sia ancora usabile e che cio' che cancellerebbe non sia cambiato nel frattempo, e dopo un undo
+    riuscito lo marca come consumato (prima lo stesso undo si poteva chiedere due volte)."""
 
     metadata = {
         "intent": "UNDO_LAST_ACTION",
@@ -80,6 +77,8 @@ class UndoLastActionSkill:
                 "message": f"Vuoi annullare l'ultima azione? Sto per {description}.",
                 "confirm_intent": descriptor.compensating_intent,
                 "confirm_parameters": dict(descriptor.compensating_parameters),
+                # F4.6.4: al "si'" la pipeline ricontrolla lo stato e, fatto l'undo, lo marca come consumato
+                "undo_source_action_id": descriptor.action_id,
             },
             error="CONFIRMATION_REQUIRED",
         )
