@@ -9298,6 +9298,11 @@ monitor rileva un evento fixture senza richiesta dell'utente e senza duplicarlo.
   una sospensione. Nella sessione vocale un avviso o un'automazione arrivati mentre Jake parla o lavora a
   un comando vanno in coda invece di tagliare la risposta in corso (prima `_speak_async` la
   interrompeva). Resta: portare anche il task monitor sulla stessa pipeline.
+- 27/09/2026 (F6.1.5, bug reale): dopo uno spegnimento (o una sospensione del PC) al primo giro dello scheduler ogni
+  promemoria scaduto veniva notificato singolarmente: al riavvio una raffica, a voce una frase dopo l'altra. Ora
+  `ReminderScheduler.tick` separa quelli appena scaduti (restano puntuali) da quelli persi (oltre 3 giri, almeno
+  2 minuti) e questi arrivano in UN riepilogo da `present_notification` con l'ora prevista di ciascuno. Test con
+  ReminderManager reale: tre promemoria (due persi, uno puntuale), nessun doppione al giro successivo.
 - 27/09/2026 (F6.3.4): `FeedbackStore` ("meno notifiche come questa", con recupero in ~30 giorni) esisteva ma
   nessuna notifica reale lo consultava. Ora il gate di `JakeCore.notify` lo usa per TIPO di notifica (numeri
   normalizzati: "Batteria al 12%" e "al 9%" sono lo stesso tipo): un tipo ridotto finisce nel riepilogo, uno

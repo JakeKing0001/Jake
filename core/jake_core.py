@@ -496,6 +496,7 @@ class JakeCore:
         # (CLI, voce, tray, HUD) puo' sostituire questo callback per parlarli o mostrarli.
         self.reminder_manager = self.skill_registry.reminder_manager
         self.scheduler = ReminderScheduler(self.reminder_manager, on_due=self._default_on_reminder_due, interval_seconds=5)
+        self.scheduler.on_missed = self._on_missed_reminders
         self.scheduler.on_tick = self.release_deferred_notifications
         self.scheduler.start()
 
@@ -772,6 +773,23 @@ class JakeCore:
         else:
             print(f"\nJake > {gated}\nTu > ", end="", flush=True)
         return gated
+
+    def _on_missed_reminders(self, reminders: list[dict]) -> None:
+        """F6.1.5: promemoria scaduti mentre Jake era spento (o il PC in sospensione): un solo riepilogo, con l'ora
+        a cui erano previsti, invece di una raffica di notifiche al riavvio."""
+        from datetime import datetime as _datetime
+
+        parts = []
+        for reminder in reminders:
+            try:
+                at = _datetime.fromisoformat(reminder["due_at"]).astimezone().strftime("%H:%M")
+            except (KeyError, ValueError):
+                at = ""
+            parts.append(f"{reminder.get('text') or 'timer'}" + (f" (alle {at})" if at else ""))
+        count = len(reminders)
+        head = "è scaduto un promemoria" if count == 1 else f"sono scaduti {count} promemoria"
+        self.present_notification("reminder", f"Mentre non ero attivo {head}: " + "; ".join(parts) + ".",
+                                  source="sono promemoria scaduti mentre Jake non era attivo")
 
     @staticmethod
     def reminder_source(reminder: dict) -> str:
