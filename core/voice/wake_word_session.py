@@ -490,7 +490,8 @@ class WakeWordSession:
 
     def _on_reminder_due(self, reminder: dict) -> None:
         # Passa dalla stessa modalita' di notifica (v4.3) del percorso CLI: vedi JakeCore.notify.
-        message = self.jake_core.notify("reminder", self.jake_core.format_due_reminder(reminder))
+        message = self.jake_core.notify("reminder", self.jake_core.format_due_reminder(reminder),
+                                        source=self.jake_core.reminder_source(reminder))
         if message is None:
             return
         self._set_state("notify", message)
@@ -532,7 +533,8 @@ class WakeWordSession:
         raw = f"Ho eseguito automaticamente {trigger.get('name')}. {summary.splitlines()[0]}"
         if self._defer_while_busy("trigger", raw):
             return
-        message = self.jake_core.notify("trigger", raw)
+        message = self.jake_core.notify(
+            "trigger", raw, source=f"e' il risultato dell'automazione '{trigger.get('name')}' che hai programmato")
         if message is None:
             return
         self._set_state("notify", message)

@@ -288,6 +288,7 @@ SKILL_RISK: dict[str, RiskLevel] = {
     # F4.6.2: di per se' non cambia nulla; il comando ripetuto passa di nuovo dalla policy col SUO rischio
     "RETRY_LAST_ACTION": RiskLevel.READ_ONLY,
     "DAILY_BRIEF": RiskLevel.READ_ONLY,  # legge promemoria e todo locali
+    "EXPLAIN_LAST_NOTIFICATION": RiskLevel.READ_ONLY,
     # F5.7: una copia dei ricordi in Documenti (senza i segreti) e il fissaggio di un ricordo, entrambi reversibili
     "EXPORT_MEMORIES": RiskLevel.LOCAL_REVERSIBLE,
     "PIN_MEMORY": RiskLevel.LOCAL_REVERSIBLE,  # osserva la fine di un processo, non lo tocca

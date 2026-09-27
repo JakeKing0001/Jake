@@ -19,8 +19,9 @@ class _Core:
         self.notified = []
         self.done = threading.Event()
 
-    def present_notification(self, kind, message):
+    def present_notification(self, kind, message, source=None):
         self.notified.append((kind, message))
+        self.source = source
         self.done.set()
         return message
 
@@ -106,7 +107,7 @@ class PresentNotificationTests(unittest.TestCase):
         core = self._core("build finita")
         core.notification_presenter = mock.MagicMock()
         self.assertEqual(core.present_notification("reminder", "build finita"), "build finita")
-        core.notify.assert_called_once_with("reminder", "build finita")
+        core.notify.assert_called_once_with("reminder", "build finita", source=None)
         core.notification_presenter.assert_called_once_with("reminder", "build finita")
 
     def test_a_gated_notification_is_not_presented(self):

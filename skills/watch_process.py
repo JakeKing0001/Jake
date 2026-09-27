@@ -81,4 +81,5 @@ class WatchProcessSkill:
             outcome = "completato senza errori"
         else:
             outcome = f"terminato con un errore (codice {code})"
-        self.core.present_notification("reminder", f"{name} e' finito dopo {elapsed}: {outcome}.")
+        self.core.present_notification("reminder", f"{name} e' finito dopo {elapsed}: {outcome}.",
+                                       source=f"mi avevi chiesto di avvisarti quando {name} finiva")

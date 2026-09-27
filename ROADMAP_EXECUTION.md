@@ -274,7 +274,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F5.6` | Context Runtime (27/09/2026: segnali non riletti non piu' presentati come attuali; appunti marcati privati da chi li copia mai letti) | `DOING` |
 | `F5.7` | Privacy Engineering (libreria completa il 21/09/2026; dal 26/09/2026 nel percorso reale: "dimentica" cancella anche registro e indici con ricevuta, l'uso dei ricordi viene registrato, "da dove sai X" spiega la provenienza; dal 27/09/2026 "esporta i miei ricordi" e "fissa il ricordo X" a voce; purge/backup non ancora esposti a voce/HUD) | `DOING` |
 | `F6.1` | Proactivity Platform (26/09/2026: promemoria, automazioni e avvisi passano dagli stessi freni in `JakeCore.notify` - duplicati, budget orario, quiet hours, conversazione in corso - e si sospendono insieme durante prove e benchmark) | `DOING` |
-| `F6.2` | Proactivity Quality | `DOING` |
+| `F6.2` | Proactivity Quality (27/09/2026: "perche' me l'hai detto?" spiega la fonte dell'ultima notifica) | `DOING` |
 | `F6.3` | Notification UX (libreria di decisione il 21/09/2026; collegata a JakeCore/EventBus/HUD il 22/09/2026; dal 27/09/2026 "meno notifiche cosi'", "non mostrarmelo piu'", "mostramelo di nuovo" e "rimandala" sull'ultima notifica, a voce e dai pulsanti del toast HUD, persistenti; nessuna consegna reale di call/companion) | `DOING` |
 | `F6.4` | Goal Runtime (27/09/2026: "devo X entro <giorno>" diventa una proposta di promemoria confermata col si'/no normale) | `DOING` |
 | `F6.5` | Automation Runtime (27/09/2026: modalita' di notifica a tempo che torna da sola alla precedente con il riepilogo) | `DOING` |
@@ -9279,6 +9279,12 @@ Dipende da: F6.1 e F5.5.
 
 Criterio di uscita: nessun suggerimento si esegue senza policy e ogni suggerimento è spiegabile;
 fixture rilevante, irrilevante e risolvibile entro la delega verificano la scelta di contatto.
+
+- 27/09/2026 (F6.2.7): ogni notifica porta ora la sua `source` (il promemoria o il timer impostato dall'utente,
+  l'automazione per nome, il processo che si era chiesto di sorvegliare, la modalita' a tempo, il controllo
+  automatico del PC) fino a `last_notification`; `EXPLAIN_LAST_NOTIFICATION` ("perche' me l'hai detto?") la dice
+  e, se non era un promemoria richiesto, ricorda come ridurre quel tipo di notifica. Test sulla pipeline reale di
+  `JakeCore.notify`.
 
 ### F6.3 — Notification intelligence
 

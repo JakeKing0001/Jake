@@ -696,3 +696,5 @@
 {"text": "non dimenticare mai il compleanno di Giulia", "intent": "PIN_MEMORY", "parameters": {"key": "compleanno di Giulia"}}
 {"text": "non disturbarmi per mezz'ora", "intent": "SET_NOTIFICATION_MODE", "parameters": {"mode": "do_not_disturb", "minutes": 30}}
 {"text": "modalita' studio per due ore", "intent": "SET_NOTIFICATION_MODE", "parameters": {"mode": "study", "minutes": 120}}
+{"text": "perché me l'hai detto", "intent": "EXPLAIN_LAST_NOTIFICATION", "parameters": {}}
+{"text": "perché questo avviso", "intent": "EXPLAIN_LAST_NOTIFICATION", "parameters": {}}

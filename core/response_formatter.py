@@ -150,6 +150,12 @@ def _format_control_success(intent: str, data: dict) -> str | None:
         return f"Ok, {data['key']} non è più fissato."
     if intent == "RETRY_LAST_ACTION":
         return str(data.get("response") or "")  # la risposta del comando ripetuto, gia' formattata
+    if intent == "EXPLAIN_LAST_NOTIFICATION":
+        reason = data.get("source") or "non so dire da dove venisse"
+        text = f"Te l'ho detto perché {reason}."
+        if data.get("kind") != "reminder":
+            text += " Se non ti serve puoi dirmi \"meno notifiche così\" o \"non mostrarmelo più\"."
+        return text
     if intent == "LESS_NOTIFICATIONS_LIKE_THIS":
         return "Ok, ti mostrerò meno notifiche come questa."
     if intent == "MUTE_NOTIFICATION":

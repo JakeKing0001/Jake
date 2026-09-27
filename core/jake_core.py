@@ -565,6 +565,8 @@ class JakeCore:
         self.skill_registry.register_skill("DAILY_BRIEF", DailyBriefSkill(
             self.skill_registry.reminder_manager, self.skill_registry.todo_manager))
         # F6.3.4: controllo dell'utente sull'ultima notifica proattiva mostrata
+        from skills.notification_feedback import ExplainLastNotificationSkill
+        self.skill_registry.register_skill("EXPLAIN_LAST_NOTIFICATION", ExplainLastNotificationSkill(self))
         from skills.notification_feedback import (LessNotificationsLikeThisSkill, MuteNotificationSkill,
                                                   SnoozeNotificationSkill, UnmuteNotificationSkill)
         self.skill_registry.register_skill("LESS_NOTIFICATIONS_LIKE_THIS", LessNotificationsLikeThisSkill(self))
@@ -681,7 +683,16 @@ class JakeCore:
 
     # ---- callback di default -------------------------------------------------------------
 
-    def notify(self, kind: str, message: str, *, trace_id: str | None = None, critical: bool = False) -> str | None:
+    # F6.2.7: perche' esiste una notifica, quando chi la produce non lo dice (vedi `source` di notify)
+    NOTIFICATION_SOURCES = {
+        "reminder": "e' un promemoria che hai chiesto tu",
+        "advisory": "e' un controllo automatico dello stato del PC (batteria, disco, attivita' dimenticate)",
+        "trigger": "e' il risultato di un'automazione che hai programmato",
+        "pairing": "un dispositivo nuovo ha chiesto di collegarsi a Jake",
+    }
+
+    def notify(self, kind: str, message: str, *, trace_id: str | None = None, critical: bool = False,
+               source: str | None = None) -> str | None:
         """Punto unico da cui passa ogni notifica proattiva (promemoria/avviso/automazione)
         prima di essere presentata, sia in CLI (qui sotto) sia in voce (vedi WakeWordSession,
         core/voice/wake_word_session.py, che chiama questo stesso metodo): applica la modalita'
@@ -707,7 +718,8 @@ class JakeCore:
                 return None
         if gated is not None:
             # l'ultima notifica mostrata: a lei si riferiscono "meno notifiche cosi'", "non mostrarmelo piu'", "rimandala"
-            self.last_notification = {"kind": kind, "message": gated, "key": notification_key(kind, gated)}
+            self.last_notification = {"kind": kind, "message": gated, "key": notification_key(kind, gated),
+                                      "source": source or self.NOTIFICATION_SOURCES.get(kind, ""), "at": time.time()}
             self.event_bus.publish(HudEvent(EventType.NOTIFICATION, {"kind": kind, "text": gated}, trace_id=trace_id))
         return gated
 
@@ -738,11 +750,11 @@ class JakeCore:
         callback(digest)
         return digest
 
-    def present_notification(self, kind: str, message: str) -> str | None:
+    def present_notification(self, kind: str, message: str, source: str | None = None) -> str | None:
         """F6.1: UNA strada per mostrare una notifica - gate (modalita', duplicati, budget, quiet hours,
         preferenze) e poi un unico presentatore: stampa in CLI, voce nella sessione vocale (che la rimanda se
         Jake sta parlando). Usata dalle fonti nuove (es. WATCH_PROCESS) invece di un callback per ciascuna."""
-        gated = self.notify(kind, message)
+        gated = self.notify(kind, message, source=source)
         if gated is None:
             return None
         presenter = getattr(self, "notification_presenter", None)
@@ -755,8 +767,13 @@ class JakeCore:
             print(f"\nJake > {gated}\nTu > ", end="", flush=True)
         return gated
 
+    @staticmethod
+    def reminder_source(reminder: dict) -> str:
+        what = "un timer" if reminder.get("kind") == "timer" else "un promemoria"
+        return f"e' {what} che hai impostato tu"
+
     def _default_on_reminder_due(self, reminder: dict) -> None:
-        message = self.notify("reminder", self.format_due_reminder(reminder))
+        message = self.notify("reminder", self.format_due_reminder(reminder), source=self.reminder_source(reminder))
         if message is None:
             return
         print(f"\nJake > {message}\nTu > ", end="", flush=True)
@@ -816,6 +833,7 @@ class JakeCore:
         message = self.notify(
             "trigger", f"Ho eseguito automaticamente '{trigger.get('name')}':\n{summary}",
             trace_id=getattr(outcome, "trace_id", None),
+            source=f"e' il risultato dell'automazione '{trigger.get('name')}' che hai programmato",
         )
         if message is None:
             return
@@ -3046,7 +3064,7 @@ class JakeCore:
         message = f"Tempo scaduto: torno alla modalità {MODE_LABELS_IT.get(previous, previous.value)}."
         if released:
             message += " Nel frattempo: " + " ".join(released)
-        self.present_notification("reminder", message)
+        self.present_notification("reminder", message, source="avevi scelto una modalita' di notifica a tempo")
 
     def _native_hud_gave_up(self, crashes: int) -> None:
         """F4.8: l'HUD nativo continua a chiudersi e non viene piu' riavviato. Prima lo diceva solo il log: l'HUD

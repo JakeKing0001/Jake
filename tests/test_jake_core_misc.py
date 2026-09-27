@@ -199,7 +199,8 @@ class DefaultNotificationCallbacksTests(unittest.TestCase):
         with mock.patch.object(core, "notify", return_value="Promemoria: chiama il dentista") as notify:
             with mock.patch("builtins.print"):
                 core._default_on_reminder_due({"text": "chiama il dentista"})
-        notify.assert_called_once_with("reminder", "Promemoria: chiama il dentista")
+        notify.assert_called_once_with(
+            "reminder", "Promemoria: chiama il dentista", source="e' un promemoria che hai impostato tu")  # F6.2.7
 
     def test_reminder_due_prints_nothing_when_notify_queues_it(self):
         core = _bare_core()

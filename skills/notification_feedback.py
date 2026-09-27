@@ -14,6 +14,27 @@ def _last(core):
     return last, None
 
 
+class ExplainLastNotificationSkill:
+    """F6.2.7: "perche' me l'hai detto?" - da dove viene l'ultima notifica e cosa si puo' fare se non serve."""
+
+    metadata = {
+        "intent": "EXPLAIN_LAST_NOTIFICATION",
+        "description": "Spiega perche' Jake ha mostrato o detto l'ultima notifica. Per 'perche' me l'hai detto?', "
+                       "'chi ti ha detto di avvisarmi?', 'perche' questo avviso?'.",
+        "parameters": {},
+    }
+
+    def __init__(self, core):
+        self.core = core
+
+    def execute(self, parameters: dict = None):
+        last, error = _last(self.core)
+        if error:
+            return error
+        return SkillResult(success=True, data={"message": last["message"], "kind": last["kind"],
+                                               "source": last.get("source") or "", "at": last.get("at")})
+
+
 class LessNotificationsLikeThisSkill:
     metadata = {
         "intent": "LESS_NOTIFICATIONS_LIKE_THIS",
