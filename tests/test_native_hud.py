@@ -56,7 +56,7 @@ class NativeHudSupervisorTests(unittest.TestCase):
         self.exe = Path(tmp.name) / "JakeHud.exe"
         self.exe.write_bytes(b"")
 
-    def _supervisor(self, exit_codes, credentials=None):
+    def _supervisor(self, exit_codes, credentials=None, on_gave_up=None):
         launches = []
         codes = list(exit_codes)
         self.processes = []
@@ -68,7 +68,7 @@ class NativeHudSupervisorTests(unittest.TestCase):
             return process
 
         supervisor = NativeHudSupervisor(self.exe, "http://127.0.0.1:9999", max_restarts=2, backoff_s=(0.01,), popen=popen,
-                                         credentials=credentials)
+                                         credentials=credentials, on_gave_up=on_gave_up)
         self.addCleanup(supervisor.stop)
         return supervisor, launches
 
@@ -97,6 +97,13 @@ class NativeHudSupervisorTests(unittest.TestCase):
         supervisor.start()
         self.assertTrue(self._wait(lambda: supervisor.gave_up))
         self.assertEqual(len(launches), 3, "primo avvio + 2 riavvii, poi basta")
+
+    def test_giving_up_is_reported_once_with_the_number_of_crashes(self):
+        reported = []
+        supervisor, _ = self._supervisor([3, 3, 3, 3], on_gave_up=reported.append)
+        supervisor.start()
+        self.assertTrue(self._wait(lambda: reported))
+        self.assertEqual(reported, [3])
 
     def test_a_hud_closed_by_the_user_is_not_reopened(self):
         supervisor, launches = self._supervisor([0])
@@ -172,6 +179,17 @@ class NativeHudCredentialTests(unittest.TestCase):
                          frozenset({EndpointClass.READ_ONLY, EndpointClass.COMMAND}))
         self.JakeCore._revoke_native_hud_credential(self.core)
         self.assertEqual(self._status(credentials["token"]), 401)
+
+    def test_when_the_hud_is_given_up_its_credential_is_revoked_and_the_user_is_told(self):
+        from unittest import mock
+
+        credentials = self.JakeCore._provision_native_hud_credential(self.core)
+        self.core.present_notification = mock.MagicMock()
+        self.JakeCore._native_hud_gave_up(self.core, 3)
+        self.assertEqual(self._status(credentials["token"]), 401, "nessuno usa piu' quella credenziale")
+        kind, message = self.core.present_notification.call_args.args
+        self.assertEqual(kind, "advisory")
+        self.assertIn("3 volte", message)
 
     def test_each_core_start_rotates_the_credential(self):
         first = self.JakeCore._provision_native_hud_credential(self.core)

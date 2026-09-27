@@ -38,6 +38,7 @@ class NativeHudSupervisor:
         popen: Callable[..., subprocess.Popen] = subprocess.Popen,
         clock: Callable[[], float] = time.monotonic,
         credentials: dict | None = None,
+        on_gave_up: Callable[[int], None] | None = None,
     ) -> None:
         self.exe_path = Path(exe_path)
         self.base_url = base_url
@@ -55,6 +56,8 @@ class NativeHudSupervisor:
         self._thread: threading.Thread | None = None
         self._restarts: list[float] = []
         self.gave_up = False
+        # F4.8: chiamato una volta quando si smette di riavviare (numero di crash): chi usa l'HUD deve saperlo
+        self._on_gave_up = on_gave_up
         self._logger = get_logger()
 
     @property
@@ -108,6 +111,11 @@ class NativeHudSupervisor:
                 self.gave_up = True
                 self._logger.error("HUD nativo in crash %d volte in %.0f s: non lo riavvio piu'", len(self._restarts) + 1,
                                    self.window_s)
+                if self._on_gave_up is not None:
+                    try:
+                        self._on_gave_up(len(self._restarts) + 1)
+                    except Exception:
+                        self._logger.exception("Errore avvisando che l'HUD nativo non viene piu' riavviato")
                 return
             delay = self.backoff_s[min(len(self._restarts), len(self.backoff_s) - 1)]
             self._restarts.append(now)

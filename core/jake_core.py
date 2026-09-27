@@ -2977,10 +2977,20 @@ class JakeCore:
         port = int(getattr(self.companion_server, "port", 0) or config.get("companion_server_port", 8765) or 8765)
         exe = Path(config.get("hud_native_path") or DEFAULT_EXE)
         credentials = self._provision_native_hud_credential()
-        self.native_hud = NativeHudSupervisor(exe, f"http://127.0.0.1:{port}", credentials=credentials)
+        self.native_hud = NativeHudSupervisor(exe, f"http://127.0.0.1:{port}", credentials=credentials,
+                                              on_gave_up=self._native_hud_gave_up)
         if not self.native_hud.start():
             self.native_hud = None
             self._revoke_native_hud_credential()
+
+    def _native_hud_gave_up(self, crashes: int) -> None:
+        """F4.8: l'HUD nativo continua a chiudersi e non viene piu' riavviato. Prima lo diceva solo il log: l'HUD
+        spariva senza spiegazione e la sua credenziale restava valida. Ora la credenziale si revoca (nessuno la usa
+        piu') e l'utente lo sa dalla stessa strada delle altre notifiche."""
+        self._revoke_native_hud_credential()
+        self.present_notification(
+            "advisory", f"L'HUD si è chiuso in modo anomalo {crashes} volte in pochi minuti: lo lascio spento. "
+                        "Jake continua a funzionare; i dettagli sono nel log.")
 
     def _provision_native_hud_credential(self) -> dict | None:
         """L'HUD nativo e' un client companion come un altro: si autentica con una credenziale
