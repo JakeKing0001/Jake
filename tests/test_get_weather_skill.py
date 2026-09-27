@@ -1,5 +1,5 @@
 """Test unitari per skills/get_weather.py: nessuna suite esisteva finora. urllib.request.urlopen
-e' sempre mockato, is_online forzato a True, config e' un MagicMock con una weather_api_key finta.
+e' sempre mockato, is_online forzato a True. Open-Meteo: geocoding della citta' e poi meteo attuale, nessuna chiave.
 
 F1: buco reale corretto in questa sessione (stesso pattern sistemico gia' corretto per altri
 consumatori diretti di API esterne) - GetWeatherSkill non validava la forma della risposta prima
@@ -26,7 +26,7 @@ def _fake_json_response(payload) -> mock.MagicMock:
 
 
 def _fake_http_error(code: int) -> error.HTTPError:
-    return error.HTTPError(url="https://api.openweathermap.org", code=code, msg="err", hdrs=None, fp=None)
+    return error.HTTPError(url="https://api.open-meteo.com", code=code, msg="err", hdrs=None, fp=None)
 
 
 def _config():
@@ -35,16 +35,21 @@ def _config():
     return config
 
 
+_PLACE = {"results": [{"name": "Roma", "latitude": 41.89, "longitude": 12.51}]}
+_CURRENT = {"current": {"temperature_2m": 22.5, "apparent_temperature": 21.0, "weather_code": 0, "wind_speed_10m": 7.4}}
+
+
 class GetWeatherTests(unittest.TestCase):
     def test_missing_city_fails(self):
         result = GetWeatherSkill(_config()).execute({})
         self.assertEqual(result.error, "MISSING_PARAMETERS")
 
-    def test_missing_api_key_fails(self):
-        config = mock.MagicMock()
-        config.get.return_value = None
-        result = GetWeatherSkill(config).execute({"city": "Roma"})
-        self.assertEqual(result.error, "MISSING_API_KEY")
+    def test_no_api_key_is_needed(self):
+        with mock.patch("skills.get_weather.is_online", return_value=True):
+            with mock.patch("urllib.request.urlopen", side_effect=[_fake_json_response(_PLACE),
+                                                                   _fake_json_response(_CURRENT)]):
+                result = GetWeatherSkill(None).execute({"city": "roma"})
+        self.assertTrue(result.success, result)
 
     def test_offline_reports_network_unavailable(self):
         with mock.patch("skills.get_weather.is_online", return_value=False):
@@ -52,18 +57,21 @@ class GetWeatherTests(unittest.TestCase):
         self.assertEqual(result.error, "NETWORK_UNAVAILABLE")
 
     def test_a_successful_response_returns_weather_data(self):
-        payload = {"weather": [{"description": "sereno"}], "main": {"temp": 22.5, "feels_like": 21.0}}
         with mock.patch("skills.get_weather.is_online", return_value=True):
-            with mock.patch("urllib.request.urlopen", return_value=_fake_json_response(payload)):
-                result = GetWeatherSkill(_config()).execute({"city": "Roma"})
+            with mock.patch("urllib.request.urlopen", side_effect=[_fake_json_response(_PLACE),
+                                                                   _fake_json_response(_CURRENT)]) as urlopen:
+                result = GetWeatherSkill(_config()).execute({"city": "roma"})
         self.assertTrue(result.success)
+        self.assertIn("latitude=41.89", urlopen.call_args_list[1].args[0])
+        self.assertEqual(result.data["city"], "Roma")
+        self.assertEqual(result.data["wind_kmh"], 7.4)
         self.assertEqual(result.data["description"], "sereno")
         self.assertEqual(result.data["temperature"], 22.5)
         self.assertEqual(result.data["feels_like"], 21.0)
 
-    def test_city_not_found_on_http_404(self):
+    def test_city_not_found_when_geocoding_has_no_results(self):
         with mock.patch("skills.get_weather.is_online", return_value=True):
-            with mock.patch("urllib.request.urlopen", side_effect=_fake_http_error(404)):
+            with mock.patch("urllib.request.urlopen", return_value=_fake_json_response({"generationtime_ms": 0.8})):
                 result = GetWeatherSkill(_config()).execute({"city": "Cittainesistente"})
         self.assertEqual(result.error, "CITY_NOT_FOUND")
 
@@ -87,15 +95,18 @@ class GetWeatherTests(unittest.TestCase):
                     result = GetWeatherSkill(_config()).execute({"city": "Roma"})
             self.assertEqual(result.error, "NETWORK_UNAVAILABLE", msg=body)
 
-    def test_malformed_weather_and_main_fields_degrade_gracefully(self):
-        payload = {"weather": "boh", "main": "boh"}
-        with mock.patch("skills.get_weather.is_online", return_value=True):
-            with mock.patch("urllib.request.urlopen", return_value=_fake_json_response(payload)):
-                result = GetWeatherSkill(_config()).execute({"city": "Roma"})
-        self.assertTrue(result.success)
-        self.assertEqual(result.data["description"], "")
-        self.assertIsNone(result.data["temperature"])
-        self.assertIsNone(result.data["feels_like"])
+    def test_malformed_current_fields_degrade_gracefully(self):
+        for current in ({"current": "boh"}, {"current": {"weather_code": "x"}}):
+            with mock.patch("skills.get_weather.is_online", return_value=True):
+                with mock.patch("urllib.request.urlopen", side_effect=[_fake_json_response(_PLACE),
+                                                                       _fake_json_response(current)]):
+                    result = GetWeatherSkill(_config()).execute({"city": "Roma"})
+            if isinstance(current["current"], dict):
+                self.assertTrue(result.success)
+                self.assertEqual(result.data["description"], "")
+                self.assertIsNone(result.data["temperature"])
+            else:
+                self.assertEqual(result.error, "NETWORK_UNAVAILABLE")
 
 
 if __name__ == "__main__":

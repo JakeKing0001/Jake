@@ -1,5 +1,5 @@
 """Test unitari per skills/get_news.py: nessuna suite esisteva finora. urllib.request.urlopen e'
-sempre mockato, is_online forzato a True, config e' un MagicMock con una news_api_key finta.
+sempre mockato, is_online forzato a True, config e' un MagicMock con una news_api_key finta (NewsData.io).
 
 F1: buco reale corretto in questa sessione (stesso pattern sistemico gia' corretto per altri
 consumatori diretti di API esterne) - GetNewsSkill non validava la forma della risposta prima di
@@ -38,25 +38,34 @@ class GetNewsTests(unittest.TestCase):
         result = GetNewsSkill(config).execute({})
         self.assertEqual(result.error, "MISSING_API_KEY")
 
+    def test_a_rejected_key_is_reported_as_invalid_not_as_a_network_problem(self):
+        rejected = error.HTTPError(url="https://newsdata.io", code=401, msg="Unauthorized", hdrs=None, fp=None)
+        with mock.patch("skills.get_news.is_online", return_value=True):
+            with mock.patch("urllib.request.urlopen", side_effect=rejected):
+                result = GetNewsSkill(_config()).execute({})
+        self.assertEqual((result.error, result.data.get("invalid")), ("MISSING_API_KEY", True))
+
     def test_offline_reports_network_unavailable(self):
         with mock.patch("skills.get_news.is_online", return_value=False):
             result = GetNewsSkill(_config()).execute({})
         self.assertEqual(result.error, "NETWORK_UNAVAILABLE")
 
     def test_a_successful_response_returns_headlines(self):
-        payload = {"articles": [
-            {"title": "Titolo uno", "source": {"name": "Fonte Uno"}},
-            {"title": "Titolo due", "source": {"name": "Fonte Due"}},
+        payload = {"status": "success", "results": [
+            {"title": "Titolo uno", "source_name": "Fonte Uno"},
+            {"title": "Titolo due", "source_id": "fontedue"},
+            {"title": "titolo uno ", "source_name": "Altra testata"},  # stessa notizia ripetuta
         ]}
         with mock.patch("skills.get_news.is_online", return_value=True):
             with mock.patch("urllib.request.urlopen", return_value=_fake_json_response(payload)):
                 result = GetNewsSkill(_config()).execute({})
         self.assertTrue(result.success)
         self.assertEqual(len(result.data["headlines"]), 2)
-        self.assertEqual(result.data["headlines"][0], {"title": "Titolo uno", "source": "Fonte Uno"})
+        self.assertEqual(result.data["headlines"], [{"title": "Titolo uno", "source": "Fonte Uno"},
+                                                    {"title": "Titolo due", "source": "fontedue"}])
 
     def test_caps_results_at_max(self):
-        payload = {"articles": [{"title": f"T{i}", "source": {"name": "F"}} for i in range(20)]}
+        payload = {"results": [{"title": f"T{i}", "source_name": "F"} for i in range(20)]}
         with mock.patch("skills.get_news.is_online", return_value=True):
             with mock.patch("urllib.request.urlopen", return_value=_fake_json_response(payload)):
                 result = GetNewsSkill(_config()).execute({})
@@ -70,8 +79,8 @@ class GetNewsTests(unittest.TestCase):
 
     def test_malformed_payload_does_not_crash(self):
         """Il buco reale trovato e corretto in questa sessione."""
-        bodies = [b"null", b"[]", b"42", json.dumps({"articles": "boh"}).encode(),
-                  json.dumps({"articles": [1, 2, "boh"]}).encode()]
+        bodies = [b"null", b"[]", b"42", json.dumps({"results": "boh"}).encode(),
+                  json.dumps({"results": [1, 2, "boh"]}).encode()]
         for body in bodies:
             with mock.patch("skills.get_news.is_online", return_value=True):
                 with mock.patch("urllib.request.urlopen", return_value=_fake_response(body)):
@@ -79,7 +88,7 @@ class GetNewsTests(unittest.TestCase):
             self.assertEqual(result.error, "NOT_FOUND", msg=body)
 
     def test_article_with_malformed_source_still_returns_empty_source_name(self):
-        payload = {"articles": [{"title": "Titolo", "source": "non un dizionario"}]}
+        payload = {"results": [{"title": "Titolo", "source_name": {"non": "una stringa"}}]}
         with mock.patch("skills.get_news.is_online", return_value=True):
             with mock.patch("urllib.request.urlopen", return_value=_fake_json_response(payload)):
                 result = GetNewsSkill(_config()).execute({})

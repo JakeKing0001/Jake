@@ -1,5 +1,4 @@
 {
-  "weather_api_key": "",
   "news_api_key": "",
   "ollama_model": "qwen2.5:7b",
   "coder_model": "qwen2.5-coder:7b",

@@ -306,7 +306,10 @@ def _format_error(intent: str, result: SkillResult) -> str:
     if error == "MODEL_ERROR":
         return "Il modello locale ha restituito un errore. Puoi dirmi \"riprova\"."
     if error == "MISSING_API_KEY":
-        return f"Per usarlo devi configurare '{data.get('setting', '')}' in config/settings.json (vedi config/settings.example.json)."
+        where = f" (la chiave gratuita si prende su {data['signup']})" if data.get("signup") else ""
+        if data.get("invalid"):
+            return f"La chiave '{data.get('setting', '')}' in config/settings.json non è valida{where}."
+        return f"Per usarlo devi configurare '{data.get('setting', '')}' in config/settings.json{where}."
     if error == "CITY_NOT_FOUND":
         return f"Non trovo la città {data.get('city', '')}"
     if error == "INVALID_URL":
@@ -447,7 +450,9 @@ def _format_success(intent: str, result: SkillResult, registry=None) -> str | No
         source = f" (fonte: {data['url']})" if data.get("url") else ""
         return f"{data['summary']}{source}"
     if intent == "GET_WEATHER":
-        return f"A {data['city']}: {data['description']}, {data.get('temperature')}°C (percepiti {data.get('feels_like')}°C)"
+        description = f"{data['description']}, " if data.get("description") else ""
+        wind = f", vento {round(data['wind_kmh'])} km/h" if isinstance(data.get("wind_kmh"), (int, float)) else ""
+        return f"A {data['city']}: {description}{data.get('temperature')}°C (percepiti {data.get('feels_like')}°C){wind}"
     if intent == "GET_NEWS":
         formatted = "; ".join(f"{h['title']} ({h['source']})" for h in data["headlines"])
         return f"Ultime notizie: {formatted}"
