@@ -702,3 +702,5 @@
 {"text": "smetti di sorvegliare npm", "intent": "STOP_WATCH", "parameters": {"process": "npm"}}
 {"text": "a cosa stai lavorando", "intent": "STATUS_OVERVIEW", "parameters": {}}
 {"text": "hai qualcosa in sospeso", "intent": "STATUS_OVERVIEW", "parameters": {}}
+{"text": "di cosa abbiamo parlato ieri", "intent": "RECALL_CONVERSATION", "parameters": {"when": "ieri"}}
+{"text": "cosa ti ho chiesto sulla palestra la settimana scorsa", "intent": "RECALL_CONVERSATION", "parameters": {"when": "la settimana scorsa", "topic": "palestra"}}

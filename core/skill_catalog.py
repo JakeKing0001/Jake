@@ -210,6 +210,7 @@ def build_memory_notes_todo_skills(memory_manager, embedding_provider, todo_mana
     from core.memory_privacy import MemoryPrivacyDashboard
     from skills.explain_memory import ExplainMemorySkill
     from skills.memory_controls import ExportMemoriesSkill, PinMemorySkill
+    from skills.recall_conversation import RecallConversationSkill
 
     # F5.7: la privacy dashboard diventa il percorso reale di "dimentica", "da dove sai" e dell'uso
     # dei ricordi. Ricevute di cancellazione (solo hash) accanto al database della memoria.
@@ -223,6 +224,7 @@ def build_memory_notes_todo_skills(memory_manager, embedding_provider, todo_mana
         "EXPLAIN_MEMORY": ExplainMemorySkill(dashboard),
         "EXPORT_MEMORIES": ExportMemoriesSkill(dashboard),
         "PIN_MEMORY": PinMemorySkill(dashboard),
+        "RECALL_CONVERSATION": RecallConversationSkill(memory_manager),
         "LINK_MEMORY": LinkMemorySkill(memory_manager),
         "PURGE_OLD_HISTORY": PurgeOldHistorySkill(memory_manager),
         "ADD_NOTE": AddNoteSkill(),

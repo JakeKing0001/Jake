@@ -616,6 +616,23 @@ class MemoryManager:
             ).fetchall()
             return [dict(row) for row in reversed(rows)]
 
+    def history_between(self, since: str, until: str, topic: str | None = None, role: str | None = None) -> list[dict]:
+        """F5.2 (episodica): i turni della cronologia in un periodo [since, until), in ordine, eventualmente su un
+        argomento (testo che lo contiene) e di un solo ruolo."""
+        clauses, params = ["created_at >= ?", "created_at < ?"], [since, until]
+        if topic:
+            clauses.append("lower(text) LIKE ?")
+            params.append(f"%{topic.lower()}%")
+        if role:
+            clauses.append("role = ?")
+            params.append(role)
+        with self._lock:
+            rows = self._connection.execute(
+                f"SELECT role, text, created_at FROM conversation_history WHERE {' AND '.join(clauses)} ORDER BY id ASC",
+                params,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def summarize_old_history(self, summarizer, keep_recent: int = 50) -> bool:
         """Comprime i turni piu' vecchi di keep_recent in un'unica memoria 'summary', poi li elimina.
 
