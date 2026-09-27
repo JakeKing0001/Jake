@@ -69,6 +69,9 @@ class PushToTalkSession:
         if not self.microphone.is_available():
             print("Nessun microfono disponibile: la modalità voce non può funzionare su questo computer.")
             return
+        mark_ready = getattr(self.jake_core, "mark_ready", None)
+        if callable(mark_ready):
+            mark_ready()
 
         while True:
             keyboard.wait(self.hotkey)

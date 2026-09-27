@@ -91,6 +91,25 @@ class NotifyPipelineTests(unittest.TestCase):
         self.assertEqual(core.notification_center.pending_count(), 0)
         self.assertIsNone(core.release_deferred_notifications(), "nessun riepilogo vuoto o ripetuto")
 
+    def test_advisories_wait_until_jake_is_ready_while_reminders_do_not(self):
+        """Prova reale del 27/09/2026: "comprare il pane" e la pulizia dei Download durante "Carico il modello...". """
+        core = self._core(ProactiveGate())
+        core.ready_for_notifications = False
+        core.READY_SETTLE_S = 0.0
+        delivered = []
+        core.system_advisor = mock.MagicMock(on_advisory=lambda message: delivered.append(core.notify("advisory", message)))
+        self.assertIsNone(core.notify("advisory", 'Attivita\' in sospeso: "comprare il pane".'))
+        self.assertIsNone(core.notify("advisory", "La cartella Download ha accumulato 4.2 GB."))
+        self.assertEqual(core.notify("reminder", "Promemoria: medicina"), "Promemoria: medicina")
+        self.assertEqual(delivered, [])
+        core.mark_ready()
+        deadline = time.time() + 2
+        while not delivered and time.time() < deadline:
+            time.sleep(0.02)
+        self.assertEqual(delivered, ['All\'avvio ho notato: Attivita\' in sospeso: "comprare il pane"; '
+                                     'La cartella Download ha accumulato 4.2 GB.'])
+        self.assertEqual(core.notification_center.pending_count(), 0)
+
     def test_no_digest_right_after_an_answer_or_while_suspended(self):
         core = self._core(ProactiveGate())
         core.system_advisor = mock.MagicMock()

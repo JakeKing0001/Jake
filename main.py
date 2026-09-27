@@ -71,6 +71,7 @@ def _dispatch():
 def run_cli_mode():
     print(f"Jake {VERSION} avviato (modalita' testo). Scrivi 'esci' per chiudere.")
     core = JakeCore()
+    core.mark_ready()
     while True:
         try:
             user_text = input("Tu > ")
@@ -303,6 +304,7 @@ def run_tray_mode():
         return
 
     core = JakeCore()
+    core.mark_ready()
     run_tray(core)
 
 
@@ -357,6 +359,8 @@ def run_jarvis_mode(with_voice: bool = True):
         backdrop=str(core.config.get("hud_backdrop", "clear") or "clear"),
         quick_actions=quick_actions,
     )
+    if session is None:
+        core.mark_ready()  # con la voce lo segnala la sessione, a microfono aperto
     try:
         app.run()
     finally:

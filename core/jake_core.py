@@ -538,6 +538,14 @@ class JakeCore:
         # Jake proattivo (v3.2): nota da solo batteria scarica e disco quasi pieno, senza
         # che tu debba chiederglielo (vedi core/system_advisor.py). Disattivabile da config
         # per chi lo trova invadente o lavora su un fisso senza batteria.
+        # Prova reale del 27/09/2026: "comprare il pane" e la pulizia dei Download comparivano mentre Jake stava
+        # ancora caricando Whisper e riscaldando RVC. Finche' la sessione (voce, testo, tray) non dice di essere
+        # pronta, gli avvisi non urgenti restano in coda; poi escono insieme, con budget e duplicati del gate.
+        # Una rete di sicurezza li libera comunque dopo READY_FALLBACK_S, per le modalita' che non lo segnalano.
+        self.ready_for_notifications = False
+        self._ready_fallback = threading.Timer(self.READY_FALLBACK_S, self.mark_ready)
+        self._ready_fallback.daemon = True
+        self._ready_fallback.start()
         self.system_advisor = SystemAdvisor(
             on_advisory=self._default_on_advisory,
             enabled=bool(config.get("system_advisor_enabled", True)),
@@ -718,6 +726,10 @@ class JakeCore:
         dentro il risultato testuale di `SET_NOTIFICATION_MODE`, mai come un secondo `HudEvent` -
         non c'e' un evento successivo a cui riattaccare il trace_id, dichiarato apertamente."""
         gated = self.notification_center.gate(kind, message)
+        if gated is not None and kind == "advisory" and not critical and not getattr(self, "ready_for_notifications", True):
+            self.notification_center.defer(kind, gated)
+            self.logger.info("Notifica %s rimandata: Jake non ha ancora finito di avviarsi", kind)
+            return None
         gate = getattr(self, "proactive_gate", None)
         if gated is not None and gate is not None:
             # F6.1/F6.3: un duplicato si scarta; budget, quiet hours o conversazione in corso -> in coda
@@ -746,7 +758,7 @@ class JakeCore:
         except Exception:
             self.logger.exception("Errore ricontrollando la scelta del modello")
 
-    def release_deferred_notifications(self) -> str | None:
+    def release_deferred_notifications(self, prefix: str = "Mentre eri impegnato: ") -> str | None:
         """F6.3: le notifiche rimandate dal gate (budget, quiet hours, conversazione) non restano in coda
         per sempre. Appena le condizioni lo permettono escono come UN riepilogo attraverso il canale degli
         avvisi (stampa in CLI, voce nella sessione vocale). Ritorna il riepilogo consegnato, o None."""
@@ -762,7 +774,7 @@ class JakeCore:
         if not items:
             return None
         shown = [item["message"].rstrip(".") for item in items[: self.DIGEST_MAX_ITEMS]]
-        digest = "Mentre eri impegnato: " + "; ".join(shown) + "."
+        digest = prefix + "; ".join(shown) + "."
         if len(items) > self.DIGEST_MAX_ITEMS:
             digest += f" E altre {len(items) - self.DIGEST_MAX_ITEMS} notifiche."
         callback = getattr(getattr(self, "system_advisor", None), "on_advisory", None) or self._default_on_advisory
@@ -820,6 +832,22 @@ class JakeCore:
             label = reminder.get("text") or "timer"
             return "Il timer è scaduto!" if label == "timer" else f"Il timer per {label} è scaduto!"
         return f"Promemoria: {reminder['text']}"
+
+    READY_FALLBACK_S = 120.0
+    READY_SETTLE_S = 4.0  # dopo "sono pronto": il tempo di un saluto prima degli avvisi rimasti in coda
+
+    def mark_ready(self) -> None:
+        """La sessione ha finito di avviarsi (microfono aperto, modello vocale caricato, prompt pronto)."""
+        if getattr(self, "ready_for_notifications", True):
+            return
+        self.ready_for_notifications = True
+        fallback = getattr(self, "_ready_fallback", None)
+        if fallback is not None:
+            fallback.cancel()
+        timer = threading.Timer(self.READY_SETTLE_S, self.release_deferred_notifications,
+                                kwargs={"prefix": "All'avvio ho notato: "})
+        timer.daemon = True
+        timer.start()
 
     def _default_on_advisory(self, message: str) -> None:
         gated = self.notify("advisory", message)
@@ -3444,6 +3472,9 @@ class JakeCore:
         # componente che non si chiude bene non deve impedire agli altri di provarci).
         #
         # F4.8.2: l'HUD nativo si chiude prima del server a cui e' collegato (niente riconnessioni a vuoto).
+        fallback = getattr(self, "_ready_fallback", None)
+        if fallback is not None:
+            fallback.cancel()
         native_hud = getattr(self, "native_hud", None)
         if native_hud is not None:
             try:

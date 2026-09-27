@@ -701,6 +701,9 @@ class WakeWordSession:
             return
         self._set_state("idle", "")
         self._update_mic(True, self.listening.state.value)
+        mark_ready = getattr(self.jake_core, "mark_ready", None)
+        if callable(mark_ready):
+            mark_ready()  # microfono aperto e Whisper caricato: ora gli avvisi rimasti in coda possono uscire
         try:
             self._listen_loop()
         finally:
