@@ -1098,6 +1098,8 @@ class JakeCore:
         return f"{response} {question}".strip() if response else question
 
     SLOW_TURN_NOTICE_S = 8.0
+    # intent che sono solo una risposta del modello: per l'HUD restano "penso", non "eseguo"
+    MODEL_ONLY_INTENTS = frozenset({"ASK_QUESTION", "CHITCHAT", "UNKNOWN"})
     UNCLEAR_REPLY = "Non ho capito bene, puoi ripetere?"
 
     def _transcript_repair(self) -> TranscriptRepair:
@@ -1238,6 +1240,9 @@ class JakeCore:
 
         # prova reale del 27/09/2026: il primo timeout del modello vale per tutto il turno (niente cascata di attese)
         health_token = model_health.begin_turn()
+        # l'HUD vede subito che Jake lavora a questa richiesta (anche scritta dall'HUD o dal telefono, senza sessione
+        # vocale che lo dica); EXECUTING arriva quando parte davvero una skill (_resolve_and_execute)
+        self.event_bus.publish(HudEvent(EventType.THINKING, {}))
         # B5: una chiamata al modello lunga non deve sembrare un blocco: dopo qualche secondo l'HUD dice cosa aspetta
         turn_state = model_health.current()
         slow_notice = threading.Timer(self.SLOW_TURN_NOTICE_S, lambda: self.event_bus.publish(HudEvent(
@@ -2014,6 +2019,9 @@ class JakeCore:
         resolved, policy_result, policy_reason = self._authorize_command(resolved)
         if policy_result is not None:
             return ActionExecution(resolved, policy_result, policy_reason=policy_reason)
+        if resolved.intent not in self.MODEL_ONLY_INTENTS:
+            # una skill vera parte adesso (autorizzata): l'orb passa da "penso" a "eseguo"
+            self.event_bus.publish(HudEvent(EventType.EXECUTING, {}))
         result = self.skill_registry.execute(
             resolved.intent, resolved.parameters, policy_engine=self.policy_engine,
             action_id=action_id, private=self.private_mode,
