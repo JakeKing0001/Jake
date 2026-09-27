@@ -432,6 +432,16 @@ class MemoryManager:
                     entry["score"] = similarity * self._freshness(entry)
                     entry["why"] = f"simile per significato ({similarity:.2f})"
                     candidates[key] = entry
+        # Prova reale del 27/09/2026: "cosa e' un processore?" riceveva il riassunto di una conversazione passata perche'
+        # conteneva "processore". Domanda di conoscenza generale: nessun ricordo, salvo uno nominato esplicitamente; un
+        # riassunto di conversazione solo se la domanda parla di conversazioni passate (core/memory_relevance.py).
+        from core.memory_relevance import GENERIC, query_kind, refers_to_conversation
+
+        generic = query_kind(question) == GENERIC
+        about_conversation = refers_to_conversation(question)
+        candidates = {k: e for k, e in candidates.items()
+                      if (not generic or e["why"].startswith("chiave citata"))
+                      and (e.get("category") != "summary" or about_conversation)}
         if temporal is not None:
             (since, until), phrase = temporal
             candidates = {k: e for k, e in candidates.items() if since <= str(e.get("updated_at") or "") <= until}
@@ -650,7 +660,9 @@ class MemoryManager:
             if not summary_text:
                 return False
 
-            self.remember(f"riassunto conversazione del {self._now()}", summary_text, category="summary")
+            # un riassunto lo scrive Jake: non e' "me l'hai detto tu"
+            self.remember(f"riassunto conversazione del {self._now()}", summary_text, category="summary",
+                          source="conversation")
             self._connection.executemany(
                 "DELETE FROM conversation_history WHERE id = ?", [(row["id"],) for row in overflow]
             )

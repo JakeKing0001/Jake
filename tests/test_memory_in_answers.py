@@ -46,20 +46,49 @@ class MemoryInAnswersTests(unittest.TestCase):
         self.assertNotIn("targa", memory_block, "solo i ricordi pertinenti, non tutta la memoria")
         answer = result.data["answer"]
         self.assertNotIn("[M1]", answer, "il marcatore non si legge ad alta voce")
-        self.assertIn("(Dai miei ricordi: compleanno di Giulia (me l'hai detto tu il ", answer)
+        self.assertIn("(Lo so perché me l'avevi detto il ", answer)
+        self.assertNotRegex(answer, r"\d{4}-\d{2}-\d{2}", "nessun timestamp tecnico nella risposta")
         self.assertEqual(self.dashboard.get("compleanno di Giulia").use_count, 1)
 
     def test_an_inference_is_never_presented_as_something_the_user_said(self):
         result, _ = self._ask("qual e' il mio colore preferito?", "Credo sia il verde.")
-        self.assertIn("colore preferito (l'ho dedotto io, non me l'hai detto tu)", result.data["answer"])
+        self.assertIn("(Questo l'ho dedotto io, non me l'avevi detto tu.)", result.data["answer"])
 
     def test_no_memory_no_citation_and_private_mode_leaves_no_trace(self):
         result, messages = self._ask("spiegami la fotosintesi", "La fotosintesi trasforma la luce in energia.")
-        self.assertNotIn("Dai miei ricordi", result.data["answer"])
+        self.assertNotIn("Lo so perché", result.data["answer"])
         self.assertFalse(any("Ricordi dell'utente" in m["content"] for m in messages))
         self.skill.private_mode_provider = lambda: True
         self._ask("quando e' il compleanno di Giulia?", "Il 12 marzo.")
         self.assertEqual(self.dashboard.get("compleanno di Giulia").use_count, 0)
+
+    def test_a_general_knowledge_question_gets_no_personal_memory_even_with_a_word_in_common(self):
+        """Prova reale del 27/09/2026: "cosa e' un processore?" + "(Dai miei ricordi: riassunto conversazione del
+        2026-09-27T07:26...)" perche' il riassunto di una conversazione passata conteneva "processore"."""
+        self.memory.remember("riassunto conversazione del 2026-09-26T10:00:00+00:00",
+                             "L'utente ha chiesto come funziona un processore e ha parlato del suo PC da gioco.",
+                             category="summary", source="conversation")
+        self.memory.remember("pc di casa", "processore Ryzen 7 e 32 GB di RAM", source="user")
+        for question in ("cosa è un processore?", "come funziona un processore?", "spiegami cos'è una CPU"):
+            result, messages = self._ask(question, "Un processore esegue istruzioni [M1].")
+            self.assertFalse(any("Ricordi dell'utente" in m["content"] for m in messages), question)
+            self.assertNotIn("Lo so perché", result.data["answer"], question)
+
+    def test_a_personal_question_uses_the_memory_and_says_where_it_comes_from(self):
+        self.memory.remember("linguaggi che sto studiando", "Rust e Go", source="user")
+        result, messages = self._ask("che linguaggi sto studiando?", "Stai studiando Rust e Go [M1].")
+        self.assertTrue(any("Rust e Go" in m["content"] for m in messages if m["role"] == "system"))
+        self.assertIn("(Lo so perché me l'avevi detto il ", result.data["answer"])
+
+    def test_a_mixed_question_cites_the_memory_only_if_the_answer_really_used_it(self):
+        self.memory.remember("linguaggi che sto studiando", "Rust e Go", source="user")
+        question = "spiegami le reti neurali considerando quello che sto studiando"
+        result, messages = self._ask(question, "Una rete neurale impara dai dati; con Rust puoi usare burn [M1].")
+        self.assertTrue(any("Rust e Go" in m["content"] for m in messages if m["role"] == "system"))
+        self.assertIn("Lo so perché", result.data["answer"])
+        # marcatore scritto ma nulla del ricordo nella risposta: nessuna citazione
+        result, _ = self._ask(question, "Una rete neurale impara dai dati attraverso strati di neuroni [M1].")
+        self.assertNotIn("Lo so perché", result.data["answer"])
 
     def test_the_context_budget_is_respected(self):
         for n in range(20):

@@ -384,7 +384,57 @@ def memory_provenance(entry: dict) -> str:
         return " (l'ho dedotto io, non me l'hai detto tu)"
     if source.startswith("agent:"):
         return " (salvato da un agente)"
+    if source == "conversation":
+        return f" (da una nostra conversazione{' del ' + date if date else ''})"
     return f" (fonte: {source})" if source else " (fonte sconosciuta)"
+
+
+_MONTHS = ("gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre",
+           "novembre", "dicembre")
+
+
+def _spoken_day(updated_at) -> str:
+    """"il 27 settembre" (l'anno solo se non e' quello corrente), "" se la data non si legge."""
+    from datetime import datetime
+
+    day = str(updated_at or "")[:10]
+    try:
+        when = datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        return ""
+    year = f" {when.year}" if when.year != datetime.now().year else ""
+    return f" il {when.day} {_MONTHS[when.month - 1]}{year}"
+
+
+def memory_citation(cited: list[dict]) -> str:
+    """Prova reale del 27/09/2026: da dove viene cio' che la risposta ha preso dalla memoria, detto come lo direbbe
+    una persona ("Lo so perche' me l'avevi detto il 27 settembre.") invece di "(Dai miei ricordi: riassunto
+    conversazione del 2026-09-27T07:26...)". Solo per i ricordi davvero usati: la scelta la fa chi chiama."""
+    def how(entry: dict) -> str:
+        source, day = str(entry.get("source") or ""), _spoken_day(entry.get("updated_at"))
+        if source == "user":
+            return f"me l'avevi detto{day}"
+        if source == "inferred":
+            return "l'ho dedotto io, non me l'avevi detto tu"
+        if source == "conversation":
+            return f"ne avevamo parlato{day}"
+        if source.startswith("agent:"):
+            return "l'aveva salvato un agente"
+        return "viene dai miei ricordi"
+
+    if not cited:
+        return ""
+    if len(cited) == 1:
+        reason = how(cited[0])
+        if reason.startswith("l'ho dedotto"):
+            return "(Questo " + reason + ".)"
+        return "(Lo so perché " + reason + ".)"
+    parts = []
+    for entry in cited:
+        key = str(entry.get("key") or "")
+        label = "una nostra conversazione" if str(entry.get("category")) == "summary" else key
+        parts.append(f"{label}: {how(entry)}")
+    return "(" + "; ".join(parts) + ".)"
 
 def _format_success(intent: str, result: SkillResult, registry=None) -> str | None:
     data = result.data or {}
