@@ -37,6 +37,7 @@ ApplicationWindow {
     property string jakeToken: ""
     // Impostati da src/main.cpp: accessibilita' e qualita' dell'orb (F4.4.5, F4.3.5).
     property bool reducedMotion: false
+    property bool highContrast: false
     property string orbQuality: "high"
     property bool orb3d: false
 
@@ -76,6 +77,7 @@ ApplicationWindow {
     onPointerOverAnyPanelChanged: if (!typing) overlayStyler.setClickThrough(window, !pointerOverAnyPanel)
 
     Component.onCompleted: {
+        Theme.highContrast = highContrast
         if (jakeToken.length > 0)
             jake.setCredentials(jakeDeviceId, jakeToken)
         jake.connectToJake(jakeBaseUrl)

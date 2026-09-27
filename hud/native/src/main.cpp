@@ -21,6 +21,17 @@ bool systemPrefersReducedMotion() {
 #endif
     return false;
 }
+
+// F4.7.3: "Contrasto elevato" di Windows (Accessibilita'), letto all'avvio.
+bool systemUsesHighContrast() {
+#ifdef Q_OS_WIN
+    HIGHCONTRASTW contrast{};
+    contrast.cbSize = sizeof(contrast);
+    if (SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0))
+        return (contrast.dwFlags & HCF_HIGHCONTRASTON) != 0;
+#endif
+    return false;
+}
 } // namespace
 
 int main(int argc, char *argv[]) {
@@ -46,6 +57,8 @@ int main(int argc, char *argv[]) {
     QVariantMap initial;
     initial.insert(QStringLiteral("reducedMotion"),
                    systemPrefersReducedMotion() || qEnvironmentVariable("JAKE_HUD_REDUCED_MOTION") == QLatin1String("1"));
+    initial.insert(QStringLiteral("highContrast"),
+                   systemUsesHighContrast() || qEnvironmentVariable("JAKE_HUD_HIGH_CONTRAST") == QLatin1String("1"));
     // JAKE_HUD_QUALITY=low per GPU deboli/batteria (F4.3.5); JAKE_HUD_ORB=2d forza l'orb 2D.
     initial.insert(QStringLiteral("orbQuality"), qEnvironmentVariable("JAKE_HUD_QUALITY") == QLatin1String("low")
                    ? QStringLiteral("low") : QStringLiteral("high"));
