@@ -16,6 +16,8 @@ Rectangle {
     }
 
     HoverHandler { id: hover }
+    Component.onCompleted: Theme.registerPanel(panel)
+    Component.onDestruction: Theme.unregisterPanel(panel)
 
     // riflesso sottile sul bordo superiore: da' materia al vetro senza effetti costosi
     Rectangle {

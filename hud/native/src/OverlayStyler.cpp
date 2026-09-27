@@ -1,5 +1,7 @@
 #include "OverlayStyler.h"
 
+#include <QCursor>
+
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
@@ -67,4 +69,10 @@ void OverlayStyler::forceVisibility(QQuickWindow *window, bool visible) {
     Q_UNUSED(window);
     Q_UNUSED(visible);
 #endif
+}
+
+QPointF OverlayStyler::cursorInWindow(QQuickWindow *window) const {
+    if (!window)
+        return QPointF(-1, -1);
+    return window->mapFromGlobal(QCursor::pos()).toPointF();
 }

@@ -264,7 +264,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F4.4` | Interaction Design (26/09/2026: orb 3D Qt Quick 3D con nucleo volumetrico e particle shell, comportamento per stato interrupt-safe, reduced motion di Windows, qualita' high/low, fallback 2D; livelli audio reali di microfono e voce di Jake collegati all'orb; 27/09/2026 sera: particelle come massa viva a tre strati con moto individuale, orbite differenziali, componente radiale e reazioni per stato/audio/esito, modalita' demo JAKE_HUD_DEMO=1; giudizio estetico `VERIFY` dall'utente) | `DOING` |
 | `F4.5` | Interaction Design (26/09/2026: trascrizione live, permission card, prove, diagnosi, notifiche nell'HUD nativo; 27/09/2026: modalita' privata = nessun contenuto verso HUD/companion/replay, con indicatore; piano live con stato e durata di ogni passo; modalita' di notifica e notifiche in attesa visibili; verifica visiva da fare) | `DOING` |
 | `F4.6` | Trust UX (26/09/2026: kill switch visibile e scorciatoia globale; action center con ultima azione, esito, verifica e undo con scadenza; 27/09/2026: dettagli dell'azione per l'utente - origine, esito/categoria, verifica, annullabilita', traccia - e motivo quando l'undo non e' piu' disponibile; retry sicuro dell'ultima azione fallita a voce e dal pulsante "Riprova"; undo rifiutato se il file/la cartella da cancellare e' cambiato dopo) | `DOING` |
-| `F4.7` | Accessibility (26/09/2026: nomi accessibili, focus ring, scrittura reale nella barra comandi di un overlay no-activate, scorciatoie globali Ctrl+Shift+J / Ctrl+Alt+Fine, reduced motion; 27/09/2026: alto contrasto da Windows o JAKE_HUD_HIGH_CONTRAST, verificato a schermo; "Dimensioni testo" di Windows applicata a tutto l'HUD (o JAKE_HUD_TEXT_SCALE), verificata a schermo al 150% di sistema; screen reader, scaling e alto contrasto da verificare) | `DOING` |
+| `F4.7` | Accessibility (26/09/2026: nomi accessibili, focus ring, scrittura reale nella barra comandi di un overlay no-activate, scorciatoie globali Ctrl+Shift+J / Ctrl+Alt+Fine, reduced motion; 27/09/2026: alto contrasto da Windows o JAKE_HUD_HIGH_CONTRAST, verificato a schermo; "Dimensioni testo" di Windows applicata a tutto l'HUD (o JAKE_HUD_TEXT_SCALE), verificata a schermo al 150% di sistema; layout completo/compatto/focus ricordato per monitor, HUD sul bordo destro del monitor scelto, spostamento sull'altro monitor e riposizionamento all'hot-plug; screen reader da verificare) | `DOING` |
 | `F4.8` | Release Engineering (26/09/2026: core e HUD nativo avviati in ordine come processi separati, riavvio dell'HUD solo dopo un crash e con un tetto; installer/crash dump/rollback non iniziati; 27/09/2026: quando il supervisore smette di riavviare un HUD in crash revoca la sua credenziale e lo dice all'utente) | `DOING` |
 | `F5.1` | Memory Platform (F5.1.1/F5.1.3-F5.1.6 il 21/09/2026: schema versionato, migrazioni transazionali con backup, metadati, recupero; resta F5.1.2 separare entita'/episodi/procedure e la prova su una copia del database reale) | `DOING` |
 | `F5.2` | Memory Platform | `DOING` |
@@ -8970,6 +8970,19 @@ Criterio di uscita: checklist accessibilità + test Windows e monitor matrix com
   riporta no-activate/click-through a invio, Esc o focus perso. Ctrl+Alt+Fine (globale) invia "ferma tutto".
   Le scorciatoie sono registrate con RegisterHotKey; se un'altra app le ha gia' prese non vengono finte.
   Focus ring visibile sul campo di testo. Verifica interattiva `VERIFY`.
+
+- 27/09/2026 sera (bug reale, F4.2.1/F4.6.5): con `WS_EX_TRANSPARENT` attivo all'avvio la finestra non riceveva
+  NESSUN evento del mouse, nemmeno l'hover che doveva toglierlo sopra un pannello: i pulsanti ("Ferma tutto",
+  "Annulla", "Riprova") non erano cliccabili col mouse e il click finiva nell'app sotto (riprodotto: un click sul
+  pulsante apriva un popup di VS Code). Ora `OverlayStyler.cursorInWindow` legge la posizione reale del cursore e
+  ogni 60 ms l'HUD attiva/disattiva il click-through confrontandola con le aree dei pannelli registrati e dell'orb.
+  Verificato con click reali del mouse (pyautogui) sul binario Release.
+- 27/09/2026 sera (F4.7.3/F4.7.4): layout completo / compatto (senza conversazione) / focus (anche senza barra
+  comandi, che ricompare con Ctrl+Shift+J); richiesta di conferma e "Ferma tutto" restano sempre visibili. Scelta
+  ricordata PER MONITOR (Settings di QtCore, `HKCU\Software\Jake\Jake HUD\layout`), HUD sul bordo destro del
+  monitor scelto, pulsante per spostarlo sull'altro monitor (visibile solo con piu' monitor) e ritorno alla scelta
+  quando i monitor cambiano (hot-plug). Verificato con click reali: completo -> compatto -> focus, ricordato. Con
+  un solo monitor collegato qui lo spostamento tra monitor non e' stato provato dal vivo (SpaceDesk non attivo).
 
 ### F4.8 — Packaging e migrazione dal legacy
 
