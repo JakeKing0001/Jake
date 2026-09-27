@@ -171,12 +171,16 @@ class WakeWordSessionStopTests(VoiceSessionTestCase):
 
         core = _BlockedCore()
         self.addCleanup(core.release.set)
-        convert_release = threading.Event()
-        self.addCleanup(convert_release.set)
+        # la conversione RVC finta resta bloccata finche' il test non la rilascia: cosi' si verifica
+        # davvero che stop() non la aspetti (convert_started) e che poi il thread abbandonato finisca
+        self.convert_started = threading.Event()
+        self.convert_release = threading.Event()
+        self.addCleanup(self.convert_release.set)
         base = mock.MagicMock()
         manager = mock.MagicMock()
         manager.ensure_running.return_value = True
-        manager.client.convert.side_effect = lambda data: (convert_release.wait(10), b"")[1]
+        manager.client.convert.side_effect = lambda data: (
+            self.convert_started.set(), self.convert_release.wait(10), b"")[2]
         tts = CharacterTtsProvider(base, manager)
         tts._synthesize_to_bytes = lambda *a, **k: b"wav"
         played = []
@@ -196,6 +200,7 @@ class WakeWordSessionStopTests(VoiceSessionTestCase):
         self.assertTrue(core.started.wait(2))
         session._speak_async("Sto ancora lavorando alla pagina.")
         self.assertTrue(_wait_until(lambda: vad.muted, 2), "la voce non e' partita")
+        self.assertTrue(self.convert_started.wait(2), "la conversione RVC non e' partita prima di stop()")
 
         started = time.monotonic()
         session.stop()
@@ -212,6 +217,7 @@ class WakeWordSessionStopTests(VoiceSessionTestCase):
 
         # le chiamate bloccate ora rispondono: nessuna frase deve piu' uscire
         core.release.set()
+        self.convert_release.set()
         self.assertTrue(session.wait_for_commands(3))
         session._speak_async("Una frase arrivata dopo stop().")
         time.sleep(0.3)
