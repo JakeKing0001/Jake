@@ -12,7 +12,7 @@ consumatore alla volta, mai trasmissibile in rete. Qui il vocabolario viene reso
 core/companion_server.py possono trasmetterlo fuori dal processo."""
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 
 from core.version import PROTOCOL_VERSION
@@ -75,6 +75,9 @@ class EventType(str, Enum):
     # Il microfono solo mentre Jake ascolta un comando (mai durante l'ascolto della parola di
     # attivazione), la voce solo mentre Jake parla; limitato a circa 10 eventi al secondo.
     AUDIO_LEVEL = "AUDIO_LEVEL"
+    # F4.5.7: la modalita' privata e' attiva/disattiva. Payload: {"enabled": bool}. Mentre e' attiva ogni
+    # evento esce dal bus gia' redatto (vedi redact_private): l'HUD mostra solo l'indicatore e "(privato)".
+    PRIVACY_MODE = "PRIVACY_MODE"
 
 
 # Traduce gli stati gia' in uso da WakeWordSession/SessionHooks.set_state (stringhe libere,
@@ -95,6 +98,42 @@ LEGACY_STATE_TO_EVENT_TYPE = {
     "error": EventType.ERROR,
     "exit": EventType.HUD_HIDE,
 }
+
+
+# F4.5.7 ("nessun contenuto sensibile nelle preview in privacy mode"): i campi che portano CONTENUTO (cio'
+# che l'utente ha detto o scritto, cio' che Jake risponde, testi di notifiche/passi/errori, nomi di elementi
+# sullo schermo, parametri delle azioni). Restano i metadati che servono all'HUD per funzionare: tipo,
+# stato, intent, rischio, id, livelli, esito.
+PRIVATE_TEXT_KEYS = frozenset({
+    "text", "stable_text", "description", "detail", "label", "message", "spoken_text", "screen_text",
+    "request", "summary", "name", "procedure", "error",
+})
+PRIVATE_STRUCTURED_KEYS = frozenset({"parameters", "actions_done", "alternatives", "chosen"})
+PRIVATE_PLACEHOLDER = "(privato)"
+
+
+def _redact_value(key: str | None, value):
+    if key in PRIVATE_STRUCTURED_KEYS:
+        return [] if isinstance(value, list) else None
+    if isinstance(value, dict):
+        return {k: _redact_value(k, v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact_value(None, item) for item in value]
+    if key in PRIVATE_TEXT_KEYS and isinstance(value, str) and value:
+        # una stringa vuota resta vuota: per JAKE_MESSAGE "" significa "sta parlando", non un contenuto
+        return PRIVATE_PLACEHOLDER
+    return value
+
+
+def redact_private(event: "HudEvent") -> "HudEvent":
+    """Copia dell'evento senza contenuto (l'originale del produttore non viene toccato). Applicata da
+    core/event_bus.py al momento della pubblicazione: HUD nativo, companion e buffer di replay non vedono
+    mai il testo, nemmeno dopo che la modalita' privata viene spenta."""
+    if event.type == EventType.PRIVACY_MODE:
+        return event
+    payload = _redact_value(None, event.payload)
+    payload["private"] = True
+    return replace(event, payload=payload)
 
 
 def _reject_json_constant(value: str) -> None:

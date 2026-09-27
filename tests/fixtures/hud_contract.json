@@ -219,6 +219,26 @@
       "expect": {"state": "LISTENING", "audio_source": "mic", "audio_level": 0.25}
     },
     {
+      "name": "modalita' privata: indicatore acceso, il contenuto arriva gia' redatto dal core",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "PRIVACY_MODE", "payload": {"enabled": true}, "sequence_id": 1}},
+        {"event": {"type": "JAKE_MESSAGE", "payload": {"text": "(privato)", "private": true}, "sequence_id": 2}},
+        {"event": {"type": "NOTIFICATION", "payload": {"kind": "advisory", "text": "(privato)", "private": true}, "sequence_id": 3}}
+      ],
+      "expect": {"state": "IDLE", "private_mode": true, "messages": [["jake", "(privato)"]], "notifications": [["advisory", "(privato)"]]}
+    },
+    {
+      "name": "modalita' privata spenta: indicatore spento, solo un booleano vero la accende",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "PRIVACY_MODE", "payload": {"enabled": true}, "sequence_id": 1}},
+        {"event": {"type": "PRIVACY_MODE", "payload": {"enabled": false}, "sequence_id": 2}},
+        {"event": {"type": "PRIVACY_MODE", "payload": {"enabled": "si"}, "sequence_id": 3}}
+      ],
+      "expect": {"private_mode": false}
+    },
+    {
       "name": "livello audio fuori scala limitato a 1",
       "steps": [
         {"connect": true},

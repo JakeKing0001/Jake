@@ -67,6 +67,8 @@ class HudViewState:
     last_outcome: str = ""
     audio_source: str = ""
     audio_level: float = 0.0
+    # F4.5.7: modalita' privata attiva - gli eventi arrivano gia' redatti dal core, l'HUD mostra l'indicatore
+    private_mode: bool = False
     last_sequence_id: int = 0
     ignored: int = 0
     incompatible: bool = False
@@ -176,6 +178,8 @@ class HudViewState:
             self.audio_source = _text(payload, "source")
         elif event_type in ("ACTION_RECEIPT", "UNDO_AVAILABLE"):
             self._activity(event_type, payload, trace_id)
+        elif event_type == "PRIVACY_MODE":
+            self.private_mode = payload.get("enabled") is True
         elif event_type == "SELECTOR_INSPECTION":
             inspection = payload.get("inspection")
             inspection = inspection if isinstance(inspection, dict) else {}

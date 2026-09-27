@@ -262,7 +262,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F4.2` | Native HUD (F4.2.1/F4.2.4 chiusi, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026; F4.2.5/F4.2.6 e resto di F4.2.3 richiedono test interattivi/visivi) | `DOING` |
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
 | `F4.4` | Interaction Design (26/09/2026: orb 3D Qt Quick 3D con nucleo volumetrico e particle shell, comportamento per stato interrupt-safe, reduced motion di Windows, qualita' high/low, fallback 2D; livelli audio reali di microfono e voce di Jake collegati all'orb; verifica visiva degli stati ancora da fare) | `DOING` |
-| `F4.5` | Interaction Design (26/09/2026: trascrizione live, permission card, prove, diagnosi, notifiche nell'HUD nativo; verifica visiva da fare) | `DOING` |
+| `F4.5` | Interaction Design (26/09/2026: trascrizione live, permission card, prove, diagnosi, notifiche nell'HUD nativo; 27/09/2026: modalita' privata = nessun contenuto verso HUD/companion/replay, con indicatore; verifica visiva da fare) | `DOING` |
 | `F4.6` | Trust UX (26/09/2026: kill switch visibile e scorciatoia globale; action center con ultima azione, esito, verifica e undo con scadenza; 27/09/2026: dettagli dell'azione per l'utente - origine, esito/categoria, verifica, annullabilita', traccia - e motivo quando l'undo non e' piu' disponibile; retry sicuro non ancora) | `DOING` |
 | `F4.7` | Accessibility (26/09/2026: nomi accessibili, focus ring, scrittura reale nella barra comandi di un overlay no-activate, scorciatoie globali Ctrl+Shift+J / Ctrl+Alt+Fine, reduced motion di sistema; screen reader, scaling e alto contrasto da verificare) | `DOING` |
 | `F4.8` | Release Engineering (26/09/2026: core e HUD nativo avviati in ordine come processi separati, riavvio dell'HUD solo dopo un crash e con un tetto; installer/crash dump/rollback non iniziati) | `DOING` |
@@ -8845,6 +8845,19 @@ pannelli contestuali restano coerenti con l'orb, senza coprire controlli, prove 
   verificato/annullato) e diagnosi del selettore; permission card con azione, rischio e fonte
   esterna; indicatore del microfono sempre visibile. Nessun parametro dell'azione nelle preview
   (F4.5.7). Verifica visiva/interattiva `VERIFY`.
+- 27/09/2026 (F4.5.7, bug reale): la modalita' privata ("modalita' privata", `SET_PRIVATE_MODE`) toglieva
+  solo la registrazione dello scambio in `answer()`. La trascrizione della voce, i passi degli agenti, le
+  notifiche (anche quelle del task monitor con etichetta, messaggio e azioni fatte) e i dettagli degli stati
+  arrivavano comunque in chiaro all'HUD nativo, al telefono associato e al buffer di replay SSE. Ora il setter
+  di `JakeCore.private_mode` imposta `EventBus.redactor = core.hud_protocol.redact_private`: ogni evento esce dal
+  bus gia' senza contenuto (testo, descrizioni, etichette, messaggi, nomi di elementi UI -> "(privato)";
+  parametri, azioni fatte, alternative del selettore -> vuoti; payload `private: true`), mentre restano i
+  metadati che servono all'HUD (tipo, stato, intent, rischio, id, livelli, esito). Un punto unico: nessun
+  produttore deve ricordarsene. Il replay resta redatto anche dopo lo spegnimento. Nuovo evento
+  `PRIVACY_MODE {"enabled"}` nei due riduttori (fixture condivisa) e chip "Privato" nella riga di stato.
+  Test: skill reale, produttori reali (trascrizione, passo agente, notifica), server companion reale su
+  loopback, stream SSE letto come lo legge l'HUD. Limite dichiarato: `reason` (codici di policy/diagnosi) non
+  e' redatto. Verifica visiva del chip `VERIFY`.
 
 ### F4.6 — Action center e undo
 

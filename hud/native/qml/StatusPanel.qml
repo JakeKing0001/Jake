@@ -3,7 +3,7 @@ import QtQuick.Layouts
 import JakeHud
 
 // Riga di stato compatta (chip): connessione (con il motivo se manca), microfono sempre visibile (F2.3.5),
-// dispositivo attivo (v5.9). Testo oltre al colore in ogni chip (F4.4.5).
+// dispositivo attivo (v5.9), modalita' privata (F4.5.7). Testo oltre al colore in ogni chip (F4.4.5).
 GlassPanel {
     id: root
     property bool connected: false
@@ -12,6 +12,7 @@ GlassPanel {
     property string activeDevice: ""
     property bool micOpen: false
     property bool micDiscarding: false
+    property bool privateMode: false
     implicitHeight: 36
     radius: height / 2
 
@@ -46,6 +47,12 @@ GlassPanel {
         Chip {
             dot: !root.micOpen ? Theme.textFaint : root.micDiscarding ? Theme.warn : Theme.danger
             label: !root.micOpen ? qsTr("Mic chiuso") : root.micDiscarding ? qsTr("Mic in pausa") : qsTr("Mic aperto")
+        }
+        Chip {
+            // i contenuti arrivano gia' nascosti dal core; qui solo il perche' si vede "(privato)"
+            visible: root.privateMode
+            dot: Theme.warn
+            label: qsTr("Privato: niente testo, niente registro")
         }
         Chip {
             visible: root.activeDevice.length > 0

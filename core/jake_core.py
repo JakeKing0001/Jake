@@ -2983,6 +2983,26 @@ class JakeCore:
             self.logger.exception("Errore revocando la credenziale dell'HUD nativo")
 
     @property
+    def private_mode(self) -> bool:
+        return getattr(self, "_private_mode", False)
+
+    @private_mode.setter
+    def private_mode(self, enabled: bool) -> None:
+        """F4.5.7: oltre a non registrare nulla (answer()), la modalita' privata toglie il contenuto da ogni
+        evento verso HUD e companion (EventBus.redactor) e lo dice all'HUD, che mostra l'indicatore."""
+        enabled = bool(enabled)
+        changed = enabled != self.private_mode
+        self._private_mode = enabled
+        bus = getattr(self, "event_bus", None)
+        if bus is None:
+            return  # all'avvio il bus non esiste ancora: parte comunque senza redazione (modalita' spenta)
+        from core.hud_protocol import redact_private
+
+        bus.redactor = redact_private if enabled else None
+        if changed:
+            bus.publish(HudEvent(EventType.PRIVACY_MODE, {"enabled": enabled}))
+
+    @property
     def model_router(self):
         from core.model_router import build_local_router
 
