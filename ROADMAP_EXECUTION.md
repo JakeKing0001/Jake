@@ -287,10 +287,10 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F7.5` | Home Integration | `DOING` |
 | `F7.6` | Sync and Crypto (motore cifrato con conflitti deterministici, revoca, wipe e coda limitata il 21/09/2026; senza trasporto ne' collegamento a memoria/pairing) | `DOING` |
 | `F7.7` | Edge Devices | `BACKLOG` |
-| `F8.1` | Skill Platform (manifest validato e loader che rifiuta prima dell'import il 22/09/2026; rischio dichiarato non ancora collegato al policy engine, hook non eseguiti) | `DOING` |
-| `F8.2` | Supply-chain Security (pacchetti firmati, catalogo, quarantena/revoca, pin/rollback il 22/09/2026; senza UI di approvazione ne' distribuzione) | `DOING` |
+| `F8.1` | Skill Platform (manifest validato e loader che rifiuta prima dell'import il 22/09/2026; dal 27/09/2026 il rischio dichiarato da un pacchetto verificato e approvato arriva a `risk_of`/PolicyEngine, mai sopra un intent integrato; hook non eseguiti) | `DOING` |
+| `F8.2` | Supply-chain Security (pacchetti firmati, catalogo, quarantena/revoca, pin/rollback il 22/09/2026; dal 27/09/2026 nel runtime: caricamento all'avvio con ricontrollo di firma/hash, installazione in due passi PLAN_SKILL_INSTALL -> INSTALL_SKILL_PACKAGE (ADMIN) legata al digest mostrato; UI HUD e distribuzione non ancora) | `DOING` |
 | `F8.3` | Skill Forge | `DOING` |
-| `F8.4` | Model Runtime (router con capability/inventario/eval/warm-unload/redazione il 22/09/2026; non ancora collegato a JakeCore) | `DOING` |
+| `F8.4` | Model Runtime (router con capability/inventario/eval/warm-unload/redazione il 22/09/2026; dal 27/09/2026 JakeCore sceglie il modello col router: catalogo da config, modelli installati, telemetria reale di batteria/VRAM, osservazioni reali di successo/latenza di ogni chiamata; warmup/unload non ancora guidati dal router) | `DOING` |
 | `F8.5` | Agent Runtime | `DOING` |
 | `F8.6` | Release Safety (golden/security set, confronto, canary, rollback, canali firmati il 22/09/2026; senza runner reali ne' collegamento HUD) | `DOING` |
 

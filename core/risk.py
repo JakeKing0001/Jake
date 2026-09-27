@@ -282,6 +282,9 @@ SKILL_RISK: dict[str, RiskLevel] = {
     # -- skill registrate direttamente in JakeCore (non nel catalogo, vedi jake_core.py) --
     "LIST_MODELS": RiskLevel.READ_ONLY,
     "SET_MODEL": RiskLevel.LOCAL_REVERSIBLE,
+    # F8.2/F8.3: verificare un pacchetto locale e' lettura; installarlo cambia cio' che Jake sa fare -> ADMIN
+    "PLAN_SKILL_INSTALL": RiskLevel.READ_ONLY,
+    "INSTALL_SKILL_PACKAGE": RiskLevel.ADMIN,
     "LEARN_COMMAND": RiskLevel.LOCAL_REVERSIBLE,
     "LIST_LEARNED": RiskLevel.READ_ONLY,
     "FORGET_LEARNED": RiskLevel.DESTRUCTIVE,
@@ -365,6 +368,18 @@ DECLARED_UI_EFFECT_RISK: dict[str, RiskLevel] = {
 }
 
 
+# F8.1/F8.2: rischio DICHIARATO dal manifest di un pacchetto firmato, verificato e approvato dall'utente
+# (core/skill_package.py::SkillStore). Il manifest valida gia' la coerenza rischio/effetto/capability; qui si
+# registra solo per gli intent del pacchetto, mai per un intent integrato (che resta quello di SKILL_RISK).
+PACKAGE_RISK: dict[str, RiskLevel] = {}
+
+
+def register_package_risk(intent: str, risk: RiskLevel) -> None:
+    if intent in SKILL_RISK or intent in DECLARED_UI_EFFECT_RISK:
+        raise ValueError(f"l'intent integrato {intent} non puo' essere ridichiarato da un pacchetto")
+    PACKAGE_RISK[intent] = RiskLevel(risk)
+
+
 def risk_of(intent: str) -> RiskLevel:
     """Livello di rischio di un intent. Una skill non ancora censita qui (un plugin di terze
     parti, o una skill scritta dalla Skill Forge) ricade su ADMIN per difetto: e' la scelta
@@ -372,4 +387,6 @@ def risk_of(intent: str) -> RiskLevel:
     errore qualcosa di potenzialmente pericoloso come se fosse a sola lettura."""
     if intent in SKILL_RISK:
         return SKILL_RISK[intent]
+    if intent in PACKAGE_RISK:
+        return PACKAGE_RISK[intent]
     return DECLARED_UI_EFFECT_RISK.get(intent, RiskLevel.ADMIN)

@@ -114,7 +114,10 @@ class JakeCore:
         config = self.skill_registry.config
         self.config = config
         self.ollama = self.skill_registry.ollama_client
-        self.model = config.get("ollama_model", "qwen2.5:7b")
+        # F8.4: il modello si chiede al ModelRouter (catalogo da config, modelli installati, batteria/VRAM reali)
+        self._configured_model = config.get("ollama_model", "qwen2.5:7b")
+        self._model_router = None
+        self.ollama.on_chat = self._record_model_call  # F8.4.7: osservazioni reali per il router
 
         # Modalita' di notifica (v4.3, Notification/Priority system): decide se un promemoria,
         # un avviso proattivo o un'automazione partita da sola interrompe subito o resta in
@@ -285,6 +288,10 @@ class JakeCore:
         # Skill/plugin installabili (v2.0): un file .py in plugins/ con una funzione
         # register(registry) diventa una capacita' di Jake senza toccare il core.
         self.loaded_plugins = load_plugins(self.skill_registry, logger=self.logger)
+        # F8.2: le skill installate da pacchetto firmato (catalogo in data/skill_packages) si caricano davvero,
+        # ricontrollando firma/hash a ogni avvio; installazione in due passi con piano e approvazione.
+        self.skill_store = None
+        self.loaded_packages = self._load_skill_packages(config)
 
         # Comprensione (v3.0): normalizzazione del parlato, esempi, recupero semantico.
         self.normalizer = TranscriptNormalizer(app_names_provider=self.skill_registry.app_names)
@@ -528,10 +535,16 @@ class JakeCore:
 
         # Skill che hanno bisogno del core (non solo del registry): registrate qui.
         self.skill_registry.register_skill("LIST_MODELS", ListModelsSkill())
+        # F8.2/F8.3: installazione di pacchetti firmati in due passi (piano con digest, poi ADMIN con approvazione)
+        from skills.skill_packages import InstallSkillPackageSkill, PlanSkillInstallSkill
+        self.skill_registry.register_skill("PLAN_SKILL_INSTALL", PlanSkillInstallSkill(self.skill_store))
+        self.skill_registry.register_skill(
+            "INSTALL_SKILL_PACKAGE", InstallSkillPackageSkill(self.skill_store, on_installed=self._activate_skill_package))
         self.skill_registry.register_skill(
             "SET_MODEL",
             SetModelSkill(
-                updatable_targets=[self.router.primary_provider, self.planner_provider, self.context_summarizer],
+                # anche JakeCore: prima agenti e ricevute restavano sul vecchio modello dopo SET_MODEL
+                updatable_targets=[self.router.primary_provider, self.planner_provider, self.context_summarizer, self],
                 config=config,
             ),
         )
@@ -2806,6 +2819,44 @@ class JakeCore:
             "action_id": action_id,
         }
 
+    def _skill_package_root(self, config):
+        from pathlib import Path
+
+        configured = config.get("skill_packages_dir") if config is not None else None
+        return Path(configured) if configured else Path(__file__).resolve().parent.parent / "data" / "skill_packages"
+
+    def _load_skill_packages(self, config) -> list[str]:
+        """Carica ogni skill installata dal catalogo firmato e registra il rischio DICHIARATO dal suo manifest
+        verificato. Un pacchetto alterato va in quarantena e non si carica; nessun errore blocca l'avvio."""
+        from core.skill_package import SkillStore, TrustStore
+
+        root = self._skill_package_root(config)
+        try:
+            self.skill_store = SkillStore(root, TrustStore(root / "trust.json"))
+        except Exception:
+            self.logger.exception("Catalogo delle skill installate non leggibile: nessun pacchetto caricato")
+            return []
+        loaded = []
+        for skill_id in self.skill_store.skills():
+            if self._activate_skill_package(skill_id):
+                loaded.append(skill_id)
+        return loaded
+
+    def _activate_skill_package(self, skill_id: str) -> bool:
+        from core.risk import register_package_risk
+
+        try:
+            result = self.skill_store.load(self.skill_registry, skill_id, self.logger)
+        except Exception:
+            self.logger.exception("Pacchetto %s non caricato", skill_id)
+            return False
+        if not getattr(result, "ok", False) or result.manifest is None:
+            self.logger.warning("Pacchetto %s rifiutato: %s", skill_id, getattr(result, "errors", []))
+            return False
+        for spec in result.manifest.intents:
+            register_package_risk(spec.intent, spec.risk)
+        return True
+
     def _publish_pending_confirmation(self, action: dict | None) -> None:
         """F4.4.1/F4.5.3: stato "waiting" e permission card dell'HUD. Solo metadati dell'azione in
         sospeso (intent, motivo, rischio, fonte esterna), mai i suoi parametri."""
@@ -2891,6 +2942,44 @@ class JakeCore:
             store.revoke(NATIVE_HUD_DEVICE_ID)
         except Exception:
             self.logger.exception("Errore revocando la credenziale dell'HUD nativo")
+
+    @property
+    def model_router(self):
+        from core.model_router import build_local_router
+
+        if getattr(self, "_model_router", None) is None:
+            config = dict(getattr(getattr(self, "config", None), "data", {}) or {})
+            config["ollama_model"] = self._configured_model
+            for key in ("ollama_light_model", "ollama_code_model", "ollama_model_vram_mb"):
+                if getattr(self, "config", None) is not None and self.config.get(key):
+                    config[key] = self.config.get(key)
+            self._model_router = build_local_router(config, self.ollama.list_models)
+        return self._model_router
+
+    def _record_model_call(self, model: str, success: bool, latency_ms: float) -> None:
+        from core.model_router import Capability, EvalRecord
+
+        self.model_router.evals.record(EvalRecord(Capability.REASON, model, success, latency_ms))
+
+    @property
+    def model(self) -> str:
+        """Il modello per ragionare ADESSO (agenti, planner, ricevute): scelto dal ModelRouter, con il modello
+        configurato come ripiego se il router non trova nulla (Ollama spento). Mai un'eccezione qui."""
+        from core.model_router import Capability, choose_model
+
+        configured = getattr(self, "_configured_model", "qwen2.5:7b")
+        if getattr(self, "ollama", None) is None:
+            return configured
+        try:
+            return choose_model(self.model_router, Capability.REASON, configured)
+        except Exception:
+            return configured
+
+    @model.setter
+    def model(self, value: str) -> None:
+        """SET_MODEL: il modello configurato cambia e il router riparte dal nuovo catalogo."""
+        self._configured_model = value
+        self._model_router = None
 
     # ---- sospensione della proattivita' ----------------------------------------------------
 

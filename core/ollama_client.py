@@ -112,7 +112,20 @@ class OllamaClient:
         if format is not None:
             payload["format"] = format
         payload["options"] = {"num_ctx": self.num_ctx, **(options or {})}
-        return self._post("/api/chat", payload, timeout=timeout)
+        observer = getattr(self, "on_chat", None)
+        if observer is None:
+            return self._post("/api/chat", payload, timeout=timeout)
+        # F8.4.7: successo e latenza REALI di ogni chiamata, per chi sceglie i modelli (JakeCore -> ModelRouter)
+        import time as _time
+
+        started = _time.monotonic()
+        try:
+            result = self._post("/api/chat", payload, timeout=timeout)
+        except OllamaError:
+            _notify(observer, model, False, (_time.monotonic() - started) * 1000)
+            raise
+        _notify(observer, model, True, (_time.monotonic() - started) * 1000)
+        return result
 
     def chat_text(self, model: str, messages: list, options: dict | None = None, timeout: float | None = None) -> str | None:
         """Come chat(), ma restituisce direttamente il testo (None se vuoto/errore)."""
@@ -166,3 +179,10 @@ class OllamaClient:
         if preferred in models or any(m.split(":")[0] == preferred.split(":")[0] for m in models):
             return preferred
         return fallback
+
+
+def _notify(observer, model: str, success: bool, latency_ms: float) -> None:
+    try:
+        observer(model, success, latency_ms)
+    except Exception:
+        pass  # un osservatore guasto non deve mai far fallire una chiamata al modello

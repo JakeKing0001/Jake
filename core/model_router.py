@@ -436,3 +436,99 @@ class ModelRouter:
 
     def warm_models(self) -> frozenset[str]:
         return frozenset(self._warm)
+
+
+# ---- integrazione nel runtime di Jake (27/09/2026) -------------------------------------------------------------------------------
+# Prima di questo blocco il router era una libreria che nessuno chiamava e il nome del modello era scritto a
+# mano in 23 punti. JakeCore ora chiede qui il modello per "reason" (usato da agenti, planner e ricevute).
+
+DEFAULT_MAIN_MODEL = "qwen2.5:7b"
+
+
+def detect_local_hardware(run=None, battery=None) -> HardwareInfo:
+    """Telemetria locale reale (F8.4.2): VRAM libera da nvidia-smi, batteria da psutil. Un valore che non si puo'
+    leggere resta None ("sconosciuto"), mai inventato."""
+    import subprocess
+
+    vram: int | None = None
+    on_battery: bool | None = None
+    percent: float | None = None
+    run = run or subprocess.run
+    try:
+        completed = run(["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+                        capture_output=True, text=True, timeout=2)
+        if completed.returncode == 0 and completed.stdout.strip():
+            vram = int(completed.stdout.split()[0])
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    try:
+        if battery is None:
+            import psutil
+
+            battery = psutil.sensors_battery()
+        if battery is not None:
+            on_battery = not bool(battery.power_plugged)
+            percent = float(battery.percent)
+    except Exception:
+        pass
+    return HardwareInfo(available_vram_mb=vram, on_battery=on_battery, battery_percent=percent)
+
+
+class _Cached:
+    """Rilegge una sorgente lenta (Ollama, nvidia-smi) al massimo ogni `ttl_s` secondi."""
+
+    def __init__(self, source: Callable, ttl_s: float, clock: Callable[[], float] = time.monotonic) -> None:
+        self._source = source
+        self._ttl = ttl_s
+        self._clock = clock
+        self._value = None
+        self._at: float | None = None
+
+    def __call__(self):
+        now = self._clock()
+        if self._at is None or now - self._at >= self._ttl:
+            self._value = self._source()
+            self._at = now
+        return self._value
+
+
+def default_specs(config) -> list[ModelSpec]:
+    """Il catalogo DICHIARATO da config: il modello principale e, se configurati, uno leggero (per la batteria)
+    e uno per il codice. Le baseline sono solo punti di partenza: le osservazioni reali (EvalStore) le sostituiscono."""
+    main = config.get("ollama_model", DEFAULT_MAIN_MODEL) or DEFAULT_MAIN_MODEL
+    specs = [ModelSpec(main, "ollama", frozenset({Capability.CLASSIFY, Capability.REASON, Capability.CODE}), True, 70.0,
+                       min_vram_mb=int(config.get("ollama_model_vram_mb", 0) or 0), battery_impact=BatteryImpact.HIGH)]
+    light = config.get("ollama_light_model")
+    if light and light != main:
+        specs.append(ModelSpec(light, "ollama", frozenset({Capability.CLASSIFY, Capability.REASON}), True, 55.0,
+                               latency_class=LatencyClass.FAST, battery_impact=BatteryImpact.LOW))
+    code = config.get("ollama_code_model")
+    if code and code not in (main, light):
+        specs.append(ModelSpec(code, "ollama", frozenset({Capability.CODE}), True, 75.0))
+    return specs
+
+
+LOW_BATTERY_PERCENT = 30.0
+
+
+def build_local_router(config, list_installed: Callable[[], list[str] | None],
+                       hardware: HardwareDetector = detect_local_hardware) -> ModelRouter:
+    inventory = ModelInventory(default_specs(config), _Cached(list_installed, 60.0), hardware=_Cached(hardware, 30.0))
+    return ModelRouter(inventory)
+
+
+def choose_model(router: ModelRouter, capability: Capability, fallback: str) -> str:
+    """Il modello da usare ADESSO. Su batteria sotto il 30% si prova prima un modello a basso consumo (se
+    dichiarato e installato); poi il migliore locale; se nessuno e' disponibile (Ollama spento, modello non
+    installato) resta il modello configurato, cosi' l'errore resta quello chiaro di Ollama e non un nome vuoto."""
+    hardware = router.inventory.hardware()
+    requests = []
+    if hardware.on_battery and hardware.battery_percent is not None and hardware.battery_percent < LOW_BATTERY_PERCENT:
+        requests.append(RouteRequest(capability, require_local=True, max_battery_impact=BatteryImpact.LOW))
+    requests.append(RouteRequest(capability, require_local=True, prefer=fallback))
+    for request in requests:
+        try:
+            return router.select(request).model.name
+        except NoModelAvailableError:
+            continue
+    return fallback
