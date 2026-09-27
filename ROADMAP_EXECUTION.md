@@ -261,7 +261,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F4.1` | Protocol Architecture (26/09/2026: riduttore di riferimento Python e riduttore C++ superano la stessa suite di 18 fixture, ctest nella CI; sequence_id/trace_id consumati anche lato C++) | `DONE` |
 | `F4.2` | Native HUD (F4.2.1/F4.2.4 chiusi, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026; F4.2.5/F4.2.6 e resto di F4.2.3 richiedono test interattivi/visivi) | `DOING` |
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
-| `F4.4` | Interaction Design (26/09/2026: orb 3D Qt Quick 3D con nucleo volumetrico e particle shell, comportamento per stato interrupt-safe, reduced motion di Windows, qualita' high/low, fallback 2D; livelli audio reali di microfono e voce di Jake collegati all'orb; verifica visiva degli stati ancora da fare) | `DOING` |
+| `F4.4` | Interaction Design (26/09/2026: orb 3D Qt Quick 3D con nucleo volumetrico e particle shell, comportamento per stato interrupt-safe, reduced motion di Windows, qualita' high/low, fallback 2D; livelli audio reali di microfono e voce di Jake collegati all'orb; 27/09/2026 sera: particelle come massa viva a tre strati con moto individuale, orbite differenziali, componente radiale e reazioni per stato/audio/esito, modalita' demo JAKE_HUD_DEMO=1; giudizio estetico `VERIFY` dall'utente) | `DOING` |
 | `F4.5` | Interaction Design (26/09/2026: trascrizione live, permission card, prove, diagnosi, notifiche nell'HUD nativo; 27/09/2026: modalita' privata = nessun contenuto verso HUD/companion/replay, con indicatore; piano live con stato e durata di ogni passo; modalita' di notifica e notifiche in attesa visibili; verifica visiva da fare) | `DOING` |
 | `F4.6` | Trust UX (26/09/2026: kill switch visibile e scorciatoia globale; action center con ultima azione, esito, verifica e undo con scadenza; 27/09/2026: dettagli dell'azione per l'utente - origine, esito/categoria, verifica, annullabilita', traccia - e motivo quando l'undo non e' piu' disponibile; retry sicuro dell'ultima azione fallita a voce e dal pulsante "Riprova"; undo rifiutato se il file/la cartella da cancellare e' cambiato dopo) | `DOING` |
 | `F4.7` | Accessibility (26/09/2026: nomi accessibili, focus ring, scrittura reale nella barra comandi di un overlay no-activate, scorciatoie globali Ctrl+Shift+J / Ctrl+Alt+Fine, reduced motion; 27/09/2026: alto contrasto da Windows o JAKE_HUD_HIGH_CONTRAST, verificato a schermo; "Dimensioni testo" di Windows applicata a tutto l'HUD (o JAKE_HUD_TEXT_SCALE), verificata a schermo al 150% di sistema; screen reader, scaling e alto contrasto da verificare) | `DOING` |
@@ -8830,6 +8830,22 @@ o il solo prototipo 2D non chiudono il requisito. La verifica dell'handoff dipen
   soli; action center compatto; azioni rapide dentro la barra comandi. F4.3 (blur/composizione reali) non
   iniziato: su Windows il backdrop DWM si applica all'intera finestra, non ai singoli pannelli.
 
+- 27/09/2026 sera (F4.4.7/F4.4.8, osservazione reale dell'utente sulla build Release: "la particle shell sembra quasi
+  statica/rigida"). Causa: particelle nate su un'unica superficie con velocita' casuale minima (circa 20 unita' in
+  2,6 s su un raggio di 78) e figlie del nodo che ruotava, quindi un corpo rigido. Ora in `Orb3D.qml`: tre strati
+  (guscio, volume pieno intermedio, alone interno) fuori dal nodo che ruota; orbite differenziali per strato
+  (`PointRotator3D`, assi che derivano nel tempo; in THINKING vortice con l'interno piu' veloce); componente radiale
+  per particella (`TargetDirection3D`) e spinta viva che segue il livello audio (`Repeller3D`); moto individuale
+  (`Wander3D`, ampiezza e ritmo unici); EXECUTING con flusso ordinato verso l'alto (`Gravity3D`); WAITING lento ma
+  vivo; successo = compressione poi piccola espansione, avviso = impulso verso l'esterno, errore = dispersione con
+  tremolio del nucleo, sempre con rientro (interrupt-safe, Behavior su ogni parametro). Reduced motion (Windows
+  "Effetti animazione" spento, letto con SPI_GETCLIENTAREAANIMATION; su questa macchina e' acceso) azzera orbite,
+  deriva e spinte. Qualita' bassa: niente strato intermedio, meno particelle. Bug corretto insieme: due esiti uguali
+  di fila (due successi) non riattivavano la reazione perche' `lastOutcome` non cambiava valore -> `outcome_serial`
+  nei due riduttori (fixture condivisa). Modalita' `JAKE_HUD_DEMO=1` per verificare tutti gli stati senza Jake.
+  Verificato: build Release + ctest, binario avviato senza errori QML su stderr, scatti a schermo di ascolto,
+  pensiero, esecuzione ed errore. Giudizio estetico `VERIFY` dall'utente.
+
 ### F4.5 — Pannelli contestuali
 
 Dipende da: F4.1 e contratti F1.
@@ -10471,14 +10487,15 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 26/09/2026, fine sessione (le note precedenti restano nella cronologia Git).
+Aggiornato 27/09/2026 sera (le versioni precedenti restano nella cronologia Git; la lista del 26/09 citava lavoro gia'
+fatto: orb 3D, retry/dettagli/precondizioni dell'Action Center, citazioni di memoria fuori da RECALL).
 
-1. Ripetere il gate hardware di F2 con `docs/f2-hardware-validation.md` dopo le correzioni del
-   26/09/2026 (partial, barge-in, routing, lingua, follow-up, proattivita' sospesa): tre profili,
-   >= 20 interruzioni e 10+10 risposte senza interruzione ciascuno, sessione wake di 24 h, poi
-   `python -m benchmarks.f2_hardware_session evaluate`. Solo con `PASS` F2 passa a `DONE`.
-2. Verifica visiva dell'HUD nativo con Jake acceso (`hud/native/build/JakeHud.exe`): stati e
-   etichetta dell'orb, anello di esito, permission card, trascrizione live, indicatore microfono,
-   ultima azione con Annulla, pulsante "Ferma tutto" (F4.4/F4.5/F4.6 restano `VERIFY` fino ad allora).
-3. Poi: orb 3D/particelle (F4.4.7-F4.4.8), action center completo (retry, dettagli, precondizioni),
-   citazioni di memoria anche fuori da RECALL (F5.5), task monitor sulla pipeline proattiva (F6.1).
+1. Utente: ripetere il gate hardware di F2 con `docs/f2-hardware-validation.md` (tre profili, interruzioni, sessione
+   wake di 24 h, poi `python -m benchmarks.f2_hardware_session evaluate`). Solo con `PASS` F2 passa a `DONE`.
+2. Utente: verifica a schermo dell'orb 3D con `JAKE_HUD_DEMO=1` (scorre IDLE, LISTENING, THINKING, EXECUTING,
+   successo, SPEAKING, WAITING, avviso, ERROR, PAUSED con livello audio sintetico) e poi con Jake acceso; con
+   "Effetti animazione" di Windows spento il moto deve quasi fermarsi. Stesso giro per chip "Privato", piano live,
+   "Riprova", chip delle notifiche in attesa.
+3. Sviluppo: F4.3 vetro con blur reale per pannello (richiede finestre native separate per pannello: oggi l'HUD e'
+   un unico overlay a schermo intero), poi continuita' di sessione PC <-> companion (F7.4.8) e Skill Forge con
+   specifica/test/canary (F8.3).

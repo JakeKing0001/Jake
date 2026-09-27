@@ -70,6 +70,7 @@ QJsonObject HudViewState::snapshot() const {
         {"confirmation_trace_id", confirmationTraceId},
         {"activities", activities},
         {"last_outcome", lastOutcome},
+        {"outcome_serial", outcomeSerial},
         {"audio_source", audioSource},
         {"audio_level", audioLevel},
         {"private_mode", privateMode},
@@ -251,6 +252,7 @@ void HudEventReducer::reduceActivity(const QString &type, const QJsonObject &pay
         else
             m_view.lastOutcome = item.value("verified").toString() == QLatin1String("verified")
                 ? QStringLiteral("success") : QStringLiteral("warning");
+        m_view.outcomeSerial += 1;
     } else {
         item.insert("undo_intent", text(payload, "compensating_intent"));
         const QJsonValue expires = payload.value(QStringLiteral("expires_at"));

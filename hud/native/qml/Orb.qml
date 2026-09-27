@@ -8,7 +8,8 @@ Item {
     property string state: "IDLE"
     // F4.4.1: esito dell'ultima azione, mostrato come anello per ~2 s e poi via (lo stato resta).
     property string outcome: ""
-    onOutcomeChanged: if (outcome.length > 0) outcomeFlash.restart()
+    property int outcomeSerial: 0     // due esiti uguali di fila restano due reazioni
+    onOutcomeSerialChanged: Qt.callLater(function() { if (outcome.length > 0) outcomeFlash.restart() })
     width: 120
     height: 120
     // F4.2.1: vedi lo stesso alias in StatusPanel.qml - l'orb non gestisce ancora click propri,

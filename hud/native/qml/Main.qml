@@ -43,6 +43,9 @@ ApplicationWindow {
     property real textScale: 1.0
     property string orbQuality: "high"
     property bool orb3d: false
+    // JAKE_HUD_DEMO=1 (src/main.cpp): l'orb scorre da solo tutti gli stati, con un livello audio sintetico e gli esiti
+    // success/warning/error - per verificarne a schermo il comportamento senza Jake acceso. Il resto dell'HUD resta reale.
+    property bool orbDemo: false
 
     JakeClient {
         id: jake
@@ -129,11 +132,29 @@ ApplicationWindow {
             onStatusChanged: if (status === Loader.Error && source.toString().indexOf("Orb3D") >= 0) source = "Orb.qml"
         }
         }
-        Binding { target: orb.item; property: "state"; value: jake.state; when: orb.item !== null }
-        Binding { target: orb.item; property: "outcome"; value: jake.lastOutcome; when: orb.item !== null }
+        Binding { target: orb.item; property: "state"; value: window.orbDemo ? demo.state : jake.state; when: orb.item !== null }
+        Binding { target: orb.item; property: "outcome"; value: window.orbDemo ? demo.outcome : jake.lastOutcome; when: orb.item !== null }
+        Binding { target: orb.item; property: "outcomeSerial"; value: window.orbDemo ? demo.index : jake.outcomeSerial
+                  when: orb.item !== null && orb.item.hasOwnProperty("outcomeSerial") }
         // F4.4.4: livello audio reale (mai audio); decade a zero se non arrivano aggiornamenti
-        Binding { target: orb.item; property: "level"; value: levelDecay.level
+        Binding { target: orb.item; property: "level"; value: window.orbDemo ? demo.level : levelDecay.level
                   when: orb.item !== null && orb.item.hasOwnProperty("level") }
+        QtObject {
+            id: demo
+            readonly property var steps: [
+                ["IDLE", ""], ["LISTENING", ""], ["THINKING", ""], ["EXECUTING", ""], ["IDLE", "success"],
+                ["SPEAKING", ""], ["WAITING", ""], ["IDLE", "warning"], ["ERROR", "error"], ["PAUSED", ""]]
+            property int index: 0
+            property string state: steps[index][0]
+            property string outcome: steps[index][1]
+            property real phase: 0
+            // voce/microfono sintetici: sillabe irregolari, non una sinusoide perfetta
+            readonly property real level: (state === "LISTENING" || state === "SPEAKING")
+                ? Math.max(0, Math.sin(phase * 7.3) * 0.6 + Math.sin(phase * 2.1) * 0.4) : 0
+        }
+        Timer { running: window.orbDemo; interval: 4000; repeat: true
+                onTriggered: demo.index = (demo.index + 1) % demo.steps.length }
+        Timer { running: window.orbDemo; interval: 50; repeat: true; onTriggered: demo.phase += 0.05 }
         QtObject {
             id: levelDecay
             property real level: 0

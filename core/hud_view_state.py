@@ -67,6 +67,8 @@ class HudViewState:
     # verificata, error = fallita). Separato da `state`: l'orb lo mostra brevemente, senza anticipare
     # un successo ne' nascondere un'attesa o un errore del turno in corso.
     last_outcome: str = ""
+    # F4.4.1: cresce a ogni ricevuta - due esiti uguali di fila (due successi) sono due eventi, non uno
+    outcome_serial: int = 0
     audio_source: str = ""
     audio_level: float = 0.0
     # F4.5.7: modalita' privata attiva - gli eventi arrivano gia' redatti dal core, l'HUD mostra l'indicatore
@@ -250,6 +252,7 @@ class HudViewState:
                 self.last_outcome = "error"
             else:
                 self.last_outcome = "success" if item["verified"] == "verified" else "warning"
+            self.outcome_serial += 1
         else:
             expires = payload.get("expires_at")
             item.update(undo_intent=_text(payload, "compensating_intent"),
