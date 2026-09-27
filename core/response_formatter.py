@@ -826,6 +826,8 @@ def _format_success(intent: str, result: SkillResult, registry=None) -> str | No
         from core.notification_center import MODE_LABELS_IT, NotificationMode
         label = MODE_LABELS_IT.get(NotificationMode(data["mode"]), data["mode"])
         released = data.get("released") or []
+        if data.get("until"):
+            label += f" fino alle {data['until']}"  # F6.5.6: poi si torna da soli alla modalita' di prima
         if not released:
             return f"Modalità {label} attiva."
         catch_up = " ".join(released)

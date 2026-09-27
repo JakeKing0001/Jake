@@ -277,7 +277,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F6.2` | Proactivity Quality | `DOING` |
 | `F6.3` | Notification UX (libreria di decisione il 21/09/2026; collegata a JakeCore/EventBus/HUD il 22/09/2026; dal 27/09/2026 "meno notifiche cosi'", "non mostrarmelo piu'", "mostramelo di nuovo" e "rimandala" sull'ultima notifica, a voce e dai pulsanti del toast HUD, persistenti; nessuna consegna reale di call/companion) | `DOING` |
 | `F6.4` | Goal Runtime (27/09/2026: "devo X entro <giorno>" diventa una proposta di promemoria confermata col si'/no normale) | `DOING` |
-| `F6.5` | Automation Runtime | `DOING` |
+| `F6.5` | Automation Runtime (27/09/2026: modalita' di notifica a tempo che torna da sola alla precedente con il riepilogo) | `DOING` |
 | `F6.6` | Meeting Experience (libreria di regole il 21/09/2026: brief senza dati inventati, consenso e indicatore, follow-up gated; dal 27/09/2026 "com'e' la mia giornata" usa il brief con promemoria e todo reali; nessun connettore reale) | `DOING` |
 | `F6.7` | Runtime Reliability (monitor/housekeeping il 22/09/2026; task monitor collegato a JakeCore/EventBus/HUD lo stesso giorno - vedi F6.3; dal 27/09/2026 "avvisami quando finisce la build" su un processo reale, notifica dalla pipeline unica; housekeeping senza connettori reali ne' pilot) | `DOING` |
 | `F7.1` | Companion Security (F7.1.1/.4/.5/.6/.7 il 22/09/2026; F7.1.2 - pairing HTTP - chiuso il 22/09/2026, vedi F7.2; TLS reale generato/persistito dal server il 22/09/2026; capability persistenti F7.1.3 dal 27/09/2026 - impostabili a voce con SET_DEVICE_ACCESS, valide subito e dopo un riavvio, riga corrotta = nessun permesso; manca la distribuzione del certificato al telefono oltre al pairing) | `DOING` |
@@ -9383,6 +9383,12 @@ Dipende da: F3.8, F5 procedural e F6.2.
 7. `F6.5.7` Versionare routine e richiedere consenso se cambiano capability.
 
 Criterio di uscita: routine non parte fuori contesto e ripristina lo stato dopo stop o fallimento.
+
+- 27/09/2026 (F6.5.6, prima fetta): "non disturbarmi per mezz'ora", "modalita' studio per due ore" -
+  `SET_NOTIFICATION_MODE` accetta `minutes`: finito il tempo torna da sola la modalita' di PRIMA (solo se nel
+  frattempo l'utente non ne ha scelta un'altra, anche fuori dalla skill; una nuova scelta annulla il ritorno) e
+  cio' che era stato trattenuto arriva in un riepilogo da `present_notification`, come un promemoria richiesto.
+  Test con `NotificationCenter` reale e timer manuale. Volume e finestre non ancora ripristinati.
 
 ### F6.6 — Daily brief e meeting copilot
 

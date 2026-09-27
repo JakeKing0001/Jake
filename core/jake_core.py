@@ -601,7 +601,8 @@ class JakeCore:
             ("CREATE_SKILL", CreateSkillSkill(self.skill_forge)),
             ("LIST_CREATED_SKILLS", ListCreatedSkillsSkill(self.skill_forge)),
             ("DELETE_CREATED_SKILL", DeleteCreatedSkillSkill(self.skill_forge, self.learning)),
-            ("SET_NOTIFICATION_MODE", SetNotificationModeSkill(self.notification_center)),
+            ("SET_NOTIFICATION_MODE", SetNotificationModeSkill(self.notification_center,
+                                                               on_restored=self._timed_notification_mode_ended)),
             ("GET_NOTIFICATION_MODE", GetNotificationModeSkill(self.notification_center)),
             ("UNDO_LAST_ACTION", UndoLastActionSkill(self)),
             ("APPROVE_PAIRING", ApprovePairingSkill(self.pairing_service, self.sync_keyring)),
@@ -3016,6 +3017,16 @@ class JakeCore:
         if not self.native_hud.start():
             self.native_hud = None
             self._revoke_native_hud_credential()
+
+    def _timed_notification_mode_ended(self, previous, released: list[str]) -> None:
+        """F6.5.6: "non disturbare per 30 minuti" e' finito da solo. Lo si dice, con cio' che e' stato trattenuto,
+        dalla stessa strada delle altre notifiche (e' una richiesta esplicita dell'utente: puntuale come un promemoria)."""
+        from core.notification_center import MODE_LABELS_IT
+
+        message = f"Tempo scaduto: torno alla modalità {MODE_LABELS_IT.get(previous, previous.value)}."
+        if released:
+            message += " Nel frattempo: " + " ".join(released)
+        self.present_notification("reminder", message)
 
     def _native_hud_gave_up(self, crashes: int) -> None:
         """F4.8: l'HUD nativo continua a chiudersi e non viene piu' riavviato. Prima lo diceva solo il log: l'HUD
