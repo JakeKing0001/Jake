@@ -689,3 +689,5 @@
 {"text": "com'è la mia giornata", "intent": "DAILY_BRIEF", "parameters": {}}
 {"text": "cosa ho oggi", "intent": "DAILY_BRIEF", "parameters": {}}
 {"text": "fammi il punto della giornata con i dettagli", "intent": "DAILY_BRIEF", "parameters": {"detailed": true}}
+{"text": "ho perso il telefono", "intent": "REVOKE_DEVICE", "parameters": {"device": "telefono"}}
+{"text": "scollega il tablet", "intent": "REVOKE_DEVICE", "parameters": {"device": "tablet"}}

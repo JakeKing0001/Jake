@@ -555,6 +555,9 @@ class JakeCore:
         self.skill_registry.register_skill("RETRY_LAST_ACTION", RetryLastActionSkill(self))
         # F6.6: "com'e' la mia giornata" - il brief con fonti dichiarate, dalle fonti locali reali
         from skills.daily_brief import DailyBriefSkill
+        # F7.2.7: "ho perso il telefono" - revoca subito il dispositivo (anche lo stream aperto)
+        from skills.device_access import RevokeDeviceSkill
+        self.skill_registry.register_skill("REVOKE_DEVICE", RevokeDeviceSkill(self))
         self.skill_registry.register_skill("DAILY_BRIEF", DailyBriefSkill(
             self.skill_registry.reminder_manager, self.skill_registry.todo_manager))
         # F6.3.4: controllo dell'utente sull'ultima notifica proattiva mostrata

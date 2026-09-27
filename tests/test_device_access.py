@@ -82,6 +82,7 @@ class OpenStreamRevocationTests(unittest.TestCase):
 
     setUp = DeviceAccessTests.setUp  # stesso server reale e stesso database temporaneo, senza rieseguirne i test
     _start = DeviceAccessTests._start
+    _request = DeviceAccessTests._request
 
     def _open_stream(self, token):
         import threading
@@ -117,13 +118,25 @@ class OpenStreamRevocationTests(unittest.TestCase):
             time.sleep(0.05)
         return predicate()
 
-    def test_revoking_a_lost_phone_closes_its_open_stream(self):
+    def test_i_lost_my_phone_revokes_it_and_closes_its_open_stream(self):
+        from core.response_formatter import format_skill_result
+        from core.sync_crypto import DeviceKeys, Keyring
+        from skills.device_access import RevokeDeviceSkill
+
+        keyring = Keyring()
+        keyring.add("phone-1", DeviceKeys.generate().public)
         received, closed = self._open_stream(self.token)
         self.assertTrue(self._wait_for(lambda: (self._publish("prima"), "prima" in received)[1]))
-        self.assertTrue(self.store.revoke("phone-1"))
+
+        result = RevokeDeviceSkill(SimpleNamespace(companion_server=self.server, sync_keyring=keyring)).execute(
+            {"device": "telefono"})
+        self.assertEqual((result.data["revoked"], result.data["sync_keys_removed"]), (True, True))
+        self.assertIn("non vede più nulla", format_skill_result("REVOKE_DEVICE", result))
         self.assertTrue(closed.wait(4), "lo stream del dispositivo revocato e' rimasto aperto")
         self._publish("dopo la revoca")
         self.assertNotIn("dopo la revoca", received)
+        self.assertFalse(keyring.is_active("phone-1"))
+        self.assertEqual(self._request(self.server, "GET", "/status"), 401)
 
     def test_rotating_the_credential_closes_the_stream_opened_with_the_old_one(self):
         received, closed = self._open_stream(self.token)

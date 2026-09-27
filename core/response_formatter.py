@@ -116,11 +116,11 @@ def _format_control_error(intent: str, error: str | None, data: dict) -> str | N
     if error == "NOT_FOUND":
         if intent == "WATCH_PROCESS":
             return f"Non vedo nessun processo '{data.get('process', '')}' in esecuzione da sorvegliare."
-        if intent == "SET_DEVICE_ACCESS":
+        if intent in ("SET_DEVICE_ACCESS", "REVOKE_DEVICE"):
             return f"Non trovo nessun dispositivo associato chiamato '{data.get('device', '')}'."
         if intent in ("PLAN_SKILL_INSTALL", "INSTALL_SKILL_PACKAGE"):
             return f"Non trovo il pacchetto {data.get('package_path', '')}."
-    if error == "AMBIGUOUS" and intent == "SET_DEVICE_ACCESS":
+    if error == "AMBIGUOUS" and intent in ("SET_DEVICE_ACCESS", "REVOKE_DEVICE"):
         return f"Più dispositivi corrispondono: {', '.join(data.get('candidates') or [])}. Quale intendi?"
     if error == "INVALID_PARAMETERS" and intent == "SET_DEVICE_ACCESS":
         return f"Livelli possibili: {', '.join(data.get('levels') or [])}."
@@ -146,6 +146,11 @@ def _format_control_success(intent: str, data: dict) -> str | None:
         return f"Ok, te la ripropongo tra {data['minutes']} minuti."
     if intent == "SET_DEVICE_ACCESS":
         return f"Fatto: {data['device']} ora ha accesso \"{data['level']}\"."
+    if intent == "REVOKE_DEVICE":
+        if not data.get("revoked"):
+            return f"{data['device']} era già scollegato: non può fare nulla finché non lo accoppi di nuovo."
+        return (f"Fatto: {data['device']} è scollegato e non vede più nulla, nemmeno gli eventi già aperti. "
+                "Per usarlo di nuovo va accoppiato da capo.")
     if intent == "PLAN_SKILL_INSTALL":
         lines = [str(data.get("summary") or "")]
         blockers = data.get("blockers") or []

@@ -290,6 +290,7 @@ SKILL_RISK: dict[str, RiskLevel] = {
     "DAILY_BRIEF": RiskLevel.READ_ONLY,  # legge promemoria e todo locali  # osserva la fine di un processo, non lo tocca
     # F7.1.3: cambia chi puo' comandare Jake da un altro dispositivo -> impostazione di sicurezza
     "SET_DEVICE_ACCESS": RiskLevel.ADMIN,
+    "REVOKE_DEVICE": RiskLevel.ADMIN,  # irreversibile senza un nuovo pairing: conferma/autenticazione della policy
     # F6.3.4: preferenze sulle notifiche, reversibili
     "LESS_NOTIFICATIONS_LIKE_THIS": RiskLevel.LOCAL_REVERSIBLE,
     "MUTE_NOTIFICATION": RiskLevel.LOCAL_REVERSIBLE,

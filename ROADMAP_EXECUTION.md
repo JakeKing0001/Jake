@@ -9592,6 +9592,12 @@ una notifica apre il task corretto e un'eventuale risposta aggiorna la stessa se
   stream dichiara `Connection: keep-alive`, quindi il gestore deve chiudere la connessione esplicitamente. Test
   con server companion reale su loopback, credenziali reali, stream aperto durante revoca e rotazione. La
   cancellazione delle chiavi sul telefono (app) resta da fare.
+- 27/09/2026 (F7.2.7, comando dal PC): prima si poteva revocare un dispositivo solo DAL dispositivo stesso
+  (`DELETE /devices/<id>`, "revoco me stesso") - inutile per un telefono perso. `REVOKE_DEVICE` ("ho perso il
+  telefono", "scollega il tablet"; rischio ADMIN -> conferma/autenticazione della policy) revoca la credenziale
+  (lo stream aperto si chiude entro un secondo, vedi sopra) e toglie le chiavi di sincronizzazione del
+  dispositivo dal portachiavi F7.6. L'HUD nativo di questo PC non e' mai un bersaglio. Test: stesso server
+  reale, frase -> skill -> stream chiuso, evento successivo non ricevuto, chiavi rimosse, richieste nuove 401.
 
 - `F7.2.1`/`F7.2.2`/`F7.2.3`/`F7.2.4`/`F7.2.8` (Companion Mobile MVP end-to-end, riuso di F7.1/F7.6/F6 senza sistemi
   paralleli) — 22/09/2026: `core/pairing_service.py` (esteso), `core/companion_guard.py`/`core/companion_server.py`
