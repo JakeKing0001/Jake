@@ -3103,9 +3103,33 @@ class JakeCore:
         if getattr(self, "ollama", None) is None:
             return configured
         try:
-            return choose_model(self.model_router, Capability.REASON, configured)
+            chosen = choose_model(self.model_router, Capability.REASON, configured)
         except Exception:
             return configured
+        self._release_previous_model(chosen)
+        return chosen
+
+    def _release_previous_model(self, chosen: str) -> None:
+        """F8.4.4: quando il router passa a un altro modello (es. quello leggero a batteria bassa), il precedente
+        viene scaricato in background: resterebbe in VRAM/RAM per tutto il keep_alive (ore) senza servire a nulla,
+        proprio quando l'energia conta. Mai bloccante, mai un'eccezione: nel peggiore dei casi resta caricato."""
+        previous = getattr(self, "_last_routed_model", None)
+        self._last_routed_model = chosen
+        if previous is None or previous == chosen:
+            return
+
+        logger = getattr(self, "logger", None)
+
+        def unload():
+            try:
+                self.ollama.unload(previous)
+                if logger is not None:
+                    logger.info("Modello %s scaricato: il router ora usa %s", previous, chosen)
+            except Exception:
+                if logger is not None:
+                    logger.warning("Non sono riuscito a scaricare il modello %s", previous)
+
+        threading.Thread(target=unload, name="jake-model-unload", daemon=True).start()
 
     @model.setter
     def model(self, value: str) -> None:

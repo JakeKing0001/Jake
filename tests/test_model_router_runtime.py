@@ -57,6 +57,30 @@ class JakeCoreModelTests(unittest.TestCase):
         self.assertEqual(core.model, "nuovo:8b")
 
 
+class ModelUnloadTests(unittest.TestCase):
+    def test_when_the_router_switches_model_the_previous_one_is_unloaded_once(self):
+        """F8.4.4: a batteria bassa il router passa al modello leggero; quello grande non resta in VRAM per ore."""
+        import threading
+
+        from core.jake_core import JakeCore
+
+        hardware = {"info": HardwareInfo(on_battery=False, battery_percent=100)}
+        unloaded, done = [], threading.Event()
+        core = JakeCore.__new__(JakeCore)
+        core.ollama = SimpleNamespace(list_models=lambda: ["grande:7b", "piccolo:1b"],
+                                      unload=lambda model: (unloaded.append(model), done.set()))
+        core._configured_model = "grande:7b"
+        core._model_router = build_local_router(CONFIG, core.ollama.list_models, hardware=lambda: hardware["info"])
+        self.assertEqual(core.model, "grande:7b")
+        self.assertEqual(core.model, "grande:7b")
+        hardware["info"] = HardwareInfo(on_battery=True, battery_percent=15)
+        core._model_router = build_local_router(CONFIG, core.ollama.list_models, hardware=lambda: hardware["info"])
+        self.assertEqual(core.model, "piccolo:1b")
+        self.assertTrue(done.wait(2))
+        self.assertEqual(core.model, "piccolo:1b")
+        self.assertEqual(unloaded, ["grande:7b"], "scaricato una volta, solo al cambio")
+
+
 class RealObservationsTests(unittest.TestCase):
     def test_every_real_model_call_feeds_the_router_statistics(self):
         from unittest import mock

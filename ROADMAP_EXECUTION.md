@@ -290,7 +290,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F8.1` | Skill Platform (manifest validato e loader che rifiuta prima dell'import il 22/09/2026; dal 27/09/2026 il rischio dichiarato da un pacchetto verificato e approvato arriva a `risk_of`/PolicyEngine, mai sopra un intent integrato; hook non eseguiti) | `DOING` |
 | `F8.2` | Supply-chain Security (pacchetti firmati, catalogo, quarantena/revoca, pin/rollback il 22/09/2026; dal 27/09/2026 nel runtime: caricamento all'avvio con ricontrollo di firma/hash, installazione in due passi PLAN_SKILL_INSTALL -> INSTALL_SKILL_PACKAGE (ADMIN) legata al digest mostrato; UI HUD e distribuzione non ancora) | `DOING` |
 | `F8.3` | Skill Forge (27/09/2026: scansione dei segreti prima della sandbox - chiavi private, token per formato, credenziali letterali) | `DOING` |
-| `F8.4` | Model Runtime (router con capability/inventario/eval/warm-unload/redazione il 22/09/2026; dal 27/09/2026 JakeCore sceglie il modello col router: catalogo da config, modelli installati, telemetria reale di batteria/VRAM, osservazioni reali di successo/latenza di ogni chiamata; warmup/unload non ancora guidati dal router) | `DOING` |
+| `F8.4` | Model Runtime (router con capability/inventario/eval/warm-unload/redazione il 22/09/2026; dal 27/09/2026 JakeCore sceglie il modello col router: catalogo da config, modelli installati, telemetria reale di batteria/VRAM, osservazioni reali di successo/latenza di ogni chiamata; dal 27/09/2026 il modello lasciato dal router viene scaricato davvero da Ollama) | `DOING` |
 | `F8.5` | Agent Runtime (27/09/2026: il supervisore ferma anche lo stesso strumento fallito 3 volte di fila con parametri diversi e chiede all'utente) | `DOING` |
 | `F8.6` | Release Safety (golden/security set, confronto, canary, rollback, canali firmati il 22/09/2026; senza runner reali ne' collegamento HUD) | `DOING` |
 
@@ -9990,6 +9990,14 @@ Dipende da: G0.
 7. `F8.4.7` Misurare ogni scelta con eval, non con nome o moda del modello.
 
 Criterio di uscita: perdita del modello principale non blocca i comandi locali semplici.
+
+- 27/09/2026 (F8.4.4, unload reale): `OllamaProviderAdapter.unload` era un `NotImplementedError` dichiarato.
+  `OllamaClient.unload` usa l'API reale di Ollama (richiesta senza prompt con `keep_alive: 0`) e
+  `OllamaClient.loaded_models` legge `/api/ps`. `JakeCore.model` ricorda l'ultimo modello scelto dal router: quando
+  la scelta cambia (batteria bassa -> modello leggero, oppure `SET_MODEL`) il precedente viene scaricato in un
+  thread daemon, una sola volta, senza bloccare ne' sollevare. Verificato su Ollama reale su questa macchina:
+  `nomic-embed-text` caricato -> `/api/ps` lo elenca -> `unload` -> `/api/ps` vuoto. Test del collegamento con
+  router reale e telemetria iniettata (100% -> 15% a batteria).
 
 - `F8.4.1`-`F8.4.7` (instradamento dei modelli, senza collegamento a `JakeCore`) — 22/09/2026: `core/model_router.py`. Oggi il nome del
   modello (`qwen2.5:7b`) e' ripetuto hardcoded in `core/jake_core.py`, `core/router.py` e `core/skill_catalog.py`: questo modulo e' il

@@ -166,6 +166,22 @@ class OllamaClient:
     def is_available(self) -> bool:
         return self.list_models() is not None
 
+    def loaded_models(self) -> list[str] | None:
+        """F8.4.4: i modelli caricati in memoria adesso (/api/ps). None se Ollama non risponde."""
+        try:
+            payload = self._get("/api/ps", timeout=5)
+        except OllamaError:
+            return None
+        raw_models = payload.get("models")
+        if not isinstance(raw_models, list):
+            return None
+        return [model.get("name", "") for model in raw_models if isinstance(model, dict)]
+
+    def unload(self, model: str) -> None:
+        """F8.4.4: libera subito la memoria (VRAM/RAM) di un modello. L'API REST di Ollama non ha un comando di
+        scaricamento dedicato: una richiesta senza prompt con keep_alive 0 scarica il modello e basta."""
+        self._post("/api/generate", {"model": model, "keep_alive": 0}, timeout=30)
+
     def has_model(self, name: str) -> bool:
         models = self.list_models() or []
         base = name.split(":")[0]
