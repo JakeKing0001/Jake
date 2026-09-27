@@ -37,7 +37,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Protocol
 
 from core.version import PROTOCOL_VERSION
 
@@ -421,6 +421,14 @@ def new_request_id() -> str:
 # ---- il guardiano ------------------------------------------------------------------------------------------------------
 
 
+class CapabilityStore(Protocol):
+    """Dove le capability per dispositivo sopravvivono al riavvio (core/device_credential_store.py)."""
+
+    def set_capabilities(self, device_id: str, classes) -> None: ...
+
+    def get_capabilities(self, device_id: str) -> list[str] | None: ...
+
+
 @dataclass
 class CompanionGuard:
     """Insieme delle difese, con default sicuri. Ogni pezzo e' sostituibile nei test."""
@@ -434,19 +442,29 @@ class CompanionGuard:
     # None = automatico: obbligatorio se il server e' esposto su un'interfaccia non locale.
     require_replay_protection: bool | None = None
     default_capabilities: frozenset = DEFAULT_CAPABILITIES
+    # F7.1.3: dove le capability sopravvivono al riavvio (core/device_credential_store.py); None = solo memoria.
+    capability_store: "CapabilityStore | None" = None
 
     def __post_init__(self) -> None:
         self._capabilities: dict[str, frozenset[EndpointClass]] = {}
         self._streams: dict[str, int] = {}
         self._lock = threading.Lock()
 
-    # capability per dispositivo (in memoria: vedi il docstring del modulo)
+    # capability per dispositivo: in memoria e, con uno store, persistenti (F7.1.3)
     def set_capabilities(self, device_id: str, classes) -> None:
-        self._capabilities[device_id] = frozenset(EndpointClass(c) for c in classes)
+        capabilities = frozenset(EndpointClass(c) for c in classes)
+        if self.capability_store is not None:
+            self.capability_store.set_capabilities(device_id, [c.value for c in capabilities])
+        self._capabilities[device_id] = capabilities
 
     def capabilities_of(self, device_id: str | None) -> frozenset:
         if device_id is None:
             return self.default_capabilities
+        if device_id not in self._capabilities and self.capability_store is not None:
+            stored = self.capability_store.get_capabilities(device_id)
+            if stored is not None:
+                valid = [c for c in stored if c in {cls.value for cls in EndpointClass}]
+                self._capabilities[device_id] = frozenset(EndpointClass(c) for c in valid)
         return self._capabilities.get(device_id, self.default_capabilities)
 
     def allowed(self, device_id: str | None, cls: EndpointClass) -> bool:

@@ -306,6 +306,10 @@ class MemoryPrivacyDashboard:
                 "memory_audit": connection.execute(
                     "DELETE FROM memory_audit WHERE memory_key = ? AND memory_category = ?", (key, category),
                 ).rowcount,
+                # le versioni precedenti sono copie del ricordo: dimenticare vuol dire anche loro (F5.4.2)
+                "memory_versions": connection.execute(
+                    "DELETE FROM memory_versions WHERE memory_key = ? AND memory_category = ?", (key, category),
+                ).rowcount,
                 "memories": connection.execute("DELETE FROM memories WHERE key = ? AND category = ?", (key, category)).rowcount,
                 "conversation_history_redacted": self._redact_history(value),
             }

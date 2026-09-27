@@ -56,7 +56,7 @@ class FreshDatabaseTests(unittest.TestCase):
     def test_a_new_database_is_created_at_the_current_version_with_no_backup(self):
         memory = MemoryManager(self.path)
         self.addCleanup(memory.close)
-        self.assertEqual(memory.migration_report.applied, [1, 2])
+        self.assertEqual(memory.migration_report.applied, [1, 2, 3])
         self.assertEqual(memory.migration_report.to_version, SCHEMA_VERSION)
         self.assertIsNone(memory.migration_report.backup_path)  # niente dati: niente da salvare
         self.assertEqual(current_version(memory.connection), SCHEMA_VERSION)
@@ -92,7 +92,7 @@ class UpgradeTests(unittest.TestCase):
         memory = MemoryManager(self.path)
         self.addCleanup(memory.close)
         self.assertEqual(memory.migration_report.from_version, 0)
-        self.assertEqual(memory.migration_report.applied, [1, 2])
+        self.assertEqual(memory.migration_report.applied, [1, 2, 3])
         recalled = {r["key"]: r for r in memory.recall(limit=10)}
         self.assertEqual(recalled["compleanno"]["value"], "5 marzo")
         self.assertEqual(recalled["compleanno"]["importance"], 3)
@@ -129,12 +129,12 @@ class UpgradeTests(unittest.TestCase):
         MemoryManager(self.path).close()
         # simula un file a cui le colonne nuove erano gia' state aggiunte a mano ma la versione no
         connection = sqlite3.connect(self.path)
-        connection.execute("DELETE FROM schema_version WHERE version = 2")
+        connection.execute("DELETE FROM schema_version WHERE version >= 2")
         connection.commit()
         connection.close()
         memory = MemoryManager(self.path)
         self.addCleanup(memory.close)
-        self.assertEqual(memory.migration_report.applied, [2])
+        self.assertEqual(memory.migration_report.applied, list(range(2, SCHEMA_VERSION + 1)))
 
     def test_backups_are_pruned_to_the_configured_number(self):
         _legacy_db(self.path)
@@ -170,14 +170,15 @@ class UnsupportedAndFailedMigrationTests(unittest.TestCase):
             conn.execute("ALTER TABLE memories ADD COLUMN esperimento TEXT")
             raise RuntimeError("guasto a meta' migrazione")
 
-        migrations = [*memory_schema.MIGRATIONS, memory_schema.Migration(3, "rotta", broken)]
-        with mock.patch.object(memory_schema, "MIGRATIONS", migrations), mock.patch.object(memory_schema, "SCHEMA_VERSION", 3):
+        broken_version = SCHEMA_VERSION + 1
+        migrations = [*memory_schema.MIGRATIONS, memory_schema.Migration(broken_version, "rotta", broken)]
+        with mock.patch.object(memory_schema, "MIGRATIONS", migrations),                 mock.patch.object(memory_schema, "SCHEMA_VERSION", broken_version):
             with self.assertRaises(MigrationError) as ctx:
                 MemoryManager(self.path)
-        self.assertEqual(ctx.exception.version, 3)
+        self.assertEqual(ctx.exception.version, broken_version)
         connection = sqlite3.connect(self.path)
         try:
-            self.assertEqual(current_version(connection), 2)  # la versione non e' avanzata
+            self.assertEqual(current_version(connection), SCHEMA_VERSION)  # la versione non e' avanzata
             columns = {r[1] for r in connection.execute("PRAGMA table_info(memories)").fetchall()}
             self.assertNotIn("esperimento", columns)  # ...e la colonna aggiunta a meta' e' sparita
         finally:

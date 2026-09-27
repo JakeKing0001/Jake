@@ -110,9 +110,23 @@ def _v2_metadata(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_audit_memory ON memory_audit(memory_key, memory_category)")
 
 
+def _v3_versions(conn: sqlite3.Connection) -> None:
+    """F5.4.1/F5.4.2: le versioni precedenti di un ricordo (e i conflitti rifiutati) invece di una sovrascrittura
+    silenziosa. `reason`: "superseded" (sostituita da un aggiornamento) o "conflict_rejected" (un'inferenza che
+    contraddiceva un fatto detto dall'utente, non applicata)."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS memory_versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, memory_key TEXT NOT NULL, memory_category TEXT NOT NULL,
+            value TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'unknown', valid_until TEXT NOT NULL,
+            recorded_at TEXT NOT NULL, reason TEXT NOT NULL)"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_versions_memory ON memory_versions(memory_key, memory_category)")
+
+
 MIGRATIONS: list[Migration] = [
     Migration(1, "schema di base (memorie, cronologia, relazioni) e colonne storiche", _v1_baseline),
     Migration(2, "metadati F5.1.3 (sensibilita', owner, autore, confidenza, validita', pin, uso) e registro eventi", _v2_metadata),
+    Migration(3, "versioni precedenti e conflitti rifiutati (F5.4.1/F5.4.2)", _v3_versions),
 ]
 SCHEMA_VERSION = MIGRATIONS[-1].version
 

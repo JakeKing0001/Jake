@@ -103,7 +103,7 @@ class MemoryManager:
         valid_from: str | None = None,
         valid_until: str | None = None,
         created_by: str | None = None,
-    ) -> None:
+    ) -> dict:
         """Salva o aggiorna un ricordo (upsert su key+category). Se e' fornito un embedding e
         un ricordo esistente nella stessa categoria/progetto e' semanticamente quasi identico
         (v3.4, vedi DEDUP_SIMILARITY_THRESHOLD), aggiorna QUELLO invece di crearne uno nuovo con
@@ -139,9 +139,27 @@ class MemoryManager:
                 if duplicate_key is not None:
                     key = duplicate_key
 
-            existed = self._connection.execute(
-                "SELECT 1 FROM memories WHERE key = ? AND category = ?", (key, category),
-            ).fetchone() is not None
+            previous_row = self._connection.execute(
+                "SELECT value, source FROM memories WHERE key = ? AND category = ?", (key, category),
+            ).fetchone()
+            existed = previous_row is not None
+            # F5.4.1/F5.4.2 (solo per la conoscenza: fatti e preferenze, non i record JSON di procedure, automazioni,
+            # contatti o riassunti che per costruzione si sostituiscono): mai una sovrascrittura silenziosa.
+            outcome = {"status": "created" if not existed else "unchanged", "previous": None}
+            changed = existed and " ".join(str(previous_row["value"]).lower().split()) != " ".join(value.lower().split())
+            if changed and category not in self.KNOWLEDGE_CATEGORIES:
+                outcome["status"] = "updated"  # record strutturato: si sostituisce, senza versioni
+            if changed and category in self.KNOWLEDGE_CATEGORIES:
+                old_value, old_source = previous_row["value"], previous_row["source"]
+                outcome["previous"] = old_value
+                if old_source == "user" and source != "user":
+                    # un'inferenza (di Jake o di un agente) non cancella cio' che l'utente ha detto
+                    self._record_version(key, category, value, source, now, "conflict_rejected")
+                    self._audit(key, category, "conflict", source, "inferenza in conflitto con un fatto dell'utente")
+                    self._connection.commit()
+                    return {"status": "conflict", "previous": old_value}
+                self._record_version(key, category, old_value, old_source, now, "superseded")
+                outcome["status"] = "updated"
             self._connection.execute(
                 """
                 INSERT INTO memories
@@ -164,6 +182,24 @@ class MemoryManager:
             self._apply_metadata(key, category, sensitivity, owner, confidence, valid_from, valid_until, author)
             self._audit(key, category, "updated" if existed else "created", created_by or source)
             self._connection.commit()
+            return outcome
+
+    KNOWLEDGE_CATEGORIES = frozenset({"fact", "preference"})
+
+    def _record_version(self, key: str, category: str, value: str, source: str, at: str, reason: str) -> None:
+        self._connection.execute(
+            "INSERT INTO memory_versions (memory_key, memory_category, value, source, valid_until, recorded_at, reason) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)", (key, category, value, source or "unknown", at, at, reason),
+        )
+
+    def versions(self, key: str, category: str = "fact") -> list[dict]:
+        """F5.4.2: le versioni precedenti di un ricordo (e le inferenze rifiutate), dalla piu' recente."""
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT value, source, valid_until, reason FROM memory_versions WHERE memory_key = ? AND memory_category = ? "
+                "ORDER BY id DESC", (key, category),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     @staticmethod
     def _validate_metadata(sensitivity, confidence, valid_from, valid_until) -> None:
@@ -323,6 +359,68 @@ class MemoryManager:
 
         scored.sort(key=lambda entry: entry["score"], reverse=True)
         return scored[:limit]
+
+    _STOPWORDS = frozenset({
+        "che", "chi", "come", "cosa", "dove", "quando", "quale", "quali", "quanto", "perche", "perché", "sono",
+        "della", "delle", "dello", "degli", "nella", "nelle", "questo", "questa", "quello", "quella", "sempre",
+        "anche", "ancora", "molto", "tutto", "tutti", "hai", "dimmi", "spiegami", "sai", "puoi", "vorrei",
+        "what", "when", "where", "which", "does", "the", "and", "with", "about",
+    })
+
+    def relevant_for(self, question: str, query_embedding: list | None = None, limit: int = 4,
+                     budget_chars: int = 700, semantic_threshold: float = 0.55) -> list[dict]:
+        """F5.5/F5.6: i ricordi pertinenti a una domanda libera, per le risposte NORMALI (non solo RECALL).
+        Ranking: frase esatta > parole in comune (pesate per importanza e recenza); la similarita' semantica
+        entra solo se le parole non trovano nulla; il primo risultato porta con se' i ricordi collegati (un
+        salto nel grafo). Si ferma al budget di caratteri: il contesto del modello non deve esplodere.
+        Ogni voce ha `why` (perche' e' stata scelta). Ricordi scaduti mai inclusi."""
+        import re
+
+        words = [w for w in re.findall(r"[\w']+", (question or "").lower())
+                 if len(w) >= 4 and w not in self._STOPWORDS]
+        candidates: dict[tuple, dict] = {}
+        if words:
+            clauses = " OR ".join(["lower(key) LIKE ? OR lower(value) LIKE ?"] * len(words))
+            params = [p for w in words for p in (f"%{w}%", f"%{w}%")]
+            with self._lock:
+                rows = self._connection.execute(
+                    f"SELECT {self._RETURNED_COLUMNS} FROM memories WHERE ({clauses}) "
+                    "AND (expires_at IS NULL OR expires_at >= ?) ORDER BY updated_at DESC LIMIT 50",
+                    (*params, self._now()),
+                ).fetchall()
+            lowered = (question or "").lower()
+            for row in rows:
+                entry = dict(row)
+                haystack = f"{entry['key']} {entry['value']}".lower()
+                hits = sum(1 for w in words if w in haystack)
+                exact = entry["key"].lower() in lowered
+                entry["score"] = (2.0 if exact else 0.0) + hits / len(words) + 0.05 * int(entry.get("importance") or 0)
+                entry["why"] = "chiave citata nella domanda" if exact else f"{hits} parole in comune"
+                candidates[(entry["key"], entry["category"])] = entry
+        if not candidates and query_embedding is not None:
+            for entry in self.semantic_recall(query_embedding, limit=limit):
+                if entry["score"] >= semantic_threshold:
+                    entry["why"] = f"simile per significato ({entry['score']:.2f})"
+                    candidates[(entry["key"], entry["category"])] = entry
+        ranked = sorted(candidates.values(), key=lambda e: (e["score"], e.get("updated_at") or ""), reverse=True)
+        if ranked:
+            top = ranked[0]
+            for related in self.related(top["key"], top.get("category", "fact")):
+                if related.get("value") is None or (related["key"], related.get("category", "fact")) in candidates:
+                    continue
+                related = dict(related)
+                related["why"] = f"collegato a '{top['key']}' ({related.get('predicate')})"
+                related["score"] = top["score"] - 0.5
+                ranked.append(related)
+        chosen: list[dict] = []
+        used = 0
+        for entry in ranked[:limit + 2]:
+            size = len(str(entry.get("key"))) + len(str(entry.get("value")))
+            if len(chosen) >= limit or used + size > budget_chars:
+                break
+            chosen.append(entry)
+            used += size
+        return chosen
 
     def purge_expired(self) -> int:
         """Rimuove per davvero i ricordi la cui scadenza (expires_at, vedi remember() ttl_days)

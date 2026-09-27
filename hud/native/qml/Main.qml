@@ -43,8 +43,8 @@ ApplicationWindow {
     JakeClient {
         id: jake
         onMessageReceived: (role, text) => conversation.append(role, text)
-        onNotification: (kind, text) => toast.show(text, kind === "reminder" ? Theme.accent : Theme.textMuted)
-        onErrorOccurred: (detail) => toast.show(detail || qsTr("Errore sconosciuto"), Theme.danger)
+        onNotification: (kind, text) => toast.show(text, kind === "reminder" ? Theme.accent : Theme.textMuted, kind)
+        onErrorOccurred: (detail) => toast.show(detail || qsTr("Errore sconosciuto"), Theme.danger, "error")
         onVisibilityRequested: (visible) => {
             window.visible = visible;
             overlayStyler.forceVisibility(window, visible);
@@ -187,6 +187,7 @@ ApplicationWindow {
             id: actionCenter
             Layout.fillWidth: true
             activitySummary: jake.lastActivitySummary
+            activityDetails: jake.lastActivityDetails
             undoExpiresAt: jake.lastUndoExpiresAt
             // undo e stop passano dagli stessi skill del comando vocale (scadenza, policy, controlli)
             onUndoRequested: jake.sendCommand("annulla l'ultima azione")
@@ -214,31 +215,57 @@ ApplicationWindow {
     GlassPanel {
         id: toast
         property string message: ""
+        property string kind: ""
         property color tone: Theme.textMuted
-        function show(text, color) {
+        // F6.3.4: per una notifica proattiva (non un promemoria, non un errore) l'utente puo' chiederne meno o
+        // silenziarla; le frasi sono quelle esatte degli skill vocali, stessa pipeline e stessa policy.
+        readonly property bool proactive: kind === "advisory" || kind === "trigger"
+        function show(text, color, notificationKind) {
             message = text;
+            kind = notificationKind || "";
             tone = color;
             opacity = 1;
             hideTimer.restart();
         }
         anchors.horizontalCenter: parent.horizontalCenter
         y: 58
-        width: Math.min(parent.width - 40, toastText.implicitWidth + 36)
-        height: toastText.implicitHeight + 18
+        width: Math.min(parent.width - 40, Math.max(toastText.implicitWidth, toastActions.implicitWidth) + 36)
+        height: toastColumn.implicitHeight + 18
         visible: opacity > 0
         opacity: 0
         accentColor: tone
         Behavior on opacity { NumberAnimation { duration: window.reducedMotion ? 0 : 220 } }
         Accessible.role: Accessible.AlertMessage
         Accessible.name: message
-        Text {
-            id: toastText
+        Column {
+            id: toastColumn
             anchors.centerIn: parent
-            width: Math.min(implicitWidth, window.width - 76)
-            text: toast.message
-            color: Theme.text
-            wrapMode: Text.WordWrap
-            font.pixelSize: Theme.fontSmall
+            spacing: 6
+            Text {
+                id: toastText
+                width: Math.min(implicitWidth, window.width - 76)
+                text: toast.message
+                color: Theme.text
+                wrapMode: Text.WordWrap
+                font.pixelSize: Theme.fontSmall
+            }
+            Row {
+                id: toastActions
+                visible: toast.proactive
+                spacing: 6
+                Button {
+                    text: qsTr("Meno così")
+                    font.pixelSize: 11
+                    Accessible.name: qsTr("Mostra meno notifiche come questa")
+                    onClicked: { jake.sendCommand("meno notifiche così"); toast.opacity = 0; }
+                }
+                Button {
+                    text: qsTr("Non più")
+                    font.pixelSize: 11
+                    Accessible.name: qsTr("Non mostrare più notifiche come questa")
+                    onClicked: { jake.sendCommand("non mostrarmelo più"); toast.opacity = 0; }
+                }
+            }
         }
         Timer { id: hideTimer; interval: 6000; onTriggered: toast.opacity = 0 }
     }

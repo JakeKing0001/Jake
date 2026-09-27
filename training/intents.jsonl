@@ -674,3 +674,10 @@
 {"text": "annulla l'ultima azione", "intent": "UNDO_LAST_ACTION", "parameters": {}}
 {"text": "da dove sai il mio indirizzo", "intent": "EXPLAIN_MEMORY", "parameters": {"key": "indirizzo"}}
 {"text": "perche ricordi il compleanno di marco", "intent": "EXPLAIN_MEMORY", "parameters": {"key": "compleanno di marco"}}
+{"text": "meno notifiche così", "intent": "LESS_NOTIFICATIONS_LIKE_THIS", "parameters": {}}
+{"text": "meno notifiche come questa", "intent": "LESS_NOTIFICATIONS_LIKE_THIS", "parameters": {}}
+{"text": "non mostrarmelo più", "intent": "MUTE_NOTIFICATION", "parameters": {}}
+{"text": "non mostrarmi più questa notifica", "intent": "MUTE_NOTIFICATION", "parameters": {}}
+{"text": "mostramelo di nuovo", "intent": "UNMUTE_NOTIFICATION", "parameters": {}}
+{"text": "rimandala di un'ora", "intent": "SNOOZE_NOTIFICATION", "parameters": {"minutes": 60}}
+{"text": "ricordamelo tra dieci minuti", "intent": "SNOOZE_NOTIFICATION", "parameters": {"minutes": 10}}

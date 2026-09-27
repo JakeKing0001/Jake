@@ -107,7 +107,8 @@ class SkillRegistry:
         self.skills.update(build_system_skills())
         self.skills.update(build_smart_home_skills(self.config))
         self.skills.update(build_dev_tools_skills())
-        self.skills.update(build_text_and_math_skills(self.config, self.conversation_state))
+        self.skills.update(build_text_and_math_skills(self.config, self.conversation_state, self.memory_manager,
+                                                      self.embedding_provider))
         self.skills.update(build_fun_skills())
         self.skills.update(build_misc_skills())
         self.skills.update(build_research_skills(self.config, web_search_skill, search_files_skill))

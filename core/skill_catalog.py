@@ -349,9 +349,16 @@ def build_dev_tools_skills() -> dict:
     }
 
 
-def build_text_and_math_skills(config, conversation_state) -> dict:
+def build_text_and_math_skills(config, conversation_state, memory_manager=None, embedding_provider=None) -> dict:
+    dashboard = None
+    if memory_manager is not None:
+        from core.memory_privacy import MemoryPrivacyDashboard
+
+        dashboard = MemoryPrivacyDashboard(memory_manager)
     return {
-        "ASK_QUESTION": AskQuestionSkill(conversation_state, model=config.get("ollama_model", "qwen2.5:7b")),
+        "ASK_QUESTION": AskQuestionSkill(conversation_state, model=config.get("ollama_model", "qwen2.5:7b"),
+                                         memory_manager=memory_manager, embedding_provider=embedding_provider,
+                                         dashboard=dashboard),
         "TRANSLATE_TEXT": TranslateTextSkill(model=config.get("ollama_model", "qwen2.5:7b")),
         "CALCULATE": CalculateSkill(),
         "CONVERT_UNITS": ConvertUnitsSkill(),

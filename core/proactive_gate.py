@@ -23,6 +23,16 @@ from collections.abc import Callable
 DELIVER = "deliver"
 DUPLICATE = "duplicate"
 DEFER = "defer"
+MUTED = "muted"
+
+
+def notification_key(kind: str, message: str) -> str:
+    """Il TIPO di una notifica, non il testo esatto: numeri e spazi normalizzati ("Batteria al 12%" e
+    "Batteria al 9%" sono la stessa cosa per "meno notifiche cosi'"). Nessuna interpretazione del significato."""
+    import re
+
+    template = re.sub(r"\d+([.,]\d+)?", "#", " ".join(message.lower().split()))
+    return f"{kind}:{template[:80]}"
 
 
 class ProactiveGate:
@@ -33,7 +43,10 @@ class ProactiveGate:
         hourly_budget: int = 3,
         in_quiet_hours: Callable[[], bool] = lambda: False,
         conversation_active: Callable[[], bool] = lambda: False,
+        feedback=None,
     ) -> None:
+        # F6.3.4: FeedbackStore (core/notification_policy.py) - "meno notifiche cosi'" e "non mostrarmelo piu'"
+        self.feedback = feedback
         self._clock = clock
         self.dedup_window_s = dedup_window_s
         self.hourly_budget = hourly_budget
@@ -57,6 +70,13 @@ class ProactiveGate:
         if last is not None and now - last < self.dedup_window_s:
             return DUPLICATE, f"gia' notificato {now - last:.0f} s fa"
         if kind != "reminder" and not critical:
+            if self.feedback is not None:
+                feedback_key = notification_key(kind, message)
+                if self.feedback.is_muted(feedback_key):
+                    return MUTED, "silenziata dall'utente"
+                # una richiesta dimezza il moltiplicatore, che risale verso 1 in ~30 giorni (FeedbackStore)
+                if self.feedback.multiplier(feedback_key) < 0.75:
+                    return DEFER, "l'utente ne ha chieste meno: va nel riepilogo"
             if self.in_quiet_hours():
                 return DEFER, "quiet hours"
             if self.conversation_active():

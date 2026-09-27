@@ -9,22 +9,43 @@ import JakeHud
 GlassPanel {
     id: root
     property string activitySummary: ""
+    property string activityDetails: ""
+    property bool showDetails: false
     property real undoExpiresAt: 0
     property real nowSeconds: Date.now() / 1000
     readonly property bool undoAvailable: undoExpiresAt > nowSeconds
+    // F4.6.4: l'undo non sparisce in silenzio - dopo la scadenza si dice perche' non c'e' piu'
+    readonly property bool undoExpired: undoExpiresAt > 0 && undoExpiresAt <= nowSeconds
     signal undoRequested()
     signal stopRequested()
-    implicitHeight: 48
+    implicitHeight: showDetails && activityDetails.length > 0 ? 48 + detailsText.implicitHeight + 10 : 48
 
     Timer {
         interval: 1000
         repeat: true
-        running: root.undoExpiresAt > 0
+        running: root.undoExpiresAt > 0 && !root.undoExpired
         onTriggered: root.nowSeconds = Date.now() / 1000
     }
 
+    Text {
+        id: detailsText
+        visible: root.showDetails && root.activityDetails.length > 0
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.margins: 12
+        text: root.activityDetails
+        color: Theme.textMuted
+        font.pixelSize: 11
+        wrapMode: Text.WordWrap
+        Accessible.name: text
+    }
+
     RowLayout {
-        anchors.fill: parent
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        height: 48
         anchors.leftMargin: 14
         anchors.rightMargin: 8
         spacing: 8
@@ -33,12 +54,21 @@ GlassPanel {
             Layout.fillWidth: true
             text: root.activitySummary.length > 0
                 ? root.activitySummary + (root.undoAvailable
-                    ? qsTr(" · annullabile per %1 s").arg(Math.max(0, Math.floor(root.undoExpiresAt - root.nowSeconds))) : "")
+                    ? qsTr(" · annullabile per %1 s").arg(Math.max(0, Math.floor(root.undoExpiresAt - root.nowSeconds)))
+                    : root.undoExpired ? qsTr(" · annullamento scaduto alle %1").arg(
+                        Qt.formatTime(new Date(root.undoExpiresAt * 1000), "hh:mm")) : "")
                 : qsTr("Nessuna azione recente")
             color: root.activitySummary.length > 0 ? Theme.text : Theme.textFaint
             font.pixelSize: Theme.fontSmall
             elide: Text.ElideRight
             Accessible.name: text
+        }
+        Button {
+            visible: root.activityDetails.length > 0
+            flat: true
+            text: root.showDetails ? qsTr("Meno") : qsTr("Dettagli")
+            Accessible.name: root.showDetails ? qsTr("Nascondi i dettagli dell'ultima azione") : qsTr("Mostra i dettagli dell'ultima azione")
+            onClicked: root.showDetails = !root.showDetails
         }
         Button {
             visible: root.undoAvailable

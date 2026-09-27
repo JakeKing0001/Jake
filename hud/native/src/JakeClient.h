@@ -43,6 +43,8 @@ class JakeClient : public QObject {
     // F4.6.1/F4.6.3: ultima attivita' dell'action center e scadenza del suo undo (epoch s, 0 = no).
     Q_PROPERTY(QString lastActivitySummary READ lastActivitySummary NOTIFY viewChanged)
     Q_PROPERTY(qint64 lastUndoExpiresAt READ lastUndoExpiresAt NOTIFY viewChanged)
+    // F4.6.2/F4.6.6: dettagli dell'ultima azione per l'utente (non l'audit tecnico completo)
+    Q_PROPERTY(QString lastActivityDetails READ lastActivityDetails NOTIFY viewChanged)
     Q_PROPERTY(QString lastOutcome READ lastOutcome NOTIFY viewChanged)
     Q_PROPERTY(double audioLevel READ audioLevel NOTIFY viewChanged)
 
@@ -69,6 +71,7 @@ public:
     bool confirmationExternal() const { return m_reducer.view().confirmationExternal; }
     QString lastActivitySummary() const;
     qint64 lastUndoExpiresAt() const;
+    QString lastActivityDetails() const;
     QString lastOutcome() const { return m_reducer.view().lastOutcome; }
     double audioLevel() const { return m_reducer.view().audioLevel; }
 

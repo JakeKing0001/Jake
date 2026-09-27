@@ -207,11 +207,12 @@ class HudViewState:
         item = next((entry for entry in self.activities if entry["action_id"] == action_id), None)
         if item is None:
             item = {"action_id": action_id, "intent": "", "outcome": "", "verified": "", "trace_id": "",
-                    "undo_intent": "", "undo_expires_at": 0}
+                    "requested_by": "", "error_category": "", "undo_intent": "", "undo_expires_at": 0}
             self._push(self.activities, item)
         if event_type == "ACTION_RECEIPT":
             item.update(intent=_text(payload, "intent"), outcome=_text(payload, "outcome"),
-                        verified=_text(payload, "verified"), trace_id=trace_id)
+                        verified=_text(payload, "verified"), trace_id=trace_id,
+                        requested_by=_text(payload, "requested_by"), error_category=_text(payload, "error_category"))
             if item["outcome"] != "success":
                 self.last_outcome = "error"
             else:

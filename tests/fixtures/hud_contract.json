@@ -191,8 +191,8 @@
       "expect": {
         "state": "IDLE", "ignored": 1, "last_outcome": "error",
         "activities": [
-          {"action_id": "a1", "intent": "CREATE_PATH", "outcome": "success", "verified": "verified", "trace_id": "t-1", "undo_intent": "DELETE_PATH", "undo_expires_at": 1790000300},
-          {"action_id": "a2", "intent": "SEND_EMAIL", "outcome": "failed", "verified": "unverified", "trace_id": "", "undo_intent": "", "undo_expires_at": 0}
+          {"action_id": "a1", "intent": "CREATE_PATH", "outcome": "success", "verified": "verified", "trace_id": "t-1", "requested_by": "user", "error_category": "success", "undo_intent": "DELETE_PATH", "undo_expires_at": 1790000300},
+          {"action_id": "a2", "intent": "SEND_EMAIL", "outcome": "failed", "verified": "unverified", "trace_id": "", "requested_by": "agent", "error_category": "denied", "undo_intent": "", "undo_expires_at": 0}
         ]
       }
     },

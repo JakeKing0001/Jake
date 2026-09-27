@@ -89,6 +89,13 @@ class DeviceCredentialStore:
                 expires_at REAL NOT NULL,
                 revoked_at REAL
             );
+            -- F7.1.3: capability per dispositivo PERSISTENTI (prima solo in memoria: un riavvio restituiva a un
+            -- dispositivo limitato i permessi di default).
+            CREATE TABLE IF NOT EXISTS device_capabilities (
+                device_id TEXT PRIMARY KEY REFERENCES devices(device_id),
+                classes TEXT NOT NULL,
+                updated_at REAL NOT NULL
+            );
             """
         )
         self._connection.commit()
@@ -241,6 +248,31 @@ class DeviceCredentialStore:
                     return None
                 return row["device_id"]
             return None
+
+    def set_capabilities(self, device_id: str, classes) -> None:
+        import json
+
+        with self._lock:
+            self._connection.execute(
+                "INSERT INTO device_capabilities (device_id, classes, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(device_id) DO UPDATE SET classes = excluded.classes, updated_at = excluded.updated_at",
+                (device_id, json.dumps(sorted(str(c) for c in classes)), self._time_source()),
+            )
+            self._connection.commit()
+
+    def get_capabilities(self, device_id: str) -> list[str] | None:
+        import json
+
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT classes FROM device_capabilities WHERE device_id = ?", (device_id,)).fetchone()
+        if row is None:
+            return None
+        try:
+            classes = json.loads(row["classes"])
+        except ValueError:
+            return []  # riga corrotta: nessun permesso invece dei default (fail-closed)
+        return [str(c) for c in classes] if isinstance(classes, list) else []
 
     def close(self) -> None:
         with self._lock:

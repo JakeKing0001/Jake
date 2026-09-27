@@ -263,34 +263,34 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
 | `F4.4` | Interaction Design (26/09/2026: orb 3D Qt Quick 3D con nucleo volumetrico e particle shell, comportamento per stato interrupt-safe, reduced motion di Windows, qualita' high/low, fallback 2D; livelli audio reali di microfono e voce di Jake collegati all'orb; verifica visiva degli stati ancora da fare) | `DOING` |
 | `F4.5` | Interaction Design (26/09/2026: trascrizione live, permission card, prove, diagnosi, notifiche nell'HUD nativo; verifica visiva da fare) | `DOING` |
-| `F4.6` | Trust UX (26/09/2026: kill switch visibile; action center con ultima azione, esito, verifica e undo con scadenza; retry/dettagli/precondizioni non ancora) | `DOING` |
+| `F4.6` | Trust UX (26/09/2026: kill switch visibile e scorciatoia globale; action center con ultima azione, esito, verifica e undo con scadenza; 27/09/2026: dettagli dell'azione per l'utente - origine, esito/categoria, verifica, annullabilita', traccia - e motivo quando l'undo non e' piu' disponibile; retry sicuro non ancora) | `DOING` |
 | `F4.7` | Accessibility (26/09/2026: nomi accessibili, focus ring, scrittura reale nella barra comandi di un overlay no-activate, scorciatoie globali Ctrl+Shift+J / Ctrl+Alt+Fine, reduced motion di sistema; screen reader, scaling e alto contrasto da verificare) | `DOING` |
 | `F4.8` | Release Engineering (26/09/2026: core e HUD nativo avviati in ordine come processi separati, riavvio dell'HUD solo dopo un crash e con un tetto; installer/crash dump/rollback non iniziati) | `DOING` |
 | `F5.1` | Memory Platform (F5.1.1/F5.1.3-F5.1.6 il 21/09/2026: schema versionato, migrazioni transazionali con backup, metadati, recupero; resta F5.1.2 separare entita'/episodi/procedure e la prova su una copia del database reale) | `DOING` |
 | `F5.2` | Memory Platform | `DOING` |
 | `F5.3` | Knowledge Model | `DOING` |
-| `F5.4` | Memory Reliability | `DOING` |
-| `F5.5` | Retrieval Quality | `DOING` |
+| `F5.4` | Memory Reliability (27/09/2026: nessuna sovrascrittura silenziosa di fatti/preferenze - versione precedente conservata e dichiarata, un'inferenza non sostituisce un fatto detto dall'utente, conflitti registrati, "dimentica" cancella anche le versioni; conferma sui conflitti importanti e consolidamento non ancora) | `DOING` |
+| `F5.5` | Retrieval Quality (27/09/2026: ricordi pertinenti con fonte anche nelle risposte libere, budget di contesto, grafo a un salto; agente e metriche ancora da fare) | `DOING` |
 | `F5.6` | Context Runtime | `DOING` |
 | `F5.7` | Privacy Engineering (libreria completa il 21/09/2026; dal 26/09/2026 nel percorso reale: "dimentica" cancella anche registro e indici con ricevuta, l'uso dei ricordi viene registrato, "da dove sai X" spiega la provenienza; purge/export/backup non ancora esposti a voce/HUD) | `DOING` |
 | `F6.1` | Proactivity Platform (26/09/2026: promemoria, automazioni e avvisi passano dagli stessi freni in `JakeCore.notify` - duplicati, budget orario, quiet hours, conversazione in corso - e si sospendono insieme durante prove e benchmark) | `DOING` |
 | `F6.2` | Proactivity Quality | `DOING` |
-| `F6.3` | Notification UX (libreria di decisione il 21/09/2026; collegata a JakeCore/EventBus/HUD il 22/09/2026 - vedi F6.7; nessuna consegna reale di call/companion) | `DOING` |
+| `F6.3` | Notification UX (libreria di decisione il 21/09/2026; collegata a JakeCore/EventBus/HUD il 22/09/2026; dal 27/09/2026 "meno notifiche cosi'", "non mostrarmelo piu'", "mostramelo di nuovo" e "rimandala" sull'ultima notifica, a voce e dai pulsanti del toast HUD, persistenti; nessuna consegna reale di call/companion) | `DOING` |
 | `F6.4` | Goal Runtime | `DOING` |
 | `F6.5` | Automation Runtime | `DOING` |
 | `F6.6` | Meeting Experience (libreria di regole il 21/09/2026: brief senza dati inventati, consenso e indicatore, follow-up gated; nessun connettore reale) | `DOING` |
 | `F6.7` | Runtime Reliability (monitor/housekeeping il 22/09/2026; task monitor collegato a JakeCore/EventBus/HUD lo stesso giorno - vedi F6.3; housekeeping senza connettori reali ne' pilot) | `DOING` |
-| `F7.1` | Companion Security (F7.1.1/.4/.5/.6/.7 il 22/09/2026; F7.1.2 - pairing HTTP - chiuso il 22/09/2026, vedi F7.2; TLS reale generato/persistito dal server il 22/09/2026; manca capability persistenti F7.1.3 e distribuzione del certificato al telefono oltre al pairing) | `DOING` |
+| `F7.1` | Companion Security (F7.1.1/.4/.5/.6/.7 il 22/09/2026; F7.1.2 - pairing HTTP - chiuso il 22/09/2026, vedi F7.2; TLS reale generato/persistito dal server il 22/09/2026; capability persistenti F7.1.3 dal 27/09/2026 - impostabili a voce con SET_DEVICE_ACCESS, valide subito e dopo un riavvio, riga corrotta = nessun permesso; manca la distribuzione del certificato al telefono oltre al pairing) | `DOING` |
 | `F7.2` | Mobile Companion (pairing/chat live/approve-deny sullo stesso task end-to-end il 22/09/2026; lista/revoca dispositivi via HTTP e prima app Android reale - MAI compilata/eseguita in questo ambiente - il 22/09/2026; senza file share/offline queue/wipe via companion) | `DOING` |
 | `F7.3` | Voice Devices | `BACKLOG` |
 | `F7.4` | Presence Runtime | `DOING` |
 | `F7.5` | Home Integration | `DOING` |
 | `F7.6` | Sync and Crypto (motore cifrato con conflitti deterministici, revoca, wipe e coda limitata il 21/09/2026; senza trasporto ne' collegamento a memoria/pairing) | `DOING` |
 | `F7.7` | Edge Devices | `BACKLOG` |
-| `F8.1` | Skill Platform (manifest validato e loader che rifiuta prima dell'import il 22/09/2026; rischio dichiarato non ancora collegato al policy engine, hook non eseguiti) | `DOING` |
-| `F8.2` | Supply-chain Security (pacchetti firmati, catalogo, quarantena/revoca, pin/rollback il 22/09/2026; senza UI di approvazione ne' distribuzione) | `DOING` |
+| `F8.1` | Skill Platform (manifest validato e loader che rifiuta prima dell'import il 22/09/2026; dal 27/09/2026 il rischio dichiarato da un pacchetto verificato e approvato arriva a `risk_of`/PolicyEngine, mai sopra un intent integrato; hook non eseguiti) | `DOING` |
+| `F8.2` | Supply-chain Security (pacchetti firmati, catalogo, quarantena/revoca, pin/rollback il 22/09/2026; dal 27/09/2026 nel runtime: caricamento all'avvio con ricontrollo di firma/hash, installazione in due passi PLAN_SKILL_INSTALL -> INSTALL_SKILL_PACKAGE (ADMIN) legata al digest mostrato; UI HUD e distribuzione non ancora) | `DOING` |
 | `F8.3` | Skill Forge | `DOING` |
-| `F8.4` | Model Runtime (router con capability/inventario/eval/warm-unload/redazione il 22/09/2026; non ancora collegato a JakeCore) | `DOING` |
+| `F8.4` | Model Runtime (router con capability/inventario/eval/warm-unload/redazione il 22/09/2026; dal 27/09/2026 JakeCore sceglie il modello col router: catalogo da config, modelli installati, telemetria reale di batteria/VRAM, osservazioni reali di successo/latenza di ogni chiamata; warmup/unload non ancora guidati dal router) | `DOING` |
 | `F8.5` | Agent Runtime | `DOING` |
 | `F8.6` | Release Safety (golden/security set, confronto, canary, rollback, canali firmati il 22/09/2026; senza runner reali ne' collegamento HUD) | `DOING` |
 
@@ -9031,8 +9031,16 @@ Criterio di uscita: ogni risposta di memoria ha almeno una fonte oppure è marca
 - 26/09/2026 (F5.5.3/F5.5.4 per `RECALL`): ogni ricordo nella risposta porta la provenienza - "me l'hai
   detto tu il GG/MM/AAAA", "l'ho dedotto io, non me l'hai detto tu", "salvato da un agente" o la fonte
   registrata. Prima la risposta era solo "chiave: valore" e un'inferenza sembrava un fatto detto
-  dall'utente. Prova in `tests/test_memory_privacy_integration.py`. Restano citazioni per le altre
-  risposte che usano la memoria (agente, domande libere) e le metriche precision/recall.
+  dall'utente. Prova in `tests/test_memory_privacy_integration.py`.
+- 27/09/2026 (F5.5.1/F5.5.3/F5.6, memoria nelle risposte normali): la memoria entrava SOLO nel comando
+  RECALL; una domanda libera ("quando e' il compleanno di Giulia?") andava al modello senza ricordi.
+  `MemoryManager.relevant_for` sceglie i ricordi pertinenti (frase esatta > parole in comune pesate per
+  importanza/recenza; semantica solo se le parole non trovano nulla; un salto nel grafo delle relazioni;
+  scaduti esclusi; budget di 700 caratteri) e ASK_QUESTION li passa al modello come fonti [M1]..; nella
+  risposta i ricordi usati (marcatore o valore citato) sono dichiarati con la stessa provenienza di
+  RECALL ("Dai miei ricordi: ... (me l'hai detto tu il ...)", un'inferenza resta un'inferenza) e ne viene
+  registrato l'uso, mai in modalita' privata. Prova: `tests/test_memory_in_answers.py`. Restano l'agente
+  a passi e le metriche precision/recall.
 
 ### F5.6 — Context engine event-driven
 
@@ -9171,6 +9179,13 @@ monitor rileva un evento fixture senza richiesta dell'utente e senza duplicarlo.
   una sospensione. Nella sessione vocale un avviso o un'automazione arrivati mentre Jake parla o lavora a
   un comando vanno in coda invece di tagliare la risposta in corso (prima `_speak_async` la
   interrompeva). Resta: portare anche il task monitor sulla stessa pipeline.
+- 27/09/2026 (F6.3.4): `FeedbackStore` ("meno notifiche come questa", con recupero in ~30 giorni) esisteva ma
+  nessuna notifica reale lo consultava. Ora il gate di `JakeCore.notify` lo usa per TIPO di notifica (numeri
+  normalizzati: "Batteria al 12%" e "al 9%" sono lo stesso tipo): un tipo ridotto finisce nel riepilogo, uno
+  silenziato non esce piu' finche' l'utente non lo riattiva. Quattro skill vocali sull'ultima notifica mostrata
+  (LESS_NOTIFICATIONS_LIKE_THIS, MUTE_NOTIFICATION, UNMUTE_NOTIFICATION, SNOOZE_NOTIFICATION con "non prima di")
+  con frasi esatte nel NLU; nell'HUD il toast di un avviso/automazione ha "Meno cosi'" e "Non piu'". Preferenze
+  salvate in `data/notification_feedback.json`. Promemoria ed eventi critici non si silenziano da qui.
 
 ### F6.2 — Suggestion engine
 
