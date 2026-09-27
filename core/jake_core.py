@@ -542,6 +542,9 @@ class JakeCore:
 
         # Skill che hanno bisogno del core (non solo del registry): registrate qui.
         self.skill_registry.register_skill("LIST_MODELS", ListModelsSkill())
+        # F6.7: "avvisami quando finisce la build" - sorveglia un processo gia' in esecuzione
+        from skills.watch_process import WatchProcessSkill
+        self.skill_registry.register_skill("WATCH_PROCESS", WatchProcessSkill(self))
         # F6.3.4: controllo dell'utente sull'ultima notifica proattiva mostrata
         from skills.notification_feedback import (LessNotificationsLikeThisSkill, MuteNotificationSkill,
                                                   SnoozeNotificationSkill, UnmuteNotificationSkill)
@@ -714,6 +717,23 @@ class JakeCore:
         callback = getattr(getattr(self, "system_advisor", None), "on_advisory", None) or self._default_on_advisory
         callback(digest)
         return digest
+
+    def present_notification(self, kind: str, message: str) -> str | None:
+        """F6.1: UNA strada per mostrare una notifica - gate (modalita', duplicati, budget, quiet hours,
+        preferenze) e poi un unico presentatore: stampa in CLI, voce nella sessione vocale (che la rimanda se
+        Jake sta parlando). Usata dalle fonti nuove (es. WATCH_PROCESS) invece di un callback per ciascuna."""
+        gated = self.notify(kind, message)
+        if gated is None:
+            return None
+        presenter = getattr(self, "notification_presenter", None)
+        if presenter is not None:
+            try:
+                presenter(kind, gated)
+            except Exception:
+                self.logger.exception("Errore presentando una notifica")
+        else:
+            print(f"\nJake > {gated}\nTu > ", end="", flush=True)
+        return gated
 
     def _default_on_reminder_due(self, reminder: dict) -> None:
         message = self.notify("reminder", self.format_due_reminder(reminder))

@@ -681,3 +681,5 @@
 {"text": "mostramelo di nuovo", "intent": "UNMUTE_NOTIFICATION", "parameters": {}}
 {"text": "rimandala di un'ora", "intent": "SNOOZE_NOTIFICATION", "parameters": {"minutes": 60}}
 {"text": "ricordamelo tra dieci minuti", "intent": "SNOOZE_NOTIFICATION", "parameters": {"minutes": 10}}
+{"text": "avvisami quando finisce la build", "intent": "WATCH_PROCESS", "parameters": {"process": "msbuild"}}
+{"text": "avvisami quando finisce npm", "intent": "WATCH_PROCESS", "parameters": {"process": "npm"}}

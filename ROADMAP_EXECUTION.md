@@ -279,7 +279,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F6.4` | Goal Runtime | `DOING` |
 | `F6.5` | Automation Runtime | `DOING` |
 | `F6.6` | Meeting Experience (libreria di regole il 21/09/2026: brief senza dati inventati, consenso e indicatore, follow-up gated; nessun connettore reale) | `DOING` |
-| `F6.7` | Runtime Reliability (monitor/housekeeping il 22/09/2026; task monitor collegato a JakeCore/EventBus/HUD lo stesso giorno - vedi F6.3; housekeeping senza connettori reali ne' pilot) | `DOING` |
+| `F6.7` | Runtime Reliability (monitor/housekeeping il 22/09/2026; task monitor collegato a JakeCore/EventBus/HUD lo stesso giorno - vedi F6.3; dal 27/09/2026 "avvisami quando finisce la build" su un processo reale, notifica dalla pipeline unica; housekeeping senza connettori reali ne' pilot) | `DOING` |
 | `F7.1` | Companion Security (F7.1.1/.4/.5/.6/.7 il 22/09/2026; F7.1.2 - pairing HTTP - chiuso il 22/09/2026, vedi F7.2; TLS reale generato/persistito dal server il 22/09/2026; capability persistenti F7.1.3 dal 27/09/2026 - impostabili a voce con SET_DEVICE_ACCESS, valide subito e dopo un riavvio, riga corrotta = nessun permesso; manca la distribuzione del certificato al telefono oltre al pairing) | `DOING` |
 | `F7.2` | Mobile Companion (pairing/chat live/approve-deny sullo stesso task end-to-end il 22/09/2026; lista/revoca dispositivi via HTTP e prima app Android reale - MAI compilata/eseguita in questo ambiente - il 22/09/2026; senza file share/offline queue/wipe via companion) | `DOING` |
 | `F7.3` | Voice Devices | `BACKLOG` |
@@ -9378,6 +9378,20 @@ Dipende da: F6.1–F6.3.
 7. `F6.7.7` Chiudere monitor completati e riprendere quelli interrotti con checkpoint.
 
 Criterio di uscita: 30 giorni di pilot senza loop di notifica o azione distruttiva autonoma.
+
+- 27/09/2026 (F6.7.1/F6.7.2 su processi reali): `WATCH_PROCESS` ("avvisami quando finisce la build/npm") sorveglia un processo
+  GIA' in esecuzione (il piu' recente con quel nome, mai Jake stesso; al massimo 5 insieme) con un thread daemon che ne aspetta la
+  fine - nessun polling, nessuna notifica intermedia - e avvisa UNA volta con durata ed esito (codice d'uscita diverso da zero =
+  errore). Rischio READ_ONLY: osserva, non tocca il processo. La notifica passa da `JakeCore.present_notification`, la strada unica
+  nuova per le fonti proattive: gate (modalita', duplicati, budget, quiet hours, feedback) e poi UN presentatore - stampa in CLI,
+  voce nella sessione vocale, che rimanda gli avvisi non richiesti mentre Jake parla ma dice subito quelli chiesti esplicitamente.
+  Test con un processo figlio vero (psutil vero, attesa vera, uscita 0 e 3), il figlio resta vivo finche' il test non lo lascia finire.
+  Non registrato nel `TaskMonitorRegistry`: oggi nessuno ne legge i compiti attivi, sarebbe un collegamento a vuoto.
+- 27/09/2026 (bug reale trovato qui): le skill aggiunte per F6.3.4, F7.1.3 e F8.2 (feedback sulle notifiche, `SET_DEVICE_ACCESS`,
+  `PLAN_SKILL_INSTALL`/`INSTALL_SKILL_PACKAGE`) non avevano frasi in `core/response_formatter.py`: l'utente avrebbe sentito il
+  dizionario grezzo (`{'message': ..., 'multiplier': 0.5}`) o "Si e' verificato un errore" per rifiuti con un motivo preciso (firma
+  mancante, digest diverso dal piano, promemoria non silenziabile). Ora hanno risposte proprie, verificate dentro i test reali gia'
+  esistenti (pacchetto firmato vero, server companion vero su loopback, pipeline notifiche vera).
 
 - `F6.7.1`-`F6.7.7` (monitor e housekeeping, senza connettori reali) — 22/09/2026: `core/task_monitor.py`. Il criterio di uscita ("30
   giorni di pilot") non si simula in un test: qui si prova la STRUTTURA che lo rende possibile - idempotenza delle notifiche e un

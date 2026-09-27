@@ -87,9 +87,81 @@ _NOT_FOUND_BY_INTENT = {
 }
 
 
+# Skill di controllo aggiunte con F6.3/F6.7/F7.1/F8.2: frasi proprie invece del dizionario grezzo
+# (`str(data)`) o dell'errore generico che l'utente avrebbe altrimenti sentito.
+_CONTROL_ERRORS = {
+    "NO_RECENT_NOTIFICATION": "Non ho mostrato nessuna notifica di recente a cui riferirmi.",
+    "REMINDER_NOT_MUTABLE": "Questo è un promemoria che hai chiesto tu: non lo silenzio, al massimo posso rimandarlo.",
+    "NOTHING_TO_RESTORE": "Quella notifica non era silenziata.",
+    "COMPANION_UNAVAILABLE": "Il collegamento con gli altri dispositivi non è attivo.",
+    "SKILL_STORE_UNAVAILABLE": "L'archivio delle skill installabili non è disponibile.",
+    "SIGNATURE_MISSING": "Il pacchetto non ha una firma: non lo installo.",
+    "SIGNATURE_INVALID": "La firma del pacchetto non è leggibile: non lo installo.",
+    "TOO_MANY_WATCHES": "Sto già sorvegliando troppi processi: aspetta che ne finisca qualcuno.",
+}
+
+_PACKAGE_REJECTED_REASONS = {
+    "digest_mismatch": "il pacchetto non è più quello del piano che hai visto",
+}
+
+
+def _format_control_error(intent: str, error: str | None, data: dict) -> str | None:
+    if error in _CONTROL_ERRORS:
+        return _CONTROL_ERRORS[error]
+    if error == "PACKAGE_REJECTED":
+        reason = str(data.get("reason") or "")
+        return f"Pacchetto rifiutato: {_PACKAGE_REJECTED_REASONS.get(reason, reason or 'verifica non superata')}."
+    if error == "NOT_FOUND":
+        if intent == "WATCH_PROCESS":
+            return f"Non vedo nessun processo '{data.get('process', '')}' in esecuzione da sorvegliare."
+        if intent == "SET_DEVICE_ACCESS":
+            return f"Non trovo nessun dispositivo associato chiamato '{data.get('device', '')}'."
+        if intent in ("PLAN_SKILL_INSTALL", "INSTALL_SKILL_PACKAGE"):
+            return f"Non trovo il pacchetto {data.get('package_path', '')}."
+    if error == "AMBIGUOUS" and intent == "SET_DEVICE_ACCESS":
+        return f"Più dispositivi corrispondono: {', '.join(data.get('candidates') or [])}. Quale intendi?"
+    if error == "INVALID_PARAMETERS" and intent == "SET_DEVICE_ACCESS":
+        return f"Livelli possibili: {', '.join(data.get('levels') or [])}."
+    if error == "INVALID_PARAMETERS" and intent == "SNOOZE_NOTIFICATION":
+        return "Di quanto la rimando? Dimmi ad esempio: di un'ora."
+    return None
+
+
+def _format_control_success(intent: str, data: dict) -> str | None:
+    if intent == "WATCH_PROCESS":
+        return f"Ok, ti avviso quando {data['process']} finisce."
+    if intent == "LESS_NOTIFICATIONS_LIKE_THIS":
+        return "Ok, ti mostrerò meno notifiche come questa."
+    if intent == "MUTE_NOTIFICATION":
+        return "Ok, questa notifica non te la mostro più. Se cambi idea dimmi \"mostramelo di nuovo\"."
+    if intent == "UNMUTE_NOTIFICATION":
+        return "Ok, questa notifica torna a comparire."
+    if intent == "SNOOZE_NOTIFICATION":
+        return f"Ok, te la ripropongo tra {data['minutes']} minuti."
+    if intent == "SET_DEVICE_ACCESS":
+        return f"Fatto: {data['device']} ora ha accesso \"{data['level']}\"."
+    if intent == "PLAN_SKILL_INSTALL":
+        lines = [str(data.get("summary") or "")]
+        blockers = data.get("blockers") or []
+        if blockers:
+            lines.append("Non si può installare: " + "; ".join(blockers) + ".")
+        else:
+            if data.get("permissions_increased"):
+                lines.append("Attenzione: chiede più permessi della versione installata.")
+            lines.append(f"Per installarlo conferma con l'impronta {data['digest']}.")
+        return "\n".join(line for line in lines if line)
+    if intent == "INSTALL_SKILL_PACKAGE":
+        loaded = "ed è già attiva" if data.get("loaded") else "e sarà attiva al prossimo avvio"
+        return f"Ho installato {data['skill_id']} {data['version']} {loaded}."
+    return None
+
+
 def _format_error(intent: str, result: SkillResult) -> str:
     data = result.data or {}
     error = result.error
+    control = _format_control_error(intent, error, data)
+    if control is not None:
+        return control
     if error == "UNSUPPORTED_APP":
         app = data.get("app", "")
         return f"Non trovo nessuna applicazione chiamata {app}" if app else "Applicazione non specificata"
@@ -254,6 +326,9 @@ def memory_provenance(entry: dict) -> str:
 
 def _format_success(intent: str, result: SkillResult, registry=None) -> str | None:
     data = result.data or {}
+    control = _format_control_success(intent, data)
+    if control is not None:
+        return control
     if intent == "RESUME_INTERRUPTED_TASK":
         # F1.8.4: la skill ha gia' ottenuto una risposta completa in linguaggio naturale
         # rieseguendo l'agente (core.agent_checkpoint.AgentCheckpoint) - nessuna formattazione

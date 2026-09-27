@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from core.companion_guard import CompanionGuard
 from core.companion_server import CompanionServer
 from core.device_credential_store import DeviceCredentialStore
+from core.response_formatter import format_skill_result
 from skills.device_access import SetDeviceAccessSkill
 
 
@@ -49,6 +50,8 @@ class DeviceAccessTests(unittest.TestCase):
         core = SimpleNamespace(companion_server=self.server)
         result = SetDeviceAccessSkill(core).execute({"device": "telefono", "level": "sola lettura"})
         self.assertTrue(result.success, result)
+        self.assertEqual(format_skill_result("SET_DEVICE_ACCESS", result),
+                         'Fatto: Telefono di prova ora ha accesso "sola lettura".')
         self.assertEqual(self._request(self.server, "POST", "/command", {"text": "che ore sono"}), 403)
         self.assertEqual(self._request(self.server, "GET", "/status"), 200)
 

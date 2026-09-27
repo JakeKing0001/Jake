@@ -3,6 +3,7 @@ le skill installate (ricontrollando firma e hash), l'installazione passa da pian
 per la policy) e il rischio DICHIARATO dal manifest verificato arriva a risk_of. Crittografia e ZIP veri."""
 import logging
 
+from core.response_formatter import format_skill_result
 from core.risk import PACKAGE_RISK, RiskLevel, register_package_risk, risk_of
 from core.skill_package import TrustStore
 from tests.test_skill_package import MARKER_SOURCE, FakeRegistry, PackageTestCase
@@ -50,11 +51,20 @@ class SkillPackageRuntimeTests(PackageTestCase):
         plan = core.skill_registry.skills["PLAN_SKILL_INSTALL"].execute({"package_path": path})
         self.assertTrue(plan.success, plan)
         self.assertNotIn("TOSS_DEMO_COIN", core.skill_registry.skills, "il piano non installa nulla")
+        # cio' che l'utente legge: il riepilogo e l'impronta da confermare, non il dizionario grezzo
+        reply = format_skill_result("PLAN_SKILL_INSTALL", plan)
+        self.assertIn(plan.data["summary"], reply)
+        self.assertIn(plan.data["digest"], reply)
+        self.assertNotIn("{", reply)
 
         install = core.skill_registry.skills["INSTALL_SKILL_PACKAGE"]
-        self.assertEqual(install.execute({"package_path": path, "digest": "0" * 64}).data["reason"], "digest_mismatch")
+        mismatch = install.execute({"package_path": path, "digest": "0" * 64})
+        self.assertEqual(mismatch.data["reason"], "digest_mismatch")
+        self.assertIn("non è più quello del piano", format_skill_result("INSTALL_SKILL_PACKAGE", mismatch))
         result = install.execute({"package_path": path, "digest": plan.data["digest"]})
         self.assertTrue(result.success, result)
+        self.assertEqual(format_skill_result("INSTALL_SKILL_PACKAGE", result),
+                         f"Ho installato davide.moneta {result.data['version']} ed è già attiva.")
         self.assertTrue(result.data["loaded"])
         self.assertIn("TOSS_DEMO_COIN", core.skill_registry.skills)
         self.assertEqual(risk_of("TOSS_DEMO_COIN"), RiskLevel.READ_ONLY, "rischio dal manifest verificato")
