@@ -275,7 +275,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F5.7` | Privacy Engineering (libreria completa il 21/09/2026; dal 26/09/2026 nel percorso reale: "dimentica" cancella anche registro e indici con ricevuta, l'uso dei ricordi viene registrato, "da dove sai X" spiega la provenienza; purge/export/backup non ancora esposti a voce/HUD) | `DOING` |
 | `F6.1` | Proactivity Platform (26/09/2026: promemoria, automazioni e avvisi passano dagli stessi freni in `JakeCore.notify` - duplicati, budget orario, quiet hours, conversazione in corso - e si sospendono insieme durante prove e benchmark) | `DOING` |
 | `F6.2` | Proactivity Quality | `DOING` |
-| `F6.3` | Notification UX (libreria di decisione il 21/09/2026; collegata a JakeCore/EventBus/HUD il 22/09/2026 - vedi F6.7; nessuna consegna reale di call/companion) | `DOING` |
+| `F6.3` | Notification UX (libreria di decisione il 21/09/2026; collegata a JakeCore/EventBus/HUD il 22/09/2026; dal 27/09/2026 "meno notifiche cosi'", "non mostrarmelo piu'", "mostramelo di nuovo" e "rimandala" sull'ultima notifica, a voce e dai pulsanti del toast HUD, persistenti; nessuna consegna reale di call/companion) | `DOING` |
 | `F6.4` | Goal Runtime | `DOING` |
 | `F6.5` | Automation Runtime | `DOING` |
 | `F6.6` | Meeting Experience (libreria di regole il 21/09/2026: brief senza dati inventati, consenso e indicatore, follow-up gated; nessun connettore reale) | `DOING` |
@@ -9179,6 +9179,13 @@ monitor rileva un evento fixture senza richiesta dell'utente e senza duplicarlo.
   una sospensione. Nella sessione vocale un avviso o un'automazione arrivati mentre Jake parla o lavora a
   un comando vanno in coda invece di tagliare la risposta in corso (prima `_speak_async` la
   interrompeva). Resta: portare anche il task monitor sulla stessa pipeline.
+- 27/09/2026 (F6.3.4): `FeedbackStore` ("meno notifiche come questa", con recupero in ~30 giorni) esisteva ma
+  nessuna notifica reale lo consultava. Ora il gate di `JakeCore.notify` lo usa per TIPO di notifica (numeri
+  normalizzati: "Batteria al 12%" e "al 9%" sono lo stesso tipo): un tipo ridotto finisce nel riepilogo, uno
+  silenziato non esce piu' finche' l'utente non lo riattiva. Quattro skill vocali sull'ultima notifica mostrata
+  (LESS_NOTIFICATIONS_LIKE_THIS, MUTE_NOTIFICATION, UNMUTE_NOTIFICATION, SNOOZE_NOTIFICATION con "non prima di")
+  con frasi esatte nel NLU; nell'HUD il toast di un avviso/automazione ha "Meno cosi'" e "Non piu'". Preferenze
+  salvate in `data/notification_feedback.json`. Promemoria ed eventi critici non si silenziano da qui.
 
 ### F6.2 — Suggestion engine
 

@@ -284,6 +284,11 @@ SKILL_RISK: dict[str, RiskLevel] = {
     "SET_MODEL": RiskLevel.LOCAL_REVERSIBLE,
     # F8.2/F8.3: verificare un pacchetto locale e' lettura; installarlo cambia cio' che Jake sa fare -> ADMIN
     "PLAN_SKILL_INSTALL": RiskLevel.READ_ONLY,
+    # F6.3.4: preferenze sulle notifiche, reversibili
+    "LESS_NOTIFICATIONS_LIKE_THIS": RiskLevel.LOCAL_REVERSIBLE,
+    "MUTE_NOTIFICATION": RiskLevel.LOCAL_REVERSIBLE,
+    "UNMUTE_NOTIFICATION": RiskLevel.LOCAL_REVERSIBLE,
+    "SNOOZE_NOTIFICATION": RiskLevel.LOCAL_REVERSIBLE,
     "INSTALL_SKILL_PACKAGE": RiskLevel.ADMIN,
     "LEARN_COMMAND": RiskLevel.LOCAL_REVERSIBLE,
     "LIST_LEARNED": RiskLevel.READ_ONLY,

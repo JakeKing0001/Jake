@@ -129,6 +129,14 @@ class FeedbackStore:
         self._save()
         return self._entries[key]["multiplier"]
 
+    # "non mostrarmelo piu'" (F6.3.4): un tipo di notifica silenziato finche' l'utente non lo riattiva.
+    def mute(self, key: str) -> None:
+        self._entries[key] = {"multiplier": 0.0, "at": self._clock(), "muted": True}
+        self._save()
+
+    def is_muted(self, key: str) -> bool:
+        return bool(self._entries.get(key, {}).get("muted"))
+
     def undo(self, key: str) -> bool:
         removed = self._entries.pop(key, None) is not None
         if removed:
@@ -139,6 +147,8 @@ class FeedbackStore:
         entry = self._entries.get(key)
         if entry is None:
             return 1.0
+        if entry.get("muted"):
+            return 0.0
         age_days = max(0.0, (self._clock() - entry["at"]) / 86400)
         recovery = 1 - 0.5 ** (age_days / self.HALF_LIFE_DAYS)  # torna verso 1 col tempo
         return entry["multiplier"] + (1 - entry["multiplier"]) * recovery

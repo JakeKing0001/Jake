@@ -121,12 +121,13 @@ class NotificationCenter:
             self._queued = remaining
             return [item["message"] for item in released]
 
-    def defer(self, kind: str, message: str) -> None:
+    def defer(self, kind: str, message: str, not_before: float | None = None) -> None:
         """In coda per dopo anche se la modalita' lo ammetterebbe (budget, quiet hours, conversazione
-        in corso: vedi core/proactive_gate.py). Esce come le altre voci in coda."""
+        in corso: vedi core/proactive_gate.py). `not_before` (epoch s): una notifica rimandata dall'utente
+        ("rimandala di un'ora") non esce prima di quel momento."""
         if message:
             with self._lock:
-                self._queued.append({"kind": kind, "message": message, "deferred": True})
+                self._queued.append({"kind": kind, "message": message, "deferred": True, "not_before": not_before})
 
     def take_deferred(self) -> list[dict]:
         """Toglie dalla coda e restituisce le voci rimandate da `defer` che la modalita' corrente ammette;
@@ -135,7 +136,11 @@ class NotificationCenter:
         with self._lock:
             if self._suspended:
                 return []
-            taken = [item for item in self._queued if item.get("deferred") and item["kind"] in allowed]
+            import time as _time
+
+            now = _time.time()
+            taken = [item for item in self._queued if item.get("deferred") and item["kind"] in allowed
+                     and (item.get("not_before") is None or item["not_before"] <= now)]
             self._queued = [item for item in self._queued if item not in taken]
             return taken
 

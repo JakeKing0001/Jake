@@ -1,6 +1,7 @@
 import contextlib
 import threading
 import time
+from pathlib import Path
 from datetime import time as datetime_time
 
 from core import fallbacks
@@ -34,7 +35,7 @@ from core.nlu.normalizer import TranscriptNormalizer
 from core.nlu.retriever import CapabilityRetriever
 from core.notification_center import NotificationCenter
 from core.notification_policy import NotificationPolicy, QuietHours
-from core.proactive_gate import DELIVER, DUPLICATE, ProactiveGate
+from core.proactive_gate import DELIVER, DUPLICATE, MUTED, ProactiveGate, notification_key
 from core.ollama_client import OllamaClient
 from core import orchestrator
 from core.orchestrator import JakeOrchestrator
@@ -197,8 +198,11 @@ class JakeCore:
         # stati condivisi tra thread/componenti).
         self.task_monitor = TaskMonitorRegistry()
         self.task_monitor_store = MonitorStore()
+        from core.notification_policy import FeedbackStore
         self.notification_policy = NotificationPolicy(
             mode=self.notification_center.mode,
+            # F6.3.4: "meno notifiche cosi'"/"non mostrarmelo piu'" sopravvivono al riavvio
+            feedback=FeedbackStore(Path(__file__).resolve().parent.parent / "data" / "notification_feedback.json"),
             quiet_hours=_parse_quiet_hours(
                 config.get("notification_quiet_hours_start"), config.get("notification_quiet_hours_end"),
             ),
@@ -212,7 +216,9 @@ class JakeCore:
             hourly_budget=int(config.get("notification_hourly_budget", 3)),
             in_quiet_hours=self.notification_policy.in_quiet_hours,
             conversation_active=lambda: getattr(self, "_in_flight_answers", 0) > 0,
+            feedback=self.notification_policy.feedback,
         )
+        self.last_notification: dict | None = None
         self.task_bridge = TaskNotificationBridge(
             self.task_monitor, self.notification_policy, self.event_bus,
             mode_source=lambda: self.notification_center.mode,
@@ -535,6 +541,13 @@ class JakeCore:
 
         # Skill che hanno bisogno del core (non solo del registry): registrate qui.
         self.skill_registry.register_skill("LIST_MODELS", ListModelsSkill())
+        # F6.3.4: controllo dell'utente sull'ultima notifica proattiva mostrata
+        from skills.notification_feedback import (LessNotificationsLikeThisSkill, MuteNotificationSkill,
+                                                  SnoozeNotificationSkill, UnmuteNotificationSkill)
+        self.skill_registry.register_skill("LESS_NOTIFICATIONS_LIKE_THIS", LessNotificationsLikeThisSkill(self))
+        self.skill_registry.register_skill("MUTE_NOTIFICATION", MuteNotificationSkill(self))
+        self.skill_registry.register_skill("UNMUTE_NOTIFICATION", UnmuteNotificationSkill(self))
+        self.skill_registry.register_skill("SNOOZE_NOTIFICATION", SnoozeNotificationSkill(self))
         # F8.2/F8.3: installazione di pacchetti firmati in due passi (piano con digest, poi ADMIN con approvazione)
         from skills.skill_packages import InstallSkillPackageSkill, PlanSkillInstallSkill
         self.skill_registry.register_skill("PLAN_SKILL_INSTALL", PlanSkillInstallSkill(self.skill_store))
@@ -661,11 +674,13 @@ class JakeCore:
             # F6.1/F6.3: un duplicato si scarta; budget, quiet hours o conversazione in corso -> in coda
             outcome, reason = gate.check(kind, gated, critical=critical)
             if outcome != DELIVER:
-                if outcome != DUPLICATE:
+                if outcome not in (DUPLICATE, MUTED):
                     self.notification_center.defer(kind, gated)
-                self.logger.info("Notifica %s %s: %s", kind, "scartata" if outcome == DUPLICATE else "rimandata", reason)
+                self.logger.info("Notifica %s %s: %s", kind, "rimandata" if outcome not in (DUPLICATE, MUTED) else "scartata", reason)
                 return None
         if gated is not None:
+            # l'ultima notifica mostrata: a lei si riferiscono "meno notifiche cosi'", "non mostrarmelo piu'", "rimandala"
+            self.last_notification = {"kind": kind, "message": gated, "key": notification_key(kind, gated)}
             self.event_bus.publish(HudEvent(EventType.NOTIFICATION, {"kind": kind, "text": gated}, trace_id=trace_id))
         return gated
 
