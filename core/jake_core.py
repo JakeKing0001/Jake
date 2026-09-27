@@ -327,6 +327,7 @@ class JakeCore:
             format_result=lambda intent, result: format_skill_result(intent, result, self.skill_registry),
             logger=self.logger,
             context_provider=lambda: self._agent_context(),
+            memory_provider=self._agent_memories,
             # F1.3.4: action_id letto da core.request_context.current_action_id(), impostato da
             # TaskAgent.run() solo intorno a questa chiamata - vedi il docstring di
             # _resolve_and_execute e quello del contextvar per il perche'.
@@ -351,6 +352,7 @@ class JakeCore:
             "format_result": lambda intent, result: format_skill_result(intent, result, self.skill_registry),
             "logger": self.logger,
             "context_provider": lambda: self._agent_context(),
+            "memory_provider": self._agent_memories,
             "executor": lambda intent, parameters: self._resolve_and_execute(
                 Command(intent, parameters), action_id=current_action_id(),
             ),
@@ -818,6 +820,16 @@ class JakeCore:
         if message is None:
             return
         print(f"\nJake > {message}\nTu > ", end="", flush=True)
+
+    def _agent_memories(self, request: str) -> str:
+        """F5.5 (agente): gli stessi ricordi pertinenti delle risposte libere (core/memory_manager.py::relevant_for,
+        con budget di caratteri), con la loro fonte, per i compiti degli agenti."""
+        from core.response_formatter import memory_provenance
+
+        memory = getattr(self, "memory_manager", None)
+        if memory is None or not hasattr(memory, "relevant_for"):
+            return ""
+        return "\n".join(f"- {m['key']}: {m['value']}{memory_provenance(m)}" for m in memory.relevant_for(request))
 
     def _agent_context(self) -> str:
         parts = [part for part in (self.desktop_context.context_summary(), self.conversation_state.entities_summary()) if part]
