@@ -37,7 +37,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Protocol
 
 from core.version import PROTOCOL_VERSION
 
@@ -421,6 +421,14 @@ def new_request_id() -> str:
 # ---- il guardiano ------------------------------------------------------------------------------------------------------
 
 
+class CapabilityStore(Protocol):
+    """Dove le capability per dispositivo sopravvivono al riavvio (core/device_credential_store.py)."""
+
+    def set_capabilities(self, device_id: str, classes) -> None: ...
+
+    def get_capabilities(self, device_id: str) -> list[str] | None: ...
+
+
 @dataclass
 class CompanionGuard:
     """Insieme delle difese, con default sicuri. Ogni pezzo e' sostituibile nei test."""
@@ -435,7 +443,7 @@ class CompanionGuard:
     require_replay_protection: bool | None = None
     default_capabilities: frozenset = DEFAULT_CAPABILITIES
     # F7.1.3: dove le capability sopravvivono al riavvio (core/device_credential_store.py); None = solo memoria.
-    capability_store: object | None = None
+    capability_store: "CapabilityStore | None" = None
 
     def __post_init__(self) -> None:
         self._capabilities: dict[str, frozenset[EndpointClass]] = {}
