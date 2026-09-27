@@ -557,6 +557,9 @@ class JakeCore:
         self.skill_registry.register_skill("WATCH_PROCESS", watcher)
         self.skill_registry.register_skill("LIST_WATCHES", ListWatchesSkill(watcher))
         self.skill_registry.register_skill("STOP_WATCH", StopWatchSkill(watcher))
+        # F6.7/F4.5.6: "a cosa stai lavorando?" - compiti aperti, sorveglianze, conferme e notifiche in attesa
+        from skills.status_overview import StatusOverviewSkill
+        self.skill_registry.register_skill("STATUS_OVERVIEW", StatusOverviewSkill(self, watcher))
         # F4.6.2: "riprova" - l'ultima azione fallita, di nuovo attraverso questa stessa pipeline
         from skills.retry_last import RetryLastActionSkill
         self.skill_registry.register_skill("RETRY_LAST_ACTION", RetryLastActionSkill(self))

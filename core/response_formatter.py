@@ -140,6 +140,9 @@ def _format_control_error(intent: str, error: str | None, data: dict) -> str | N
 def _format_control_success(intent: str, data: dict) -> str | None:
     if intent == "WATCH_PROCESS":
         return f"Ok, ti avviso quando {data['process']} finisce."
+    if intent == "STATUS_OVERVIEW":
+        from skills.status_overview import format_overview
+        return format_overview(data)
     if intent == "LIST_WATCHES":
         processes = data.get("processes") or []
         return ("Sto aspettando che finiscano: " + ", ".join(processes) + ".") if processes else \
