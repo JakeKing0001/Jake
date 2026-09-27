@@ -88,7 +88,7 @@ class TranscriptRepair:
                 continue  # un esempio imparato da solo puo' essere proprio una trascrizione storta ("chiore sono")
             tokens = words(example.text)
             vocabulary.update(tokens)
-            bigrams.update(zip(tokens, tokens[1:]))
+            bigrams.update(zip(tokens, tokens[1:], strict=False))
         return cls(vocabulary, bigrams)
 
     def add_context(self, text: str) -> None:
@@ -164,7 +164,7 @@ class TranscriptRepair:
         if framed and unknown <= 1 and confidence >= self.FRAMED_MIN:
             if safe_repaired != tokens:
                 fixed = text
-                for old, new in zip(tokens, safe_repaired):
+                for old, new in zip(tokens, safe_repaired, strict=True):
                     if old != new:  # nel testo originale, cosi' apostrofi e punteggiatura restano
                         fixed = re.sub(rf"\b{re.escape(old)}\b", new, fixed, flags=re.I)
                 return Assessment(REPAIRED, fixed, "domanda con cornice chiara, parola corretta")

@@ -106,8 +106,8 @@ class NotifyPipelineTests(unittest.TestCase):
         deadline = time.time() + 2
         while not delivered and time.time() < deadline:
             time.sleep(0.02)
-        self.assertEqual(delivered, ['All\'avvio ho notato: Attivita\' in sospeso: "comprare il pane"; '
-                                     'La cartella Download ha accumulato 4.2 GB.'])
+        self.assertEqual(delivered, [("All'avvio ho notato: Attivita' in sospeso: \"comprare il pane\"; "
+                                      "La cartella Download ha accumulato 4.2 GB.")])
         self.assertEqual(core.notification_center.pending_count(), 0)
 
     def test_no_digest_right_after_an_answer_or_while_suspended(self):
