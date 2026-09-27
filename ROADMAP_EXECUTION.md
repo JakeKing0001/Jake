@@ -262,19 +262,19 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F4.2` | Native HUD (F4.2.1/F4.2.4 chiusi, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026; F4.2.5/F4.2.6 e resto di F4.2.3 richiedono test interattivi/visivi) | `DOING` |
 | `F4.3` | Native HUD (G1 superato, mai iniziato) | `READY` |
 | `F4.4` | Interaction Design (26/09/2026: orb 3D Qt Quick 3D con nucleo volumetrico e particle shell, comportamento per stato interrupt-safe, reduced motion di Windows, qualita' high/low, fallback 2D; livelli audio reali di microfono e voce di Jake collegati all'orb; verifica visiva degli stati ancora da fare) | `DOING` |
-| `F4.5` | Interaction Design (26/09/2026: trascrizione live, permission card, prove, diagnosi, notifiche nell'HUD nativo; 27/09/2026: modalita' privata = nessun contenuto verso HUD/companion/replay, con indicatore; piano live con stato e durata di ogni passo; verifica visiva da fare) | `DOING` |
-| `F4.6` | Trust UX (26/09/2026: kill switch visibile e scorciatoia globale; action center con ultima azione, esito, verifica e undo con scadenza; 27/09/2026: dettagli dell'azione per l'utente - origine, esito/categoria, verifica, annullabilita', traccia - e motivo quando l'undo non e' piu' disponibile; retry sicuro dell'ultima azione fallita a voce e dal pulsante "Riprova") | `DOING` |
-| `F4.7` | Accessibility (26/09/2026: nomi accessibili, focus ring, scrittura reale nella barra comandi di un overlay no-activate, scorciatoie globali Ctrl+Shift+J / Ctrl+Alt+Fine, reduced motion; 27/09/2026: alto contrasto da Windows o JAKE_HUD_HIGH_CONTRAST, verificato a schermo di sistema; screen reader, scaling e alto contrasto da verificare) | `DOING` |
+| `F4.5` | Interaction Design (26/09/2026: trascrizione live, permission card, prove, diagnosi, notifiche nell'HUD nativo; 27/09/2026: modalita' privata = nessun contenuto verso HUD/companion/replay, con indicatore; piano live con stato e durata di ogni passo; modalita' di notifica e notifiche in attesa visibili; verifica visiva da fare) | `DOING` |
+| `F4.6` | Trust UX (26/09/2026: kill switch visibile e scorciatoia globale; action center con ultima azione, esito, verifica e undo con scadenza; 27/09/2026: dettagli dell'azione per l'utente - origine, esito/categoria, verifica, annullabilita', traccia - e motivo quando l'undo non e' piu' disponibile; retry sicuro dell'ultima azione fallita a voce e dal pulsante "Riprova"; undo rifiutato se il file/la cartella da cancellare e' cambiato dopo) | `DOING` |
+| `F4.7` | Accessibility (26/09/2026: nomi accessibili, focus ring, scrittura reale nella barra comandi di un overlay no-activate, scorciatoie globali Ctrl+Shift+J / Ctrl+Alt+Fine, reduced motion; 27/09/2026: alto contrasto da Windows o JAKE_HUD_HIGH_CONTRAST, verificato a schermo; "Dimensioni testo" di Windows applicata a tutto l'HUD (o JAKE_HUD_TEXT_SCALE), verificata a schermo al 150% di sistema; screen reader, scaling e alto contrasto da verificare) | `DOING` |
 | `F4.8` | Release Engineering (26/09/2026: core e HUD nativo avviati in ordine come processi separati, riavvio dell'HUD solo dopo un crash e con un tetto; installer/crash dump/rollback non iniziati; 27/09/2026: quando il supervisore smette di riavviare un HUD in crash revoca la sua credenziale e lo dice all'utente) | `DOING` |
 | `F5.1` | Memory Platform (F5.1.1/F5.1.3-F5.1.6 il 21/09/2026: schema versionato, migrazioni transazionali con backup, metadati, recupero; resta F5.1.2 separare entita'/episodi/procedure e la prova su una copia del database reale) | `DOING` |
 | `F5.2` | Memory Platform | `DOING` |
 | `F5.3` | Knowledge Model | `DOING` |
 | `F5.4` | Memory Reliability (27/09/2026: nessuna sovrascrittura silenziosa di fatti/preferenze - versione precedente conservata e dichiarata, un'inferenza non sostituisce un fatto detto dall'utente, conflitti registrati, "dimentica" cancella anche le versioni; conferma prima di cambiare un ricordo importante o fissato; decadimento per categoria nel ranking, fissati esclusi; consolidamento non ancora) | `DOING` |
-| `F5.5` | Retrieval Quality (27/09/2026: ricordi pertinenti con fonte anche nelle risposte libere, budget di contesto, grafo a un salto; agente e metriche ancora da fare) | `DOING` |
-| `F5.6` | Context Runtime | `DOING` |
+| `F5.5` | Retrieval Quality (27/09/2026: ricordi pertinenti con fonte anche nelle risposte libere e nei compiti dei tre agenti, retrieval ibrido parole+significato, budget di contesto, grafo a un salto; metriche ancora da fare) | `DOING` |
+| `F5.6` | Context Runtime (27/09/2026: segnali non riletti non piu' presentati come attuali; appunti marcati privati da chi li copia mai letti) | `DOING` |
 | `F5.7` | Privacy Engineering (libreria completa il 21/09/2026; dal 26/09/2026 nel percorso reale: "dimentica" cancella anche registro e indici con ricevuta, l'uso dei ricordi viene registrato, "da dove sai X" spiega la provenienza; dal 27/09/2026 "esporta i miei ricordi" e "fissa il ricordo X" a voce; purge/backup non ancora esposti a voce/HUD) | `DOING` |
 | `F6.1` | Proactivity Platform (26/09/2026: promemoria, automazioni e avvisi passano dagli stessi freni in `JakeCore.notify` - duplicati, budget orario, quiet hours, conversazione in corso - e si sospendono insieme durante prove e benchmark) | `DOING` |
-| `F6.2` | Proactivity Quality | `DOING` |
+| `F6.2` | Proactivity Quality (27/09/2026: "perche' me l'hai detto?" spiega la fonte dell'ultima notifica) | `DOING` |
 | `F6.3` | Notification UX (libreria di decisione il 21/09/2026; collegata a JakeCore/EventBus/HUD il 22/09/2026; dal 27/09/2026 "meno notifiche cosi'", "non mostrarmelo piu'", "mostramelo di nuovo" e "rimandala" sull'ultima notifica, a voce e dai pulsanti del toast HUD, persistenti; nessuna consegna reale di call/companion) | `DOING` |
 | `F6.4` | Goal Runtime (27/09/2026: "devo X entro <giorno>" diventa una proposta di promemoria confermata col si'/no normale) | `DOING` |
 | `F6.5` | Automation Runtime (27/09/2026: modalita' di notifica a tempo che torna da sola alla precedente con il riepilogo) | `DOING` |
@@ -8873,6 +8873,11 @@ pannelli contestuali restano coerenti con l'orb, senza coprire controlli, prove 
   contato). Il pannello conversazione mostra ogni passo con ✓/✗/… e secondi, anche durante una conferma a meta'
   compito. Fixture condivisa Python/C++ (ctest verde); test end-to-end agente scriptato -> callback del core ->
   bus -> riduttore. Verifica visiva `VERIFY`.
+- 27/09/2026 (F4.5.6, coda notifiche): con "non disturbare" (o durante una conversazione, budget, quiet hours) le
+  notifiche trattenute erano invisibili finche' non uscivano. `NotificationCenter.on_state_change` avvisa quando
+  cambiano modalita' o numero in attesa (mai i testi) e `JakeCore` pubblica `NOTIFICATION_STATE {mode,
+  mode_label, pending}`; i due riduttori (fixture condivisa) e un chip nella riga di stato: "non disturbare · 2 in
+  attesa". Test: skill reale -> notify -> bus -> riduttore, un evento solo quando qualcosa cambia.
 
 ### F4.6 — Action center e undo
 
@@ -8896,6 +8901,16 @@ Criterio di uscita: undo end-to-end verificato per file, finestra e workflow fix
   stato applicato in parte: Jake lo dice e chiede prima; il "si'" riprova esattamente l'azione mostrata
   (`action_id`), non quella diventata ultima nel frattempo. Il meta-comando non sostituisce il turno del comando
   vero (`META_TURN_INTENTS`, come la correzione). Test sul JakeCore vero (policy reale, dialogo reale, "si'").
+- 27/09/2026 (F4.6.4, rischio reale di perdita dati): l'undo di `CREATE_PATH` e' un `DELETE_PATH` confermato e
+  quello di `EXTRACT_ARCHIVE` cancella la cartella estratta. Se nei 5 minuti di validita' l'utente aveva scritto
+  nel file o aggiunto file nella cartella, "annulla l'ultima azione" (o il pulsante Annulla) avrebbe cancellato
+  anche il suo lavoro. Ora questi undo portano nelle `preconditions` l'impronta osservabile di cio' che hanno
+  creato (nomi, dimensioni, date di modifica; max 2000 file) e se e' cambiata l'undo non parte e Jake spiega
+  perche' (`UNDO_STATE_CHANGED`). Un rename/move annullato non cancella nulla e non ne ha bisogno. Test su file e
+  cartelle reali. Chiuso lo stesso giorno anche il limite tra domanda e "si'": l'envelope porta
+  `undo_source_action_id`, `_finalize_pending_action` ricontrolla al "si'" che l'undo sia ancora usabile e che lo
+  stato non sia cambiato, e dopo un undo riuscito lo marca consumato (prima lo stesso undo si poteva chiedere due
+  volte). Test sul JakeCore reale con DeletePathSkill vera.
 
 - 26/09/2026 (F4.6.5, prima fetta): pulsante "Ferma tutto" sempre visibile nell'HUD nativo, che
   invia `ferma tutto` (corsia a corrispondenza esatta -> `KILL_SWITCH`, nessun modello in mezzo).
@@ -9111,6 +9126,15 @@ Dipende da: F3 e F5.1.
 
 Criterio di uscita: riferimenti impliciti risolti senza cattura continua indiscriminata.
 
+- 27/09/2026 (F5.6.4/F5.6.7, bug reali in `core/desktop_context.py`): (1) se la lettura delle finestre aperte o
+  degli appunti cominciava a fallire, l'ultimo valore restava e finiva in ogni prompt come "Finestre aperte ora"
+  / "Appunti": ora ogni segnale ha il momento dell'ultima lettura riuscita e oltre `max(10 s, 3 x poll)` non viene
+  piu' presentato come attuale. (2) L'anteprima degli appunti veniva letta e mandata al modello anche quando l'app
+  che ha copiato chiede a Windows di non monitorarla (password manager, campi password:
+  `ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory`=0): ora non la legge nemmeno e
+  il contesto dice solo "contenuto privato (non letto)". Test sugli appunti VERI di Windows (contenuto
+  dell'utente salvato e ripristinato) e con orologio finto per la freschezza.
+
 ### F5.7 — Privacy dashboard e portabilità
 
 Dipende da: F5.1 e F4.5.
@@ -9258,6 +9282,12 @@ Dipende da: F6.1 e F5.5.
 
 Criterio di uscita: nessun suggerimento si esegue senza policy e ogni suggerimento è spiegabile;
 fixture rilevante, irrilevante e risolvibile entro la delega verificano la scelta di contatto.
+
+- 27/09/2026 (F6.2.7): ogni notifica porta ora la sua `source` (il promemoria o il timer impostato dall'utente,
+  l'automazione per nome, il processo che si era chiesto di sorvegliare, la modalita' a tempo, il controllo
+  automatico del PC) fino a `last_notification`; `EXPLAIN_LAST_NOTIFICATION` ("perche' me l'hai detto?") la dice
+  e, se non era un promemoria richiesto, ricorda come ridurre quel tipo di notifica. Test sulla pipeline reale di
+  `JakeCore.notify`.
 
 ### F6.3 — Notification intelligence
 
@@ -9465,6 +9495,9 @@ Criterio di uscita: 30 giorni di pilot senza loop di notifica o azione distrutti
   voce nella sessione vocale, che rimanda gli avvisi non richiesti mentre Jake parla ma dice subito quelli chiesti esplicitamente.
   Test con un processo figlio vero (psutil vero, attesa vera, uscita 0 e 3), il figlio resta vivo finche' il test non lo lascia finire.
   Non registrato nel `TaskMonitorRegistry`: oggi nessuno ne legge i compiti attivi, sarebbe un collegamento a vuoto.
+  Stesso giorno (F6.7.7): "cosa stai sorvegliando?" (`LIST_WATCHES`) e "smetti di sorvegliare npm" (`STOP_WATCH`,
+  toglie solo l'avviso, il processo non si tocca). Test con processo figlio reale: annullata la sorveglianza, il
+  processo finisce normalmente e nessun avviso parte.
 - 27/09/2026 (bug reale trovato qui): le skill aggiunte per F6.3.4, F7.1.3 e F8.2 (feedback sulle notifiche, `SET_DEVICE_ACCESS`,
   `PLAN_SKILL_INSTALL`/`INSTALL_SKILL_PACKAGE`) non avevano frasi in `core/response_formatter.py`: l'utente avrebbe sentito il
   dizionario grezzo (`{'message': ..., 'multiplier': 0.5}`) o "Si e' verificato un errore" per rifiuti con un motivo preciso (firma

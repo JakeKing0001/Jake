@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -11,7 +12,7 @@ from unittest import mock
 import psutil
 
 from core.response_formatter import format_skill_result
-from skills.watch_process import MAX_WATCHES, WatchProcessSkill
+from skills.watch_process import MAX_WATCHES, ListWatchesSkill, StopWatchSkill, WatchProcessSkill
 
 
 class _Core:
@@ -19,8 +20,9 @@ class _Core:
         self.notified = []
         self.done = threading.Event()
 
-    def present_notification(self, kind, message):
+    def present_notification(self, kind, message, source=None):
         self.notified.append((kind, message))
+        self.source = source
         self.done.set()
         return message
 
@@ -67,6 +69,31 @@ class WatchRealProcessTests(unittest.TestCase):
         self.assertIn("terminato con un errore (codice 3)", message)
 
 
+class StopWatchingTests(unittest.TestCase):
+    def test_a_cancelled_watch_says_nothing_when_the_real_process_ends(self):
+        child = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.readline()"], stdin=subprocess.PIPE)
+        self.addCleanup(child.wait, 5)
+        self.addCleanup(child.stdin.close)
+        core = _Core()
+        watcher = WatchProcessSkill(core, process_iter=lambda: [
+            p for p in psutil.process_iter(["pid", "name", "create_time"]) if p.pid == child.pid])
+        watcher.execute({"process": "python"})
+        self.assertEqual(format_skill_result("LIST_WATCHES", ListWatchesSkill(watcher).execute()),
+                         f"Sto aspettando che finiscano: {watcher.watching[child.pid]}.")
+        stopped = StopWatchSkill(watcher).execute({"process": "python"})
+        self.assertIn("il processo continua normalmente", format_skill_result("STOP_WATCH", stopped))
+        self.assertEqual(ListWatchesSkill(watcher).execute().data["processes"], [])
+
+        child.stdin.write(b"fine\n")
+        child.stdin.flush()
+        self.assertEqual(child.wait(5), 0, "il processo non e' stato toccato")
+        deadline = time.monotonic() + 3
+        while watcher.watching and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertEqual(core.notified, [], "sorveglianza annullata: nessun avviso")
+        self.assertEqual(StopWatchSkill(watcher).execute({"process": "npm"}).error, "NOT_FOUND")
+
+
 class WatchProcessChoiceTests(unittest.TestCase):
     def test_the_most_recent_match_is_watched_and_jake_itself_never(self):
         core = _Core()
@@ -106,7 +133,7 @@ class PresentNotificationTests(unittest.TestCase):
         core = self._core("build finita")
         core.notification_presenter = mock.MagicMock()
         self.assertEqual(core.present_notification("reminder", "build finita"), "build finita")
-        core.notify.assert_called_once_with("reminder", "build finita")
+        core.notify.assert_called_once_with("reminder", "build finita", source=None)
         core.notification_presenter.assert_called_once_with("reminder", "build finita")
 
     def test_a_gated_notification_is_not_presented(self):

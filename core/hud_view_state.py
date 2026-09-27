@@ -71,6 +71,10 @@ class HudViewState:
     audio_level: float = 0.0
     # F4.5.7: modalita' privata attiva - gli eventi arrivano gia' redatti dal core, l'HUD mostra l'indicatore
     private_mode: bool = False
+    # F4.5.6: modalita' di notifica (etichetta) e notifiche in attesa
+    notification_mode: str = "normal"
+    notification_mode_label: str = ""
+    notifications_pending: int = 0
     last_sequence_id: int = 0
     ignored: int = 0
     incompatible: bool = False
@@ -180,6 +184,10 @@ class HudViewState:
             self._activity(event_type, payload, trace_id)
         elif event_type == "PRIVACY_MODE":
             self.private_mode = payload.get("enabled") is True
+        elif event_type == "NOTIFICATION_STATE":
+            self.notification_mode = _text(payload, "mode") or "normal"
+            self.notification_mode_label = _text(payload, "mode_label")
+            self.notifications_pending = max(0, _int(payload, "pending"))
         elif event_type == "SELECTOR_INSPECTION":
             inspection = payload.get("inspection")
             inspection = inspection if isinstance(inspection, dict) else {}

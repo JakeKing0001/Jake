@@ -39,6 +39,7 @@ class WatchProcessSkill:
         self._clock = clock
         self._lock = threading.Lock()
         self.watching: dict[int, str] = {}
+        self._cancelled: set[int] = set()  # "smetti di sorvegliare": il processo continua, l'avviso no
 
     def _processes(self):
         if self._process_iter is not None:
@@ -74,6 +75,10 @@ class WatchProcessSkill:
         finally:
             with self._lock:
                 self.watching.pop(process.pid, None)
+                cancelled = process.pid in self._cancelled
+                self._cancelled.discard(process.pid)
+        if cancelled:
+            return
         elapsed = _duration(self._clock() - started)
         if code is None:
             outcome = "esito non disponibile"
@@ -81,4 +86,52 @@ class WatchProcessSkill:
             outcome = "completato senza errori"
         else:
             outcome = f"terminato con un errore (codice {code})"
-        self.core.present_notification("reminder", f"{name} e' finito dopo {elapsed}: {outcome}.")
+        self.core.present_notification("reminder", f"{name} e' finito dopo {elapsed}: {outcome}.",
+                                       source=f"mi avevi chiesto di avvisarti quando {name} finiva")
+
+
+class ListWatchesSkill:
+    """F6.7.7: "cosa stai sorvegliando?" - le sorveglianze attive."""
+
+    metadata = {
+        "intent": "LIST_WATCHES",
+        "description": "Elenca i processi di cui Jake sta aspettando la fine per avvisare. Per 'cosa stai sorvegliando?'.",
+        "parameters": {},
+    }
+
+    def __init__(self, watcher: WatchProcessSkill):
+        self.watcher = watcher
+
+    def execute(self, parameters: dict = None):
+        with self.watcher._lock:
+            names = [name for pid, name in self.watcher.watching.items() if pid not in self.watcher._cancelled]
+        return SkillResult(success=True, data={"processes": names})
+
+
+class StopWatchSkill:
+    """F6.7.7: "smetti di sorvegliare npm" - nessun avviso alla fine; il processo non viene toccato."""
+
+    metadata = {
+        "intent": "STOP_WATCH",
+        "description": "Smette di aspettare la fine di un processo sorvegliato (non lo chiude). Per 'smetti di sorvegliare X', "
+                       "'non avvisarmi piu' per X'.",
+        "parameters": {
+            "process": {"type": "string", "required": True, "description": "Nome del processo sorvegliato."},
+        },
+    }
+
+    def __init__(self, watcher: WatchProcessSkill):
+        self.watcher = watcher
+
+    def execute(self, parameters: dict = None):
+        query = str((parameters or {}).get("process") or "").strip().lower().removesuffix(".exe")
+        if not query:
+            return SkillResult(success=False, data={}, error="MISSING_PARAMETERS")
+        with self.watcher._lock:
+            matches = [pid for pid, name in self.watcher.watching.items()
+                       if query in name.lower() and pid not in self.watcher._cancelled]
+            self.watcher._cancelled.update(matches)
+            names = [self.watcher.watching[pid] for pid in matches]
+        if not matches:
+            return SkillResult(success=False, data={"process": query}, error="NOT_FOUND")
+        return SkillResult(success=True, data={"processes": names})

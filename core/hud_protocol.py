@@ -80,6 +80,9 @@ class EventType(str, Enum):
     # F4.5.7: la modalita' privata e' attiva/disattiva. Payload: {"enabled": bool}. Mentre e' attiva ogni
     # evento esce dal bus gia' redatto (vedi redact_private): l'HUD mostra solo l'indicatore e "(privato)".
     PRIVACY_MODE = "PRIVACY_MODE"
+    # F4.5.6: modalita' di notifica e quante notifiche aspettano (trattenute dalla modalita' o rimandate). Payload:
+    # {"mode": str, "mode_label": str (italiano, da mostrare), "pending": int}. Solo numeri e nomi, mai i testi.
+    NOTIFICATION_STATE = "NOTIFICATION_STATE"
 
 
 # Traduce gli stati gia' in uso da WakeWordSession/SessionHooks.set_state (stringhe libere,

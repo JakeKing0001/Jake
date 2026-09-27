@@ -73,6 +73,9 @@ QJsonObject HudViewState::snapshot() const {
         {"audio_source", audioSource},
         {"audio_level", audioLevel},
         {"private_mode", privateMode},
+        {"notification_mode", notificationMode},
+        {"notification_mode_label", notificationModeLabel},
+        {"notifications_pending", notificationsPending},
         {"last_sequence_id", lastSequenceId},
         {"ignored", ignored},
         {"incompatible", incompatible},
@@ -204,6 +207,11 @@ void HudEventReducer::reduce(const QString &type, const QJsonObject &payload, co
         reduceActivity(type, payload, traceId);
     } else if (isType(type, PRIVACY_MODE)) {
         m_view.privateMode = payload.value(QStringLiteral("enabled")) == QJsonValue(true);
+    } else if (isType(type, NOTIFICATION_STATE)) {
+        const QString mode = text(payload, "mode");
+        m_view.notificationMode = mode.isEmpty() ? QStringLiteral("normal") : mode;
+        m_view.notificationModeLabel = text(payload, "mode_label");
+        m_view.notificationsPending = qMax(0, integer(payload, "pending"));
     } else if (isType(type, SELECTOR_INSPECTION)) {
         const QJsonValue inspectionValue = payload.value(QStringLiteral("inspection"));
         const QJsonObject inspection = inspectionValue.isObject() ? inspectionValue.toObject() : QJsonObject();

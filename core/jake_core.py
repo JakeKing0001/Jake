@@ -186,6 +186,8 @@ class JakeCore:
         # parte solo se companion_server_enabled e' esplicitamente vero in config.json, stesso
         # pattern gia' usato da system_advisor_enabled.
         self.event_bus = EventBus()
+        # F4.5.6: l'HUD vede modalita' di notifica e quante notifiche aspettano, non solo quelle mostrate
+        self.notification_center.on_state_change = self._publish_notification_state
 
         # F6.3/F6.7 (Notification Intelligence + Task Monitor, primo collegamento reale a
         # JakeCore/EventBus/HUD): entrambi i moduli esistevano gia' come librerie testate ma
@@ -325,6 +327,7 @@ class JakeCore:
             format_result=lambda intent, result: format_skill_result(intent, result, self.skill_registry),
             logger=self.logger,
             context_provider=lambda: self._agent_context(),
+            memory_provider=self._agent_memories,
             # F1.3.4: action_id letto da core.request_context.current_action_id(), impostato da
             # TaskAgent.run() solo intorno a questa chiamata - vedi il docstring di
             # _resolve_and_execute e quello del contextvar per il perche'.
@@ -349,6 +352,7 @@ class JakeCore:
             "format_result": lambda intent, result: format_skill_result(intent, result, self.skill_registry),
             "logger": self.logger,
             "context_provider": lambda: self._agent_context(),
+            "memory_provider": self._agent_memories,
             "executor": lambda intent, parameters: self._resolve_and_execute(
                 Command(intent, parameters), action_id=current_action_id(),
             ),
@@ -548,8 +552,11 @@ class JakeCore:
         # Skill che hanno bisogno del core (non solo del registry): registrate qui.
         self.skill_registry.register_skill("LIST_MODELS", ListModelsSkill())
         # F6.7: "avvisami quando finisce la build" - sorveglia un processo gia' in esecuzione
-        from skills.watch_process import WatchProcessSkill
-        self.skill_registry.register_skill("WATCH_PROCESS", WatchProcessSkill(self))
+        from skills.watch_process import ListWatchesSkill, StopWatchSkill, WatchProcessSkill
+        watcher = WatchProcessSkill(self)
+        self.skill_registry.register_skill("WATCH_PROCESS", watcher)
+        self.skill_registry.register_skill("LIST_WATCHES", ListWatchesSkill(watcher))
+        self.skill_registry.register_skill("STOP_WATCH", StopWatchSkill(watcher))
         # F4.6.2: "riprova" - l'ultima azione fallita, di nuovo attraverso questa stessa pipeline
         from skills.retry_last import RetryLastActionSkill
         self.skill_registry.register_skill("RETRY_LAST_ACTION", RetryLastActionSkill(self))
@@ -561,6 +568,8 @@ class JakeCore:
         self.skill_registry.register_skill("DAILY_BRIEF", DailyBriefSkill(
             self.skill_registry.reminder_manager, self.skill_registry.todo_manager))
         # F6.3.4: controllo dell'utente sull'ultima notifica proattiva mostrata
+        from skills.notification_feedback import ExplainLastNotificationSkill
+        self.skill_registry.register_skill("EXPLAIN_LAST_NOTIFICATION", ExplainLastNotificationSkill(self))
         from skills.notification_feedback import (LessNotificationsLikeThisSkill, MuteNotificationSkill,
                                                   SnoozeNotificationSkill, UnmuteNotificationSkill)
         self.skill_registry.register_skill("LESS_NOTIFICATIONS_LIKE_THIS", LessNotificationsLikeThisSkill(self))
@@ -677,7 +686,16 @@ class JakeCore:
 
     # ---- callback di default -------------------------------------------------------------
 
-    def notify(self, kind: str, message: str, *, trace_id: str | None = None, critical: bool = False) -> str | None:
+    # F6.2.7: perche' esiste una notifica, quando chi la produce non lo dice (vedi `source` di notify)
+    NOTIFICATION_SOURCES = {
+        "reminder": "e' un promemoria che hai chiesto tu",
+        "advisory": "e' un controllo automatico dello stato del PC (batteria, disco, attivita' dimenticate)",
+        "trigger": "e' il risultato di un'automazione che hai programmato",
+        "pairing": "un dispositivo nuovo ha chiesto di collegarsi a Jake",
+    }
+
+    def notify(self, kind: str, message: str, *, trace_id: str | None = None, critical: bool = False,
+               source: str | None = None) -> str | None:
         """Punto unico da cui passa ogni notifica proattiva (promemoria/avviso/automazione)
         prima di essere presentata, sia in CLI (qui sotto) sia in voce (vedi WakeWordSession,
         core/voice/wake_word_session.py, che chiama questo stesso metodo): applica la modalita'
@@ -703,7 +721,8 @@ class JakeCore:
                 return None
         if gated is not None:
             # l'ultima notifica mostrata: a lei si riferiscono "meno notifiche cosi'", "non mostrarmelo piu'", "rimandala"
-            self.last_notification = {"kind": kind, "message": gated, "key": notification_key(kind, gated)}
+            self.last_notification = {"kind": kind, "message": gated, "key": notification_key(kind, gated),
+                                      "source": source or self.NOTIFICATION_SOURCES.get(kind, ""), "at": time.time()}
             self.event_bus.publish(HudEvent(EventType.NOTIFICATION, {"kind": kind, "text": gated}, trace_id=trace_id))
         return gated
 
@@ -734,11 +753,11 @@ class JakeCore:
         callback(digest)
         return digest
 
-    def present_notification(self, kind: str, message: str) -> str | None:
+    def present_notification(self, kind: str, message: str, source: str | None = None) -> str | None:
         """F6.1: UNA strada per mostrare una notifica - gate (modalita', duplicati, budget, quiet hours,
         preferenze) e poi un unico presentatore: stampa in CLI, voce nella sessione vocale (che la rimanda se
         Jake sta parlando). Usata dalle fonti nuove (es. WATCH_PROCESS) invece di un callback per ciascuna."""
-        gated = self.notify(kind, message)
+        gated = self.notify(kind, message, source=source)
         if gated is None:
             return None
         presenter = getattr(self, "notification_presenter", None)
@@ -751,8 +770,13 @@ class JakeCore:
             print(f"\nJake > {gated}\nTu > ", end="", flush=True)
         return gated
 
+    @staticmethod
+    def reminder_source(reminder: dict) -> str:
+        what = "un timer" if reminder.get("kind") == "timer" else "un promemoria"
+        return f"e' {what} che hai impostato tu"
+
     def _default_on_reminder_due(self, reminder: dict) -> None:
-        message = self.notify("reminder", self.format_due_reminder(reminder))
+        message = self.notify("reminder", self.format_due_reminder(reminder), source=self.reminder_source(reminder))
         if message is None:
             return
         print(f"\nJake > {message}\nTu > ", end="", flush=True)
@@ -812,10 +836,21 @@ class JakeCore:
         message = self.notify(
             "trigger", f"Ho eseguito automaticamente '{trigger.get('name')}':\n{summary}",
             trace_id=getattr(outcome, "trace_id", None),
+            source=f"e' il risultato dell'automazione '{trigger.get('name')}' che hai programmato",
         )
         if message is None:
             return
         print(f"\nJake > {message}\nTu > ", end="", flush=True)
+
+    def _agent_memories(self, request: str) -> str:
+        """F5.5 (agente): gli stessi ricordi pertinenti delle risposte libere (core/memory_manager.py::relevant_for,
+        con budget di caratteri), con la loro fonte, per i compiti degli agenti."""
+        from core.response_formatter import memory_provenance
+
+        memory = getattr(self, "memory_manager", None)
+        if memory is None or not hasattr(memory, "relevant_for"):
+            return ""
+        return "\n".join(f"- {m['key']}: {m['value']}{memory_provenance(m)}" for m in memory.relevant_for(request))
 
     def _agent_context(self) -> str:
         parts = [part for part in (self.desktop_context.context_summary(), self.conversation_state.entities_summary()) if part]
@@ -2167,6 +2202,8 @@ class JakeCore:
                     # F2.6
                     "action_id": action_id,
                     "dialogue_scope": scope,
+                    # F4.6.4: un undo porta con se' quale azione annulla (ricontrollo al "si'", poi consumato)
+                    "undo_source_action_id": envelope.get("undo_source_action_id"),
                 }
             )
 
@@ -2611,6 +2648,19 @@ class JakeCore:
             if descriptor is None:
                 self._cancel_dialogue_action(action)
                 return "L'undo non è più disponibile. Non eseguo la versione corretta."
+        elif action.get("undo_source_action_id"):
+            # F4.6.4: tra la domanda e il "si'" l'undo puo' essere scaduto, gia' fatto, o cio' che cancellerebbe
+            # puo' essere cambiato - si ricontrolla ADESSO, non ci si fida della domanda di prima
+            from core.undo_store import undo_state_problem
+
+            descriptor = self.undo_store.get(action["undo_source_action_id"])
+            changed = undo_state_problem(descriptor) if descriptor is not None else None
+            if descriptor is None or changed is not None:
+                self._cancel_dialogue_action(action)
+                if descriptor is None:
+                    return "Quell'annullamento non è più disponibile (scaduto o già fatto): non eseguo nulla."
+                return (f"Non annullo: {changed} è cambiato mentre aspettavo la conferma, e annullare cancellerebbe "
+                        "anche quelle modifiche.")
 
         parameters = {
             **strip_authorization_signals(
@@ -2642,6 +2692,9 @@ class JakeCore:
                 action_id=action_id,
                 private=self.private_mode,
             )
+
+        if action.get("undo_source_action_id") and result is not None and result.success:
+            self.undo_store.mark_used(action["undo_source_action_id"])  # F4.6.4: lo stesso undo non si ripete
 
         # Può servire un secondo gradino di conferma/auth.
         if (
@@ -3018,6 +3071,12 @@ class JakeCore:
             self.native_hud = None
             self._revoke_native_hud_credential()
 
+    def _publish_notification_state(self, mode, pending: int) -> None:
+        from core.notification_center import MODE_LABELS_IT
+
+        self.event_bus.publish(HudEvent(EventType.NOTIFICATION_STATE, {
+            "mode": mode.value, "mode_label": MODE_LABELS_IT.get(mode, mode.value), "pending": pending}))
+
     def _timed_notification_mode_ended(self, previous, released: list[str]) -> None:
         """F6.5.6: "non disturbare per 30 minuti" e' finito da solo. Lo si dice, con cio' che e' stato trattenuto,
         dalla stessa strada delle altre notifiche (e' una richiesta esplicita dell'utente: puntuale come un promemoria)."""
@@ -3026,7 +3085,7 @@ class JakeCore:
         message = f"Tempo scaduto: torno alla modalità {MODE_LABELS_IT.get(previous, previous.value)}."
         if released:
             message += " Nel frattempo: " + " ".join(released)
-        self.present_notification("reminder", message)
+        self.present_notification("reminder", message, source="avevi scelto una modalita' di notifica a tempo")
 
     def _native_hud_gave_up(self, crashes: int) -> None:
         """F4.8: l'HUD nativo continua a chiudersi e non viene piu' riavviato. Prima lo diceva solo il log: l'HUD

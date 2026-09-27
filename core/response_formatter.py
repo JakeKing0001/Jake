@@ -116,6 +116,8 @@ def _format_control_error(intent: str, error: str | None, data: dict) -> str | N
     if error == "NOT_FOUND":
         if intent == "WATCH_PROCESS":
             return f"Non vedo nessun processo '{data.get('process', '')}' in esecuzione da sorvegliare."
+        if intent == "STOP_WATCH":
+            return f"Non sto sorvegliando nessun processo '{data.get('process', '')}'."
         if intent in ("SET_DEVICE_ACCESS", "REVOKE_DEVICE"):
             return f"Non trovo nessun dispositivo associato chiamato '{data.get('device', '')}'."
         if intent == "PIN_MEMORY":
@@ -138,6 +140,12 @@ def _format_control_error(intent: str, error: str | None, data: dict) -> str | N
 def _format_control_success(intent: str, data: dict) -> str | None:
     if intent == "WATCH_PROCESS":
         return f"Ok, ti avviso quando {data['process']} finisce."
+    if intent == "LIST_WATCHES":
+        processes = data.get("processes") or []
+        return ("Sto aspettando che finiscano: " + ", ".join(processes) + ".") if processes else \
+            "Non sto sorvegliando nessun processo."
+    if intent == "STOP_WATCH":
+        return f"Ok, non ti avviso più per {', '.join(data['processes'])}: il processo continua normalmente."
     if intent == "DAILY_BRIEF":
         return str(data.get("text") or "")
     if intent == "EXPORT_MEMORIES":
@@ -150,6 +158,12 @@ def _format_control_success(intent: str, data: dict) -> str | None:
         return f"Ok, {data['key']} non è più fissato."
     if intent == "RETRY_LAST_ACTION":
         return str(data.get("response") or "")  # la risposta del comando ripetuto, gia' formattata
+    if intent == "EXPLAIN_LAST_NOTIFICATION":
+        reason = data.get("source") or "non so dire da dove venisse"
+        text = f"Te l'ho detto perché {reason}."
+        if data.get("kind") != "reminder":
+            text += " Se non ti serve puoi dirmi \"meno notifiche così\" o \"non mostrarmelo più\"."
+        return text
     if intent == "LESS_NOTIFICATIONS_LIKE_THIS":
         return "Ok, ti mostrerò meno notifiche come questa."
     if intent == "MUTE_NOTIFICATION":
@@ -206,6 +220,9 @@ def _format_error(intent: str, result: SkillResult) -> str:
         return "Mancano delle informazioni per eseguire questa azione."
     if error == "NO_UNDO_AVAILABLE":
         return "Non c'è nessuna azione recente che posso annullare."
+    if error == "UNDO_STATE_CHANGED":
+        return (f"Non annullo: {data.get('path', '')} è cambiato dopo la mia azione, e annullare cancellerebbe anche "
+                "le modifiche fatte dopo. Se vuoi davvero toglierlo, chiedimelo esplicitamente.")
     if error == "NOT_FOUND":
         if intent == "RESUME_INTERRUPTED_TASK":
             return "Non ho nessun compito interrotto da riprendere."

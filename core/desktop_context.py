@@ -1,4 +1,5 @@
 import threading
+import time
 from collections import deque
 from datetime import datetime
 
@@ -9,6 +10,23 @@ from core.logger import get_logger
 # ma non tanto da gonfiare ogni prompt con un blocco di testo intero copiato per altri motivi.
 CLIPBOARD_PREVIEW_MAX_CHARS = 120
 
+# F5.6.4 (privacy): formati con cui un'app chiede a Windows di non far leggere cio' che ha copiato ai programmi che
+# sorvegliano gli appunti (password manager, campi password). Se presenti, Jake non ne legge nemmeno l'anteprima.
+CLIPBOARD_EXCLUDE_FORMATS = ("ExcludeClipboardContentFromMonitorProcessing",)
+CLIPBOARD_HISTORY_FORMAT = "CanIncludeInClipboardHistory"  # DWORD 0 = "non tenerlo nella cronologia"
+
+
+def clipboard_is_private(win32clipboard) -> bool:
+    """Vero se gli appunti aperti portano un segnale di contenuto da non monitorare."""
+    for name in CLIPBOARD_EXCLUDE_FORMATS:
+        if win32clipboard.IsClipboardFormatAvailable(win32clipboard.RegisterClipboardFormat(name)):
+            return True
+    history = win32clipboard.RegisterClipboardFormat(CLIPBOARD_HISTORY_FORMAT)
+    if win32clipboard.IsClipboardFormatAvailable(history):
+        value = win32clipboard.GetClipboardData(history)
+        return bool(value) and int.from_bytes(bytes(value)[:4], "little") == 0
+    return False
+
 
 class DesktopContextTracker:
     """Tiene traccia, in background e a basso costo, di cosa sta facendo l'utente sul desktop
@@ -16,12 +34,18 @@ class DesktopContextTracker:
     aperte e un'anteprima degli appunti). Letture leggere a intervalli, mai continue (niente
     OCR/screenshot qui: troppo costoso e invasivo per girare sempre in background)."""
 
-    def __init__(self, poll_seconds: float = 3.0, history_size: int = 10, stop_timeout_seconds: float = 2.0):
+    def __init__(self, poll_seconds: float = 3.0, history_size: int = 10, stop_timeout_seconds: float = 2.0,
+                 clock=time.monotonic):
         self.poll_seconds = poll_seconds
+        # F5.6.7: un segnale non riletto da troppo tempo (lettura che fallisce, thread fermo) non e' piu' "adesso"
+        self.stale_after_seconds = max(10.0, 3 * poll_seconds)
+        self._clock = clock
+        self._fresh_at: dict[str, float] = {}
         self._history: deque[dict] = deque(maxlen=history_size)
         self._current_title: str | None = None
         self._open_windows: list[str] = []
         self._clipboard_preview: str | None = None
+        self._clipboard_private = False
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
@@ -64,8 +88,9 @@ class DesktopContextTracker:
             title = get_active_window_title()
         except Exception:
             return
-        if title and title != self._current_title:
-            with self._lock:
+        with self._lock:
+            self._fresh_at["window"] = self._clock()
+            if title and title != self._current_title:
                 self._current_title = title
                 self._history.append({"title": title, "at": datetime.now()})
 
@@ -78,6 +103,7 @@ class DesktopContextTracker:
             return
         with self._lock:
             self._open_windows = titles
+            self._fresh_at["open_windows"] = self._clock()
 
     def _poll_clipboard(self) -> None:
         try:
@@ -85,11 +111,12 @@ class DesktopContextTracker:
 
             win32clipboard.OpenClipboard()
             try:
-                text = win32clipboard.GetClipboardData(win32clipboard.CF_UNICODETEXT)
+                private = clipboard_is_private(win32clipboard)
+                text = None if private else win32clipboard.GetClipboardData(win32clipboard.CF_UNICODETEXT)
             finally:
                 win32clipboard.CloseClipboard()
         except Exception:
-            text = None
+            private, text = False, None
 
         preview = None
         if text and text.strip():
@@ -99,6 +126,13 @@ class DesktopContextTracker:
                 preview += "…"
         with self._lock:
             self._clipboard_preview = preview
+            self._clipboard_private = private
+            self._fresh_at["clipboard"] = self._clock()
+
+    def _fresh(self, signal: str) -> bool:
+        with self._lock:
+            at = self._fresh_at.get(signal)
+        return at is not None and self._clock() - at <= self.stale_after_seconds
 
     def get_current_window(self) -> str | None:
         with self._lock:
@@ -132,10 +166,13 @@ class DesktopContextTracker:
         recent = self.get_recent_windows()
         if recent:
             parts.append("Finestre/app usate di recente sul desktop: " + "; ".join(recent))
-        open_windows = self.get_open_windows()
+        # F5.6.7: "ora" solo se riletto di recente; un valore vecchio non si presenta come stato attuale
+        open_windows = self.get_open_windows() if self._fresh("open_windows") else []
         if open_windows:
             parts.append("Finestre aperte ora: " + "; ".join(open_windows[:8]))
-        clipboard = self.get_clipboard_preview()
+        clipboard = self.get_clipboard_preview() if self._fresh("clipboard") else None
         if clipboard:
             parts.append(f'Appunti: "{clipboard}"')
+        elif self._clipboard_private and self._fresh("clipboard"):
+            parts.append("Appunti: contenuto privato (non letto)")
         return " | ".join(parts)

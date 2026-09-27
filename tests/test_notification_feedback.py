@@ -65,6 +65,17 @@ class NotificationFeedbackTests(unittest.TestCase):
         with mock.patch("time.time", return_value=time.time() + 31 * 60):
             self.assertEqual([i["message"] for i in self.core.notification_center.take_deferred()], ["Promemoria: medicina"])
 
+    def test_why_did_you_tell_me_explains_the_source_of_the_last_notification(self):
+        from skills.notification_feedback import ExplainLastNotificationSkill
+
+        self.core.notify("advisory", "Batteria al 12%")
+        reply = format_skill_result("EXPLAIN_LAST_NOTIFICATION", ExplainLastNotificationSkill(self.core).execute())
+        self.assertIn("controllo automatico dello stato del PC", reply)
+        self.assertIn("meno notifiche così", reply)
+        self.core.notify("reminder", "npm e' finito", source="mi avevi chiesto di avvisarti quando npm finiva")
+        reply = format_skill_result("EXPLAIN_LAST_NOTIFICATION", ExplainLastNotificationSkill(self.core).execute())
+        self.assertEqual(reply, "Te l'ho detto perché mi avevi chiesto di avvisarti quando npm finiva.")
+
     def test_without_a_recent_notification_nothing_happens(self):
         result = MuteNotificationSkill(self.core).execute()
         self.assertEqual(result.error, "NO_RECENT_NOTIFICATION")

@@ -22,6 +22,19 @@ bool systemPrefersReducedMotion() {
     return false;
 }
 
+// F4.7.4: "Dimensioni testo" di Windows (Accessibilita' > Dimensioni testo, 100-225%). Qt non la applica al QML:
+// senza, l'HUD resta piccolo anche per chi ha ingrandito il testo di tutto il sistema.
+double systemTextScale() {
+#ifdef Q_OS_WIN
+    DWORD value = 0;
+    DWORD size = sizeof(value);
+    if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Accessibility", L"TextScaleFactor",
+                     RRF_RT_REG_DWORD, nullptr, &value, &size) == ERROR_SUCCESS && value >= 100 && value <= 225)
+        return value / 100.0;
+#endif
+    return 1.0;
+}
+
 // F4.7.3: "Contrasto elevato" di Windows (Accessibilita'), letto all'avvio.
 bool systemUsesHighContrast() {
 #ifdef Q_OS_WIN
@@ -59,6 +72,9 @@ int main(int argc, char *argv[]) {
                    systemPrefersReducedMotion() || qEnvironmentVariable("JAKE_HUD_REDUCED_MOTION") == QLatin1String("1"));
     initial.insert(QStringLiteral("highContrast"),
                    systemUsesHighContrast() || qEnvironmentVariable("JAKE_HUD_HIGH_CONTRAST") == QLatin1String("1"));
+    bool scaleOk = false;
+    const double envScale = qEnvironmentVariable("JAKE_HUD_TEXT_SCALE").toDouble(&scaleOk);
+    initial.insert(QStringLiteral("textScale"), scaleOk && envScale >= 1.0 && envScale <= 2.25 ? envScale : systemTextScale());
     // JAKE_HUD_QUALITY=low per GPU deboli/batteria (F4.3.5); JAKE_HUD_ORB=2d forza l'orb 2D.
     initial.insert(QStringLiteral("orbQuality"), qEnvironmentVariable("JAKE_HUD_QUALITY") == QLatin1String("low")
                    ? QStringLiteral("low") : QStringLiteral("high"));
