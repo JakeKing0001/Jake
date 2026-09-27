@@ -187,6 +187,7 @@ ApplicationWindow {
             id: actionCenter
             Layout.fillWidth: true
             activitySummary: jake.lastActivitySummary
+            activityDetails: jake.lastActivityDetails
             undoExpiresAt: jake.lastUndoExpiresAt
             // undo e stop passano dagli stessi skill del comando vocale (scadenza, policy, controlli)
             onUndoRequested: jake.sendCommand("annulla l'ultima azione")

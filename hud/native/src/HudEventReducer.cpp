@@ -226,13 +226,16 @@ void HudEventReducer::reduceActivity(const QString &type, const QJsonObject &pay
     }
     QJsonObject item = index >= 0 ? m_view.activities.at(index).toObject() : QJsonObject{
         {"action_id", actionId}, {"intent", QString()}, {"outcome", QString()}, {"verified", QString()},
-        {"trace_id", QString()}, {"undo_intent", QString()}, {"undo_expires_at", 0},
+        {"trace_id", QString()}, {"requested_by", QString()}, {"error_category", QString()},
+        {"undo_intent", QString()}, {"undo_expires_at", 0},
     };
     if (type == QLatin1String(JakeHudEventType::ACTION_RECEIPT)) {
         item.insert("intent", text(payload, "intent"));
         item.insert("outcome", text(payload, "outcome"));
         item.insert("verified", text(payload, "verified"));
         item.insert("trace_id", traceId);
+        item.insert("requested_by", text(payload, "requested_by"));
+        item.insert("error_category", text(payload, "error_category"));
         if (item.value("outcome").toString() != QLatin1String("success"))
             m_view.lastOutcome = QStringLiteral("error");
         else

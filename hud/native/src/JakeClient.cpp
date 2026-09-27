@@ -1,6 +1,7 @@
 #include "JakeClient.h"
 
 #include <QJsonArray>
+#include <QStringList>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkRequest>
@@ -227,6 +228,33 @@ QString JakeClient::lastActivitySummary() const {
     if (verified == QLatin1String("verified")) summary += QStringLiteral(" · ") + tr("verificata");
     else if (verified == QLatin1String("verification_failed")) summary += QStringLiteral(" · ") + tr("verifica fallita");
     return summary;
+}
+
+QString JakeClient::lastActivityDetails() const {
+    const QJsonArray &activities = m_reducer.view().activities;
+    if (activities.isEmpty()) return QString();
+    const QJsonObject last = activities.last().toObject();
+    if (last.value("intent").toString().isEmpty()) return QString();
+    const QString by = last.value("requested_by").toString();
+    const QString who = by == QLatin1String("user") ? tr("chiesta da te")
+        : by == QLatin1String("agent") ? tr("decisa da un agente")
+        : by == QLatin1String("trigger") ? tr("partita da un'automazione") : tr("origine: %1").arg(by);
+    QStringList lines;
+    lines << tr("Azione: %1 (%2)").arg(last.value("intent").toString(), who);
+    const QString category = last.value("error_category").toString();
+    if (last.value("outcome").toString() != QLatin1String("success") && !category.isEmpty())
+        lines << tr("Esito: non riuscita (%1)").arg(category);
+    const QString verified = last.value("verified").toString();
+    lines << (verified == QLatin1String("verified") ? tr("Effetto verificato")
+              : verified == QLatin1String("verification_failed") ? tr("Verifica dell'effetto fallita")
+              : tr("Effetto non verificato"));
+    const QString undoIntent = last.value("undo_intent").toString();
+    lines << (undoIntent.isEmpty() ? tr("Non annullabile automaticamente")
+              : tr("Annullabile con %1").arg(undoIntent));
+    const QString trace = last.value("trace_id").toString();
+    if (!trace.isEmpty())
+        lines << tr("Traccia: %1").arg(trace.left(12));
+    return lines.join(QLatin1Char('\n'));
 }
 
 qint64 JakeClient::lastUndoExpiresAt() const {
