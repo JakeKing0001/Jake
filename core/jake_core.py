@@ -747,8 +747,29 @@ class JakeCore:
             # l'ultima notifica mostrata: a lei si riferiscono "meno notifiche cosi'", "non mostrarmelo piu'", "rimandala"
             self.last_notification = {"kind": kind, "message": gated, "key": notification_key(kind, gated),
                                       "source": source or self.NOTIFICATION_SOURCES.get(kind, ""), "at": time.time()}
-            self.event_bus.publish(HudEvent(EventType.NOTIFICATION, {"kind": kind, "text": gated}, trace_id=trace_id))
+            responder = self._remote_responder()
+            payload = {"kind": kind, "text": gated}
+            if responder:
+                payload["responder"] = responder
+            self.event_bus.publish(HudEvent(EventType.NOTIFICATION, payload, trace_id=trace_id))
+            if responder:
+                # F7.4 (un solo active responder): con un telefono attivo la notifica la riceve lui dal bus; il PC non la
+                # dice ne' la stampa - niente doppia risposta, niente voce in una stanza magari vuota
+                self.logger.info("Notifica %s consegnata al dispositivo attivo %s, non al PC", kind, responder)
+                return None
         return gated
+
+    def _remote_responder(self) -> str | None:
+        """Il dispositivo companion che risponde adesso al posto del PC, se c'e' (F7.4: DeviceRegistry col lease)."""
+        server = getattr(self, "companion_server", None)
+        if server is None or getattr(server, "running", False) is not True:
+            return None
+        try:
+            active = server.devices.active_device_id
+        except Exception:
+            self.logger.exception("Errore leggendo il dispositivo attivo")
+            return None
+        return active if isinstance(active, str) and active else None
 
     # Dopo una risposta si aspetta questo tempo prima di un riepilogo: la voce potrebbe ancora parlare.
     DIGEST_QUIET_AFTER_ANSWER_S = 60.0
@@ -3216,6 +3237,7 @@ class JakeCore:
 
     def _publish_action_receipt(self, receipt) -> None:
         """F4.5/F4.6.1: ogni ricevuta del ledger ha una rappresentazione nell'HUD (action center)."""
+        self._observe_forge_trial(receipt)
         result = str(getattr(receipt, "result", "") or "")
         requested_by = str(getattr(receipt, "requested_by", "") or "")
         self.event_bus.publish(HudEvent(EventType.ACTION_RECEIPT, {
@@ -3225,6 +3247,25 @@ class JakeCore:
             "error_category": str(getattr(receipt, "error_category", "") or ""),
             "verified": str(getattr(receipt, "verified", "") or ""),
         }, trace_id=getattr(receipt, "trace_id", None)))
+
+    def _observe_forge_trial(self, receipt) -> None:
+        """F8.3.7: le skill forgiate in prova vedono ogni loro esecuzione reale; a prova finita (superata o skill
+        disattivata) l'utente lo sa dal canale degli avvisi (voce nella sessione vocale, CLI altrimenti)."""
+        forge = getattr(self, "skill_forge", None)
+        if forge is None or getattr(forge, "skill_store", None) is None:
+            return
+        try:
+            message = forge.observe_execution(str(receipt.intent or ""), str(getattr(receipt, "result", "") or ""),
+                                              str(getattr(receipt, "error_category", "") or ""))
+        except Exception:
+            self.logger.exception("Errore nel periodo di prova di una skill forgiata")
+            return
+        if message:
+            callback = getattr(getattr(self, "system_advisor", None), "on_advisory", None) or self._default_on_advisory
+            try:
+                callback(message)
+            except Exception:
+                self.logger.exception("Errore annunciando la fine della prova di una skill forgiata")
 
     def _publish_undo_available(self, descriptor) -> None:
         """F4.6.3: scadenza dell'undo visibile nell'HUD (mai i parametri compensatori)."""

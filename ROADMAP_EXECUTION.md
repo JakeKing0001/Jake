@@ -270,7 +270,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F5.2` | Memory Platform (27/09/2026: memoria episodica interrogabile - "di cosa abbiamo parlato ieri?" sulla cronologia reale per periodo e argomento) | `DOING` |
 | `F5.3` | Knowledge Model | `DOING` |
 | `F5.4` | Memory Reliability (27/09/2026: nessuna sovrascrittura silenziosa di fatti/preferenze - versione precedente conservata e dichiarata, un'inferenza non sostituisce un fatto detto dall'utente, conflitti registrati, "dimentica" cancella anche le versioni; conferma prima di cambiare un ricordo importante o fissato; decadimento per categoria nel ranking, fissati esclusi; consolidamento non ancora) | `DOING` |
-| `F5.5` | Retrieval Quality (27/09/2026: ricordi pertinenti con fonte anche nelle risposte libere e nei compiti dei tre agenti, retrieval ibrido parole+significato+periodo ("ieri", "la settimana scorsa" dentro la domanda), budget di contesto, grafo a un salto; 28/09/2026: nessun ricordo personale nelle domande di conoscenza generale, riassunti di conversazione solo se la domanda parla di conversazioni passate, citazione solo se il ricordo e' davvero nella risposta e detta in modo leggibile; metriche ancora da fare) | `DOING` |
+| `F5.5` | Retrieval Quality (27/09/2026: ricordi pertinenti con fonte anche nelle risposte libere e nei compiti dei tre agenti, retrieval ibrido parole+significato+periodo ("ieri", "la settimana scorsa" dentro la domanda), budget di contesto, grafo a un salto; 28/09/2026: nessun ricordo personale nelle domande di conoscenza generale, riassunti di conversazione solo se la domanda parla di conversazioni passate, citazione solo se il ricordo e' davvero nella risposta e detta in modo leggibile; 28/09/2026 sera: metriche nell'eval di rilascio - golden set della memoria su database vero, recall@3 e MRR 1,0, 5 casi di sicurezza; i ricordi segreti non entrano piu' nel contesto automatico) | `DOING` |
 | `F5.6` | Context Runtime (27/09/2026: segnali non riletti non piu' presentati come attuali; appunti marcati privati da chi li copia mai letti) | `DOING` |
 | `F5.7` | Privacy Engineering (libreria completa il 21/09/2026; dal 26/09/2026 nel percorso reale: "dimentica" cancella anche registro e indici con ricevuta, l'uso dei ricordi viene registrato, "da dove sai X" spiega la provenienza; dal 27/09/2026 "esporta i miei ricordi" e "fissa il ricordo X" a voce; purge/backup non ancora esposti a voce/HUD) | `DOING` |
 | `F6.1` | Proactivity Platform (26/09/2026: promemoria, automazioni e avvisi passano dagli stessi freni in `JakeCore.notify` - duplicati, budget orario, quiet hours, conversazione in corso - e si sospendono insieme durante prove e benchmark; 28/09/2026: gli avvisi non urgenti aspettano che Jake sia pronto e poi escono in un solo riepilogo) | `DOING` |
@@ -9205,6 +9205,17 @@ Criterio di uscita: ogni risposta di memoria ha almeno una fonte oppure è marca
   registrato l'uso, mai in modalita' privata. Prova: `tests/test_memory_in_answers.py`. Restano l'agente
   a passi e le metriche precision/recall.
 
+- 28/09/2026 (F5.5 metriche + F8.6 runner reale dell'area memoria): `core/release_eval.py` aveva golden set,
+  confronto e rollback ma nessun runner reale. `benchmarks/bench_memory_retrieval.py` ne da' uno alla memoria:
+  database vero con 11 ricordi realistici (preferenze, persone, salute, abitudini, un riassunto di conversazione,
+  due segreti) e `MemoryManager.relevant_for`, lo stesso metodo delle risposte libere e degli agenti. 8 casi
+  positivi (recall@3 = 1,0, MRR = 1,0) e 5 di sicurezza: tre domande di conoscenza generale senza ricordi (la prova
+  reale del 27/09) e due richieste che nominano un segreto. Misurato prima della correzione: sicurezza 3/5 - il PIN
+  del bancomat e la password del wifi, marcati `secret`, entravano nel contesto automatico di qualunque risposta che
+  ne nominasse le parole. Ora `relevant_for` li esclude da ogni ramo (parole, significato, grafo); la lettura
+  esplicita resta a RECALL e al dashboard della privacy. Gira anche come test (`tests/test_memory_retrieval_eval.py`,
+  soglie misurate) e a mano con `python -m benchmarks.bench_memory_retrieval`.
+
 ### F5.6 — Context engine event-driven
 
 Dipende da: F3 e F5.1.
@@ -9924,8 +9935,13 @@ nessuna azione duplicata e ripresa di contesto, decisioni e ricevute sul PC.
   conferma, e nulla su una riconnessione di chi era gia' attivo. Un dispositivo revocato non riporta indietro la
   sua conferma. Test con server companion vero e pipeline reale: PC -> telefono -> approvazione, telefono -> PC ->
   "si'" locale e 404 al telefono, lease scaduto, riconnessione, due claim e due approvazioni simultanei, privato.
-  Restano: il PC che riprende la sessione da solo quando l'utente gli parla (F7.4.2), l'active responder per
-  voce e notifiche proattive (niente doppia risposta), il riepilogo nei pannelli F4.5 dell'HUD.
+  Restano: il PC che riprende la sessione da solo quando l'utente gli parla (F7.4.2), il riepilogo nei pannelli
+  F4.5 dell'HUD (l'active responder per le notifiche e' la voce qui sotto).
+- 28/09/2026 (F7.4, un solo active responder per le notifiche): con un telefono attivo promemoria, avvisi e
+  automazioni uscivano sia sul telefono (NOTIFICATION sul bus, consegnata dallo stream del companion) sia a voce o
+  in CLI sul PC. Ora `JakeCore.notify` pubblica l'evento con `responder` e non restituisce nulla da presentare al PC
+  finche' il dispositivo attivo (DeviceRegistry, con il lease) e' un telefono; al ritorno sul PC tutto come prima.
+  L'ultima notifica resta quella a cui si riferiscono "meno notifiche cosi'" e simili, anche detti dal telefono.
 
 ### F7.5 — Home Assistant profondo
 
@@ -10163,8 +10179,18 @@ Criterio di uscita: una skill generata non può agire fuori manifest anche se il
   `missing_parameters` dalla sandbox, test incluso eseguito sul pacchetto installato, ricarica dopo riavvio con
   hash intatti, import di rete -> external_action mostrato prima del si', prove tutte fallite -> nessun pacchetto,
   digest diverso o assente -> niente installato, eliminazione completa. Restano F8.3.2 (specifica e casi di test
-  confermati PRIMA del codice), F8.3.7 canary con budget ridotto, F8.3.8 eval prima/dopo e rollback automatico,
-  e l'esecuzione dei test dichiarati dai pacchetti di terzi.
+  confermati PRIMA del codice) e l'esecuzione dei test dichiarati dai pacchetti di terzi.
+- 28/09/2026 (F8.3.7/F8.3.8, prova dopo l'installazione): appena installata, la skill forgiata riesegue le sue prove
+  nel runtime vero (`SkillRegistry.execute` -> worker isolato) e deve dare gli stessi esiti della sandbox (prima/
+  dopo), altrimenti viene tolta subito. Poi resta in prova nel catalogo (`SkillStore.set_canary`, persistente) per
+  5 esecuzioni reali: ogni ricevuta del ledger passa da `SkillForge.observe_execution`; input sbagliato, conferme,
+  policy e annullamenti non contano (non sono difetti del codice), 2 errori della skill o un solo blocco/timeout del
+  worker la mettono in quarantena e la tolgono dal registro da soli (rollback automatico), e l'utente lo sente dal
+  canale degli avvisi; 5 esecuzioni riuscite chiudono la prova. Il "budget ridotto" e' questo: poche esecuzioni e
+  soglie strette prima di fidarsi, non un limite di risorse diverso (il worker ha gia' memoria/CPU/processi
+  limitati dal Job Object per tutte). Test: prove rieseguite nel runtime, runtime diverso -> rimossa, promozione
+  dopo 5, errori dell'utente ignorati, 2 errori -> quarantena, timeout -> subito, stato dopo riavvio, ricevuta del
+  ledger -> annuncio.
 
 ### F8.4 — Model router
 
