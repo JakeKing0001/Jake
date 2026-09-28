@@ -1226,10 +1226,8 @@ class JakeCore:
     CONTINUITY_TURNS = 6
 
     def _pc_takes_the_session(self) -> None:
-        from core.native_hud import NATIVE_HUD_DEVICE_ID
-
-        if current_device_id() not in (None, NATIVE_HUD_DEVICE_ID):
-            return   # un telefono che parla resta il suo canale: nessuna elezione
+        if current_conversation_channel() is not None:
+            return   # un telefono che parla resta il suo canale: nessuna elezione (voce, CLI e HUD sono il PC)
         server = getattr(self, "companion_server", None)
         if server is None or not getattr(server, "running", False):
             return
