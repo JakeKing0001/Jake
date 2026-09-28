@@ -67,6 +67,21 @@ def reset_current_device_id(token: contextvars.Token) -> None:
     _current_device_id.reset(token)
 
 
+# Identita' companion dell'HUD nativo locale (core/native_hud.py): per ledger, audit e policy resta un dispositivo a se',
+# ma e' una superficie di QUESTO PC, come la voce e la CLI.
+NATIVE_HUD_DEVICE_ID = "native-hud-local"
+PC_SURFACE_DEVICE_IDS = frozenset({NATIVE_HUD_DEVICE_ID})
+
+
+def current_conversation_channel() -> str | None:
+    """Il canale della conversazione (conferme in sospeso, correzioni, "cosa hai sentito?"): None per il PC - voce,
+    CLI e HUD nativo insieme - altrimenti il device_id del dispositivo companion. Bug reale: l'HUD nativo aveva un
+    canale suo, quindi il "si'" scritto nella barra dell'HUD non confermava la domanda fatta a voce (diventava un
+    comando nuovo), e una conferma chiesta da un comando scritto nell'HUD non si confermava a voce."""
+    device_id = _current_device_id.get()
+    return None if device_id in PC_SURFACE_DEVICE_IDS else device_id
+
+
 def current_agent_name() -> str | None:
     """Il `TaskAgent.agent_name` che sta eseguendo un intent su QUESTO thread in questo momento
     (solo durante la chiamata all'executor dentro TaskAgent.run(), vedi core/agent.py), o None se

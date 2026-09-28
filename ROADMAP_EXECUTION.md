@@ -260,9 +260,9 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F3.8` | Demonstration Learning (dimostrazione vera -> passi semantici, parametri, descrizione, versione/app/undo, sospensione su drift, ri-approvazione; sopravvive a riavvio, resize e dati diversi - 25/09/2026) | `DONE` |
 | `F4.1` | Protocol Architecture (26/09/2026: riduttore di riferimento Python e riduttore C++ superano la stessa suite di 18 fixture, ctest nella CI; sequence_id/trace_id consumati anche lato C++) | `DONE` |
 | `F4.2` | Native HUD (F4.2.1/F4.2.4 chiusi, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026; F4.2.5/F4.2.6 e resto di F4.2.3 richiedono test interattivi/visivi) | `DOING` |
-| `F4.3` | Native HUD (27/09/2026: qualita' adattiva dell'orb - batteria e fotogrammi lenti; blur di sistema per pannello provato e scartato con evidenza: serve una finestra nativa non-layered per pannello; 28/09/2026: vetro con rifrazione della luce DELL'HUD - aura e polvere sfocate una volta e ritagliate dietro ogni pannello -, orlo, bagliore di stato, ombra; il blur del desktop resta F4.3 aperto) | `DOING` |
+| `F4.3` | Native HUD (27/09/2026: qualita' adattiva dell'orb - batteria e fotogrammi lenti; blur di sistema per pannello provato e scartato con evidenza: serve una finestra nativa non-layered per pannello; 28/09/2026: vetro con rifrazione della luce DELL'HUD - aura e polvere sfocate una volta e ritagliate dietro ogni pannello -, orlo, bagliore di stato, ombra; sera: desktop vero sfocato dietro ogni pannello su Windows 11 - lastre native della composizione con angoli arrotondati al raggio del pannello -, click-through intatto, ripiego sul vetro dell'HUD; giudizio estetico `VERIFY` dall'utente) | `DOING` |
 | `F4.4` | Interaction Design (26/09/2026: orb 3D Qt Quick 3D con nucleo volumetrico e particle shell, comportamento per stato interrupt-safe, reduced motion di Windows, qualita' high/low, fallback 2D; livelli audio reali di microfono e voce di Jake collegati all'orb; 27/09/2026 sera: particelle come massa viva a tre strati con moto individuale, orbite differenziali, componente radiale e reazioni per stato/audio/esito, modalita' demo JAKE_HUD_DEMO=1; 28/09/2026: gli stati REALI arrivano all'HUD nativo - prima la sessione vocale li dava solo al vecchio HUD PySide -, guscio in due popolazioni, scie di luce, scoppio in ERROR, scena sfumata senza bordi, polvere ambientale che si muove per stato; giudizio estetico `VERIFY` dall'utente) | `DOING` |
-| `F4.5` | Interaction Design (26/09/2026: trascrizione live, permission card, prove, diagnosi, notifiche nell'HUD nativo; 27/09/2026: modalita' privata = nessun contenuto verso HUD/companion/replay, con indicatore; piano live con stato e durata di ogni passo; modalita' di notifica e notifiche in attesa visibili; verifica visiva da fare) | `DOING` |
+| `F4.5` | Interaction Design (26/09/2026: trascrizione live, permission card, prove, diagnosi, notifiche nell'HUD nativo; 27/09/2026: modalita' privata = nessun contenuto verso HUD/companion/replay, con indicatore; piano live con stato e durata di ogni passo; modalita' di notifica e notifiche in attesa visibili; 28/09/2026: il "si'" scritto nell'HUD conferma la domanda fatta a voce e viceversa - l'HUD condivide il canale della voce del PC; verifica visiva da fare) | `DOING` |
 | `F4.6` | Trust UX (26/09/2026: kill switch visibile e scorciatoia globale; action center con ultima azione, esito, verifica e undo con scadenza; 27/09/2026: dettagli dell'azione per l'utente - origine, esito/categoria, verifica, annullabilita', traccia - e motivo quando l'undo non e' piu' disponibile; retry sicuro dell'ultima azione fallita a voce e dal pulsante "Riprova"; undo rifiutato se il file/la cartella da cancellare e' cambiato dopo) | `DOING` |
 | `F4.7` | Accessibility (26/09/2026: nomi accessibili, focus ring, scrittura reale nella barra comandi di un overlay no-activate, scorciatoie globali Ctrl+Shift+J / Ctrl+Alt+Fine, reduced motion; 27/09/2026: alto contrasto da Windows o JAKE_HUD_HIGH_CONTRAST, verificato a schermo; "Dimensioni testo" di Windows applicata a tutto l'HUD (o JAKE_HUD_TEXT_SCALE), verificata a schermo al 150% di sistema; layout completo/compatto/focus ricordato per monitor, spostamento sull'altro monitor e riposizionamento all'hot-plug; 28/09/2026: composizione centrata - orb al centro della finestra, finestra al centro dell'area utile del monitor, pannelli simmetrici che compaiono solo quando servono; screen reader da verificare) | `DOING` |
 | `F4.8` | Release Engineering (26/09/2026: core e HUD nativo avviati in ordine come processi separati, riavvio dell'HUD solo dopo un crash e con un tetto; installer/crash dump/rollback non iniziati; 27/09/2026: quando il supervisore smette di riavviare un HUD in crash revoca la sua credenziale e lo dice all'utente) | `DOING` |
@@ -289,7 +289,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F7.7` | Edge Devices | `BACKLOG` |
 | `F8.1` | Skill Platform (manifest validato e loader che rifiuta prima dell'import il 22/09/2026; dal 27/09/2026 il rischio dichiarato da un pacchetto verificato e approvato arriva a `risk_of`/PolicyEngine, mai sopra un intent integrato; hook non eseguiti) | `DOING` |
 | `F8.2` | Supply-chain Security (pacchetti firmati, catalogo, quarantena/revoca, pin/rollback il 22/09/2026; dal 27/09/2026 nel runtime: caricamento all'avvio con ricontrollo di firma/hash, installazione in due passi PLAN_SKILL_INSTALL -> INSTALL_SKILL_PACKAGE (ADMIN) legata al digest mostrato; UI HUD e distribuzione non ancora) | `DOING` |
-| `F8.3` | Skill Forge (27/09/2026: scansione dei segreti prima della sandbox - chiavi private, token per formato, credenziali letterali) | `DOING` |
+| `F8.3` | Skill Forge (27/09/2026: scansione dei segreti prima della sandbox - chiavi private, token per formato, credenziali letterali; 28/09/2026: la skill generata diventa un pacchetto firmato nel catalogo - fixture dall'esito reale nella sandbox, manifest scritto dalla Forge con capability dagli import e rischio minimo coerente, permessi mostrati prima del si', approvazione legata al digest, disinstallazione) | `DOING` |
 | `F8.4` | Model Runtime (router con capability/inventario/eval/warm-unload/redazione il 22/09/2026; dal 27/09/2026 JakeCore sceglie il modello col router: catalogo da config, modelli installati, telemetria reale di batteria/VRAM, osservazioni reali di successo/latenza di ogni chiamata; dal 27/09/2026 il modello lasciato dal router viene scaricato davvero da Ollama; la scelta del router e SET_MODEL arrivano a tutte le skill che usano il modello di ragionamento, ricontrollata a ogni giro dello scheduler) | `DOING` |
 | `F8.5` | Agent Runtime (27/09/2026: il supervisore ferma anche lo stesso strumento fallito 3 volte di fila con parametri diversi e chiede all'utente) | `DOING` |
 | `F8.6` | Release Safety (golden/security set, confronto, canary, rollback, canali firmati il 22/09/2026; senza runner reali ne' collegamento HUD) | `DOING` |
@@ -8752,6 +8752,22 @@ reduced motion restano utilizzabili.
   (exstyle letto: 0x080800a8), su cui l'accent di DWM non compone il blur. Il vetro vero richiede una finestra
   nativa NON layered per ogni pannello (o DirectComposition): e' il blocco architetturale del track HUD, non un
   incremento. Codice dell'esperimento non tenuto; resta il riempimento pieno leggibile.
+- 28/09/2026 (F4.3.1/F4.3.2/F4.3.5, vetro sul desktop): dietro ogni pannello visibile una lastra nativa separata
+  (`src/NativeGlass.cpp`): HWND senza bitmap di redirezione, `DWMWA_USE_HOSTBACKDROPBRUSH`, Windows.UI.Composition
+  con HostBackdropBrush e clip arrotondata al raggio del pannello, subito sotto l'overlay nello z-order, mai attiva,
+  HTTRANSPARENT. `DesktopGlass` (QML) la tiene allineata ai pannelli di `Theme.panels` ogni 60 ms (DPI, rientro di
+  1 px sotto l'orlo, solo da meta' dissolvenza); con il vetro vero la rifrazione simulata si spegne e la tinta
+  scende da 0,93 a 0,58-0,66. Prima provato l'accent di DWM su lastre separate, scartato con evidenza: con un
+  programma di prova sopra un motivo a righe, blur e acrilico ignorano `SetWindowRgn` in qualunque ordine (vetro
+  squadrato oltre l'angolo curvo), gli angoli di DWM arrotondano solo a ~8 px; il system backdrop documentato
+  diventa un colore pieno su una finestra non attiva. Verifica a schermo su questa macchina (Windows 11 26200,
+  scala 100%): motivo a righe e testo dietro l'HUD in demo -> pannelli con il desktop sfocato, testo dell'HUD
+  leggibile, angoli antialiasati senza alone; clic simulato fuori dai pannelli arriva alla finestra sotto, sul
+  vetro resta all'HUD; CPU dell'HUD in demo 49-55% con vetro e 48-52% senza (dominata dall'orb). Ripiego sul vetro
+  dell'HUD senza Windows 11, con "Effetti di trasparenza" spenti, con il contrasto elevato o con
+  `JAKE_HUD_GLASS=hud`. Test: `hud_glass_geometry` in ctest (DPI 100/125/150%, rientro, raggio, dissolvenza).
+  Restano: giudizio estetico dell'utente, prova su un secondo monitor a scala diversa, F4.3.3 profilo GPU/batteria,
+  F4.3.6 contrasto su desktop chiari.
 
 ### F4.4 — State machine e Orb 2.0
 
@@ -10129,6 +10145,26 @@ Criterio di uscita: una skill generata non può agire fuori manifest anche se il
   sandbox chiavi private PEM, chiavi AWS/Google, token GitHub/Slack, chiavi `sk-...` e assegnazioni letterali di
   8+ caratteri a nomi da segreto (api_key/secret/token/password), con un messaggio che il modello riceve per
   riscrivere il file. Test: cinque forme di segreto rifiutate, parole comuni ("risk-...", `token_count`) no.
+- 28/09/2026 (F8.3.1/F8.3.3/F8.3.5/F8.3.6, Forge dentro la catena dei pacchetti): la Forge installava un file sciolto
+  in `plugins/` - niente manifest, niente rischio dichiarato, niente firma, un secondo sistema accanto a F8.1/F8.2.
+  Ora, con il catalogo leggibile, la skill generata e' un pacchetto come quelli degli editori: il plugin dichiara
+  `FIXTURES` (input di prova), la sonda li esegue nella sandbox a integrita' ridotta e il loro esito REALE diventa le
+  fixture del manifest (nessun output inventato; senza almeno una prova riuscita niente pacchetto); il manifest lo
+  scrive la Forge - capability da una tabella chiusa degli import (rete, web, processi, sistema, app, appunti,
+  schermo, lettura file), rischio = `skill_manifest.minimum_risk_for` (il minimo coerente, mai deciso dal modello),
+  provenienza `forge`; pacchetto deterministico con un `test_skill.py` che riesegue le fixture, firmato con la chiave
+  locale della Forge, fidata solo per gli id `jakeforge.*`. Prima del "si'" l'utente legge permessi e rischio
+  generati dal manifest; il "si'" vale solo per quel digest (senza digest o con un altro: rifiutato) e passa da
+  `plan_install` -> `approve` -> `install`, poi dal caricamento con ricontrollo di firma e hash, dal rischio
+  dichiarato in `risk_of` e dal worker isolato. "Elimina la skill" la toglie da catalogo e disco
+  (`SkillStore.uninstall`, nuovo). Corretto anche un difetto reale: la sonda usava come radice la cartella sopra
+  `plugins_dir` e con una cartella dei plugin diversa ogni skill risultava rotta ("No module named 'core'").
+  Test (`tests/test_skill_forge_packages.py`, solo il modello finto): installazione firmata con fixture 42 /
+  `missing_parameters` dalla sandbox, test incluso eseguito sul pacchetto installato, ricarica dopo riavvio con
+  hash intatti, import di rete -> external_action mostrato prima del si', prove tutte fallite -> nessun pacchetto,
+  digest diverso o assente -> niente installato, eliminazione completa. Restano F8.3.2 (specifica e casi di test
+  confermati PRIMA del codice), F8.3.7 canary con budget ridotto, F8.3.8 eval prima/dopo e rollback automatico,
+  e l'esecuzione dei test dichiarati dai pacchetti di terzi.
 
 ### F8.4 — Model router
 

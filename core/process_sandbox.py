@@ -39,7 +39,7 @@ import json
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 LOW_INTEGRITY_SID = "S-1-16-4096"
@@ -67,6 +67,8 @@ class ProbeOutcome:
     timed_out: bool = False
     launch_error: str | None = None
     integrity_restricted: bool = False
+    # tutto il JSON scritto dalla sonda (es. le esecuzioni di prova della Skill Forge, F8.3.5)
+    payload: dict = field(default_factory=dict)
 
 
 def _make_low_integrity_token():
@@ -147,6 +149,7 @@ def run_probe_with_reduced_privileges(
 
         outcome.ok = bool(payload.get("ok"))
         outcome.error = payload.get("error")
+        outcome.payload = payload if isinstance(payload, dict) else {}
         return outcome
 
 

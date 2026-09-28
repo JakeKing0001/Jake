@@ -49,7 +49,7 @@ from core.policy_engine import (
 from core.plugin_loader import load_plugins
 from core.profiles import ProfileError, ProfileManager
 from core.request_context import (
-    current_action_id, current_command_source_intent, current_device_id, current_session_id,
+    current_action_id, current_command_source_intent, current_conversation_channel, current_device_id, current_session_id,
     current_speaker_profile_id, current_stt_confidence, reset_current_command_source_intent,
     set_current_command_source_intent,
 )
@@ -561,6 +561,9 @@ class JakeCore:
             model_provider=lambda: self.model, logger=self.logger,
             on_skill_installed=self._on_skill_installed,
             coder_model=config.get("coder_model") or None,
+            # F8.3: le skill forgiate diventano pacchetti firmati nel catalogo (caricamento verificato, rischio
+            # dichiarato, worker isolato); senza catalogo leggibile resta il file in plugins/
+            skill_store=getattr(self, "skill_store", None), on_package_installed=self._activate_skill_package,
         )
 
         # Skill che hanno bisogno del core (non solo del registry): registrate qui.
@@ -1392,7 +1395,9 @@ class JakeCore:
         if profile_id:
             return f"profile:{profile_id}"
 
-        device_id = current_device_id()
+        # l'HUD nativo e' il PC: stesso scope della voce locale (una correzione scritta nell'HUD vale per l'ultimo
+        # comando detto a voce)
+        device_id = current_conversation_channel()
 
         if device_id:
             return f"device:{device_id}"

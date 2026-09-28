@@ -97,6 +97,9 @@ int main(int argc, char *argv[]) {
 #endif
     initial.insert(QStringLiteral("orb3d"), use3d);
     initial.insert(QStringLiteral("orbDemo"), qEnvironmentVariable("JAKE_HUD_DEMO") == QLatin1String("1"));
+    // F4.3.1: JAKE_HUD_GLASS=hud (o off) resta sul vetro disegnato dall'HUD anche dove DWM puo' sfocare il desktop
+    const QString glass = qEnvironmentVariable("JAKE_HUD_GLASS");
+    initial.insert(QStringLiteral("desktopGlassAllowed"), glass != QLatin1String("hud") && glass != QLatin1String("off"));
     if (parser.isSet(jakeUrl))
         initial.insert(QStringLiteral("jakeBaseUrl"), parser.value(jakeUrl));
     if (parser.isSet(credentialsStdin)) {
