@@ -12,7 +12,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from core.skill_forge import FORGE_ID_PREFIX, ForgeError, SkillForge
+from core.skill_forge import CANARY_RUNS, FORGE_ID_PREFIX, ForgeError, SkillForge
+from core.skill_result import SkillResult
 from core.skill_manifest import MANIFEST_FILENAME, Environment
 from core.skill_package import SkillStore, TrustStore
 from skills.skill_forge_skills import CreateSkillSkill, DeleteCreatedSkillSkill
@@ -50,12 +51,20 @@ def register(registry):
 NETWORK = DOUBLER.replace("from core.skill_result import SkillResult",
                           "import urllib.parse\n\nfrom core.skill_result import SkillResult")
 
+# F8.3.2: la specifica che il modello propone prima del codice (niente codice qui)
+SPEC = json.dumps({
+    "intent": "DOUBLE_NUMBER", "description": "Raddoppia un numero.",
+    "parameters": {"number": {"type": "integer", "required": True, "description": "Il numero"}},
+    "examples": ["raddoppia 21", "quanto fa il doppio di 4", "dammi il doppio di 10"],
+    "test_cases": [{"input": {"number": 21}, "expect": "success"}, {"input": {}, "expect": "error"}],
+})
+
 NEVER_WORKS = DOUBLER.replace('FIXTURES = [{"input": {"number": 21}}, {"input": {}}]', 'FIXTURES = [{"input": {}}]')
 
 
 class FakeClient:
     def __init__(self, *answers):
-        self.answers = [f"```python\n{answer}\n```" for answer in answers]
+        self.answers = [answer if answer.lstrip().startswith("{") else f"```python\n{answer}\n```" for answer in answers]
 
     def is_available(self):
         return True
@@ -71,6 +80,8 @@ class Registry:
     def __init__(self):
         self.skills = {}
         self.sandboxed = {}
+        self.executed = []
+        self.runtime_breaks = False   # simula un runtime che si comporta diversamente dalla sandbox
 
     def list_capabilities(self):
         return [{"intent": intent} for intent in self.skills]
@@ -84,8 +95,14 @@ class Registry:
         self.skills.pop(intent, None)
         self.sandboxed.pop(intent, None)
 
+    def execute(self, intent, parameters, **kwargs):
+        self.executed.append((intent, parameters))
+        if self.runtime_breaks:
+            return SkillResult(success=False, data={}, error="SANDBOX_WORKER_UNAVAILABLE")
+        return self.skills[intent].execute(parameters)
 
-class ForgePackageTests(unittest.TestCase):
+
+class ForgeTestCase(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="jake_forge_packages_test_"))
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
@@ -99,11 +116,21 @@ class ForgePackageTests(unittest.TestCase):
         return SkillForge(self.registry, client=FakeClient(*answers), plugins_dir=self.tmp / "plugins",
                           skill_store=self._store())
 
+    @staticmethod
+    def _through_the_spec(create: CreateSkillSkill, request: str):
+        """F8.3.2: prima la specifica confermata, poi la proposta del pacchetto."""
+        spec = create.execute({"request": request})
+        assert spec.error == "CONFIRMATION_REQUIRED", spec
+        return create.execute(spec.data["confirm_parameters"])
+
+
+
+class ForgePackageTests(ForgeTestCase):
     def test_a_forged_skill_is_installed_as_a_signed_package_with_fixtures_from_the_sandbox(self):
-        forge = self._forge(DOUBLER)
+        forge = self._forge(SPEC, DOUBLER)
         create = CreateSkillSkill(forge)
 
-        proposal = create.execute({"request": "impara a raddoppiare un numero"})
+        proposal = self._through_the_spec(create, "impara a raddoppiare un numero")
 
         self.assertEqual(proposal.error, "CONFIRMATION_REQUIRED")
         self.assertIn("Permessi richiesti: nessuno. Rischio massimo: sola lettura.", proposal.data["message"])
@@ -141,8 +168,8 @@ class ForgePackageTests(unittest.TestCase):
         self.assertEqual(fresh.skills["DOUBLE_NUMBER"].execute({"number": 5}).data, {"result": 10})
 
     def test_imports_that_reach_the_network_raise_the_declared_risk_and_are_shown_before_the_yes(self):
-        forge = self._forge(NETWORK)
-        proposal = CreateSkillSkill(forge).execute({"request": "raddoppia usando la rete"})
+        forge = self._forge(SPEC, NETWORK)
+        proposal = self._through_the_spec(CreateSkillSkill(forge), "raddoppia usando la rete")
         self.assertIn("accede alla rete", proposal.data["message"])
         self.assertIn("azione verso l'esterno", proposal.data["message"])
         draft = next(iter(forge.drafts.values()))
@@ -155,8 +182,8 @@ class ForgePackageTests(unittest.TestCase):
         self.assertIn("nessuna esecuzione di prova", str(caught.exception))
 
     def test_the_yes_installs_only_the_package_that_was_shown(self):
-        forge = self._forge(DOUBLER)
-        confirm = CreateSkillSkill(forge).execute({"request": "raddoppia"}).data["confirm_parameters"]
+        forge = self._forge(SPEC, DOUBLER)
+        confirm = self._through_the_spec(CreateSkillSkill(forge), "raddoppia").data["confirm_parameters"]
 
         refused = CreateSkillSkill(forge).execute({**confirm, "digest": "0" * 64})
         without = {key: value for key, value in confirm.items() if key != "digest"}
@@ -167,9 +194,9 @@ class ForgePackageTests(unittest.TestCase):
         self.assertEqual(forge.skill_store.skills(), [])
 
     def test_deleting_a_forged_skill_removes_it_from_the_catalog_the_disk_and_the_registry(self):
-        forge = self._forge(DOUBLER)
+        forge = self._forge(SPEC, DOUBLER)
         create = CreateSkillSkill(forge)
-        installed = create.execute(create.execute({"request": "raddoppia"}).data["confirm_parameters"])
+        installed = create.execute(self._through_the_spec(create, "raddoppia").data["confirm_parameters"])
         self.assertEqual(forge.list_created()[0]["intent"], "DOUBLE_NUMBER")
 
         deleted = DeleteCreatedSkillSkill(forge).execute({"name": "raddoppia"})
@@ -183,3 +210,115 @@ class ForgePackageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AfterInstallTests(ForgeTestCase):
+    """F8.3.8 (prove rieseguite nel runtime vero appena installata) e F8.3.7 (periodo di prova con rollback)."""
+
+    def _install(self):
+        forge = self._forge(SPEC, DOUBLER)
+        create = CreateSkillSkill(forge)
+        installed = create.execute(self._through_the_spec(create, "raddoppia").data["confirm_parameters"])
+        return forge, installed
+
+    def test_the_trial_runs_are_repeated_in_the_real_runtime_right_after_installing(self):
+        forge, installed = self._install()
+        self.assertTrue(installed.success, installed)
+        self.assertEqual(self.registry.executed, [("DOUBLE_NUMBER", {"number": 21}), ("DOUBLE_NUMBER", {})])
+        version, state, intents = forge.skill_store.canary(f"{FORGE_ID_PREFIX}double_number")
+        self.assertEqual((version, state, intents), ("1.0.0", {"remaining": CANARY_RUNS, "failures": 0}, ["DOUBLE_NUMBER"]))
+
+    def test_a_skill_that_behaves_differently_once_installed_is_removed_at_once(self):
+        self.registry.runtime_breaks = True
+        forge, installed = self._install()
+        self.assertEqual(installed.error, "FORGE_FAILED")
+        self.assertIn("non si comporta come nella prova", installed.data["message"])
+        self.assertEqual(forge.skill_store.skills(), [])
+        self.assertNotIn("DOUBLE_NUMBER", self.registry.skills)
+
+    def test_enough_successful_real_runs_end_the_trial(self):
+        forge, _ = self._install()
+        messages = [forge.observe_execution("DOUBLE_NUMBER", "success", "success") for _ in range(CANARY_RUNS)]
+        self.assertEqual(messages[:-1], [None] * (CANARY_RUNS - 1))
+        self.assertIn("ha superato il periodo di prova", messages[-1])
+        self.assertIsNone(forge.skill_store.canary(f"{FORGE_ID_PREFIX}double_number"))
+        self.assertIsNone(forge.observe_execution("DOUBLE_NUMBER", "OPERATION_FAILED", "uncategorized"),
+                          "dopo la prova e' una skill normale")
+
+    def test_user_errors_do_not_count_but_two_skill_errors_disable_it(self):
+        forge, _ = self._install()
+        skill_id = f"{FORGE_ID_PREFIX}double_number"
+        self.assertIsNone(forge.observe_execution("DOUBLE_NUMBER", "MISSING_PARAMETERS", "invalid_input"))
+        self.assertIsNone(forge.observe_execution("DOUBLE_NUMBER", "CONFIRMATION_REQUIRED", "pending"))
+        self.assertIsNone(forge.observe_execution("DOUBLE_NUMBER", "OPERATION_FAILED", "uncategorized"))
+        # la prova sopravvive a un riavvio: un catalogo nuovo la ricorda
+        self.assertEqual(self._store().canary(skill_id)[1], {"remaining": CANARY_RUNS, "failures": 1})
+
+        message = forge.observe_execution("DOUBLE_NUMBER", "OPERATION_FAILED", "uncategorized")
+
+        self.assertIn("Ho disattivato la nuova capacità", message)
+        self.assertNotIn("DOUBLE_NUMBER", self.registry.skills)
+        self.assertEqual(forge.skill_store.describe(skill_id)["versions"]["1.0.0"]["status"], "quarantined")
+
+    def test_a_blocked_worker_disables_it_at_the_first_time(self):
+        forge, _ = self._install()
+        message = forge.observe_execution("DOUBLE_NUMBER", "SANDBOX_WORKER_TIMEOUT", "timeout")
+        self.assertIn("blocco o timeout", message)
+        self.assertNotIn("DOUBLE_NUMBER", self.registry.skills)
+
+    def test_every_ledger_receipt_reaches_the_trial_and_the_end_is_announced(self):
+        import logging
+        from types import SimpleNamespace
+
+        from core.event_bus import EventBus
+        from core.jake_core import JakeCore
+
+        forge, _ = self._install()
+        announced = []
+        core = JakeCore.__new__(JakeCore)
+        core.skill_forge, core.event_bus = forge, EventBus()
+        core.logger = logging.getLogger("test.forge_canary")
+        core.system_advisor = SimpleNamespace(on_advisory=announced.append)
+        receipt = SimpleNamespace(action_id="a", intent="DOUBLE_NUMBER", requested_by="user", result="SANDBOX_WORKER_TIMEOUT",
+                                  error_category="timeout", verified="unverified", trace_id="t")
+
+        core._publish_action_receipt(receipt)
+
+        self.assertEqual(len(announced), 1)
+        self.assertIn("Ho disattivato", announced[0])
+
+
+class SpecificationFirstTests(ForgeTestCase):
+    """F8.3.1/F8.3.2: la specifica (cosa fara', con quali prove) si conferma PRIMA che esista una riga di codice."""
+
+    def test_the_specification_is_shown_before_any_code_is_written(self):
+        forge = self._forge(SPEC)   # una sola risposta del modello: la specifica
+        result = CreateSkillSkill(forge).execute({"request": "impara a raddoppiare un numero"})
+
+        self.assertEqual(result.error, "CONFIRMATION_REQUIRED")
+        message = result.data["message"]
+        self.assertIn("Raddoppia un numero.", message)
+        self.assertIn("«raddoppia 21»", message)
+        self.assertIn("number=21 -> deve riuscire", message)
+        self.assertNotIn("def ", message)
+        self.assertEqual(forge.drafts, {}, "nessun codice prima della conferma della specifica")
+
+    def test_the_trials_of_the_confirmed_specification_replace_the_models_own(self):
+        own_trials = DOUBLER.replace('FIXTURES = [{"input": {"number": 21}}, {"input": {}}]', 'FIXTURES = [{"input": {"number": 1}}]')
+        forge = self._forge(SPEC, own_trials)
+        create = CreateSkillSkill(forge)
+        installed = create.execute(self._through_the_spec(create, "raddoppia").data["confirm_parameters"])
+
+        manifest = json.loads((Path(installed.data["path"]) / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+        self.assertEqual([f["input"] for f in manifest["intents"][0]["fixtures"]], [{"number": 21}, {}])
+
+    def test_code_that_does_not_keep_the_promises_of_the_specification_is_refused(self):
+        other_intent = DOUBLER.replace("DOUBLE_NUMBER", "TRIPLE_NUMBER")
+        always_fails = DOUBLER.replace('if "number" not in parameters:', "if True:")
+        forge = self._forge(SPEC, other_intent, always_fails)
+        spec = forge.specify("raddoppia")
+
+        with self.assertRaises(ForgeError) as caught:
+            forge.propose("raddoppia", spec=spec)
+
+        self.assertIn("doveva riuscire", str(caught.exception))

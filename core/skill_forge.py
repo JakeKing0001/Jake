@@ -23,7 +23,15 @@ file sciolto in plugins/ ma un pacchetto come quelli degli editori, nella stessa
 4. prima del "si'" l'utente legge permessi e rischio generati dal manifest (`permission_summary`), e il "si'" vale
    per quel digest: `SkillStore.plan_install` -> `approve` -> `install`, poi il caricamento con ricontrollo di firma
    e hash, il rischio dichiarato a `risk_of` e l'esecuzione nel worker isolato (F1.6), come ogni pacchetto;
-5. "elimina la skill" la toglie dal catalogo e dal disco.
+5. "elimina la skill" la toglie dal catalogo e dal disco;
+0. F8.3.1/F8.3.2: prima del codice una SPECIFICA (intent, parametri, frasi d'esempio, casi di prova con l'esito
+   atteso) che l'utente conferma; il codice deve poi rispettarla e le prove della specifica diventano le FIXTURES
+   eseguite nella sandbox, con l'esito che la specifica prometteva;
+6. F8.3.8: appena installata la skill riesegue le sue prove nel runtime vero (worker isolato) e deve dare gli stessi
+   esiti della sandbox, altrimenti viene tolta subito;
+7. F8.3.7: poi resta IN PROVA (canary, nel catalogo) per le prime CANARY_RUNS esecuzioni reali: un blocco del worker
+   o CANARY_MAX_FAILURES errori suoi (non quelli dell'utente o della policy) la mettono in quarantena e la
+   disattivano da soli, e l'utente lo sa; superata la prova diventa una skill normale.
 Senza catalogo (non leggibile all'avvio) resta il percorso storico del file in plugins/."""
 import ast
 import hashlib
@@ -32,6 +40,7 @@ import json
 import re
 import sys
 import tempfile
+import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -105,6 +114,12 @@ IMPORT_CAPABILITIES = {
     "PIL": ("screen",),
 }
 _PARAMETER_TYPES = {"string", "integer", "number", "boolean", "array", "object"}
+# F8.3.7: il periodo di prova. Contano solo gli errori della skill: input sbagliato, conferma, policy o annullamento
+# sono dell'utente o delle regole di Jake, non un difetto del codice generato.
+CANARY_RUNS = 5
+CANARY_MAX_FAILURES = 2
+_CANARY_NOT_THE_SKILLS_FAULT = frozenset({"pending", "denied", "invalid_input", "user_cancelled"})
+_CANARY_FATAL = frozenset({"timeout"})   # worker bloccato o terminato dal Job Object
 
 # Controlli statici indipendenti da FORBIDDEN_PATTERNS (v5.3, Self-Improvement controllato):
 # quella lista nera e' testuale (regex sul sorgente), quindi aggirabile con l'indirezione,
@@ -239,6 +254,41 @@ class ForgeError(Exception):
     pass
 
 
+_SPEC_PROMPT = """Progetti una nuova capacita' per Jake, un assistente vocale italiano per Windows. NON scrivere codice.
+Rispondi SOLO con un oggetto JSON con queste chiavi:
+- "intent": nome MAIUSCOLO_CON_UNDERSCORE (3-40 caratteri), non tra: {existing_intents};
+- "description": una frase italiana su cosa fa e quando usarla;
+- "parameters": {nome: {"type": "string|integer|number|boolean", "required": true|false, "description": "..."}};
+- "examples": 3-6 frasi italiane naturali con cui l'utente la chiederebbe a voce;
+- "test_cases": 1-4 prove {"input": {parametri con valori concreti}, "expect": "success" oppure "error"}; almeno una
+  "success"; un caso "error" solo per un input davvero non valido (es. un parametro obbligatorio mancante).
+Vincoli: solo calcoli, testo, date, lettura di file, informazioni di sistema o richieste HTTP GET pubbliche; niente
+scritture o cancellazioni di file, niente controllo di tastiera o mouse."""
+
+
+@dataclass
+class ForgeSpec:
+    """F8.3.1: cosa fara' la skill, detto PRIMA del codice e confermato dall'utente (F8.3.2)."""
+
+    spec_id: str
+    request: str
+    intent: str
+    description: str
+    parameters: dict
+    examples: list
+    test_cases: list
+
+    def summary(self) -> str:
+        """Il testo che l'utente legge prima di dire si': niente JSON, niente codice."""
+        params = ", ".join(f"{name}{'' if spec.get('required') else ' (facoltativo)'}"
+                           for name, spec in self.parameters.items()) or "nessuno"
+        trials = "; ".join(f"{', '.join(f'{k}={v}' for k, v in case['input'].items()) or 'senza parametri'} -> "
+                           f"{'deve riuscire' if case['expect'] == 'success' else 'deve dare errore'}"
+                           for case in self.test_cases)
+        return (f"{self.description} Si userà dicendo per esempio «{self.examples[0]}». Parametri: {params}. "
+                f"La proverò così: {trials}.")
+
+
 class SkillForge:
     def __init__(self, registry, client: OllamaClient | None = None, model_provider=None, plugins_dir: Path | None = None,
                  logger=None, on_skill_installed=None, coder_model: str | None = None, skill_store=None,
@@ -252,12 +302,16 @@ class SkillForge:
         self.on_skill_installed = on_skill_installed
         self.preferred_coder_model = coder_model or DEFAULT_CODER_MODEL
         self.drafts: dict[str, ForgeDraft] = {}
+        self.specs: dict[str, ForgeSpec] = {}
+        # F8.3.2: la specifica si conferma prima del codice (CreateSkillSkill la chiede se questo e' vero)
+        self.spec_first = True
         self.last_error = None
         # F8.3: catalogo firmato in cui installare (None = percorso storico) e chi attiva il pacchetto installato
         # (JakeCore._activate_skill_package: caricamento verificato + rischio dichiarato a risk_of)
         self.skill_store = skill_store
         self.on_package_installed = on_package_installed
         self._signing_key = None
+        self._canary_lock = threading.Lock()
 
     # ---- disponibilita' ----------------------------------------------------------------
 
@@ -283,17 +337,89 @@ class SkillForge:
         code = match.group(1) if match else text
         return code.strip() + "\n"
 
-    def propose(self, request: str, feedback: str | None = None, attempts: int = 2) -> ForgeDraft:
-        """Genera e valida un plugin per la richiesta. Solleva ForgeError con un messaggio
-        comprensibile se dopo 'attempts' tentativi il codice non passa i controlli."""
+    # ---- F8.3.1/F8.3.2: specifica prima del codice -----------------------------------------
+
+    def specify(self, request: str, attempts: int = 2) -> ForgeSpec:
+        """La specifica della skill (nessun codice): validata qui, poi mostrata all'utente per la conferma."""
         request = (request or "").strip()
         if not request:
             raise ForgeError("Non ho capito cosa dovrei imparare a fare.")
         model = self.coder_model()
         messages = [
+            {"role": "system", "content": _SPEC_PROMPT.replace("{existing_intents}", ", ".join(self._existing_intents()))},
+            {"role": "user", "content": f"Richiesta dell'utente: \"{request}\"."},
+        ]
+        problem = None
+        for _ in range(attempts):
+            answer = self.client.chat_text(model, messages, options={"temperature": 0.2, "num_ctx": 4096, "num_predict": 900},
+                                           timeout=120)
+            if not answer:
+                raise ForgeError("Il modello non ha risposto: verifica che Ollama sia attivo.")
+            try:
+                spec = self._parse_spec(request, answer)
+                self.specs[spec.spec_id] = spec
+                return spec
+            except ForgeError as exc:
+                problem = str(exc)
+                messages += [{"role": "assistant", "content": answer},
+                             {"role": "user", "content": f"Specifica rifiutata: {problem}. Rimandala completa, solo JSON."}]
+        raise ForgeError(f"Non sono riuscito a definire la capacità: {problem}")
+
+    def _parse_spec(self, request: str, text: str) -> ForgeSpec:
+        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        try:
+            data = json.loads(match.group(0)) if match else None
+        except ValueError:
+            data = None
+        if not isinstance(data, dict):
+            raise ForgeError("non e' un oggetto JSON")
+        intent = data.get("intent")
+        if not isinstance(intent, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{2,40}", intent):
+            raise ForgeError("intent deve essere MAIUSCOLO_CON_UNDERSCORE")
+        if intent in self._existing_intents():
+            raise ForgeError(f"l'intent {intent} esiste gia'")
+        description = data.get("description")
+        if not isinstance(description, str) or not description.strip():
+            raise ForgeError("manca description")
+        parameters = data.get("parameters") or {}
+        if not isinstance(parameters, dict) or not all(isinstance(v, dict) for v in parameters.values()):
+            raise ForgeError("parameters deve essere {nome: {type, required, description}}")
+        examples = [e for e in data.get("examples") or [] if isinstance(e, str) and e.strip()]
+        if len(examples) < 2:
+            raise ForgeError("servono almeno 2 frasi d'esempio")
+        cases = data.get("test_cases")
+        if not isinstance(cases, list) or not 1 <= len(cases) <= 4:
+            raise ForgeError("test_cases: da 1 a 4 prove")
+        checked = []
+        for case in cases:
+            if not (isinstance(case, dict) and isinstance(case.get("input"), dict) and case.get("expect") in ("success", "error")):
+                raise ForgeError("ogni prova e' {input: {...}, expect: success|error}")
+            unknown = sorted(set(case["input"]) - set(parameters))
+            if unknown:
+                raise ForgeError(f"la prova usa parametri non dichiarati: {unknown}")
+            checked.append({"input": dict(case["input"]), "expect": case["expect"]})
+        if not any(case["expect"] == "success" for case in checked):
+            raise ForgeError("serve almeno una prova che deve riuscire")
+        return ForgeSpec(uuid.uuid4().hex[:8], request, intent, description.strip(), parameters, examples[:6], checked)
+
+    def propose(self, request: str, feedback: str | None = None, attempts: int = 2,
+                spec: ForgeSpec | None = None) -> ForgeDraft:
+        """Genera e valida un plugin per la richiesta. Solleva ForgeError con un messaggio
+        comprensibile se dopo 'attempts' tentativi il codice non passa i controlli. Con una specifica confermata
+        (F8.3.2) il codice deve rispettarla: stesso intent, e le sue prove sono le FIXTURES eseguite in sandbox."""
+        request = (request or "").strip()
+        if not request:
+            raise ForgeError("Non ho capito cosa dovrei imparare a fare.")
+        model = self.coder_model()
+        instruction = f"Scrivi il plugin per questa richiesta dell'utente: \"{request}\"."
+        if spec is not None:
+            instruction += (" Rispetta ESATTAMENTE questa specifica confermata dall'utente (stesso intent, stessi "
+                            "parametri, stessi EXAMPLES): " + json.dumps({
+                                "intent": spec.intent, "description": spec.description, "parameters": spec.parameters,
+                                "examples": spec.examples}, ensure_ascii=False))
+        messages = [
             {"role": "system", "content": self._build_prompt()},
-            {"role": "user", "content": f"Scrivi il plugin per questa richiesta dell'utente: \"{request}\"."
-                                         + (f" Nota: {feedback}" if feedback else "")},
+            {"role": "user", "content": instruction + (f" Nota: {feedback}" if feedback else "")},
         ]
         last_problem = None
         for attempt in range(attempts):
@@ -301,8 +427,14 @@ class SkillForge:
             if not answer:
                 raise ForgeError("Il modello non ha risposto: verifica che Ollama sia attivo.")
             code = self._extract_code(answer)
+            if spec is not None:
+                # le prove sono quelle della specifica confermata, non quelle che il modello si e' scelto
+                code += ("\n\n# Prove dalla specifica confermata dall'utente (F8.3.2)\n"
+                         f"FIXTURES = {[{'input': case['input']} for case in spec.test_cases]!r}\n")
             try:
                 checked = self._check(code)
+                if spec is not None:
+                    self._matches_spec(spec, checked)
                 draft = ForgeDraft(
                     draft_id=uuid.uuid4().hex[:8], request=request, intent=checked["intent"],
                     description=checked["description"], code=code, examples=checked["examples"], model=model,
@@ -318,6 +450,18 @@ class SkillForge:
                 messages.append({"role": "assistant", "content": answer})
                 messages.append({"role": "user", "content": f"Il file e' stato rifiutato: {last_problem}. Riscrivilo completo, corretto, rispettando tutti i vincoli."})
         raise ForgeError(f"Non sono riuscito a scrivere una skill valida: {last_problem}")
+
+    @staticmethod
+    def _matches_spec(spec: ForgeSpec, checked: dict) -> None:
+        if checked["intent"] != spec.intent:
+            raise ForgeError(f"l'intent e' {checked['intent']}, la specifica confermata dice {spec.intent}")
+        runs = checked["runs"]
+        for index, case in enumerate(spec.test_cases):
+            run = runs[index] if index < len(runs) else {}
+            if bool(run.get("success")) != (case["expect"] == "success"):
+                wanted = "riuscire" if case["expect"] == "success" else "dare errore"
+                got = "e' riuscita" if run.get("success") else f"ha dato {run.get('error')}"
+                raise ForgeError(f"la prova {case['input']} doveva {wanted}, invece {got}")
 
     # ---- validazione -------------------------------------------------------------------
 
@@ -613,6 +757,13 @@ class SkillForge:
         if not loaded:
             store.uninstall(skill_id)
             raise ForgeError("il pacchetto non si e' caricato: l'ho rimosso.")
+        mismatch = self._evaluate_installed(plan.verified.manifest)
+        if mismatch:
+            store.uninstall(skill_id)
+            if hasattr(self.registry, "unregister_skill"):
+                self.registry.unregister_skill(draft.intent)
+            raise ForgeError(f"installata, non si comporta come nella prova ({mismatch}): l'ho rimossa.")
+        store.set_canary(skill_id, plan.verified.manifest.version, {"remaining": CANARY_RUNS, "failures": 0})
         self.drafts.pop(draft.draft_id, None)
         if self.on_skill_installed is not None:
             try:
@@ -623,6 +774,69 @@ class SkillForge:
         if self.logger:
             self.logger.info("Skill forgiata installata come pacchetto firmato: %s (%s)", skill_id, draft.digest[:12])
         return draft, store.usable_directory(skill_id)
+
+    def _evaluate_installed(self, manifest) -> str:
+        """F8.3.8, prima/dopo: le prove registrate nella sandbox si rieseguono nel runtime vero (per le skill dei
+        pacchetti e' il worker isolato di SkillRegistry) e devono avere lo stesso esito. Ritorna la prima differenza,
+        o "" se tutto torna. Solo l'esito (riuscita o errore dichiarato): l'output puo' dipendere da ora o caso."""
+        execute = getattr(self.registry, "execute", None)
+        if execute is None:
+            return ""
+        for spec in manifest.intents:
+            for fixture in spec.fixtures:
+                result = execute(spec.intent, dict(fixture["input"]))
+                expected = "output" in fixture
+                if bool(getattr(result, "success", False)) != expected:
+                    got = getattr(result, "error", None) or "riuscita"
+                    return f"{fixture['name']}: attesa {'riuscita' if expected else 'un errore'}, ottenuto {got}"
+        return ""
+
+    def observe_execution(self, intent: str, result: str, error_category: str) -> str | None:
+        """F8.3.7: ogni esecuzione reale (ricevuta del ledger) di una skill forgiata ancora in prova. Ritorna il
+        messaggio da dare all'utente quando la prova finisce (superata, o skill disattivata), altrimenti None."""
+        store = self.skill_store
+        if store is None or not intent:
+            return None
+        with self._canary_lock:
+            for skill_id in store.skills():
+                if not skill_id.startswith(FORGE_ID_PREFIX):
+                    continue
+                trial = store.canary(skill_id)
+                if trial is None or intent not in trial[2]:
+                    continue
+                version, state, intents = trial
+                return self._record_trial(skill_id, version, state, intents, result, error_category)
+        return None
+
+    def _record_trial(self, skill_id: str, version: str, state: dict, intents: list, result: str,
+                      error_category: str) -> str | None:
+        name = intents[0].replace("_", " ").lower() if intents else skill_id
+        if error_category in _CANARY_NOT_THE_SKILLS_FAULT:
+            return None
+        if result == "success":
+            state["remaining"] -= 1
+            if state["remaining"] > 0:
+                self.skill_store.set_canary(skill_id, version, state)
+                return None
+            self.skill_store.set_canary(skill_id, version, None)
+            if self.logger:
+                self.logger.info("Skill forgiata %s: prova superata", skill_id)
+            return f"La nuova capacità «{name}» ha superato il periodo di prova: resta attiva."
+        state["failures"] += 1
+        if error_category not in _CANARY_FATAL and state["failures"] < CANARY_MAX_FAILURES:
+            self.skill_store.set_canary(skill_id, version, state)
+            return None
+        # rollback automatico: quarantena nel catalogo (reversibile, la versione resta su disco per capire cosa
+        # e' successo) e l'intent esce subito dal registro
+        reason = "blocco o timeout nel worker" if error_category in _CANARY_FATAL else f"{state['failures']} errori"
+        self.skill_store.quarantine(skill_id, version, f"canary: {reason} ({result})")
+        for intent in intents:
+            if hasattr(self.registry, "unregister_skill"):
+                self.registry.unregister_skill(intent)
+        if self.logger:
+            self.logger.warning("Skill forgiata %s disattivata durante la prova: %s", skill_id, reason)
+        return (f"Ho disattivato la nuova capacità «{name}»: durante il periodo di prova ha dato {reason}. "
+                "L'ho messa in quarantena; puoi chiedermi di eliminarla o di riscriverla.")
 
     # ---- gestione ----------------------------------------------------------------------
 

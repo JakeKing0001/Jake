@@ -22,8 +22,11 @@ QtObject {
     // Vetro (seconda prova reale del 27/09/2026): tinta scura ma non piena - sotto c'e' la rifrazione della luce
     // dell'HUD (GlassPanel). Quasi opaca: il testo delle finestre sotto non deve trapelare (screenshot reale del
     // 26/09/2026, pannelli illeggibili con un vetro troppo trasparente).
-    readonly property color glassTop: highContrast ? "#000000" : Qt.rgba(0.11, 0.12, 0.16, desktopGlass ? 0.58 : 0.93)
-    readonly property color glassBottom: highContrast ? "#000000" : Qt.rgba(0.06, 0.07, 0.09, desktopGlass ? 0.66 : 0.95)
+    // Con il vetro vero (F4.3.6, misurato a schermo il 28/09/2026): sopra un documento bianco una tinta 0,58-0,66
+    // lasciava il testo secondario a contrasto 3,5 (sotto 4,5, la soglia di leggibilita'). 0,82-0,88 e' il minimo che
+    // tiene 4,5 anche sul bianco; sopra un desktop scuro o colorato il desktop sfocato si vede comunque.
+    readonly property color glassTop: highContrast ? "#000000" : Qt.rgba(0.11, 0.12, 0.16, desktopGlass ? 0.82 : 0.93)
+    readonly property color glassBottom: highContrast ? "#000000" : Qt.rgba(0.06, 0.07, 0.09, desktopGlass ? 0.88 : 0.95)
     readonly property color glassBorder: highContrast ? "#ffffff" : Qt.rgba(1, 1, 1, 0.09)
     readonly property color glassRim: Qt.rgba(1, 1, 1, 0.34)
     readonly property color glassHighlight: highContrast ? "transparent" : Qt.rgba(1, 1, 1, 0.07)

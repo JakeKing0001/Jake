@@ -270,9 +270,9 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F5.2` | Memory Platform (27/09/2026: memoria episodica interrogabile - "di cosa abbiamo parlato ieri?" sulla cronologia reale per periodo e argomento) | `DOING` |
 | `F5.3` | Knowledge Model | `DOING` |
 | `F5.4` | Memory Reliability (27/09/2026: nessuna sovrascrittura silenziosa di fatti/preferenze - versione precedente conservata e dichiarata, un'inferenza non sostituisce un fatto detto dall'utente, conflitti registrati, "dimentica" cancella anche le versioni; conferma prima di cambiare un ricordo importante o fissato; decadimento per categoria nel ranking, fissati esclusi; consolidamento non ancora) | `DOING` |
-| `F5.5` | Retrieval Quality (27/09/2026: ricordi pertinenti con fonte anche nelle risposte libere e nei compiti dei tre agenti, retrieval ibrido parole+significato+periodo ("ieri", "la settimana scorsa" dentro la domanda), budget di contesto, grafo a un salto; 28/09/2026: nessun ricordo personale nelle domande di conoscenza generale, riassunti di conversazione solo se la domanda parla di conversazioni passate, citazione solo se il ricordo e' davvero nella risposta e detta in modo leggibile; metriche ancora da fare) | `DOING` |
+| `F5.5` | Retrieval Quality (27/09/2026: ricordi pertinenti con fonte anche nelle risposte libere e nei compiti dei tre agenti, retrieval ibrido parole+significato+periodo ("ieri", "la settimana scorsa" dentro la domanda), budget di contesto, grafo a un salto; 28/09/2026: nessun ricordo personale nelle domande di conoscenza generale, riassunti di conversazione solo se la domanda parla di conversazioni passate, citazione solo se il ricordo e' davvero nella risposta e detta in modo leggibile; 28/09/2026 sera: metriche nell'eval di rilascio - golden set della memoria su database vero, recall@3 e MRR 1,0, 5 casi di sicurezza; i ricordi segreti non entrano piu' nel contesto automatico) | `DOING` |
 | `F5.6` | Context Runtime (27/09/2026: segnali non riletti non piu' presentati come attuali; appunti marcati privati da chi li copia mai letti) | `DOING` |
-| `F5.7` | Privacy Engineering (libreria completa il 21/09/2026; dal 26/09/2026 nel percorso reale: "dimentica" cancella anche registro e indici con ricevuta, l'uso dei ricordi viene registrato, "da dove sai X" spiega la provenienza; dal 27/09/2026 "esporta i miei ricordi" e "fissa il ricordo X" a voce; purge/backup non ancora esposti a voce/HUD) | `DOING` |
+| `F5.7` | Privacy Engineering (libreria completa il 21/09/2026; dal 26/09/2026 nel percorso reale: "dimentica" cancella anche registro e indici con ricevuta, l'uso dei ricordi viene registrato, "da dove sai X" spiega la provenienza; dal 27/09/2026 "esporta i miei ricordi" e "fissa il ricordo X" a voce; purge/backup non ancora esposti a voce/HUD); 28/09/2026: modalita' privata dall'HUD con un interruttore nella barra di stato, e le frasi "attiva/disattiva la modalita' privata" nella corsia esatta - prima passavano dal modello e con la GPU piena andavano in timeout) | `DOING` |
 | `F6.1` | Proactivity Platform (26/09/2026: promemoria, automazioni e avvisi passano dagli stessi freni in `JakeCore.notify` - duplicati, budget orario, quiet hours, conversazione in corso - e si sospendono insieme durante prove e benchmark; 28/09/2026: gli avvisi non urgenti aspettano che Jake sia pronto e poi escono in un solo riepilogo) | `DOING` |
 | `F6.2` | Proactivity Quality (27/09/2026: "perche' me l'hai detto?" spiega la fonte dell'ultima notifica) | `DOING` |
 | `F6.3` | Notification UX (libreria di decisione il 21/09/2026; collegata a JakeCore/EventBus/HUD il 22/09/2026; dal 27/09/2026 "meno notifiche cosi'", "non mostrarmelo piu'", "mostramelo di nuovo" e "rimandala" sull'ultima notifica, a voce e dai pulsanti del toast HUD, persistenti; nessuna consegna reale di call/companion) | `DOING` |
@@ -289,7 +289,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F7.7` | Edge Devices | `BACKLOG` |
 | `F8.1` | Skill Platform (manifest validato e loader che rifiuta prima dell'import il 22/09/2026; dal 27/09/2026 il rischio dichiarato da un pacchetto verificato e approvato arriva a `risk_of`/PolicyEngine, mai sopra un intent integrato; hook non eseguiti) | `DOING` |
 | `F8.2` | Supply-chain Security (pacchetti firmati, catalogo, quarantena/revoca, pin/rollback il 22/09/2026; dal 27/09/2026 nel runtime: caricamento all'avvio con ricontrollo di firma/hash, installazione in due passi PLAN_SKILL_INSTALL -> INSTALL_SKILL_PACKAGE (ADMIN) legata al digest mostrato; UI HUD e distribuzione non ancora) | `DOING` |
-| `F8.3` | Skill Forge (27/09/2026: scansione dei segreti prima della sandbox - chiavi private, token per formato, credenziali letterali; 28/09/2026: la skill generata diventa un pacchetto firmato nel catalogo - fixture dall'esito reale nella sandbox, manifest scritto dalla Forge con capability dagli import e rischio minimo coerente, permessi mostrati prima del si', approvazione legata al digest, disinstallazione) | `DOING` |
+| `F8.3` | Skill Forge (27/09/2026: scansione dei segreti prima della sandbox - chiavi private, token per formato, credenziali letterali; 28/09/2026: la skill generata diventa un pacchetto firmato nel catalogo - fixture dall'esito reale nella sandbox, manifest scritto dalla Forge con capability dagli import e rischio minimo coerente, permessi mostrati prima del si', approvazione legata al digest, disinstallazione; prova nel runtime dopo l'installazione e canary con rollback automatico; specifica con casi di prova confermata prima del codice) | `DOING` |
 | `F8.4` | Model Runtime (router con capability/inventario/eval/warm-unload/redazione il 22/09/2026; dal 27/09/2026 JakeCore sceglie il modello col router: catalogo da config, modelli installati, telemetria reale di batteria/VRAM, osservazioni reali di successo/latenza di ogni chiamata; dal 27/09/2026 il modello lasciato dal router viene scaricato davvero da Ollama; la scelta del router e SET_MODEL arrivano a tutte le skill che usano il modello di ragionamento, ricontrollata a ogni giro dello scheduler) | `DOING` |
 | `F8.5` | Agent Runtime (27/09/2026: il supervisore ferma anche lo stesso strumento fallito 3 volte di fila con parametri diversi e chiede all'utente) | `DOING` |
 | `F8.6` | Release Safety (golden/security set, confronto, canary, rollback, canali firmati il 22/09/2026; senza runner reali ne' collegamento HUD) | `DOING` |
@@ -8766,8 +8766,12 @@ reduced motion restano utilizzabili.
   vetro resta all'HUD; CPU dell'HUD in demo 49-55% con vetro e 48-52% senza (dominata dall'orb). Ripiego sul vetro
   dell'HUD senza Windows 11, con "Effetti di trasparenza" spenti, con il contrasto elevato o con
   `JAKE_HUD_GLASS=hud`. Test: `hud_glass_geometry` in ctest (DPI 100/125/150%, rientro, raggio, dissolvenza).
-  Restano: giudizio estetico dell'utente, prova su un secondo monitor a scala diversa, F4.3.3 profilo GPU/batteria,
-  F4.3.6 contrasto su desktop chiari.
+  Restano: giudizio estetico dell'utente, prova su un secondo monitor a scala diversa, F4.3.3 profilo GPU/batteria.
+- 28/09/2026 (F4.3.6, contrasto su desktop chiari, misurato): HUD in demo sopra un documento bianco con testo nero,
+  pixel dei pannelli letti dallo screenshot. Con la tinta 0,58-0,66 lo sfondo dei pannelli era #4b4d53 (luminanza
+  0,074): testo secondario a contrasto 3,50, sotto la soglia di leggibilita' 4,5 (testo principale 7,68). Tinta del
+  vetro vero portata a 0,82-0,88, il minimo che tiene il caso peggiore: sul bianco il pixel piu' chiaro dei pannelli
+  ha luminanza 0,045 e il testo secondario sale a 4,59; sopra un desktop colorato il desktop sfocato resta visibile.
 
 ### F4.4 — State machine e Orb 2.0
 
@@ -9204,6 +9208,17 @@ Criterio di uscita: ogni risposta di memoria ha almeno una fonte oppure è marca
   RECALL ("Dai miei ricordi: ... (me l'hai detto tu il ...)", un'inferenza resta un'inferenza) e ne viene
   registrato l'uso, mai in modalita' privata. Prova: `tests/test_memory_in_answers.py`. Restano l'agente
   a passi e le metriche precision/recall.
+
+- 28/09/2026 (F5.5 metriche + F8.6 runner reale dell'area memoria): `core/release_eval.py` aveva golden set,
+  confronto e rollback ma nessun runner reale. `benchmarks/bench_memory_retrieval.py` ne da' uno alla memoria:
+  database vero con 11 ricordi realistici (preferenze, persone, salute, abitudini, un riassunto di conversazione,
+  due segreti) e `MemoryManager.relevant_for`, lo stesso metodo delle risposte libere e degli agenti. 8 casi
+  positivi (recall@3 = 1,0, MRR = 1,0) e 5 di sicurezza: tre domande di conoscenza generale senza ricordi (la prova
+  reale del 27/09) e due richieste che nominano un segreto. Misurato prima della correzione: sicurezza 3/5 - il PIN
+  del bancomat e la password del wifi, marcati `secret`, entravano nel contesto automatico di qualunque risposta che
+  ne nominasse le parole. Ora `relevant_for` li esclude da ogni ramo (parole, significato, grafo); la lettura
+  esplicita resta a RECALL e al dashboard della privacy. Gira anche come test (`tests/test_memory_retrieval_eval.py`,
+  soglie misurate) e a mano con `python -m benchmarks.bench_memory_retrieval`.
 
 ### F5.6 — Context engine event-driven
 
@@ -9924,14 +9939,19 @@ nessuna azione duplicata e ripresa di contesto, decisioni e ricevute sul PC.
   conferma, e nulla su una riconnessione di chi era gia' attivo. Un dispositivo revocato non riporta indietro la
   sua conferma. Test con server companion vero e pipeline reale: PC -> telefono -> approvazione, telefono -> PC ->
   "si'" locale e 404 al telefono, lease scaduto, riconnessione, due claim e due approvazioni simultanei, privato.
-  Restano: l'active responder per voce e notifiche proattive (niente doppia risposta), il riepilogo nei pannelli
-  F4.5 dell'HUD.
+  Restano: il riepilogo nei pannelli F4.5 dell'HUD (il PC che riprende la sessione e l'active responder per
+  le notifiche sono le voci qui sotto).
 - 28/09/2026 (F7.4.2, elezione per scelta esplicita e recency): con un telefono attivo, l'utente che torna al PC e
   parla o scrive li' (voce, CLI, HUD nativo) doveva prima "rilasciare" dal telefono; il "si'" detto al PC non
   trovava la conferma passata al telefono. Ora ogni turno dell'utente al PC riporta la sessione al PC con la
   stessa logica del rilascio (`CompanionServer.release_to_pc`, sotto il lock di handoff): conferma di nuovo sul
   PC, `DEVICE_HANDOFF` verso nessuno. Un comando dal telefono non fa elezione. Test: conferma passata al telefono,
   "si'" detto al PC -> PC attivo, azione eseguita una volta, 404 all'approvazione successiva dal telefono.
+- 28/09/2026 (F7.4, un solo active responder per le notifiche): con un telefono attivo promemoria, avvisi e
+  automazioni uscivano sia sul telefono (NOTIFICATION sul bus, consegnata dallo stream del companion) sia a voce o
+  in CLI sul PC. Ora `JakeCore.notify` pubblica l'evento con `responder` e non restituisce nulla da presentare al PC
+  finche' il dispositivo attivo (DeviceRegistry, con il lease) e' un telefono; al ritorno sul PC tutto come prima.
+  L'ultima notifica resta quella a cui si riferiscono "meno notifiche cosi'" e simili, anche detti dal telefono.
 
 ### F7.5 — Home Assistant profondo
 
@@ -10168,9 +10188,28 @@ Criterio di uscita: una skill generata non può agire fuori manifest anche se il
   Test (`tests/test_skill_forge_packages.py`, solo il modello finto): installazione firmata con fixture 42 /
   `missing_parameters` dalla sandbox, test incluso eseguito sul pacchetto installato, ricarica dopo riavvio con
   hash intatti, import di rete -> external_action mostrato prima del si', prove tutte fallite -> nessun pacchetto,
-  digest diverso o assente -> niente installato, eliminazione completa. Restano F8.3.2 (specifica e casi di test
-  confermati PRIMA del codice), F8.3.7 canary con budget ridotto, F8.3.8 eval prima/dopo e rollback automatico,
-  e l'esecuzione dei test dichiarati dai pacchetti di terzi.
+  digest diverso o assente -> niente installato, eliminazione completa. Resta l'esecuzione dei test dichiarati dai
+  pacchetti di terzi.
+- 28/09/2026 (F8.3.1/F8.3.2, specifica prima del codice): "impara a fare X" chiede ora al modello una SPECIFICA senza
+  codice - intent, parametri, frasi d'esempio, 1-4 casi di prova con l'esito atteso - validata dalla Forge (intent
+  libero, prove solo sui parametri dichiarati, almeno una che deve riuscire) e mostrata a parole per la conferma
+  ("Prima di scriverla, ecco cosa farebbe..."). Solo dopo il "si'" il codice: deve avere lo stesso intent, e le prove
+  della specifica sostituiscono quelle che il modello si sceglie (FIXTURES) e girano nella sandbox con l'esito
+  promesso, altrimenti il modello riceve il motivo e riscrive. Poi la conferma del pacchetto con permessi e rischio
+  (F8.3.6) come prima: due "si'", uno per cosa fara' e uno per cosa potra' toccare. Test: specifica mostrata senza
+  codice e senza bozze, prove del modello sostituite da quelle confermate, codice con un altro intent o che non
+  mantiene le prove rifiutato.
+- 28/09/2026 (F8.3.7/F8.3.8, prova dopo l'installazione): appena installata, la skill forgiata riesegue le sue prove
+  nel runtime vero (`SkillRegistry.execute` -> worker isolato) e deve dare gli stessi esiti della sandbox (prima/
+  dopo), altrimenti viene tolta subito. Poi resta in prova nel catalogo (`SkillStore.set_canary`, persistente) per
+  5 esecuzioni reali: ogni ricevuta del ledger passa da `SkillForge.observe_execution`; input sbagliato, conferme,
+  policy e annullamenti non contano (non sono difetti del codice), 2 errori della skill o un solo blocco/timeout del
+  worker la mettono in quarantena e la tolgono dal registro da soli (rollback automatico), e l'utente lo sente dal
+  canale degli avvisi; 5 esecuzioni riuscite chiudono la prova. Il "budget ridotto" e' questo: poche esecuzioni e
+  soglie strette prima di fidarsi, non un limite di risorse diverso (il worker ha gia' memoria/CPU/processi
+  limitati dal Job Object per tutte). Test: prove rieseguite nel runtime, runtime diverso -> rimossa, promozione
+  dopo 5, errori dell'utente ignorati, 2 errori -> quarantena, timeout -> subito, stato dopo riavvio, ricevuta del
+  ledger -> annuncio.
 
 ### F8.4 — Model router
 
