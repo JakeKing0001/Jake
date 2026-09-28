@@ -1268,6 +1268,20 @@ class JakeCore:
         turns = self.conversation_state.get_short_term_history()[-self.CONTINUITY_TURNS:]
         return {"recent": [{"role": turn.get("role"), "text": turn.get("text", "")} for turn in turns]}
 
+    def _turn_device_label(self) -> str | None:
+        """Il nome del dispositivo companion da cui arriva il turno (dal registro, altrimenti l'id); None per il PC."""
+        channel = current_conversation_channel()
+        if channel is None:
+            return None
+        server = getattr(self, "companion_server", None)
+        try:
+            for device in server.devices.list_devices() if server is not None else []:
+                if isinstance(device, dict) and device.get("id") == channel and device.get("name"):
+                    return str(device["name"])
+        except Exception:
+            self.logger.exception("Errore leggendo il nome del dispositivo")
+        return channel
+
     def _publish_hud_event(self, event: HudEvent) -> None:
         """Punto unico per lo stato del turno verso HUD/companion. Lo stato e' un effetto collaterale del runtime, non
         parte della logica: senza bus (core parziali, avvio, fallback) si salta, e un iscritto che fallisce non rompe
@@ -1378,9 +1392,12 @@ class JakeCore:
         if self.private_mode:
             self.logger.info("Scambio in modalità privata: non registrato.")
         else:
-            self._publish_hud_event(HudEvent(EventType.USER_MESSAGE, {"text": text}))
+            # F7.4.6: un turno arrivato da un telefono lo dice (l'HUD del PC mostra "Tu (da Telefono)"); il PC no
+            device = self._turn_device_label()
+            origin = {"device": device} if device else {}
+            self._publish_hud_event(HudEvent(EventType.USER_MESSAGE, {"text": text, **origin}))
             if replied:
-                self._publish_hud_event(HudEvent(EventType.JAKE_MESSAGE, {"text": response}))
+                self._publish_hud_event(HudEvent(EventType.JAKE_MESSAGE, {"text": response, **origin}))
         if self.private_mode or not replied:
             # nessun JAKE_MESSAGE che riporti l'HUD a riposo (turno privato, risposta vuota, uscita): lo stato del
             # turno si chiude comunque, senza contenuto - un comando scritto non deve lasciare l'orb su THINKING

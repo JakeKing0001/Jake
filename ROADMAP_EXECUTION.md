@@ -9963,6 +9963,11 @@ nessuna azione duplicata e ripresa di contesto, decisioni e ricevute sul PC.
   stessa logica del rilascio (`CompanionServer.release_to_pc`, sotto il lock di handoff): conferma di nuovo sul
   PC, `DEVICE_HANDOFF` verso nessuno. Un comando dal telefono non fa elezione. Test: conferma passata al telefono,
   "si'" detto al PC -> PC attivo, azione eseguita una volta, 404 all'approvazione successiva dal telefono.
+- 28/09/2026 (F7.4.6, da quale dispositivo arriva un messaggio): un turno arrivato dal telefono appariva nella
+  conversazione dell'HUD del PC identico a uno detto al PC. Ora USER_MESSAGE/JAKE_MESSAGE di un turno del telefono
+  portano `device` (il nome dal registro dei dispositivi, altrimenti l'id), il client C++ lo passa al pannello e la
+  conversazione mostra "Tu (da Telefono)"/"Jake (a Telefono)". Verificato a schermo con server companion vero e HUD
+  collegato; test sul core reale (telefono -> nome, PC -> niente).
 - 28/09/2026 (F7.4, un solo active responder per le notifiche): con un telefono attivo promemoria, avvisi e
   automazioni uscivano sia sul telefono (NOTIFICATION sul bus, consegnata dallo stream del companion) sia a voce o
   in CLI sul PC. Ora `JakeCore.notify` pubblica l'evento con `responder` e non restituisce nulla da presentare al PC

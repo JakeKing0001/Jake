@@ -18,14 +18,16 @@ GlassPanel {
     property string inspectionReason: ""
     property string lastUser: ""
     property string lastJake: ""
+    property string lastDevice: ""   // F7.4.6: da quale telefono e' arrivato l'ultimo scambio (vuoto = questo PC)
     readonly property bool hasContent: model.count > 0 || transcriptText.length > 0 || stepDescription.length > 0 || planSteps.length > 0
         || evidenceSummary.length > 0 || inspectionReason.length > 0
     implicitHeight: expanded ? 320 : Math.min(150, header.implicitHeight + summary.implicitHeight + live.implicitHeight + 28)
 
-    function append(senderRole, messageText) {
+    function append(senderRole, messageText, device) {
         // "senderRole"/"messageText": nomi diversi da proprieta' di Text, evita il binding su se stessi.
-        model.append({ senderRole: senderRole, messageText: messageText });
-        if (senderRole === "user") { lastUser = messageText; lastJake = ""; }
+        const origin = device || "";
+        model.append({ senderRole: senderRole, messageText: messageText, deviceLabel: origin });
+        if (senderRole === "user") { lastUser = messageText; lastJake = ""; lastDevice = origin; }
         if (senderRole === "jake") lastJake = messageText;
         list.positionViewAtEnd();
     }
@@ -67,7 +69,7 @@ GlassPanel {
             Text {
                 width: parent.width
                 visible: root.lastUser.length > 0
-                text: qsTr("Tu: %1").arg(root.lastUser)
+                text: (root.lastDevice.length > 0 ? qsTr("Tu (da %1): ").arg(root.lastDevice) : qsTr("Tu: ")) + root.lastUser
                 color: Theme.accent
                 font.pixelSize: Theme.fontSmall
                 elide: Text.ElideRight
@@ -103,7 +105,8 @@ GlassPanel {
                 width: list.width - 8
                 spacing: 2
                 Text {
-                    text: senderRole === "user" ? qsTr("Tu") : qsTr("Jake")
+                    text: (senderRole === "user" ? qsTr("Tu") : qsTr("Jake"))
+                        + (deviceLabel.length > 0 ? (senderRole === "user" ? qsTr(" (da %1)") : qsTr(" (a %1)")).arg(deviceLabel) : "")
                     font.pixelSize: Theme.fontTiny
                     font.bold: true
                     color: senderRole === "user" ? Theme.accent : Theme.ok
