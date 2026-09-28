@@ -551,6 +551,8 @@ class JakeCore:
             enabled=bool(config.get("system_advisor_enabled", True)),
             todo_manager=self.skill_registry.todo_manager,
             memory_manager=self.memory_manager,
+            # F6.4.5: cio' che gli avvisi hanno gia' detto sopravvive al riavvio (niente "Download pieni" a ogni avvio)
+            state_path=Path(config.get("advisor_state_path") or Path(__file__).resolve().parent.parent / "data" / "advisor_state.json"),
         )
         self.system_advisor.start()
 
