@@ -270,7 +270,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F5.2` | Memory Platform (27/09/2026: memoria episodica interrogabile - "di cosa abbiamo parlato ieri?" sulla cronologia reale per periodo e argomento) | `DOING` |
 | `F5.3` | Knowledge Model | `DOING` |
 | `F5.4` | Memory Reliability (27/09/2026: nessuna sovrascrittura silenziosa di fatti/preferenze - versione precedente conservata e dichiarata, un'inferenza non sostituisce un fatto detto dall'utente, conflitti registrati, "dimentica" cancella anche le versioni; conferma prima di cambiare un ricordo importante o fissato; decadimento per categoria nel ranking, fissati esclusi; consolidamento non ancora) | `DOING` |
-| `F5.5` | Retrieval Quality (27/09/2026: ricordi pertinenti con fonte anche nelle risposte libere e nei compiti dei tre agenti, retrieval ibrido parole+significato+periodo ("ieri", "la settimana scorsa" dentro la domanda), budget di contesto, grafo a un salto; 28/09/2026: nessun ricordo personale nelle domande di conoscenza generale, riassunti di conversazione solo se la domanda parla di conversazioni passate, citazione solo se il ricordo e' davvero nella risposta e detta in modo leggibile; metriche ancora da fare) | `DOING` |
+| `F5.5` | Retrieval Quality (27/09/2026: ricordi pertinenti con fonte anche nelle risposte libere e nei compiti dei tre agenti, retrieval ibrido parole+significato+periodo ("ieri", "la settimana scorsa" dentro la domanda), budget di contesto, grafo a un salto; 28/09/2026: nessun ricordo personale nelle domande di conoscenza generale, riassunti di conversazione solo se la domanda parla di conversazioni passate, citazione solo se il ricordo e' davvero nella risposta e detta in modo leggibile; 28/09/2026 sera: metriche nell'eval di rilascio - golden set della memoria su database vero, recall@3 e MRR 1,0, 5 casi di sicurezza; i ricordi segreti non entrano piu' nel contesto automatico) | `DOING` |
 | `F5.6` | Context Runtime (27/09/2026: segnali non riletti non piu' presentati come attuali; appunti marcati privati da chi li copia mai letti) | `DOING` |
 | `F5.7` | Privacy Engineering (libreria completa il 21/09/2026; dal 26/09/2026 nel percorso reale: "dimentica" cancella anche registro e indici con ricevuta, l'uso dei ricordi viene registrato, "da dove sai X" spiega la provenienza; dal 27/09/2026 "esporta i miei ricordi" e "fissa il ricordo X" a voce; purge/backup non ancora esposti a voce/HUD) | `DOING` |
 | `F6.1` | Proactivity Platform (26/09/2026: promemoria, automazioni e avvisi passano dagli stessi freni in `JakeCore.notify` - duplicati, budget orario, quiet hours, conversazione in corso - e si sospendono insieme durante prove e benchmark; 28/09/2026: gli avvisi non urgenti aspettano che Jake sia pronto e poi escono in un solo riepilogo) | `DOING` |
@@ -9204,6 +9204,17 @@ Criterio di uscita: ogni risposta di memoria ha almeno una fonte oppure è marca
   RECALL ("Dai miei ricordi: ... (me l'hai detto tu il ...)", un'inferenza resta un'inferenza) e ne viene
   registrato l'uso, mai in modalita' privata. Prova: `tests/test_memory_in_answers.py`. Restano l'agente
   a passi e le metriche precision/recall.
+
+- 28/09/2026 (F5.5 metriche + F8.6 runner reale dell'area memoria): `core/release_eval.py` aveva golden set,
+  confronto e rollback ma nessun runner reale. `benchmarks/bench_memory_retrieval.py` ne da' uno alla memoria:
+  database vero con 11 ricordi realistici (preferenze, persone, salute, abitudini, un riassunto di conversazione,
+  due segreti) e `MemoryManager.relevant_for`, lo stesso metodo delle risposte libere e degli agenti. 8 casi
+  positivi (recall@3 = 1,0, MRR = 1,0) e 5 di sicurezza: tre domande di conoscenza generale senza ricordi (la prova
+  reale del 27/09) e due richieste che nominano un segreto. Misurato prima della correzione: sicurezza 3/5 - il PIN
+  del bancomat e la password del wifi, marcati `secret`, entravano nel contesto automatico di qualunque risposta che
+  ne nominasse le parole. Ora `relevant_for` li esclude da ogni ramo (parole, significato, grafo); la lettura
+  esplicita resta a RECALL e al dashboard della privacy. Gira anche come test (`tests/test_memory_retrieval_eval.py`,
+  soglie misurate) e a mano con `python -m benchmarks.bench_memory_retrieval`.
 
 ### F5.6 — Context engine event-driven
 
