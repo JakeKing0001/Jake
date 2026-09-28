@@ -197,10 +197,10 @@ void JakeClient::handleEventLine(const QString &jsonLine) {
     const QJsonObject &payload = m_reducer.lastPayload();
     // Segnali puntuali per chi li usa gia' (Main.qml): stessi di prima, ora solo per eventi validi.
     if (type == QLatin1String(JakeHudEventType::USER_MESSAGE)) {
-        emit messageReceived(QStringLiteral("user"), payload.value("text").toString());
+        emit messageReceived(QStringLiteral("user"), payload.value("text").toString(), payload.value("device").toString());
     } else if (type == QLatin1String(JakeHudEventType::JAKE_MESSAGE)) {
         if (payload.value("text").isString() && !payload.value("text").toString().isEmpty())
-            emit messageReceived(QStringLiteral("jake"), payload.value("text").toString());
+            emit messageReceived(QStringLiteral("jake"), payload.value("text").toString(), payload.value("device").toString());
     } else if (type == QLatin1String(JakeHudEventType::AGENT_STEP)) {
         emit agentStep(view.stepIndex, view.stepDescription);
     } else if (type == QLatin1String(JakeHudEventType::NOTIFICATION)) {

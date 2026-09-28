@@ -106,7 +106,8 @@ signals:
     void viewChanged();
     void activeDeviceChanged();
     // role: "user" o "jake" (da USER_MESSAGE/JAKE_MESSAGE, vedi core/hud_protocol.py).
-    void messageReceived(const QString &role, const QString &text);
+    // device: il telefono da cui arriva il turno (F7.4.6), vuoto per il PC
+    void messageReceived(const QString &role, const QString &text, const QString &device);
     void agentStep(int step, const QString &description);
     void notification(const QString &kind, const QString &text);
     void errorOccurred(const QString &detail);

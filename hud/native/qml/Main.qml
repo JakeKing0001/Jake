@@ -57,7 +57,7 @@ ApplicationWindow {
 
     JakeClient {
         id: jake
-        onMessageReceived: (role, text) => { conversation.append(role, text); window.touch(); }
+        onMessageReceived: (role, text, device) => { conversation.append(role, text, device); window.touch(); }
         onNotification: (kind, text) => toast.show(text, kind === "reminder" ? Theme.accent : Theme.textMuted, kind)
         onErrorOccurred: (detail) => toast.show(detail || qsTr("Errore sconosciuto"), Theme.danger, "error")
         onVisibilityRequested: (visible) => {
