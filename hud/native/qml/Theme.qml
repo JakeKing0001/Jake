@@ -2,9 +2,10 @@ pragma Singleton
 import QtQuick
 
 // Un solo linguaggio visivo per tutto l'HUD: stesso vetro, stesso gradiente, stessi raggi e colori in
-// ogni pannello (mai un aspetto diverso per elemento). Il vetro vero con blur di sistema e' F4.3: qui il
-// "vetro" e' un riempimento scuro semitrasparente con gradiente e bordo luminoso, leggibile anche sopra
-// un desktop chiaro o pieno di testo.
+// ogni pannello (mai un aspetto diverso per elemento). Su Windows 11 dietro ogni pannello c'e' il desktop vero
+// sfocato (F4.3.1, DesktopGlass); altrove, o con trasparenza spenta, il "vetro" e' un riempimento scuro con la
+// rifrazione della luce dell'HUD. In entrambi i casi tinta, gradiente e orlo sono questi, leggibili anche sopra un
+// desktop chiaro o pieno di testo.
 QtObject {
     // F4.7.3: impostato da Main.qml (src/main.cpp legge "Contrasto elevato" di Windows). Stesso materiale e stessa
     // forma di ogni pannello; cambiano solo i colori: nero pieno, testo bianco, bordi e focus ben visibili.
@@ -21,8 +22,8 @@ QtObject {
     // Vetro (seconda prova reale del 27/09/2026): tinta scura ma non piena - sotto c'e' la rifrazione della luce
     // dell'HUD (GlassPanel). Quasi opaca: il testo delle finestre sotto non deve trapelare (screenshot reale del
     // 26/09/2026, pannelli illeggibili con un vetro troppo trasparente).
-    readonly property color glassTop: highContrast ? "#000000" : Qt.rgba(0.11, 0.12, 0.16, 0.93)
-    readonly property color glassBottom: highContrast ? "#000000" : Qt.rgba(0.06, 0.07, 0.09, 0.95)
+    readonly property color glassTop: highContrast ? "#000000" : Qt.rgba(0.11, 0.12, 0.16, desktopGlass ? 0.58 : 0.93)
+    readonly property color glassBottom: highContrast ? "#000000" : Qt.rgba(0.06, 0.07, 0.09, desktopGlass ? 0.66 : 0.95)
     readonly property color glassBorder: highContrast ? "#ffffff" : Qt.rgba(1, 1, 1, 0.09)
     readonly property color glassRim: Qt.rgba(1, 1, 1, 0.34)
     readonly property color glassHighlight: highContrast ? "transparent" : Qt.rgba(1, 1, 1, 0.07)
@@ -33,6 +34,9 @@ QtObject {
     property Item backdrop: null
     // rifrazione e ombre: solo in qualita' alta (batteria, GPU debole, JAKE_HUD_QUALITY=low -> no)
     property bool richGlass: true
+    // F4.3.1: vetro vero sul desktop dietro ai pannelli (DesktopGlass, lastre native della composizione di Windows 11). Quando c'e', la
+    // rifrazione simulata non serve e la tinta si alleggerisce: si vede il desktop sfocato, il testo resta leggibile.
+    property bool desktopGlass: false
 
     readonly property color text: highContrast ? "#ffffff" : "#f3f4f6"
     readonly property color textMuted: highContrast ? "#ffffff" : "#a1a7b3"
