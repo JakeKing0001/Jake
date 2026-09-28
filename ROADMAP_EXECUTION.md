@@ -10676,6 +10676,10 @@ per la parte di sviluppo sull'HUD, vedi sotto).
   IDLE quasi tutto il turno. Ora la catena e' completa e coperta da un test end-to-end. Composizione centrata, vetro
   con rifrazione, polvere ambientale per stato, orb meno rigido; build Release, ctest, verifica a schermo.
 - Meteo su Open-Meteo (nessuna chiave), notizie su NewsData.io (chiave gratuita in `news_api_key`).
+- Dal log della prova del 28/09 mattina (GPU con 55 MB liberi): "che ore sono?" con una coda confusa ha risposto dopo
+  28 s, perche' ogni turno nuovo ripagava i ~25 s del classificatore d'intenti prima di ripiegare sulle regole. Ora,
+  dopo un timeout del modello e finche' il modello non risponde di nuovo (al massimo 2 minuti), il solo
+  instradamento aspetta 6 s (`model_health.routing_timeout`); domande libere e agenti mantengono la loro attesa.
 - Contratto degli eventi di turno (CI della PR #167): THINKING e EXECUTING pubblicati direttamente dal core facevano
   cadere tutti i percorsi che costruiscono un core parziale senza bus (conferme, permessi, auth, fallback). Ora un
   solo punto, `JakeCore._publish_hud_event`, pubblica se il bus c'e' e non rompe il turno se un iscritto fallisce.
