@@ -560,6 +560,9 @@ class JakeCore:
             model_provider=lambda: self.model, logger=self.logger,
             on_skill_installed=self._on_skill_installed,
             coder_model=config.get("coder_model") or None,
+            # F8.3: le skill forgiate diventano pacchetti firmati nel catalogo (caricamento verificato, rischio
+            # dichiarato, worker isolato); senza catalogo leggibile resta il file in plugins/
+            skill_store=getattr(self, "skill_store", None), on_package_installed=self._activate_skill_package,
         )
 
         # Skill che hanno bisogno del core (non solo del registry): registrate qui.

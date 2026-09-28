@@ -289,7 +289,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F7.7` | Edge Devices | `BACKLOG` |
 | `F8.1` | Skill Platform (manifest validato e loader che rifiuta prima dell'import il 22/09/2026; dal 27/09/2026 il rischio dichiarato da un pacchetto verificato e approvato arriva a `risk_of`/PolicyEngine, mai sopra un intent integrato; hook non eseguiti) | `DOING` |
 | `F8.2` | Supply-chain Security (pacchetti firmati, catalogo, quarantena/revoca, pin/rollback il 22/09/2026; dal 27/09/2026 nel runtime: caricamento all'avvio con ricontrollo di firma/hash, installazione in due passi PLAN_SKILL_INSTALL -> INSTALL_SKILL_PACKAGE (ADMIN) legata al digest mostrato; UI HUD e distribuzione non ancora) | `DOING` |
-| `F8.3` | Skill Forge (27/09/2026: scansione dei segreti prima della sandbox - chiavi private, token per formato, credenziali letterali) | `DOING` |
+| `F8.3` | Skill Forge (27/09/2026: scansione dei segreti prima della sandbox - chiavi private, token per formato, credenziali letterali; 28/09/2026: la skill generata diventa un pacchetto firmato nel catalogo - fixture dall'esito reale nella sandbox, manifest scritto dalla Forge con capability dagli import e rischio minimo coerente, permessi mostrati prima del si', approvazione legata al digest, disinstallazione) | `DOING` |
 | `F8.4` | Model Runtime (router con capability/inventario/eval/warm-unload/redazione il 22/09/2026; dal 27/09/2026 JakeCore sceglie il modello col router: catalogo da config, modelli installati, telemetria reale di batteria/VRAM, osservazioni reali di successo/latenza di ogni chiamata; dal 27/09/2026 il modello lasciato dal router viene scaricato davvero da Ollama; la scelta del router e SET_MODEL arrivano a tutte le skill che usano il modello di ragionamento, ricontrollata a ogni giro dello scheduler) | `DOING` |
 | `F8.5` | Agent Runtime (27/09/2026: il supervisore ferma anche lo stesso strumento fallito 3 volte di fila con parametri diversi e chiede all'utente) | `DOING` |
 | `F8.6` | Release Safety (golden/security set, confronto, canary, rollback, canali firmati il 22/09/2026; senza runner reali ne' collegamento HUD) | `DOING` |
@@ -10112,6 +10112,26 @@ Criterio di uscita: una skill generata non può agire fuori manifest anche se il
   sandbox chiavi private PEM, chiavi AWS/Google, token GitHub/Slack, chiavi `sk-...` e assegnazioni letterali di
   8+ caratteri a nomi da segreto (api_key/secret/token/password), con un messaggio che il modello riceve per
   riscrivere il file. Test: cinque forme di segreto rifiutate, parole comuni ("risk-...", `token_count`) no.
+- 28/09/2026 (F8.3.1/F8.3.3/F8.3.5/F8.3.6, Forge dentro la catena dei pacchetti): la Forge installava un file sciolto
+  in `plugins/` - niente manifest, niente rischio dichiarato, niente firma, un secondo sistema accanto a F8.1/F8.2.
+  Ora, con il catalogo leggibile, la skill generata e' un pacchetto come quelli degli editori: il plugin dichiara
+  `FIXTURES` (input di prova), la sonda li esegue nella sandbox a integrita' ridotta e il loro esito REALE diventa le
+  fixture del manifest (nessun output inventato; senza almeno una prova riuscita niente pacchetto); il manifest lo
+  scrive la Forge - capability da una tabella chiusa degli import (rete, web, processi, sistema, app, appunti,
+  schermo, lettura file), rischio = `skill_manifest.minimum_risk_for` (il minimo coerente, mai deciso dal modello),
+  provenienza `forge`; pacchetto deterministico con un `test_skill.py` che riesegue le fixture, firmato con la chiave
+  locale della Forge, fidata solo per gli id `jakeforge.*`. Prima del "si'" l'utente legge permessi e rischio
+  generati dal manifest; il "si'" vale solo per quel digest (senza digest o con un altro: rifiutato) e passa da
+  `plan_install` -> `approve` -> `install`, poi dal caricamento con ricontrollo di firma e hash, dal rischio
+  dichiarato in `risk_of` e dal worker isolato. "Elimina la skill" la toglie da catalogo e disco
+  (`SkillStore.uninstall`, nuovo). Corretto anche un difetto reale: la sonda usava come radice la cartella sopra
+  `plugins_dir` e con una cartella dei plugin diversa ogni skill risultava rotta ("No module named 'core'").
+  Test (`tests/test_skill_forge_packages.py`, solo il modello finto): installazione firmata con fixture 42 /
+  `missing_parameters` dalla sandbox, test incluso eseguito sul pacchetto installato, ricarica dopo riavvio con
+  hash intatti, import di rete -> external_action mostrato prima del si', prove tutte fallite -> nessun pacchetto,
+  digest diverso o assente -> niente installato, eliminazione completa. Restano F8.3.2 (specifica e casi di test
+  confermati PRIMA del codice), F8.3.7 canary con budget ridotto, F8.3.8 eval prima/dopo e rollback automatico,
+  e l'esecuzione dei test dichiarati dai pacchetti di terzi.
 
 ### F8.4 — Model router
 
