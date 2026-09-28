@@ -224,6 +224,17 @@ class PublisherKey:
     def generate(cls) -> PublisherKey:
         return cls(Ed25519PrivateKey.generate())
 
+    @classmethod
+    def from_pem(cls, data: bytes) -> PublisherKey:
+        private = serialization.load_pem_private_key(data, password=None)
+        if not isinstance(private, Ed25519PrivateKey):
+            raise PackageError("key_invalid", "la chiave non e' Ed25519")
+        return cls(private)
+
+    def to_pem(self) -> bytes:
+        return self._private.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                           serialization.NoEncryption())
+
     @property
     def public_raw(self) -> bytes:
         return self._private.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
@@ -624,6 +635,18 @@ class SkillStore:
             return load_skill_package(registry, directory, self.env, logger)
         finally:
             sys.dont_write_bytecode = previous
+
+    def uninstall(self, skill_id: str) -> Path:
+        """Toglie una skill dal catalogo e i suoi file dal disco (F8.3: "elimina la skill che hai creato"). A differenza
+        della revoca il digest non viene negato: una skill tolta dall'utente si puo' rigenerare. Ritorna la cartella
+        rimossa (per il verificatore indipendente di DELETE_CREATED_SKILL)."""
+        with self._lock:
+            self._entry(skill_id)
+            folder = self.root / "store" / skill_id
+            shutil.rmtree(folder, ignore_errors=True)
+            del self._data["skills"][skill_id]
+            self._save()
+            return folder
 
     # ---- F8.2.6: quarantena e revoca ----
     def _fallback(self, skill_id: str) -> None:

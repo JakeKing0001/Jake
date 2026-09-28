@@ -30,7 +30,10 @@ class CreateSkillSkill:
 
         if parameters.get("confirmed") and parameters.get("draft_id"):
             try:
-                draft, path = self.forge.install(parameters["draft_id"])
+                # F8.3: il "si'" vale per il pacchetto mostrato (digest), non per una bozza qualunque con quell'id
+                digest = parameters.get("digest")
+                draft, path = (self.forge.install(parameters["draft_id"], digest) if digest
+                               else self.forge.install(parameters["draft_id"]))
             except ForgeError as exc:
                 return SkillResult(success=False, data={"message": str(exc)}, error="FORGE_FAILED")
             return SkillResult(success=True, data={
@@ -44,15 +47,26 @@ class CreateSkillSkill:
             return SkillResult(success=False, data={"message": str(exc)}, error="FORGE_FAILED")
 
         example = draft.examples[0] if draft.examples else ""
+        # F8.3.6: prima del "si'" permessi e rischio, generati dal manifest (non scritti dal modello)
+        permissions = ""
+        summary = getattr(draft, "permissions", "")
+        if isinstance(summary, str) and summary:
+            lines = summary.splitlines()
+            wanted = [line for line in lines if line.startswith(("Permessi richiesti:", "Rischio massimo:"))]
+            permissions = " " + ". ".join(line.rstrip(".") for line in wanted) + "."
         message = (
             f"Ho scritto una nuova capacità, {draft.intent.replace('_', ' ').lower()}: {draft.description} "
-            f"Si userà dicendo per esempio «{example}». La attivo?"
+            f"Si userà dicendo per esempio «{example}».{permissions} La attivo?"
         )
+        confirm = {"request": request, "draft_id": draft.draft_id, "confirmed": True}
+        digest = getattr(draft, "digest", "")
+        if isinstance(digest, str) and digest:
+            confirm["digest"] = digest
         return SkillResult(
             success=False,
             data={
                 "message": message,
-                "confirm_parameters": {"request": request, "draft_id": draft.draft_id, "confirmed": True},
+                "confirm_parameters": confirm,
                 "intent": draft.intent, "description": draft.description, "code": draft.code,
             },
             error="CONFIRMATION_REQUIRED",

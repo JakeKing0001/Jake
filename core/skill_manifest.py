@@ -58,6 +58,19 @@ _MUTATING_CAPABILITIES = frozenset({
 _EXTERNAL_CAPABILITIES = frozenset({"network", "web", "contacts", "smart_home", "subprocess"})
 _ADMIN_CAPABILITIES = frozenset({"system", "process"})
 
+
+def minimum_risk_for(capabilities) -> RiskLevel:
+    """Il rischio piu' basso che un intent con queste capability puo' dichiarare senza violare la coerenza imposta da
+    `_validate_intent` (F8.1.3). Chi genera un manifest (la Skill Forge, F8.3) dichiara questo, mai meno."""
+    caps = set(capabilities)
+    if caps & _ADMIN_CAPABILITIES:
+        return RiskLevel.DESTRUCTIVE
+    if caps & _EXTERNAL_CAPABILITIES:
+        return RiskLevel.EXTERNAL_ACTION
+    if caps & _MUTATING_CAPABILITIES:
+        return RiskLevel.LOCAL_REVERSIBLE
+    return RiskLevel.READ_ONLY
+
 PROVENANCE_KINDS = frozenset({"builtin", "user", "forge", "registry"})
 VERIFIER_KINDS = frozenset({"none", "declarative", "function"})
 HOOK_NAMES = frozenset({"migrate", "uninstall"})
