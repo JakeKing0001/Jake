@@ -34,16 +34,30 @@ def main(input_path: str, output_path: str, project_root: str | None = None) -> 
         register(_Registry())
         if not registered:
             raise AssertionError("register() non ha registrato nulla")
+        # F8.3.5: le esecuzioni di prova dichiarate dal plugin (FIXTURES = [{"input": {...}}, ...]) girano QUI, nella
+        # sandbox, e il loro esito reale diventa la fixture del manifest; senza FIXTURES una sola prova con input vuoto
+        fixtures = spec_module.get("FIXTURES") or [{"input": {}}]
+        if not isinstance(fixtures, list) or len(fixtures) > 8:
+            raise AssertionError("FIXTURES deve essere una lista di al massimo 8 esecuzioni di prova")
+        runs = []
         for skill in registered.values():
-            outcome = skill.execute({})
-            if not hasattr(outcome, "success"):
-                raise AssertionError("execute non ritorna SkillResult")
-            if outcome.success and hasattr(skill, "format_result"):
-                text = skill.format_result(outcome)
-                if not isinstance(text, str):
-                    raise AssertionError("format_result non ritorna una stringa")
+            for fixture in fixtures:
+                parameters = fixture.get("input") if isinstance(fixture, dict) else None
+                if not isinstance(parameters, dict):
+                    raise AssertionError("ogni elemento di FIXTURES deve essere {'input': {...}}")
+                outcome = skill.execute(dict(parameters))
+                if not hasattr(outcome, "success"):
+                    raise AssertionError("execute non ritorna SkillResult")
+                if outcome.success and hasattr(skill, "format_result"):
+                    text = skill.format_result(outcome)
+                    if not isinstance(text, str):
+                        raise AssertionError("format_result non ritorna una stringa")
+                data = outcome.data if isinstance(outcome.data, dict) else {"value": outcome.data}
+                runs.append({"input": parameters, "success": bool(outcome.success),
+                             "data": json.loads(json.dumps(data, default=str)), "error": outcome.error})
         result["ok"] = True
         result["registered"] = list(registered)
+        result["fixtures"] = runs
     except Exception as exc:  # la sonda deve sempre scrivere un esito, mai propagare
         result["ok"] = False
         result["error"] = f"{type(exc).__name__}: {exc}"

@@ -11,12 +11,27 @@ Sicurezza, in ordine: (1) niente esecuzione senza conferma esplicita; (2) lista 
 costrutti distruttivi o di evasione (cancellazioni ricorsive, eval/exec, registro di sistema,
 rete grezza); (3) solo import risolvibili nell'ambiente corrente; (4) import di prova in
 sandbox con timeout; (5) la skill generata resta un file leggibile in plugins/, che l'utente
-puo' aprire, modificare o cancellare ("elimina la skill ...")."""
+puo' aprire, modificare o cancellare ("elimina la skill ...").
+
+F8.3 (Skill Forge 2.0): con il catalogo firmato (`core/skill_package.SkillStore`) la skill generata non e' piu' un
+file sciolto in plugins/ ma un pacchetto come quelli degli editori, nella stessa catena di F8.1/F8.2:
+1. le esecuzioni di prova dichiarate dal plugin (FIXTURES) girano nella sandbox e il loro esito REALE diventa le
+   fixture del manifest - nessuna fixture inventata;
+2. il manifest lo scrive la Forge, non il modello: capability dagli import (tabella chiusa, conservativa), rischio
+   = il minimo coerente con quelle capability (`skill_manifest.minimum_risk_for`), provenienza "forge";
+3. pacchetto deterministico firmato con la chiave locale della Forge, fidata SOLO per gli id `jakeforge.*`;
+4. prima del "si'" l'utente legge permessi e rischio generati dal manifest (`permission_summary`), e il "si'" vale
+   per quel digest: `SkillStore.plan_install` -> `approve` -> `install`, poi il caricamento con ricontrollo di firma
+   e hash, il rischio dichiarato a `risk_of` e l'esecuzione nel worker isolato (F1.6), come ogni pacchetto;
+5. "elimina la skill" la toglie dal catalogo e dal disco.
+Senza catalogo (non leggibile all'avvio) resta il percorso storico del file in plugins/."""
 import ast
+import hashlib
 import importlib.util
 import json
 import re
 import sys
+import tempfile
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -24,8 +39,10 @@ from pathlib import Path
 
 from core.ollama_client import OllamaClient
 from core.process_sandbox import run_probe_with_reduced_privileges
+from core.skill_manifest import MANIFEST_FILENAME, minimum_risk_for, parse_manifest, permission_summary
 
-PLUGINS_DIR = Path(__file__).resolve().parent.parent / "plugins"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PLUGINS_DIR = PROJECT_ROOT / "plugins"
 FORGE_PROBE_PATH = Path(__file__).resolve().parent / "forge_probe.py"
 FORGE_PREFIX = "learned_"
 DEFAULT_CODER_MODEL = "qwen2.5-coder:7b"
@@ -75,6 +92,20 @@ SECRET_PATTERNS = [
 
 ALLOWED_THIRD_PARTY = {"psutil", "PIL", "numpy", "win32gui", "win32con", "win32api", "win32clipboard", "pyperclip", "requests"}
 
+# F8.3: il manifest di una skill forgiata. Le capability le dichiara la Forge dagli import, con una tabella chiusa e
+# prudente (un modulo che PUO' fare qualcosa conta come se lo facesse); il modello non sceglie ne' permessi ne' rischio.
+FORGE_ID_PREFIX = "jakeforge."
+FORGE_PUBLISHER = "Jake Skill Forge"
+FORGE_KEY_FILENAME = "forge_signing_key.pem"
+IMPORT_CAPABILITIES = {
+    "requests": ("network",), "urllib": ("network",), "http": ("network",), "ftplib": ("network",),
+    "smtplib": ("network",), "webbrowser": ("web",),
+    "psutil": ("process",), "win32api": ("system",), "win32gui": ("apps",),
+    "pyperclip": ("clipboard.read", "clipboard.write"), "win32clipboard": ("clipboard.read", "clipboard.write"),
+    "PIL": ("screen",),
+}
+_PARAMETER_TYPES = {"string", "integer", "number", "boolean", "array", "object"}
+
 # Controlli statici indipendenti da FORBIDDEN_PATTERNS (v5.3, Self-Improvement controllato):
 # quella lista nera e' testuale (regex sul sorgente), quindi aggirabile con l'indirezione,
 # es. getattr(os, "system")(...) invece di os.system(...) non contiene mai la sottostringa
@@ -98,6 +129,7 @@ import random
 from core.skill_result import SkillResult
 
 EXAMPLES = ["lancia una moneta", "testa o croce", "tira una monetina"]
+FIXTURES = [{"input": {}}]
 
 
 class CoinFlipSkill:
@@ -128,6 +160,7 @@ Contratto del plugin (obbligatorio):
 - una costante `EXAMPLES` a livello di modulo: lista di 4-6 frasi italiane, naturali e diverse tra loro, con cui l'utente chiederebbe a voce questa funzione (con valori concreti di esempio se servono parametri).
 - una classe con attributo `metadata` = {"intent": "NOME_MAIUSCOLO_CON_UNDERSCORE", "description": "descrizione breve in italiano di cosa fa e quando usarla", "parameters": {nome: {"type": "string|integer|number|boolean|array", "required": true|false, "description": "..."}}}.
 - metodo `execute(self, parameters: dict = None)` che legge i parametri (parameters = parameters or {}), valida, e ritorna `SkillResult(success=True, data={...})` oppure `SkillResult(success=False, data={...}, error="MISSING_PARAMETERS"|"NOT_FOUND"|"OPERATION_FAILED"|"INVALID_VALUE")`. Mai eccezioni non gestite.
+- una costante `FIXTURES` a livello di modulo: lista di 1-4 esecuzioni di prova {"input": {parametri}} con valori concreti; almeno una deve riuscire (verranno eseguite davvero in una sandbox e il loro esito diventa il test della skill).
 - metodo `format_result(self, result: SkillResult) -> str` che restituisce una frase italiana breve da leggere a voce (niente markdown).
 - funzione `register(registry)` che chiama `registry.register_skill(INTENT, Classe())`.
 
@@ -144,6 +177,41 @@ Esempio di plugin nel formato corretto:
 """
 
 
+# F8.3: il test incluso in ogni pacchetto forgiato. Riesegue le fixture del manifest (registrate nella sandbox) contro
+# la skill: chiunque puo' lanciarlo sul pacchetto installato per verificare che si comporti ancora come allora.
+_FIXTURE_TEST = '''"""Test generato dalla Skill Forge: le fixture del manifest sono l'esito reale delle prove nella sandbox."""
+import importlib.util
+import json
+import unittest
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+
+
+class FixtureTests(unittest.TestCase):
+    def test_the_skill_still_behaves_like_in_the_sandbox(self):
+        spec = importlib.util.spec_from_file_location("forged_skill", HERE / "skill.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        skills = {}
+
+        class Registry:
+            def register_skill(self, intent, skill):
+                skills[intent] = skill
+
+        module.register(Registry())
+        manifest = json.loads((HERE / "skill.json").read_text(encoding="utf-8"))
+        for declared in manifest["intents"]:
+            for fixture in declared["fixtures"]:
+                result = skills[declared["intent"]].execute(dict(fixture["input"]))
+                self.assertEqual(bool(result.success), "output" in fixture, fixture["name"])
+
+
+if __name__ == "__main__":
+    unittest.main()
+'''
+
+
 @dataclass
 class ForgeDraft:
     draft_id: str
@@ -154,6 +222,12 @@ class ForgeDraft:
     examples: list = field(default_factory=list)
     model: str = ""
     created_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
+    # F8.3: il pacchetto firmato che il "si'" installa (vuoti senza catalogo: percorso storico in plugins/)
+    package: bytes = b""
+    signature: dict = field(default_factory=dict)
+    digest: str = ""
+    permissions: str = ""
+    risk: str = ""
 
     @property
     def filename(self) -> str:
@@ -167,7 +241,8 @@ class ForgeError(Exception):
 
 class SkillForge:
     def __init__(self, registry, client: OllamaClient | None = None, model_provider=None, plugins_dir: Path | None = None,
-                 logger=None, on_skill_installed=None, coder_model: str | None = None):
+                 logger=None, on_skill_installed=None, coder_model: str | None = None, skill_store=None,
+                 on_package_installed=None):
         self.registry = registry
         self.client = client or OllamaClient(timeout=180)
         # callable -> nome del modello generico configurato (per il fallback se manca il coder)
@@ -178,6 +253,11 @@ class SkillForge:
         self.preferred_coder_model = coder_model or DEFAULT_CODER_MODEL
         self.drafts: dict[str, ForgeDraft] = {}
         self.last_error = None
+        # F8.3: catalogo firmato in cui installare (None = percorso storico) e chi attiva il pacchetto installato
+        # (JakeCore._activate_skill_package: caricamento verificato + rischio dichiarato a risk_of)
+        self.skill_store = skill_store
+        self.on_package_installed = on_package_installed
+        self._signing_key = None
 
     # ---- disponibilita' ----------------------------------------------------------------
 
@@ -222,11 +302,13 @@ class SkillForge:
                 raise ForgeError("Il modello non ha risposto: verifica che Ollama sia attivo.")
             code = self._extract_code(answer)
             try:
-                intent, description, examples = self._validate(code)
+                checked = self._check(code)
                 draft = ForgeDraft(
-                    draft_id=uuid.uuid4().hex[:8], request=request, intent=intent,
-                    description=description, code=code, examples=examples, model=model,
+                    draft_id=uuid.uuid4().hex[:8], request=request, intent=checked["intent"],
+                    description=checked["description"], code=code, examples=checked["examples"], model=model,
                 )
+                if self.skill_store is not None:
+                    self._package(draft, checked)
                 self.drafts[draft.draft_id] = draft
                 return draft
             except ForgeError as exc:
@@ -262,6 +344,12 @@ class SkillForge:
                     raise ForgeError("importa moduli dinamicamente (importlib.import_module), non ammesso")
 
     def _validate(self, code: str) -> tuple[str, str, list]:
+        checked = self._check(code)
+        return checked["intent"], checked["description"], checked["examples"]
+
+    def _check(self, code: str) -> dict:
+        """Controlli statici, poi le esecuzioni di prova nella sandbox. Ritorna intent, descrizione, esempi, parametri
+        dichiarati, moduli importati, se legge file e l'esito reale di ogni esecuzione di prova."""
         try:
             tree = ast.parse(code)
         except SyntaxError as exc:
@@ -275,11 +363,13 @@ class SkillForge:
                 raise ForgeError(f"contiene quello che sembra {what}: una skill non deve avere credenziali nel codice")
         self._check_ast_escapes(tree)
 
+        imported: set[str] = set()
         for node in ast.walk(tree):
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 names = [alias.name for alias in node.names] if isinstance(node, ast.Import) else [node.module or ""]
                 for name in names:
                     root = (name or "").split(".")[0]
+                    imported.add(root)
                     if not root or root in ("core",):
                         continue
                     if root in sys.stdlib_module_names or root in ALLOWED_THIRD_PARTY:
@@ -304,7 +394,7 @@ class SkillForge:
         if len(examples) < 2:
             raise ForgeError("manca la lista EXAMPLES con almeno 2 frasi di esempio")
 
-        intent, description = None, None
+        intent, description, parameters = None, None, {}
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef):
                 for item in node.body:
@@ -330,10 +420,15 @@ class SkillForge:
         if not description or not isinstance(description, str):
             raise ForgeError("manca metadata['description']")
 
-        self._sandbox_import(code)
-        return intent, description, examples
+        runs = self._sandbox_import(code)
+        reads_files = any(isinstance(node, ast.Call) and (
+            (isinstance(node.func, ast.Name) and node.func.id == "open")
+            or (isinstance(node.func, ast.Attribute) and node.func.attr in ("read_text", "read_bytes", "open", "iterdir", "glob")))
+            for node in ast.walk(tree))
+        return {"intent": intent, "description": description, "examples": examples, "parameters": parameters,
+                "imported": imported, "reads_files": reads_files, "runs": runs}
 
-    def _sandbox_import(self, code: str) -> None:
+    def _sandbox_import(self, code: str) -> list:
         """Importa il plugin ed esegue execute()/format_result() in un processo separato
         (timeout 20s): un errore all'import o un execute() che esplode non devono mai toccare
         il processo di Jake. Quando le API di Windows lo permettono, il processo di prova gira
@@ -342,7 +437,9 @@ class SkillForge:
         blocca a livello di sistema operativo le scritture su file/registro anche per tecniche
         di evasione non ancora previste dal blocklist. Se quelle API non sono disponibili, si
         ripiega sull'esecuzione normale (solo isolamento dai crash) con un avviso nel log."""
-        root = str(self.plugins_dir.parent)
+        # la radice di Jake (dove sta `core`), non la cartella sopra plugins_dir: con una cartella dei plugin
+        # personalizzata la sonda non trovava piu' core.skill_result e ogni skill risultava rotta
+        root = str(PROJECT_ROOT)
         outcome = run_probe_with_reduced_privileges(
             FORGE_PROBE_PATH, code, cwd=root, timeout=20, extra_args=[root],
         )
@@ -357,13 +454,115 @@ class SkillForge:
             )
         if not outcome.ok:
             raise ForgeError("errore in esecuzione: " + (outcome.error or "sconosciuto"))
+        runs = outcome.payload.get("fixtures")
+        return runs if isinstance(runs, list) else []
+
+    # ---- F8.3: pacchetto firmato ---------------------------------------------------------
+
+    def _forge_key(self):
+        """La chiave con cui la Forge firma cio' che ha generato e controllato. Sta accanto al catalogo e nel
+        TrustStore e' fidata solo per gli id `jakeforge.*`: non puo' firmare una skill che finge di essere di un
+        editore. Chi ha gia' accesso in scrittura a quella cartella puo' comunque scrivere un plugin: la firma qui
+        attesta origine e integrita' a riposo (ricontrollate a ogni caricamento), non un segreto remoto."""
+        from core.skill_package import PublisherKey
+
+        if self._signing_key is not None:
+            return self._signing_key
+        path = Path(self.skill_store.root) / FORGE_KEY_FILENAME
+        if path.exists():
+            key = PublisherKey.from_pem(path.read_bytes())
+        else:
+            key = PublisherKey.generate()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(key.to_pem())
+        trust = self.skill_store.trust
+        if trust.get(key.key_id) is None:
+            trust.add(FORGE_PUBLISHER, key.public_b64(), FORGE_ID_PREFIX)
+        self._signing_key = key
+        return key
+
+    @staticmethod
+    def _manifest_for(draft: ForgeDraft, checked: dict) -> dict:
+        capabilities = sorted({cap for module in checked["imported"] for cap in IMPORT_CAPABILITIES.get(module, ())}
+                              | ({"filesystem.read"} if checked["reads_files"] else set()))
+        risk = minimum_risk_for(capabilities)
+        read_only = risk.value == "read_only"
+        properties, required = {}, []
+        for name, spec in (checked["parameters"] or {}).items():
+            spec = spec if isinstance(spec, dict) else {}
+            kind = spec.get("type") if spec.get("type") in _PARAMETER_TYPES else "string"
+            properties[str(name)] = {"type": kind}
+            if spec.get("required"):
+                required.append(str(name))
+        input_schema: dict = {"type": "object", "properties": properties}
+        if required:
+            input_schema["required"] = required
+        errors: dict = {}
+        fixtures = []
+        for index, run in enumerate(checked["runs"], start=1):
+            name = f"prova {index} nella sandbox"
+            if run.get("success"):
+                fixtures.append({"name": name, "input": run.get("input") or {}, "output": run.get("data") or {}})
+            else:
+                code = re.sub(r"[^a-z0-9_]+", "_", str(run.get("error") or "failed").lower()).strip("_")[:47] or "failed"
+                code = code if code[0].isalpha() else f"e_{code}"[:47]
+                errors.setdefault(code, f"errore della skill: {run.get('error') or 'sconosciuto'}")
+                fixtures.append({"name": name, "input": run.get("input") or {}, "error_code": code})
+        if not any("output" in fixture for fixture in fixtures):
+            raise ForgeError("nessuna esecuzione di prova e' riuscita: aggiungi in FIXTURES un input con cui la skill funziona")
+        slug = re.sub(r"[^a-z0-9_]+", "_", draft.intent.lower()).strip("_")
+        return {
+            "schema_version": 1, "id": f"{FORGE_ID_PREFIX}{slug}", "name": draft.intent.replace("_", " ").capitalize()[:80],
+            "version": "1.0.0", "description": draft.description[:500],
+            "author": {"name": FORGE_PUBLISHER},
+            "provenance": {"kind": "forge", "source": f"Skill Forge ({draft.model or 'modello locale'}): {draft.request}"[:300],
+                           "created_at": draft.created_at[:10], "sha256": hashlib.sha256(draft.code.encode("utf-8")).hexdigest()},
+            "compatibility": {"jake": ">=5.9,<7", "python": ">=3.11", "windows": ">=10"},
+            "dependencies": [], "entry": "skill.py", "tests": {"files": ["test_skill.py"]},
+            "intents": [{
+                "intent": draft.intent, "description": draft.description[:300], "risk": risk.value,
+                "effect_class": "read" if read_only else ("external" if risk.value == "external_action" else "modify"),
+                "capabilities": capabilities,
+                "verifier": ({"kind": "none", "reason": "sola lettura: nessun effetto da verificare"} if read_only
+                             else {"kind": "declarative", "expect": "l'esito dichiarato dalla skill (SkillResult.success)"}),
+                "undo": {"supported": False, "reason": "skill generata: nessuna funzione di annullamento dichiarata"},
+                "input_schema": input_schema, "output_schema": {"type": "object"},
+                "errors": [{"code": code, "description": text} for code, text in errors.items()],
+                "fixtures": fixtures,
+            }],
+        }
+
+    def _package(self, draft: ForgeDraft, checked: dict) -> None:
+        """Manifest, pacchetto deterministico e firma: il "si'" dell'utente installera' esattamente questi byte."""
+        from core.skill_manifest import ManifestError
+        from core.skill_package import build_package, sha256_hex
+
+        data = self._manifest_for(draft, checked)
+        try:
+            manifest = parse_manifest(data, self.skill_store.env, self._existing_intents())
+        except ManifestError as exc:
+            raise ForgeError("il manifest generato non e' valido: " + "; ".join(exc.errors[:3])) from exc
+        with tempfile.TemporaryDirectory(prefix="jake_forge_") as tmp:
+            folder = Path(tmp)
+            (folder / MANIFEST_FILENAME).write_text(json.dumps(data, ensure_ascii=False, indent=1, sort_keys=True),
+                                                    encoding="utf-8")
+            (folder / "skill.py").write_text(draft.code, encoding="utf-8")
+            (folder / "test_skill.py").write_text(_FIXTURE_TEST, encoding="utf-8")
+            package = build_package(folder)
+        draft.package = package
+        draft.signature = self._forge_key().sign_package(package)
+        draft.digest = sha256_hex(package)
+        draft.permissions = permission_summary(manifest)
+        draft.risk = manifest.highest_risk().value
 
     # ---- installazione -----------------------------------------------------------------
 
-    def install(self, draft_id: str):
+    def install(self, draft_id: str, digest: str | None = None):
         draft = self.drafts.get(draft_id)
         if draft is None:
             raise ForgeError("la bozza della skill non esiste piu': riprova a chiedermelo.")
+        if draft.package and self.skill_store is not None:
+            return self._install_package(draft, digest)
         self.plugins_dir.mkdir(parents=True, exist_ok=True)
         path = self.plugins_dir / draft.filename
         header = (
@@ -390,10 +589,64 @@ class SkillForge:
             self.logger.info("Skill installata: %s (%s)", draft.intent, path.name)
         return draft, path
 
+    def _install_package(self, draft: ForgeDraft, digest: str | None):
+        """Il "si'" vale per il pacchetto mostrato: stesso digest, poi piano -> approvazione -> installazione nel
+        catalogo e attivazione con i controlli di ogni pacchetto (firma, hash, manifest, worker isolato)."""
+        from core.skill_package import PackageError, approve
+
+        if digest != draft.digest:
+            # anche una conferma senza digest: il "si'" vale per il pacchetto mostrato, non per l'id di una bozza
+            raise ForgeError("la skill da attivare non e' piu' quella che ti ho mostrato: non la installo.")
+        store = self.skill_store
+        try:
+            plan = store.plan_install(draft.package, draft.signature)
+            if plan.verified.digest != draft.digest:
+                raise ForgeError("il pacchetto e' cambiato dopo i controlli: non lo installo.")
+            if plan.blockers:
+                raise ForgeError("non installabile: " + "; ".join(plan.blockers))
+            store.install(plan, approve(plan, "utente (conferma di CREATE_SKILL)"))
+        except PackageError as exc:
+            raise ForgeError(f"installazione rifiutata dal catalogo: {exc}") from exc
+        skill_id = plan.verified.manifest.id
+        activate = self.on_package_installed
+        loaded = activate(skill_id) if activate is not None else bool(store.load(self.registry, skill_id, self.logger).ok)
+        if not loaded:
+            store.uninstall(skill_id)
+            raise ForgeError("il pacchetto non si e' caricato: l'ho rimosso.")
+        self.drafts.pop(draft.draft_id, None)
+        if self.on_skill_installed is not None:
+            try:
+                self.on_skill_installed(draft)
+            except Exception:
+                if self.logger:
+                    self.logger.exception("Errore nel callback post-installazione della skill")
+        if self.logger:
+            self.logger.info("Skill forgiata installata come pacchetto firmato: %s (%s)", skill_id, draft.digest[:12])
+        return draft, store.usable_directory(skill_id)
+
     # ---- gestione ----------------------------------------------------------------------
 
+    def _forged_packages(self) -> list[dict]:
+        store = self.skill_store
+        if store is None:
+            return []
+        found = []
+        for skill_id in store.skills():
+            if not skill_id.startswith(FORGE_ID_PREFIX):
+                continue
+            info = {"file": skill_id, "intent": None, "description": "", "request": "", "package": skill_id}
+            try:
+                data = json.loads((store.usable_directory(skill_id) / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+                spec = data["intents"][0]
+                info.update(intent=spec["intent"], description=spec.get("description", ""),
+                            request=data["provenance"]["source"].split(": ", 1)[-1])
+            except Exception:
+                pass
+            found.append(info)
+        return found
+
     def list_created(self) -> list[dict]:
-        created = []
+        created = self._forged_packages()
         for path in sorted(self.plugins_dir.glob(f"{FORGE_PREFIX}*.py")):
             info = {"file": path.name, "intent": None, "description": "", "request": ""}
             try:
@@ -435,6 +688,11 @@ class SkillForge:
                 best, best_score = info, score
         if best is None or best_score == 0:
             return None
+        if best.get("package"):
+            removed = self.skill_store.uninstall(best["package"])
+            if best["intent"] and hasattr(self.registry, "unregister_skill"):
+                self.registry.unregister_skill(best["intent"])
+            return {**best, "path": str(removed)}
         path = self.plugins_dir / best["file"]
         # F1.3 (execution_safety.INTENT_SAFETY_REGISTRY, verificatore per DELETE_CREATED_SKILL):
         # il percorso completo va nel risultato PRIMA di eliminare il file, cosi' un verificatore
