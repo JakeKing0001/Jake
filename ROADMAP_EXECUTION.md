@@ -10209,8 +10209,14 @@ Criterio di uscita: una skill generata non può agire fuori manifest anche se il
   Test (`tests/test_skill_forge_packages.py`, solo il modello finto): installazione firmata con fixture 42 /
   `missing_parameters` dalla sandbox, test incluso eseguito sul pacchetto installato, ricarica dopo riavvio con
   hash intatti, import di rete -> external_action mostrato prima del si', prove tutte fallite -> nessun pacchetto,
-  digest diverso o assente -> niente installato, eliminazione completa. Resta l'esecuzione dei test dichiarati dai
-  pacchetti di terzi.
+  digest diverso o assente -> niente installato, eliminazione completa.
+- 28/09/2026 (F8.3, test dei pacchetti di terzi): il manifest obbligava a dichiarare un file di test ma nessuno lo
+  eseguiva: un pacchetto con un `test_skill.py` vuoto o rotto si installava lo stesso. Ora `core/package_tests.py`
+  estrae il pacchetto gia' verificato e ne esegue i test in un processo separato a integrita' ridotta (stessa
+  sandbox della Forge); PLAN_SKILL_INSTALL mostra l'esito prima della decisione e INSTALL_SKILL_PACKAGE rifiuta
+  (`tests_failed`) se non passano. Nessun test dentro i file conta come fallimento. `core/skill_package.py` resta
+  il modulo che non esegue mai codice di un pacchetto. Test: test fallito -> piano bloccato e niente installato,
+  test superati riportati nel piano, un test che scrive fuori dalla sua cartella fermato dal sistema operativo.
 - 28/09/2026 (F8.3.1/F8.3.2, specifica prima del codice): "impara a fare X" chiede ora al modello una SPECIFICA senza
   codice - intent, parametri, frasi d'esempio, 1-4 casi di prova con l'esito atteso - validata dalla Forge (intent
   libero, prove solo sui parametri dichiarati, almeno una che deve riuscire) e mostrata a parole per la conferma

@@ -48,9 +48,15 @@ class PlanSkillInstallSkill:
             plan = self.store.plan_install(package, signature)
         except PackageError as exc:
             return SkillResult(success=False, data={"reason": exc.code}, error="PACKAGE_REJECTED")
+        # F8.3: i test dichiarati girano davvero, nella sandbox, prima che l'utente decida
+        from core.package_tests import run_declared_tests
+
+        tests = run_declared_tests(plan.verified)
+        blockers = list(plan.blockers) + ([] if tests.ok else [f"tests_failed: {tests.error or ', '.join(tests.failures[:3])}"])
         return SkillResult(success=True, data={
-            "summary": plan.summary, "digest": plan.verified.digest, "blockers": plan.blockers,
+            "summary": plan.summary + "\n" + tests.summary(), "digest": plan.verified.digest, "blockers": blockers,
             "permissions_increased": plan.permissions_increased,
+            "tests": {"ok": tests.ok, "run": tests.tests_run, "failures": tests.failures},
         })
 
 
@@ -88,6 +94,13 @@ class InstallSkillPackageSkill:
             plan = self.store.plan_install(package, signature)
             if plan.verified.digest != str(parameters.get("digest") or "").strip():
                 return SkillResult(success=False, data={"reason": "digest_mismatch"}, error="PACKAGE_REJECTED")
+            # F8.3: niente installazione se i test dichiarati dal pacchetto non passano nella sandbox
+            from core.package_tests import run_declared_tests
+
+            tests = run_declared_tests(plan.verified)
+            if not tests.ok:
+                return SkillResult(success=False, data={"reason": "tests_failed", "detail": tests.summary()},
+                                   error="PACKAGE_REJECTED")
             result = self.store.install(plan, approve(plan, "user", allow_permission_increase=True))
         except PackageError as exc:
             return SkillResult(success=False, data={"reason": exc.code}, error="PACKAGE_REJECTED")
