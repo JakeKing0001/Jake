@@ -103,6 +103,7 @@ class OllamaClient:
         # invece del solo OllamaError che i chiamanti gia' catturano.
         if not isinstance(parsed, dict):
             raise OllamaResponseError("risposta non nella forma attesa (non un dizionario)")
+        model_health.succeeded()
         return parsed
 
     def _get(self, path: str, timeout: float | None = None) -> dict:

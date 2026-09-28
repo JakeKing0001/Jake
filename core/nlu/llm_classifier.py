@@ -9,6 +9,7 @@ Rispetto alla versione precedente:
 import json
 from copy import deepcopy
 
+from core import model_health
 from core.command import Command
 from core.intent_provider_base import IntentProvider
 from core.ollama_client import OllamaClient, OllamaResponseError, OllamaUnavailable
@@ -212,7 +213,8 @@ class OllamaProvider(IntentProvider):
             # Temperatura 0: qui serve riprodurre esattamente percorsi e testo letterale
             # dell'utente, non generare variazioni creative.
             options={"temperature": 0, "num_ctx": self.NUM_CTX, "num_predict": self.MAX_OUTPUT_TOKENS},
-            timeout=self.timeout,
+            # subito dopo un timeout del modello l'instradamento non ripaga l'attesa piena: regole e recupero bastano
+            timeout=model_health.routing_timeout(self.timeout),
         )
 
     def _parse_response(self, response: dict) -> dict:
