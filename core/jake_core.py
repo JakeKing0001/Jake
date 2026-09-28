@@ -290,6 +290,7 @@ class JakeCore:
             on_pairing_requested=self._on_pairing_requested,
             # F7.2.5: i file dal telefono (solo dispositivi con accesso "file") finiscono qui, uno per dispositivo
             files_dir=Path(config.get("companion_files_dir") or Path.home() / "Documents" / "Jake" / "Dal telefono"),
+            continuity_provider=self._continuity_snapshot,
         )
         self.native_hud = None
         if bool(config.get("companion_server_enabled", False)):
@@ -1239,6 +1240,17 @@ class JakeCore:
             with self._in_flight_lock:
                 self._in_flight_answers -= 1
                 self._last_answer_finished_at = time.time()
+
+    CONTINUITY_TURNS = 6
+
+    def _continuity_snapshot(self) -> dict:
+        """F7.4.8: gli ultimi scambi della conversazione (unica per tutti i dispositivi) per chi prende la sessione dal
+        PC: sul telefono si riparte da dove si era, senza rispiegare. In modalita' privata nulla: lo scambio privato non
+        esce verso companion e HUD (v4.9.1)."""
+        if self.private_mode:
+            return {"recent": []}
+        turns = self.conversation_state.get_short_term_history()[-self.CONTINUITY_TURNS:]
+        return {"recent": [{"role": turn.get("role"), "text": turn.get("text", "")} for turn in turns]}
 
     def _publish_hud_event(self, event: HudEvent) -> None:
         """Punto unico per lo stato del turno verso HUD/companion. Lo stato e' un effetto collaterale del runtime, non

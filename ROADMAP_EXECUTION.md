@@ -283,7 +283,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F7.1` | Companion Security (F7.1.1/.4/.5/.6/.7 il 22/09/2026; F7.1.2 - pairing HTTP - chiuso il 22/09/2026, vedi F7.2; TLS reale generato/persistito dal server il 22/09/2026; capability persistenti F7.1.3 dal 27/09/2026 - impostabili a voce con SET_DEVICE_ACCESS, valide subito e dopo un riavvio, riga corrotta = nessun permesso; manca la distribuzione del certificato al telefono oltre al pairing) | `DOING` |
 | `F7.2` | Mobile Companion (pairing/chat live/approve-deny sullo stesso task end-to-end il 22/09/2026; lista/revoca dispositivi via HTTP e prima app Android reale - MAI compilata/eseguita in questo ambiente - il 22/09/2026; dal 27/09/2026 revoca/rotazione chiudono anche lo stream gia' aperto; file dal telefono al PC con permesso esplicito; senza offline queue/wipe lato app) | `DOING` |
 | `F7.3` | Voice Devices | `BACKLOG` |
-| `F7.4` | Presence Runtime (27/09/2026: lease del dispositivo attivo - scade senza segni di vita, rinnovato da richieste e stream aperto, rilasciato alla revoca) | `DOING` |
+| `F7.4` | Presence Runtime (27/09/2026: lease del dispositivo attivo - scade senza segni di vita, rinnovato da richieste e stream aperto, rilasciato alla revoca; 28/09/2026: la conferma in sospeso segue chi risponde PC -> telefono -> PC con lo stesso task_id, claim simultanei deterministici, esecuzione unica, riepilogo per il telefono) | `DOING` |
 | `F7.5` | Home Integration | `DOING` |
 | `F7.6` | Sync and Crypto (motore cifrato con conflitti deterministici, revoca, wipe e coda limitata il 21/09/2026; senza trasporto ne' collegamento a memoria/pairing) | `DOING` |
 | `F7.7` | Edge Devices | `BACKLOG` |
@@ -9924,6 +9924,23 @@ nessuna azione duplicata e ripresa di contesto, decisioni e ricevute sul PC.
   dispositivo (dall'HTTP o con `REVOKE_DEVICE`) lo rilascia subito. Reclamare dopo la scadenza non genera un
   handoff da se stesso. Test: registro con orologio finto; server reale con claim -> silenzio -> scaduto con
   handoff, stream aperto oltre il lease -> resta attivo, revoca -> stream chiuso e dispositivo rilasciato.
+- 28/09/2026 (F7.4.4/F7.4.7/F7.4.8, prima fetta della continuita'): buco reale - un compito avviato sul PC che
+  chiedeva conferma notificava anche il telefono col suo task_id, ma `/approvals/<task_id>` cercava la conferma nel
+  canale del telefono (`no_matching_pending_decision`): la decisione restava bloccata sul PC. Ora
+  `ConversationStateManager.hand_over_pending` sposta in modo atomico la conferma di chi rispondeva a chi risponde
+  adesso: il claim del telefono la porta con se' (stesso trace_id/action_id/parametri; al "si'" la policy si
+  ricontrolla nel contesto del telefono), il rilascio e la scadenza del lease la riportano al PC (la carta di
+  conferma ricompare nell'HUD, una notifica "di nuovo sul PC" dice cosa aspetta). Claim, rilascio e scadenza
+  girano sotto un solo lock del server: con due claim simultanei la conferma finisce sempre sul dispositivo attivo
+  e l'azione parte una volta sola. La risposta del claim porta `continuity` (conferma in sospeso senza parametri,
+  ultimi 6 scambi - nessuno in modalita' privata). Non si spostano: autenticazioni (legate al PC), azioni ADMIN
+  (il pairing di un nuovo dispositivo lo approva solo il PC: la policy non blocca gli ADMIN da un telefono), domande piu'
+  vecchie di 10 minuti (F7.4.9: niente approvazioni fuori dal loro momento), un canale che ha gia' la sua
+  conferma, e nulla su una riconnessione di chi era gia' attivo. Un dispositivo revocato non riporta indietro la
+  sua conferma. Test con server companion vero e pipeline reale: PC -> telefono -> approvazione, telefono -> PC ->
+  "si'" locale e 404 al telefono, lease scaduto, riconnessione, due claim e due approvazioni simultanei, privato.
+  Restano: il PC che riprende la sessione da solo quando l'utente gli parla (F7.4.2), il riepilogo nei pannelli
+  F4.5 dell'HUD (l'active responder per le notifiche e' la voce qui sotto).
 - 28/09/2026 (F7.4, un solo active responder per le notifiche): con un telefono attivo promemoria, avvisi e
   automazioni uscivano sia sul telefono (NOTIFICATION sul bus, consegnata dallo stream del companion) sia a voce o
   in CLI sul PC. Ora `JakeCore.notify` pubblica l'evento con `responder` e non restituisce nulla da presentare al PC

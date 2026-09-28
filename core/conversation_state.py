@@ -1,8 +1,10 @@
 import threading
+import time
 from collections import deque
 from copy import deepcopy
 
 from core.request_context import current_conversation_channel
+from core.risk import RiskLevel, risk_of
 
 
 class ConversationStateManager:
@@ -51,6 +53,8 @@ class ConversationStateManager:
         # la chiave e' current_conversation_channel() (None per la voce locale), letta internamente da ogni
         # metodo sotto invece di essere un parametro esplicito.
         self._pending_actions: dict[str | None, dict] = {}
+        # F7.4.8: da quando ogni conferma aspetta (monotonic), per non passare a un altro dispositivo una domanda vecchia
+        self._pending_since: dict[str | None, float] = {}
         self._pending_action_lock = threading.Lock()
         # F4.4.1/F4.5.3: chiamata (azione o None) FUORI dal lock ogni volta che l'azione in sospeso
         # di un canale cambia davvero - JakeCore la usa per l'evento CONFIRMATION dell'HUD.
@@ -73,6 +77,7 @@ class ConversationStateManager:
         with first._pending_action_lock:
             with second._pending_action_lock:
                 self._pending_actions, other._pending_actions = other._pending_actions, self._pending_actions
+                self._pending_since, other._pending_since = other._pending_since, self._pending_since
                 self._short_term_history, other._short_term_history = (
                     other._short_term_history,
                     self._short_term_history,
@@ -120,12 +125,14 @@ class ConversationStateManager:
         senza toccare quella di nessun altro canale."""
         with self._pending_action_lock:
             self._pending_actions[current_conversation_channel()] = deepcopy(action)
+            self._pending_since[current_conversation_channel()] = time.monotonic()
         self._notify_pending(action)
 
     def clear_pending_action(self):
         """Cancella l'azione in attesa PER QUESTO CANALE."""
         with self._pending_action_lock:
             removed = self._pending_actions.pop(current_conversation_channel(), None)
+            self._pending_since.pop(current_conversation_channel(), None)
         if removed is not None:
             self._notify_pending(None)
 
@@ -149,9 +156,55 @@ class ConversationStateManager:
         indipendente: non vede ne' interferisce con questa azione."""
         with self._pending_action_lock:
             action = self._pending_actions.pop(current_conversation_channel(), None)
+            self._pending_since.pop(current_conversation_channel(), None)
         if action is not None:
             self._notify_pending(None)
         return deepcopy(action) if action is not None else None
+
+    # Una conferma segue chi risponde (F7.4.8) solo se e' ancora fresca: una domanda di mezz'ora fa, approvata dal
+    # telefono, sarebbe un'approvazione "riusata" fuori dal suo momento (F7.4.9).
+    HANDOVER_MAX_AGE_S = 600.0
+
+    def pending_channels(self) -> dict:
+        """Sola lettura: {canale: azione} per tutti i canali (None = voce locale). Per chi deve descrivere lo stato,
+        mai per agire - per agire c'e' take_pending_action() sul proprio canale."""
+        with self._pending_action_lock:
+            return deepcopy(self._pending_actions)
+
+    def hand_over_pending(self, source: str | None, target: str | None) -> dict | None:
+        """F7.4.8 (continuita' PC -> companion -> PC): sposta la conferma in sospeso del canale `source` (None = voce
+        locale del PC) sul canale `target`, in un'unica operazione atomica. La conferma resta la STESSA - trace_id
+        (il task_id del telefono), action_id, parametri - e al momento del "si'" passa di nuovo dalla policy nel
+        contesto del dispositivo che conferma (JakeCore._finalize_pending_action): un dispositivo senza il permesso
+        per quell'intent non la esegue. Non si sposta (None):
+        - niente in sospeso su `source`, o `target` ha gia' la sua conferma (non si sovrascrive mai, F1.8.1);
+        - una richiesta di autenticazione: la prova d'identita' resta legata al PC dove e' stata chiesta;
+        - un'azione ADMIN (es. approvare il pairing di un nuovo dispositivo, che il PC chiede nel proprio canale): un
+          telefono che prende la sessione non deve poter autorizzare un altro dispositivo o cambiare il sistema (F7.4.5);
+        - una domanda piu' vecchia di HANDOVER_MAX_AGE_S."""
+        if source == target:
+            return None
+        with self._pending_action_lock:
+            action = self._pending_actions.get(source)
+            if action is None or target in self._pending_actions or action.get("reason") != "confirmation_required":
+                return None
+            if risk_of(str(action.get("intent") or "")) == RiskLevel.ADMIN:
+                return None
+            if time.monotonic() - self._pending_since.get(source, 0.0) > self.HANDOVER_MAX_AGE_S:
+                return None
+            del self._pending_actions[source]
+            since = self._pending_since.pop(source, time.monotonic())
+            action = {**action, "handed_over_from": source or "local"}
+            if action.get("dialogue_scope"):
+                action["dialogue_scope"] = f"device:{target}" if target else "local"
+            self._pending_actions[target] = action
+            self._pending_since[target] = since
+        # l'HUD del PC mostra la conferma del PC: sparisce quando passa al telefono, ricompare quando torna
+        if source is None:
+            self._notify_pending(None)
+        elif target is None:
+            self._notify_pending(action)
+        return deepcopy(action)
 
     # ---- riferimenti recenti (v3.1) -------------------------------------------------------
 
