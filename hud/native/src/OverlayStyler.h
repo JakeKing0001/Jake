@@ -53,6 +53,10 @@ public:
     // qui dal sistema (funziona anche senza eventi), in coordinate della finestra, e Main.qml decide da quella.
     Q_INVOKABLE QPointF cursorInWindow(QQuickWindow *window) const;
 
+    // Seconda prova reale del 27/09/2026 ("l'HUD e' troppo spostato a destra"): l'area utile del monitor della finestra,
+    // SENZA la barra delle applicazioni (il QML vede solo la geometria intera del monitor). Serve a centrare davvero.
+    Q_INVOKABLE QRectF availableGeometry(QQuickWindow *window) const;
+
     Q_INVOKABLE void beginKeyboardInput(QQuickWindow *window);
     Q_INVOKABLE void endKeyboardInput(QQuickWindow *window);
 };

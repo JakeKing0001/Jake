@@ -1,4 +1,5 @@
 import contextlib
+import copy
 import threading
 import time
 from pathlib import Path
@@ -33,6 +34,7 @@ from core.nlu.examples import ExampleStore
 from core.nlu.index import lexical_similarity
 from core.nlu.normalizer import TranscriptNormalizer
 from core.nlu.retriever import CapabilityRetriever
+from core.nlu.transcript_repair import AMBIGUOUS, REPAIRED, UNCLEAR, Assessment, TranscriptRepair
 from core.notification_center import NotificationCenter
 from core.notification_policy import NotificationPolicy, QuietHours
 from core.proactive_gate import DELIVER, DUPLICATE, MUTED, ProactiveGate, notification_key
@@ -53,7 +55,7 @@ from core.request_context import (
 )
 from core.taint import wrap_external_content
 from core.response_formatter import format_plan_outcome, format_skill_result
-from core.risk import risk_of
+from core.risk import RiskLevel, risk_of
 from core.voice.dialogue import (
     DialogueContext,
     ReplyKind,
@@ -536,6 +538,14 @@ class JakeCore:
         # Jake proattivo (v3.2): nota da solo batteria scarica e disco quasi pieno, senza
         # che tu debba chiederglielo (vedi core/system_advisor.py). Disattivabile da config
         # per chi lo trova invadente o lavora su un fisso senza batteria.
+        # Prova reale del 27/09/2026: "comprare il pane" e la pulizia dei Download comparivano mentre Jake stava
+        # ancora caricando Whisper e riscaldando RVC. Finche' la sessione (voce, testo, tray) non dice di essere
+        # pronta, gli avvisi non urgenti restano in coda; poi escono insieme, con budget e duplicati del gate.
+        # Una rete di sicurezza li libera comunque dopo READY_FALLBACK_S, per le modalita' che non lo segnalano.
+        self.ready_for_notifications = False
+        self._ready_fallback = threading.Timer(self.READY_FALLBACK_S, self.mark_ready)
+        self._ready_fallback.daemon = True
+        self._ready_fallback.start()
         self.system_advisor = SystemAdvisor(
             on_advisory=self._default_on_advisory,
             enabled=bool(config.get("system_advisor_enabled", True)),
@@ -716,6 +726,10 @@ class JakeCore:
         dentro il risultato testuale di `SET_NOTIFICATION_MODE`, mai come un secondo `HudEvent` -
         non c'e' un evento successivo a cui riattaccare il trace_id, dichiarato apertamente."""
         gated = self.notification_center.gate(kind, message)
+        if gated is not None and kind == "advisory" and not critical and not getattr(self, "ready_for_notifications", True):
+            self.notification_center.defer(kind, gated)
+            self.logger.info("Notifica %s rimandata: Jake non ha ancora finito di avviarsi", kind)
+            return None
         gate = getattr(self, "proactive_gate", None)
         if gated is not None and gate is not None:
             # F6.1/F6.3: un duplicato si scarta; budget, quiet hours o conversazione in corso -> in coda
@@ -744,7 +758,7 @@ class JakeCore:
         except Exception:
             self.logger.exception("Errore ricontrollando la scelta del modello")
 
-    def release_deferred_notifications(self) -> str | None:
+    def release_deferred_notifications(self, prefix: str = "Mentre eri impegnato: ") -> str | None:
         """F6.3: le notifiche rimandate dal gate (budget, quiet hours, conversazione) non restano in coda
         per sempre. Appena le condizioni lo permettono escono come UN riepilogo attraverso il canale degli
         avvisi (stampa in CLI, voce nella sessione vocale). Ritorna il riepilogo consegnato, o None."""
@@ -760,7 +774,7 @@ class JakeCore:
         if not items:
             return None
         shown = [item["message"].rstrip(".") for item in items[: self.DIGEST_MAX_ITEMS]]
-        digest = "Mentre eri impegnato: " + "; ".join(shown) + "."
+        digest = prefix + "; ".join(shown) + "."
         if len(items) > self.DIGEST_MAX_ITEMS:
             digest += f" E altre {len(items) - self.DIGEST_MAX_ITEMS} notifiche."
         callback = getattr(getattr(self, "system_advisor", None), "on_advisory", None) or self._default_on_advisory
@@ -818,6 +832,22 @@ class JakeCore:
             label = reminder.get("text") or "timer"
             return "Il timer è scaduto!" if label == "timer" else f"Il timer per {label} è scaduto!"
         return f"Promemoria: {reminder['text']}"
+
+    READY_FALLBACK_S = 120.0
+    READY_SETTLE_S = 4.0  # dopo "sono pronto": il tempo di un saluto prima degli avvisi rimasti in coda
+
+    def mark_ready(self) -> None:
+        """La sessione ha finito di avviarsi (microfono aperto, modello vocale caricato, prompt pronto)."""
+        if getattr(self, "ready_for_notifications", True):
+            return
+        self.ready_for_notifications = True
+        fallback = getattr(self, "_ready_fallback", None)
+        if fallback is not None:
+            fallback.cancel()
+        timer = threading.Timer(self.READY_SETTLE_S, self.release_deferred_notifications,
+                                kwargs={"prefix": "All'avvio ho notato: "})
+        timer.daemon = True
+        timer.start()
 
     def _default_on_advisory(self, message: str) -> None:
         gated = self.notify("advisory", message)
@@ -1067,28 +1097,41 @@ class JakeCore:
         question = f"Vuoi che te lo ricordi {describe(commitment.remind_at, now)}?"
         return f"{response} {question}".strip() if response else question
 
-    # Confidenza STT (exp della media di avg_logprob di Whisper, 0-1) sotto la quale una frase che non e' un comando
-    # deterministico non viene interpretata: si chiede di ripetere. Frasi brevi: soglia piu' alta (una trascrizione
-    # rotta di 2-3 parole e' la piu' facile da scambiare per una chiacchiera, e ripeterla costa poco).
-    UNCLEAR_CONFIDENCE = 0.5
     SLOW_TURN_NOTICE_S = 8.0
-    UNCLEAR_CONFIDENCE_SHORT = 0.62
-    SHORT_UTTERANCE_WORDS = 4
+    # intent che sono solo una risposta del modello: per l'HUD restano "penso", non "eseguo"
+    MODEL_ONLY_INTENTS = frozenset({"ASK_QUESTION", "CHITCHAT", "UNKNOWN"})
+    UNCLEAR_REPLY = "Non ho capito bene, puoi ripetere?"
 
-    def _unclear_voice_turn(self, text: str) -> bool:
+    def _transcript_repair(self) -> TranscriptRepair:
+        """Lessico dagli esempi affidabili (ricostruito solo quando gli esempi cambiano) + la conversazione recente."""
+        examples = self.example_store.all()
+        cached = getattr(self, "_repair_cache", None)
+        if cached is None or cached[0] != len(examples):
+            cached = (len(examples), TranscriptRepair.from_examples(examples))
+            self._repair_cache = cached
+        repair = copy.copy(cached[1])
+        repair.lexicon = set(cached[1].lexicon)
+        for turn in self.conversation_state.get_short_term_history():
+            repair.add_context(turn.get("text", ""))
+        return repair
+
+    def _assess_voice_turn(self, text: str) -> Assessment | None:
         """Solo per i turni vocali con una confidenza reale (testo scritto e provider senza confidenza: mai). La corsia
-        deterministica (esempi esatti: "che ore sono", date, calcoli) passa sempre: la' non si interpreta nulla."""
+        deterministica (esempi esatti: "che ore sono", date, calcoli) passa sempre: la' non si interpreta nulla.
+        Altrimenti trascrizione corrotta (chiedere), recuperabile (correggere con prudenza) o affidabile: vedi
+        core/nlu/transcript_repair.py."""
         confidence = current_stt_confidence()
-        if confidence is None:
-            return False
-        if self.example_store.find_exact(text) is not None:
-            return False
-        threshold = self.UNCLEAR_CONFIDENCE_SHORT if len(text.split()) <= self.SHORT_UTTERANCE_WORDS else self.UNCLEAR_CONFIDENCE
-        if confidence >= threshold:
-            return False
-        self.logger.info("Trascrizione incerta (confidenza %.2f < %.2f): chiedo di ripetere invece di interpretare '%s'",
-                         confidence, threshold, text)
-        return True
+        if confidence is None or self.example_store.find_exact(text) is not None:
+            return None
+        assessment = self._transcript_repair().assess(
+            text, confidence, self.example_store.find_exact, lambda intent: risk_of(intent) == RiskLevel.READ_ONLY)
+        if assessment.verdict == REPAIRED:
+            self.logger.info("Trascrizione corretta (confidenza %.2f, %s): '%s' -> '%s'", confidence,
+                             assessment.reason, text, assessment.text)
+        elif assessment.verdict in (UNCLEAR, AMBIGUOUS):
+            self.logger.info("Trascrizione incerta (%s): chiedo di ripetere invece di interpretare '%s'",
+                             assessment.reason, text)
+        return assessment
 
     def _run_in_current_profile(self, callback):
         """
@@ -1173,6 +1216,29 @@ class JakeCore:
                 self._in_flight_answers -= 1
                 self._last_answer_finished_at = time.time()
 
+    def _publish_hud_event(self, event: HudEvent) -> None:
+        """Punto unico per lo stato del turno verso HUD/companion. Lo stato e' un effetto collaterale del runtime, non
+        parte della logica: senza bus (core parziali, avvio, fallback) si salta, e un iscritto che fallisce non rompe
+        il turno. La privacy resta del bus (EventBus.redactor, F4.5.7) e di answer(), che decide QUANDO il contenuto
+        esce. Contratto del turno:
+        - THINKING {} all'inizio, EXECUTING {} quando parte una skill autorizzata, THINKING {"status"} se il modello
+          tarda, ERROR {"detail"} generico: solo stato, mai il testo della richiesta o della risposta;
+        - USER_MESSAGE poi JAKE_MESSAGE solo a turno concluso, non annullato e non privato (sono il contenuto: l'HUD
+          conosce gia' la richiesta, l'ha scritta lui o l'ha vista nel TRANSCRIPT della voce);
+        - senza JAKE_MESSAGE (privato, risposta vuota, uscita) un IDLE {} chiude lo stato;
+        - turno annullato: dopo l'annullamento il core non pubblica nulla; lo stato finale e' di chi l'ha annullato
+          (la sessione vocale, l'unica che puo' farlo: _finish_turn torna a IDLE solo se nessuno stato piu' nuovo
+          ha preso il posto del turno)."""
+        publish = getattr(getattr(self, "event_bus", None), "publish", None)
+        if publish is None:
+            return
+        try:
+            publish(event)
+        except Exception:
+            logger = getattr(self, "logger", None)
+            if logger is not None:
+                logger.exception("Errore pubblicando lo stato %s verso l'HUD", event.type.value)
+
     def _answer_counted(self, text: str, raw_text: str) -> str:
         # F1.8.4 ("drain limitato"): conta questa chiamata come "in corso" da qui a return -
         # incrementato PRIMA di qualunque lavoro vero (skill/agente/piano), decrementato in un
@@ -1197,9 +1263,13 @@ class JakeCore:
 
         # prova reale del 27/09/2026: il primo timeout del modello vale per tutto il turno (niente cascata di attese)
         health_token = model_health.begin_turn()
+        # l'HUD vede subito che Jake lavora a questa richiesta (anche scritta dall'HUD o dal telefono, senza sessione
+        # vocale che lo dica); EXECUTING arriva quando parte davvero una skill (_resolve_and_execute). Solo stato:
+        # il contenuto del turno esce alla fine, quando si sa che non e' annullato ne' privato (vedi _publish_hud_event)
+        self._publish_hud_event(HudEvent(EventType.THINKING, {}))
         # B5: una chiamata al modello lunga non deve sembrare un blocco: dopo qualche secondo l'HUD dice cosa aspetta
         turn_state = model_health.current()
-        slow_notice = threading.Timer(self.SLOW_TURN_NOTICE_S, lambda: self.event_bus.publish(HudEvent(
+        slow_notice = threading.Timer(self.SLOW_TURN_NOTICE_S, lambda: self._publish_hud_event(HudEvent(
             EventType.THINKING, {"status": "Sto aspettando il modello locale..." if (turn_state or {}).get("calling")
                                  else "Ci sto ancora lavorando..."})))
         slow_notice.daemon = True
@@ -1210,7 +1280,7 @@ class JakeCore:
             if failed is not None:
                 self.logger.warning("Modello locale non disponibile in questo turno: %s %s %s", failed.kind, failed.detail,
                                     failed.hint)
-                self.event_bus.publish(HudEvent(EventType.ERROR, {"detail": failed.detail or "modello non disponibile"}))
+                self._publish_hud_event(HudEvent(EventType.ERROR, {"detail": failed.detail or "modello non disponibile"}))
         except TurnCancelled:
             reset_current_command_source_intent(source_intent_token)
             raise
@@ -1219,7 +1289,7 @@ class JakeCore:
             # e riportata all'utente con un messaggio comprensibile invece di terminare il processo.
             self.logger.exception("Errore imprevisto elaborando: %s", text)
             response = "Mi dispiace, si è verificato un errore imprevisto. L'ho registrato nel log."
-            self.event_bus.publish(HudEvent(EventType.ERROR, {"detail": "errore imprevisto"}))
+            self._publish_hud_event(HudEvent(EventType.ERROR, {"detail": "errore imprevisto"}))
         finally:
             slow_notice.cancel()
             model_health.end_turn(health_token)
@@ -1252,12 +1322,18 @@ class JakeCore:
             if response:
                 self.last_response = response
         reset_current_command_source_intent(source_intent_token)
+        replied = bool(response) and response != self.EXIT_SENTINEL
         if self.private_mode:
             self.logger.info("Scambio in modalità privata: non registrato.")
         else:
-            self.event_bus.publish(HudEvent(EventType.USER_MESSAGE, {"text": text}))
-            if response and response != self.EXIT_SENTINEL:
-                self.event_bus.publish(HudEvent(EventType.JAKE_MESSAGE, {"text": response}))
+            self._publish_hud_event(HudEvent(EventType.USER_MESSAGE, {"text": text}))
+            if replied:
+                self._publish_hud_event(HudEvent(EventType.JAKE_MESSAGE, {"text": response}))
+        if self.private_mode or not replied:
+            # nessun JAKE_MESSAGE che riporti l'HUD a riposo (turno privato, risposta vuota, uscita): lo stato del
+            # turno si chiude comunque, senza contenuto - un comando scritto non deve lasciare l'orb su THINKING
+            self._publish_hud_event(HudEvent(EventType.IDLE, {}))
+        if not self.private_mode:
             self.memory_manager.log_turn("user", text)
             if response != self.EXIT_SENTINEL:
                 self.memory_manager.log_turn("jake", response)
@@ -1807,12 +1883,18 @@ class JakeCore:
                 learn=False,
             )
 
-        if self._unclear_voice_turn(text):
+        assessment = self._assess_voice_turn(text)
+        if assessment is not None and assessment.verdict in (UNCLEAR, AMBIGUOUS):
             # prova reale del 27/09/2026: "Jake, io ero sono." (trascrizione rotta) era diventata una chiacchiera
             # inventata ("stai cambiando tono?"). Meglio chiedere che indovinare il significato.
-            reply = "Non ho capito bene, puoi ripetere?"
+            reply = self.UNCLEAR_REPLY
+            if assessment.verdict == AMBIGUOUS:
+                reply = f"Non ho capito bene: intendevi «{assessment.options[0]}» o «{assessment.options[1]}»? Puoi ripetere?"
             self._remember_exchange(text, Command("UNKNOWN", {}), reply)
             return reply
+        if assessment is not None and assessment.verdict == REPAIRED:
+            # "chiore sono" -> "che ore sono": da qui in poi (router, apprendimento, memoria) vale la frase corretta
+            text = assessment.text
 
         if len(text.split()) <= 4:
             quick = chitchat.reply(text)
@@ -1967,6 +2049,9 @@ class JakeCore:
         resolved, policy_result, policy_reason = self._authorize_command(resolved)
         if policy_result is not None:
             return ActionExecution(resolved, policy_result, policy_reason=policy_reason)
+        if resolved.intent not in self.MODEL_ONLY_INTENTS:
+            # una skill vera parte adesso (autorizzata): l'orb passa da "penso" a "eseguo"
+            self._publish_hud_event(HudEvent(EventType.EXECUTING, {}))
         result = self.skill_registry.execute(
             resolved.intent, resolved.parameters, policy_engine=self.policy_engine,
             action_id=action_id, private=self.private_mode,
@@ -3425,6 +3510,9 @@ class JakeCore:
         # componente che non si chiude bene non deve impedire agli altri di provarci).
         #
         # F4.8.2: l'HUD nativo si chiude prima del server a cui e' collegato (niente riconnessioni a vuoto).
+        fallback = getattr(self, "_ready_fallback", None)
+        if fallback is not None:
+            fallback.cancel()
         native_hud = getattr(self, "native_hud", None)
         if native_hud is not None:
             try:

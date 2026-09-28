@@ -22,6 +22,8 @@ GlassPanel {
     property int screenCount: 1
     signal layoutRequested()
     signal screenRequested()
+    // "Ferma tutto" sempre raggiungibile anche quando l'Action Center non e' mostrato (compare solo quando serve)
+    signal stopRequested()
     implicitHeight: 36
     radius: height / 2
 
@@ -91,6 +93,14 @@ GlassPanel {
             visible: root.activeDevice.length > 0
             dot: Theme.accent
             label: root.activeDevice
+        }
+        ToolButton {
+            text: qsTr("■ Ferma")
+            font.pixelSize: Theme.fontSmall
+            Layout.preferredHeight: 26
+            palette.buttonText: "#fecaca"
+            Accessible.name: qsTr("Ferma tutto: interrompe subito agenti e automazioni (Ctrl+Alt+Fine)")
+            onClicked: root.stopRequested()
         }
     }
 }

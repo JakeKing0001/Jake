@@ -71,22 +71,21 @@ class AskQuestionSkill:
         answer = self._ask(question)
         if answer is None:
             return self._model_failure_result()
-        answer, cited = self._cite(answer, memories)
+        answer, cited = self._cite(answer, memories, question)
         kept, drifted = keep_reply_language(answer, question)
         if drifted and len(kept) < self.MIN_KEPT_CHARS:
             # la deriva e' arrivata presto: un solo nuovo tentativo, deterministico e con la lingua ribadita
             retry = self._ask(question, temperature=0.0, insist_language=True)
             if retry is not None:
                 kept, _ = keep_reply_language(retry, question)
-                kept, cited = self._cite(kept, memories)
+                kept, cited = self._cite(kept, memories, question)
         if drifted and not kept:
             kept = "Scusa, non sono riuscito a formulare bene la risposta. Puoi ripetere la domanda?"
         if cited and kept:
-            from core.response_formatter import memory_provenance
+            from core.response_formatter import memory_citation
 
             self._record_use(cited)
-            sources = "; ".join(f"{m['key']}{memory_provenance(m)}" for m in cited)
-            kept = f"{kept}\n(Dai miei ricordi: {sources})"
+            kept = f"{kept}\n{memory_citation(cited)}"
         return SkillResult(success=True, data={"answer": kept, "memories_used": [m["key"] for m in cited]})
 
     MAX_MEMORY_CHARS = 700
@@ -106,17 +105,25 @@ class AskQuestionSkill:
             return []  # la memoria non deve mai impedire di rispondere
 
     @staticmethod
-    def _cite(answer: str, memories: list[dict]) -> tuple[str, list[dict]]:
-        """Quali ricordi la risposta ha usato davvero: il marcatore [M#] chiesto al modello, oppure il valore
-        del ricordo citato alla lettera. I marcatori si tolgono dal testo (la risposta viene letta ad alta voce)."""
+    def _cite(answer: str, memories: list[dict], question: str = "") -> tuple[str, list[dict]]:
+        """Quali ricordi la risposta ha usato davvero: il valore del ricordo citato alla lettera, oppure il marcatore
+        [M#] chiesto al modello PIU' almeno una parola propria del ricordo nella risposta (una che non sia gia' nella
+        domanda: un modello piccolo scrive [M1] anche quando non usa nulla). I marcatori si tolgono dal testo (la
+        risposta viene letta ad alta voce)."""
         import re
+
+        def content_words(text: str) -> set[str]:
+            return {word for word in re.findall(r"\w+", text.lower()) if len(word) >= 4}
 
         cited_indexes = {int(n) for n in re.findall(r"\[M(\d+)\]", answer)}
         clean = re.sub(r"\s*\[M\d+\]", "", answer).strip()
+        answer_words, question_words = content_words(clean), content_words(question)
         cited = []
         for index, memory in enumerate(memories, start=1):
             value = str(memory.get("value") or "").strip().lower()
-            if index in cited_indexes or (len(value) >= 4 and value in clean.lower()):
+            literal = len(value) >= 4 and value in clean.lower()
+            supported = bool((content_words(value) - question_words) & answer_words)
+            if literal or (index in cited_indexes and supported):
                 cited.append(memory)
         return clean, cited
 

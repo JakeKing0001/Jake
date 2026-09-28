@@ -1,6 +1,8 @@
 import QtQuick
 import QtQuick3D
 import QtQuick3D.Particles3D
+import QtQuick.Effects
+import QtQuick.Shapes
 
 // F4.4.7/F4.4.8 - Orb 3D: scena Qt Quick 3D reale (camera prospettica, nucleo volumetrico emissivo, guscio
 // luminoso) avvolta da una massa di particelle viva. Tutto deriva dallo stato reale del core (JakeClient.state),
@@ -148,6 +150,8 @@ Item {
     property real wanderPace: targetWanderPace
     property real flow: reducedMotion ? 0 : targetFlow
     property color glowColor: stateColor
+    // colore alla NASCITA delle particelle: segue la transizione morbida, tranne in ERROR (subito rosso, vedi errorBurst)
+    readonly property color particleColor: state === "ERROR" ? stateColor : glowColor
     // le grandezze guidate dall'audio seguono gia' l'inviluppo: animarle ancora le renderebbe molli
     Behavior on shell { enabled: !root.audioState; NumberAnimation { duration: 380; easing.type: Easing.OutCubic } }
     Behavior on outerOrbit { enabled: !root.audioState; NumberAnimation { duration: 700; easing.type: Easing.InOutQuad } }
@@ -169,6 +173,14 @@ Item {
     Behavior on glitch { NumberAnimation { duration: 500 } }
     // dopo il giro corrente di binding: outcome e outcomeSerial cambiano insieme ma in ordine non garantito
     onOutcomeSerialChanged: Qt.callLater(react)
+    // ERROR dura poco (1,8 s in Main.qml) e il colore di una particella si decide alla nascita: senza questo l'errore
+    // si vedeva quasi solo col colore delle particelle VECCHIE. Qui uno scoppio: la massa di prima sparisce e una
+    // raffica rossa nasce e si disperde subito (demo reale del 28/09/2026).
+    onStateChanged: if (state === "ERROR" && !reducedMotion) Qt.callLater(errorBurst)
+    function errorBurst() {
+        particles.reset();
+        outerEmitter.burst(particles.high ? 420 : 160);
+    }
     function react() {
         if (outcome.length === 0 || reducedMotion) return;
         if (outcome === "success") {
@@ -248,17 +260,57 @@ Item {
         z: 1
     }
 
+    Item {
+        id: vignette
+        width: view.width
+        height: view.height
+        visible: false
+        layer.enabled: true
+        Shape {
+            anchors.fill: parent
+            ShapePath {
+                strokeWidth: -1
+                fillGradient: RadialGradient {
+                    centerX: vignette.width / 2; centerY: vignette.height / 2
+                    focalX: vignette.width / 2; focalY: vignette.height / 2
+                    centerRadius: Math.min(vignette.width, vignette.height) / 2
+                    GradientStop { position: 0.0; color: "white" }
+                    GradientStop { position: 0.7; color: "white" }
+                    GradientStop { position: 1.0; color: "transparent" }
+                }
+                startX: 0; startY: 0
+                PathLine { x: vignette.width; y: 0 }
+                PathLine { x: vignette.width; y: vignette.height }
+                PathLine { x: 0; y: vignette.height }
+                PathLine { x: 0; y: 0 }
+            }
+        }
+    }
+    // la scena e' piu' grande dell'area dell'orb (1,5x, camera arretrata in proporzione: l'orb resta della stessa
+    // misura): in SPEAKING a volume alto la nube si espandeva fino ai bordi della View3D e veniva tagliata in un
+    // quadrato (demo reale del 28/09/2026). Il margine in piu' e' trasparente e non intercetta il mouse.
+    readonly property real sceneScale: 1.5
     View3D {
         id: view
-        anchors.fill: parent
-        anchors.bottomMargin: 18
+        anchors.centerIn: parent
+        anchors.verticalCenterOffset: -9
+        width: root.width * root.sceneScale
+        height: (root.height - 18) * root.sceneScale
+        // bordo della scena sfumato in cerchio: nessuno spigolo della View3D puo' comparire, in nessun layout
+        layer.enabled: root.effectiveQuality === "high"
+        layer.effect: MultiEffect {
+            maskEnabled: true
+            maskSource: vignette
+            maskThresholdMin: 0.0
+            maskSpreadAtMin: 1.0
+        }
         environment: SceneEnvironment {
             backgroundMode: SceneEnvironment.Transparent
             antialiasingMode: root.effectiveQuality === "high" ? SceneEnvironment.MSAA : SceneEnvironment.NoAA
             antialiasingQuality: SceneEnvironment.High
         }
 
-        PerspectiveCamera { position: Qt.vector3d(0, 0, 320); clipNear: 1; clipFar: 1000 }
+        PerspectiveCamera { position: Qt.vector3d(0, 0, 320 * root.sceneScale); clipNear: 1; clipFar: 1500 }
         DirectionalLight { eulerRotation.x: -30; eulerRotation.y: -40; brightness: 1.2 }
         PointLight { position: Qt.vector3d(0, 0, 60); color: root.glowColor; brightness: 1.1 + root.audio * 1.8 }
 
@@ -297,14 +349,44 @@ Item {
             running: root.visible
             readonly property bool high: root.effectiveQuality === "high"
 
+            // seconda prova reale del 27/09/2026 ("ancora una sfera rigida di puntini"): il guscio esterno e' DUE
+            // popolazioni che orbitano su assi e velocita' diverse e si attraversano, non una superficie unica
             SpriteParticle3D {
                 id: outerSprite
                 sprite: Texture { source: "assets/particle.png" }
-                maxAmount: particles.high ? 1200 : 420
-                color: root.glowColor
-                colorVariation: Qt.vector4d(0.14, 0.14, 0.14, 0.25)
+                maxAmount: particles.high ? 760 : 300
+                color: root.particleColor
+                colorVariation: Qt.vector4d(0.14, 0.14, 0.14, 0.35)
                 fadeInDuration: 350
                 fadeOutDuration: 600
+                billboard: true
+                blendMode: SpriteParticle3D.Screen
+            }
+            SpriteParticle3D {
+                id: outerSpriteB
+                sprite: Texture { source: "assets/particle.png" }
+                maxAmount: particles.high ? 520 : 160
+                color: Qt.rgba(root.particleColor.r, root.particleColor.g, root.particleColor.b, 0.8)
+                colorVariation: Qt.vector4d(0.18, 0.18, 0.18, 0.4)
+                fadeInDuration: 450
+                fadeOutDuration: 700
+                billboard: true
+                blendMode: SpriteParticle3D.Screen
+            }
+            // scie: rendono visibile il moto tangenziale (archi di luce), non solo punti
+            LineParticle3D {
+                id: streakSprite
+                sprite: Texture { source: "assets/particle.png" }
+                maxAmount: particles.high ? 140 : 40
+                color: Qt.lighter(root.particleColor, 1.2)
+                colorVariation: Qt.vector4d(0.1, 0.1, 0.1, 0.3)
+                segmentCount: particles.high ? 10 : 5
+                length: 26 + root.audio * 30
+                lengthVariation: 10
+                alphaFade: 1.0            // la coda della scia sfuma del tutto
+                scaleMultiplier: 0.35
+                fadeInDuration: 200
+                fadeOutDuration: 500
                 billboard: true
                 blendMode: SpriteParticle3D.Screen
             }
@@ -312,7 +394,7 @@ Item {
                 id: midSprite
                 sprite: Texture { source: "assets/particle.png" }
                 maxAmount: particles.high ? 520 : 0          // qualita' bassa: solo guscio e alone
-                color: Qt.rgba(root.glowColor.r, root.glowColor.g, root.glowColor.b, 0.55)
+                color: Qt.rgba(root.particleColor.r, root.particleColor.g, root.particleColor.b, 0.55)
                 colorVariation: Qt.vector4d(0.1, 0.1, 0.1, 0.3)
                 fadeInDuration: 500
                 fadeOutDuration: 800
@@ -323,7 +405,7 @@ Item {
                 id: innerSprite
                 sprite: Texture { source: "assets/particle.png" }
                 maxAmount: particles.high ? 420 : 160
-                color: Qt.lighter(root.glowColor, 1.35)
+                color: Qt.lighter(root.particleColor, 1.35)
                 colorVariation: Qt.vector4d(0.08, 0.08, 0.08, 0.2)
                 fadeInDuration: 250
                 fadeOutDuration: 450
@@ -333,20 +415,67 @@ Item {
 
             // guscio esterno: superficie, particelle piccole e fitte
             ParticleEmitter3D {
+                id: outerEmitter
                 particle: outerSprite
                 shape: ParticleShape3D { type: ParticleShape3D.Sphere; fill: false
                     extents: Qt.vector3d(root.shellRadius, root.shellRadius, root.shellRadius) }
-                emitRate: (particles.high ? 460 : 160) * (1 + root.audio * 1.8) * (root.state === "THINKING" ? 1.3 : 1)
+                emitRate: (particles.high ? 290 : 110) * (1 + root.audio * 1.8) * (root.state === "THINKING" ? 1.3 : 1)
                 // abbastanza lunga da vedere la traiettoria, abbastanza breve da cambiare colore col nuovo stato
                 lifeSpan: 2300
                 lifeSpanVariation: 700
-                particleScale: particles.high ? 1.5 : 2.1
-                particleScaleVariation: 0.8
+                // la voce ingrandisce le particelle nuove: la reazione si vede anche nella grana, non solo nel raggio
+                particleScale: (particles.high ? 1.5 : 2.1) * (1 + root.audio * 0.9)
+                particleScaleVariation: 0.9
                 velocity: TargetDirection3D {
                     position: Qt.vector3d(0, 0, 0)
                     normalized: true
                     magnitude: -root.radial
                     magnitudeVariation: Math.abs(root.radial) * 0.6 + 2
+                }
+            }
+            // seconda popolazione del guscio: guscio SPESSO (sfera piena sottile fra 0.85 e 1.15 del raggio, ottenuta
+            // con una spinta radiale variabile), particelle piu' grandi e tenui
+            ParticleEmitter3D {
+                particle: outerSpriteB
+                shape: ParticleShape3D { type: ParticleShape3D.Sphere; fill: false
+                    extents: Qt.vector3d(root.shellRadius * 1.04, root.shellRadius * 1.04, root.shellRadius * 1.04) }
+                emitRate: (particles.high ? 200 : 60) * (1 + root.audio * 1.5)
+                lifeSpan: 2600
+                lifeSpanVariation: 900
+                particleScale: (particles.high ? 2.2 : 2.6) * (1 + root.audio * 0.7)
+                particleScaleVariation: 1.2
+                velocity: TargetDirection3D {
+                    position: Qt.vector3d(0, 0, 0)
+                    normalized: true
+                    magnitude: -root.radial * 0.8
+                    magnitudeVariation: Math.abs(root.radial) * 0.8 + 9
+                }
+            }
+            // scie: poche, nascono sul guscio e seguono l'orbita interna -> archi luminosi che mostrano il verso
+            ParticleEmitter3D {
+                particle: streakSprite
+                enabled: !root.reducedMotion
+                shape: ParticleShape3D { type: ParticleShape3D.Sphere; fill: false
+                    extents: Qt.vector3d(root.shellRadius * 0.9, root.shellRadius * 0.9, root.shellRadius * 0.9) }
+                emitRate: {
+                    switch (root.state) {
+                    case "THINKING": return 46;
+                    case "TRANSCRIBING": return 30;
+                    case "EXECUTING": return 26;
+                    case "LISTENING": case "DICTATION": case "SPEAKING": return 8 + root.audio * 50;
+                    case "ERROR": return 20;
+                    case "WAITING": case "PAUSED": return 0;
+                    default: return 5;
+                    }
+                }
+                lifeSpan: 1400
+                lifeSpanVariation: 400
+                particleScale: 1.3
+                velocity: TargetDirection3D {
+                    position: Qt.vector3d(0, 0, 0)
+                    normalized: true
+                    magnitude: -root.radial * 0.6
+                    magnitudeVariation: 4
                 }
             }
             // volume intermedio: sfera PIENA, particelle piu' grandi e tenui -> profondita', non una superficie
@@ -392,6 +521,20 @@ Item {
                 direction: root.outerAxis
                 magnitude: root.outerOrbit
             }
+            // la seconda popolazione del guscio gira su un asse inclinato e piu' lenta: le due si attraversano
+            PointRotator3D {
+                particles: [outerSpriteB]
+                pivotPoint: Qt.vector3d(0, 0, 0)
+                direction: Qt.vector3d(root.outerAxis.z + 0.6, 0.7, -root.outerAxis.x)
+                magnitude: root.outerOrbit * 0.62 + (root.state === "IDLE" ? 5 : 0)
+            }
+            // le scie seguono il vortice interno (in THINKING il piu' veloce): archi che mostrano il verso del moto
+            PointRotator3D {
+                particles: [streakSprite]
+                pivotPoint: Qt.vector3d(0, 0, 0)
+                direction: root.innerAxis
+                magnitude: root.innerOrbit * 0.8 + (root.state === "IDLE" ? 18 : 0)
+            }
             PointRotator3D {
                 particles: [midSprite]
                 pivotPoint: Qt.vector3d(0, 0, 0)
@@ -406,7 +549,7 @@ Item {
             }
             // moto individuale: ampiezza e ritmo diversi per ogni particella
             Wander3D {
-                particles: [outerSprite, midSprite, innerSprite]
+                particles: [outerSprite, outerSpriteB, midSprite, innerSprite, streakSprite]
                 globalAmount: Qt.vector3d(root.wander * 0.25, root.wander * 0.25, root.wander * 0.25)
                 globalPace: Qt.vector3d(0.1, 0.13, 0.08)
                 uniqueAmount: Qt.vector3d(root.wander, root.wander, root.wander)
@@ -417,14 +560,14 @@ Item {
             }
             // spinta viva dal centro: segue il livello audio in tempo reale (anche sulle particelle gia' nate)
             Repeller3D {
-                particles: [outerSprite, midSprite]
+                particles: [outerSprite, outerSpriteB, midSprite]
                 radius: root.shellRadius * 0.6
                 outerRadius: root.shellRadius * 1.4
                 strength: root.reducedMotion ? 0 : root.audio * 150 + (root.state === "ERROR" ? 50 : 0)
             }
             // EXECUTING: flusso ordinato verso l'alto
             Gravity3D {
-                particles: [outerSprite, midSprite]
+                particles: [outerSprite, outerSpriteB, midSprite]
                 direction: Qt.vector3d(0, 1, 0)
                 magnitude: root.flow
             }

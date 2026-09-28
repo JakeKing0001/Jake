@@ -1,6 +1,7 @@
 import QtQuick
 import QtCore
 import QtQuick.Controls.Basic
+import QtQuick.Effects
 import QtQuick.Layouts
 import JakeHud
 
@@ -8,14 +9,18 @@ import JakeHud
 // collegato al server companion di Jake (core/companion_server.py) con la credenziale per-dispositivo che il
 // core gli consegna (core/native_hud.py).
 //
-// Gerarchia (F4.4/F4.5): l'orb e' la presenza principale; attorno, pannelli di vetro (Theme/GlassPanel, un
-// solo materiale) che compaiono quando servono - conversazione compatta apribile, permission card solo con
-// una conferma in sospeso, action center compatto, barra comandi. Notifiche ed errori sono toast che si
-// chiudono da soli: non si accumulano mai nella conversazione.
+// Composizione (seconda prova reale del 27/09/2026: "troppo spostato a destra, l'orb schiacciato dai pannelli"):
+// l'orb e' il centro visivo, al centro esatto della finestra, e la finestra e' al centro dell'area utile del monitor.
+// Attorno, simmetrici, i pannelli di vetro (un solo materiale, Theme/GlassPanel) che COMPAIONO SOLO QUANDO SERVONO:
+// a sinistra la conversazione, a destra conferme e ultima azione; sotto l'orb il sottotitolo live, in basso la barra
+// comandi. Le colonne laterali tengono il loro spazio anche vuote: l'orb non si sposta mai quando un pannello
+// compare o sparisce. Dietro a tutto l'ambiente (aura dello stato e polvere luminosa, Ambience.qml), che il vetro
+// dei pannelli rifrange. Notifiche ed errori sono toast che si chiudono da soli.
 ApplicationWindow {
     id: window
-    width: 440
-    height: layoutMode === "full" ? 720 : layoutMode === "compact" ? 560 : 470
+    // F4.7.3/F4.7.4: completo (orb + pannelli ai lati), compatto (orb + pannelli sotto), focus (solo l'orb)
+    width: layoutMode === "full" ? 1080 : layoutMode === "compact" ? 600 : 560
+    height: layoutMode === "full" ? 680 : layoutMode === "compact" ? 820 : 540
     visible: true
     title: qsTr("Jake HUD")
     color: "transparent"
@@ -50,7 +55,7 @@ ApplicationWindow {
 
     JakeClient {
         id: jake
-        onMessageReceived: (role, text) => conversation.append(role, text)
+        onMessageReceived: (role, text) => { conversation.append(role, text); window.touch(); }
         onNotification: (kind, text) => toast.show(text, kind === "reminder" ? Theme.accent : Theme.textMuted, kind)
         onErrorOccurred: (detail) => toast.show(detail || qsTr("Errore sconosciuto"), Theme.danger, "error")
         onVisibilityRequested: (visible) => {
@@ -77,11 +82,8 @@ ApplicationWindow {
         }
     }
 
-    // Click-through ovunque tranne sopra i pannelli (mai calcolato dalla geometria del layout, che
-    // includerebbe i vuoti tra un pannello e l'altro).
-    // F4.7.3/F4.7.4: layout completo / compatto / focus, ricordato PER MONITOR, e il monitor scelto. Compatto: niente
-    // conversazione; focus: niente conversazione ne' barra comandi (torna con Ctrl+Shift+J). Richiesta di conferma
-    // e "Ferma tutto" restano sempre visibili. L'HUD sta sul bordo destro del monitor e ci torna se un monitor sparisce.
+    // Layout ricordato PER MONITOR, e il monitor scelto. "Ferma tutto" (riga di stato) e la richiesta di conferma
+    // restano sempre visibili. Se il monitor dell'HUD sparisce si torna al principale, sempre al centro.
     Settings {
         id: hudSettings
         category: "layout"
@@ -112,12 +114,17 @@ ApplicationWindow {
         layoutMode = modeFor(window.screen.name);
         Qt.callLater(place);
     }
+    // al centro dell'area UTILE del monitor (senza barra delle applicazioni), su ogni monitor e in ogni layout
     function place() {
+        const area = overlayStyler.availableGeometry(window);
         const s = window.screen;
-        if (!s) return;
-        // margine per la barra delle applicazioni: il QScreen di QML espone solo la geometria intera del monitor
-        window.x = s.virtualX + s.width - window.width - 24;
-        window.y = s.virtualY + Math.max(12, (s.height - 48 - window.height) / 2);
+        if (area.width > 0) {
+            window.x = Math.round(area.x + (area.width - window.width) / 2);
+            window.y = Math.round(area.y + Math.max(0, (area.height - window.height) / 2));
+        } else if (s) {
+            window.x = Math.round(s.virtualX + (s.width - window.width) / 2);
+            window.y = Math.round(s.virtualY + Math.max(0, (s.height - 48 - window.height) / 2));
+        }
     }
     function chooseScreen() {
         const screens = Qt.application.screens;
@@ -129,21 +136,49 @@ ApplicationWindow {
     // hot-plug: un monitor collegato o scollegato (il monitor dell'HUD puo' sparire) -> si riparte dalla scelta
     Connections { target: Qt.application; function onScreensChanged() { window.chooseScreen(); } }
     onScreenChanged: Qt.callLater(place)
+    onWidthChanged: Qt.callLater(place)
+    onHeightChanged: Qt.callLater(place)
 
-    // B7 (prova reale del 27/09/2026): un errore del modello era subito coperto dalla risposta (JAKE_MESSAGE -> IDLE)
-    // e l'orb non mostrava mai ERROR. Lo stato ERROR resta visibile almeno 2,5 s prima di tornare a IDLE; qualunque
-    // stato attivo (ascolto, pensiero, voce) lo sostituisce subito.
+    // ---- stato mostrato dall'orb ----------------------------------------------------------------------------
+    // ERROR resta visibile almeno 1,8 s (B7, prova reale del 27/09/2026: un errore era subito coperto dalla risposta)
+    // anche se nel frattempo Jake parla per spiegarlo; solo l'utente che parla (ascolto, trascrizione, dettatura) lo
+    // sostituisce subito. Poi si torna allo stato REALE del momento, mai a uno vecchio.
     property bool holdingError: false
-    readonly property string displayState: holdingError && jake.state === "IDLE" ? "ERROR" : jake.state
+    readonly property string rawState: holdingError && ["LISTENING", "TRANSCRIBING", "DICTATION"].indexOf(jake.state) < 0
+        ? "ERROR" : jake.state
     Connections {
         target: jake
         function onStateChanged() {
             if (jake.state === "ERROR") { window.holdingError = true; errorHold.restart(); }
-            else if (jake.state !== "IDLE") window.holdingError = false;
+            else if (["LISTENING", "TRANSCRIBING", "DICTATION"].indexOf(jake.state) >= 0) window.holdingError = false;
+            if (jake.state !== "IDLE") window.touch();
         }
     }
-    Timer { id: errorHold; interval: 2500; onTriggered: window.holdingError = false }
+    Timer { id: errorHold; interval: 1800; onTriggered: window.holdingError = false }
+    // IDLE si mostra dopo un istante: la risposta testuale arriva un attimo prima della voce (JAKE_MESSAGE -> IDLE,
+    // poi SPEAKING), e l'orb non deve "spegnersi" per un fotogramma fra le due. Ogni stato attivo passa subito.
+    property string displayState: "IDLE"
+    onRawStateChanged: {
+        if (rawState === "IDLE") idleSettle.restart();
+        else { idleSettle.stop(); displayState = rawState; }
+    }
+    Timer { id: idleSettle; interval: 220; onTriggered: if (window.rawState === "IDLE") window.displayState = "IDLE" }
+    readonly property string shownState: orbDemo ? demo.state : displayState
 
+    // ---- quando i pannelli servono ----------------------------------------------------------------------------
+    property real lastActivityAt: 0
+    property real nowMs: Date.now()
+    function touch() { lastActivityAt = Date.now(); nowMs = lastActivityAt; }
+    Timer { interval: 1000; repeat: true; running: window.visible; onTriggered: window.nowMs = Date.now() }
+    readonly property bool recentlyActive: nowMs - lastActivityAt < 30000 || shownState !== "IDLE"
+    Connections {
+        target: jake
+        function onViewChanged() {
+            if (jake.transcriptText.length > 0 || jake.planSteps.length > 0 || jake.confirmationPending) window.touch();
+        }
+    }
+
+    // ---- click-through ---------------------------------------------------------------------------------------
     readonly property bool pointerOverAnyPanel: statusPanel.hovered || orb.hovered || permissionCard.hovered
         || conversation.hovered || actionCenter.hovered || commandBar.hovered || toast.hovered
     property bool typing: false
@@ -157,6 +192,9 @@ ApplicationWindow {
         for (let i = 0; i < items.length; ++i) {
             const item = items[i];
             if (!item || !item.visible || item.opacity < 0.02) continue;
+            let ancestor = item.parent, hidden = false;
+            while (ancestor) { if (!ancestor.visible || ancestor.opacity < 0.02) { hidden = true; break; } ancestor = ancestor.parent; }
+            if (hidden) continue;
             const p = item.mapFromItem(null, point.x, point.y);
             if (p.x >= 0 && p.y >= 0 && p.x <= item.width && p.y <= item.height) return true;
         }
@@ -170,6 +208,7 @@ ApplicationWindow {
             if (over !== window.cursorOverPanel) {
                 window.cursorOverPanel = over;
                 overlayStyler.setClickThrough(window, !over);
+                if (over) window.touch();   // un pannello sotto il cursore non sparisce mentre lo si usa
             }
         }
     }
@@ -177,6 +216,8 @@ ApplicationWindow {
     Component.onCompleted: {
         Theme.highContrast = highContrast
         Theme.textScale = textScale
+        Theme.richGlass = orbQuality === "high" && !highContrast
+        Theme.backdrop = frosted
         if (jakeToken.length > 0)
             jake.setCredentials(jakeDeviceId, jakeToken)
         jake.connectToJake(jakeBaseUrl)
@@ -184,102 +225,201 @@ ApplicationWindow {
         overlayStyler.setClickThrough(window, true)
         chooseScreen()
     }
+    Binding { target: Theme; property: "stateColor"; value: orb.item && orb.item.glowColor !== undefined ? orb.item.glowColor : Theme.ok }
 
-    ColumnLayout {
-        id: content
+    // ---- geometria -----------------------------------------------------------------------------------------
+    readonly property int margin: 16
+    readonly property int orbSize: layoutMode === "full" ? 410 : layoutMode === "compact" ? 350 : 320
+    readonly property int orbTop: 64
+    readonly property int sideWidth: 318
+    readonly property int sideGap: 26
+    readonly property point orbCenter: Qt.point(width / 2, orbTop + orbSize / 2)
+
+    // ---- ambiente: aura e polvere, e la loro copia sfocata che il vetro rifrange --------------------------------
+    MultiEffect {
+        id: frosted
+        anchors.fill: ambience
+        source: ambience
+        visible: Theme.richGlass
+        blurEnabled: true
+        blur: 1.0
+        blurMax: 48
+        autoPaddingEnabled: false
+    }
+    Ambience {
+        id: ambience
         anchors.fill: parent
-        anchors.margins: 14
-        spacing: 10
+        state: window.shownState
+        tint: Theme.stateColor
+        center: window.orbCenter
+        orbRadius: window.orbSize * 0.42
+        level: orb.item && orb.item.audio !== undefined ? orb.item.audio : 0
+        reducedMotion: window.reducedMotion
+        rich: window.orbQuality === "high"
+    }
 
-        StatusPanel {
-            id: statusPanel
-            Layout.fillWidth: true
-            connected: jake.connected
-            connectionProblem: jake.connectionProblem
-            state: jake.state
-            activeDevice: jake.activeDevice
-            micOpen: jake.micOpen
-            micDiscarding: jake.micDiscarding
-            privateMode: jake.privateMode
-            notificationMode: jake.notificationMode
-            notificationModeLabel: jake.notificationModeLabel
-            notificationsPending: jake.notificationsPending
-            layoutMode: window.layoutMode
-            screenCount: Qt.application.screens.length
-            onLayoutRequested: window.cycleLayout()
-            onScreenRequested: window.nextScreen()
-        }
+    StatusPanel {
+        id: statusPanel
+        anchors.top: parent.top
+        anchors.topMargin: 10
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: Math.min(parent.width - 2 * window.margin, 640)
+        opacity: window.recentlyActive || hovered ? 1 : 0.72
+        Behavior on opacity { NumberAnimation { duration: 300 } }
+        connected: jake.connected
+        connectionProblem: jake.connectionProblem
+        state: jake.state
+        activeDevice: jake.activeDevice
+        micOpen: jake.micOpen
+        micDiscarding: jake.micDiscarding
+        privateMode: jake.privateMode
+        notificationMode: jake.notificationMode
+        notificationModeLabel: jake.notificationModeLabel
+        notificationsPending: jake.notificationsPending
+        layoutMode: window.layoutMode
+        screenCount: Qt.application.screens.length
+        onLayoutRequested: window.cycleLayout()
+        onScreenRequested: window.nextScreen()
+        onStopRequested: jake.sendCommand("ferma tutto")
+    }
 
-        // F4.4.7: orb 3D (Qt Quick 3D) se disponibile, altrimenti l'orb 2D con la stessa interfaccia.
-        // L'area dell'orb prende lo spazio libero: e' la presenza principale dell'HUD.
-        Item {
-            id: orbArea
-            Layout.fillWidth: true
-            Layout.fillHeight: !conversation.expanded
-            Layout.preferredHeight: 250
-            Layout.minimumHeight: 170
+    // F4.4.7: orb 3D (Qt Quick 3D) se disponibile, altrimenti l'orb 2D con la stessa interfaccia. Al centro.
+    Item {
+        id: orbArea
+        x: (window.width - window.orbSize) / 2
+        y: window.orbTop
+        width: window.orbSize
+        height: window.orbSize
         Loader {
             id: orb
             anchors.centerIn: parent
             // un Loader con dimensioni esplicite ridimensiona il suo item: le dimensioni stanno solo qui
-            width: window.orb3d ? Math.min(orbArea.width, orbArea.height, 300) : 140
+            width: window.orb3d ? orbArea.width : 160
             height: width
             readonly property bool hovered: item ? item.hovered : false
             source: window.orb3d ? "Orb3D.qml" : "Orb.qml"
             onStatusChanged: if (status === Loader.Error && source.toString().indexOf("Orb3D") >= 0) source = "Orb.qml"
         }
-        }
-        Binding { target: orb.item; property: "state"; value: window.orbDemo ? demo.state : window.displayState; when: orb.item !== null }
-        Binding { target: orb.item; property: "status"; value: window.orbDemo ? "" : jake.stateStatus
-                  when: orb.item !== null && orb.item.hasOwnProperty("status") }
-        Binding { target: orb.item; property: "outcome"; value: window.orbDemo ? demo.outcome : jake.lastOutcome; when: orb.item !== null }
-        Binding { target: orb.item; property: "outcomeSerial"; value: window.orbDemo ? demo.index : jake.outcomeSerial
-                  when: orb.item !== null && orb.item.hasOwnProperty("outcomeSerial") }
-        // F4.4.4: livello audio reale (mai audio); decade a zero se non arrivano aggiornamenti
-        Binding { target: orb.item; property: "level"; value: window.orbDemo ? demo.level : levelDecay.level
-                  when: orb.item !== null && orb.item.hasOwnProperty("level") }
-        QtObject {
-            id: demo
-            readonly property var steps: [
-                ["IDLE", ""], ["LISTENING", ""], ["TRANSCRIBING", ""], ["THINKING", ""], ["EXECUTING", ""], ["IDLE", "success"],
-                ["SPEAKING", ""], ["WAITING", ""], ["IDLE", "warning"], ["ERROR", "error"], ["PAUSED", ""]]
-            property int index: 0
-            property string state: steps[index][0]
-            property string outcome: steps[index][1]
-            property real phase: 0
-            // voce/microfono sintetici: sillabe irregolari, non una sinusoide perfetta
-            readonly property real level: (state === "LISTENING" || state === "SPEAKING")
-                ? Math.max(0, Math.sin(phase * 7.3) * 0.6 + Math.sin(phase * 2.1) * 0.4) : 0
-        }
-        Timer { running: window.orbDemo; interval: 4000; repeat: true
-                onTriggered: demo.index = (demo.index + 1) % demo.steps.length }
-        Timer { running: window.orbDemo; interval: 50; repeat: true; onTriggered: demo.phase += 0.05 }
-        QtObject {
-            id: levelDecay
-            property real level: 0
-            property real incoming: jake.audioLevel
-            onIncomingChanged: { level = incoming; decayTimer.restart(); }
-        }
-        Timer { id: decayTimer; interval: 400; onTriggered: levelDecay.level = 0 }
-        Binding { target: orb.item; property: "reducedMotion"; value: window.reducedMotion
-                  when: orb.item !== null && orb.item.hasOwnProperty("reducedMotion") }
-        Binding { target: orb.item; property: "quality"; value: window.orbQuality
-                  when: orb.item !== null && orb.item.hasOwnProperty("quality") }
+    }
+    Binding { target: orb.item; property: "state"; value: window.shownState; when: orb.item !== null }
+    Binding { target: orb.item; property: "status"; value: window.orbDemo ? "" : jake.stateStatus
+              when: orb.item !== null && orb.item.hasOwnProperty("status") }
+    Binding { target: orb.item; property: "outcome"; value: window.orbDemo ? demo.outcome : jake.lastOutcome; when: orb.item !== null }
+    Binding { target: orb.item; property: "outcomeSerial"; value: window.orbDemo ? demo.index : jake.outcomeSerial
+              when: orb.item !== null && orb.item.hasOwnProperty("outcomeSerial") }
+    // F4.4.4: livello audio reale (mai audio); decade a zero se non arrivano aggiornamenti
+    Binding { target: orb.item; property: "level"; value: window.orbDemo ? demo.level : levelDecay.level
+              when: orb.item !== null && orb.item.hasOwnProperty("level") }
+    QtObject {
+        id: demo
+        readonly property var steps: [
+            ["IDLE", ""], ["LISTENING", ""], ["TRANSCRIBING", ""], ["THINKING", ""], ["EXECUTING", ""], ["IDLE", "success"],
+            ["SPEAKING", ""], ["WAITING", ""], ["IDLE", "warning"], ["ERROR", "error"], ["PAUSED", ""]]
+        property int index: 0
+        property string state: steps[index][0]
+        property string outcome: steps[index][1]
+        property real phase: 0
+        // voce/microfono sintetici: sillabe irregolari, non una sinusoide perfetta
+        readonly property real level: (state === "LISTENING" || state === "SPEAKING")
+            ? Math.max(0, Math.sin(phase * 7.3) * 0.6 + Math.sin(phase * 2.1) * 0.4) : 0
+    }
+    Timer { running: window.orbDemo; interval: 4000; repeat: true
+            onTriggered: demo.index = (demo.index + 1) % demo.steps.length }
+    Timer { running: window.orbDemo; interval: 50; repeat: true; onTriggered: demo.phase += 0.05 }
+    QtObject {
+        id: levelDecay
+        property real level: 0
+        property real incoming: jake.audioLevel
+        onIncomingChanged: { level = incoming; decayTimer.restart(); }
+    }
+    Timer { id: decayTimer; interval: 400; onTriggered: levelDecay.level = 0 }
+    Binding { target: orb.item; property: "reducedMotion"; value: window.reducedMotion
+              when: orb.item !== null && orb.item.hasOwnProperty("reducedMotion") }
+    Binding { target: orb.item; property: "quality"; value: window.orbQuality
+              when: orb.item !== null && orb.item.hasOwnProperty("quality") }
+
+    // pillola di vetro dietro al sottotitolo: sopra un desktop pieno di testo il sottotitolo nudo non si leggeva
+    Rectangle {
+        anchors.centerIn: caption
+        width: caption.contentWidth + 28
+        height: caption.contentHeight + 12
+        radius: height / 2
+        color: Theme.glassBottom
+        border.width: 1
+        border.color: Theme.glassBorder
+        opacity: caption.opacity * 0.92
+        visible: caption.text.length > 0
+    }
+    // sottotitolo live sotto l'orb: cio' che Jake sta sentendo (provvisorio, in corsivo) o il passo in corso; nei
+    // layout senza conversazione laterale anche l'ultima risposta, per qualche secondo
+    Text {
+        id: caption
+        anchors.top: orbArea.bottom
+        anchors.topMargin: 8
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: Math.min(window.width - 2 * window.margin, 560)
+        horizontalAlignment: Text.AlignHCenter
+        wrapMode: Text.WordWrap
+        maximumLineCount: 2
+        elide: Text.ElideRight
+        readonly property bool live: jake.transcriptText.length > 0 && !jake.transcriptFinal
+        text: live ? "«" + jake.transcriptText + "»"
+            : jake.state === "EXECUTING" && jake.stepDescription.length > 0 ? jake.stepDescription
+            : window.layoutMode !== "full" && window.recentlyActive ? conversation.lastJake : ""
+        font.italic: live
+        font.pixelSize: Theme.fontBody
+        color: live ? Theme.textMuted : Theme.text
+        style: Text.Raised
+        styleColor: "#a0000000"
+        opacity: text.length > 0 ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 250 } }
+        Accessible.name: live ? qsTr("Sto sentendo: ") + jake.transcriptText : text
+    }
+
+    // ---- colonna sinistra: conversazione (solo layout completo) ------------------------------------------------
+    ConversationPanel {
+        id: conversation
+        readonly property bool wanted: window.layoutMode === "full"
+            && (expanded || hovered || (hasContent && window.recentlyActive))
+        x: orbArea.x - window.sideGap - width
+        width: window.sideWidth
+        height: Math.min(implicitHeight, window.orbSize)
+        anchors.verticalCenter: orbArea.verticalCenter
+        opacity: wanted ? 1 : 0
+        visible: opacity > 0.01
+        Behavior on opacity { NumberAnimation { duration: window.reducedMotion ? 0 : 320; easing.type: Easing.OutCubic } }
+        transcriptText: ""   // la trascrizione live e' il sottotitolo sotto l'orb
+        transcriptFinal: jake.transcriptFinal
+        stepDescription: jake.state === "EXECUTING" ? jake.stepDescription : ""
+        // il piano resta visibile finche' si lavora e mentre si attende una conferma a meta' compito
+        planSteps: jake.state === "EXECUTING" || jake.state === "WAITING" ? jake.planSteps : []
+        evidenceSummary: jake.evidenceSummary
+        inspectionReason: jake.inspectionReason
+    }
+
+    // ---- colonna destra (completo) o sotto il sottotitolo (compatto): conferma e ultima azione ----------------
+    Column {
+        id: sideColumn
+        spacing: 10
+        width: window.layoutMode === "full" ? window.sideWidth : Math.min(window.width - 2 * window.margin, 480)
+        x: window.layoutMode === "full" ? orbArea.x + orbArea.width + window.sideGap : (window.width - width) / 2
+        y: window.layoutMode === "full" ? orbArea.y + (orbArea.height - height) / 2 : caption.y + Math.max(caption.height, 20) + 16
+        visible: window.layoutMode !== "focus" || jake.confirmationPending
 
         // F4.5.3: permission card - azione, rischio, fonte esterna. Si conferma a voce o scrivendo "si'"
-        // (stesso percorso della policy), nessun bottone che scavalchi la conferma.
+        // (stesso percorso della policy), nessun bottone che scavalchi la conferma. Sempre visibile se in sospeso.
         GlassPanel {
             id: permissionCard
-            Layout.fillWidth: true
+            width: parent.width
             visible: jake.confirmationPending
             accentColor: Theme.attention
-            implicitHeight: permissionColumn.implicitHeight + 20
+            height: permissionColumn.implicitHeight + 24
             Accessible.role: Accessible.AlertMessage
             Accessible.name: permissionTitle.text + ". " + permissionDetail.text
             Column {
                 id: permissionColumn
                 anchors.fill: parent
-                anchors.margins: 10
+                anchors.margins: 12
                 spacing: 3
                 Text {
                     id: permissionTitle
@@ -301,24 +441,15 @@ ApplicationWindow {
             }
         }
 
-        ConversationPanel {
-            id: conversation
-            visible: window.layoutMode === "full"
-            Layout.fillWidth: true
-            Layout.preferredHeight: implicitHeight
-            Layout.fillHeight: expanded
-            transcriptText: jake.transcriptText
-            transcriptFinal: jake.transcriptFinal
-            stepDescription: jake.state === "EXECUTING" ? jake.stepDescription : ""
-            // il piano resta visibile finche' si lavora e mentre si attende una conferma a meta' compito
-            planSteps: jake.state === "EXECUTING" || jake.state === "WAITING" ? jake.planSteps : []
-            evidenceSummary: jake.evidenceSummary
-            inspectionReason: jake.inspectionReason
-        }
-
         ActionCenter {
             id: actionCenter
-            Layout.fillWidth: true
+            width: parent.width
+            // compare con un'azione recente, finche' si puo' annullare o riprovare, o sotto il cursore
+            readonly property bool wanted: activitySummary.length > 0
+                && (window.recentlyActive || undoAvailable || retryAvailable || hovered)
+            opacity: wanted ? 1 : 0
+            visible: opacity > 0.01
+            Behavior on opacity { NumberAnimation { duration: window.reducedMotion ? 0 : 320 } }
             activitySummary: jake.lastActivitySummary
             activityDetails: jake.lastActivityDetails
             undoExpiresAt: jake.lastUndoExpiresAt
@@ -328,22 +459,26 @@ ApplicationWindow {
             onRetryRequested: jake.sendCommand("riprova l'ultima azione")
             onStopRequested: jake.sendCommand("ferma tutto")
         }
+    }
 
-        CommandBar {
-            id: commandBar
-            // in focus ricompare solo mentre si scrive (Ctrl+Shift+J)
-            visible: window.layoutMode !== "focus" || window.typing
-            Layout.fillWidth: true
-            onCommandSubmitted: (text) => jake.sendCommand(text)
-            onKeyboardRequested: {
-                window.typing = true;
-                overlayStyler.beginKeyboardInput(window);
-            }
-            onKeyboardReleased: {
-                window.typing = false;
-                overlayStyler.endKeyboardInput(window);
-                overlayStyler.setClickThrough(window, !window.pointerOverAnyPanel);
-            }
+    CommandBar {
+        id: commandBar
+        // in focus ricompare solo mentre si scrive (Ctrl+Shift+J)
+        visible: window.layoutMode !== "focus" || window.typing
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 12
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: Math.min(parent.width - 2 * window.margin, 580)
+        height: implicitHeight
+        onCommandSubmitted: (text) => { jake.sendCommand(text); window.touch(); }
+        onKeyboardRequested: {
+            window.typing = true;
+            overlayStyler.beginKeyboardInput(window);
+        }
+        onKeyboardReleased: {
+            window.typing = false;
+            overlayStyler.endKeyboardInput(window);
+            overlayStyler.setClickThrough(window, !window.pointerOverAnyPanel);
         }
     }
 
@@ -365,9 +500,9 @@ ApplicationWindow {
             hideTimer.restart();
         }
         anchors.horizontalCenter: parent.horizontalCenter
-        y: 58
-        width: Math.min(parent.width - 40, Math.max(toastText.implicitWidth, toastActions.implicitWidth) + 36)
-        height: toastColumn.implicitHeight + 18
+        y: 56
+        width: Math.min(parent.width - 40, 560, Math.max(toastText.implicitWidth, toastActions.implicitWidth) + 40)
+        height: toastColumn.implicitHeight + 20
         visible: opacity > 0
         opacity: 0
         accentColor: tone
@@ -380,7 +515,7 @@ ApplicationWindow {
             spacing: 6
             Text {
                 id: toastText
-                width: Math.min(implicitWidth, window.width - 76)
+                width: Math.min(implicitWidth, 520)
                 text: toast.message
                 color: Theme.text
                 wrapMode: Text.WordWrap

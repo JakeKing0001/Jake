@@ -542,8 +542,26 @@ class WakeWordSession:
 
     # ---- stato ------------------------------------------------------------------------
 
+    # Seconda prova reale del 27/09/2026 ("gli stati visivi non funzionano"): lo stato della sessione arrivava solo al
+    # vecchio HUD PySide (on_state); l'HUD nativo legge il bus di eventi e non vedeva mai ascolto, trascrizione, voce.
+    # Stato della sessione -> evento HUD. "responding" (risposta pronta, voce in preparazione) e' gia' SPEAKING: fra
+    # la risposta e l'inizio dell'audio l'orb non deve ricadere in IDLE. "notify" e "cancelling" non cambiano stato.
+    _HUD_STATES = {
+        "idle": EventType.IDLE, "listening": EventType.LISTENING, "transcribing": EventType.TRANSCRIBING,
+        "thinking": EventType.THINKING, "working": EventType.EXECUTING, "dictation": EventType.DICTATION,
+        "paused": EventType.PAUSED, "error": EventType.ERROR,
+        "speaking": EventType.JAKE_MESSAGE, "responding": EventType.JAKE_MESSAGE,  # senza testo = SPEAKING
+    }
+
     def _set_state(self, state: str, detail: str = "") -> None:
-        self.state = state
+        previous, self.state = getattr(self, "state", None), state
+        event_type = self._HUD_STATES.get(state)
+        speaking = event_type == EventType.JAKE_MESSAGE
+        # in IDLE ogni frase della stanza si trascrive per cercare "Jake": non e' "sto capendo" un comando
+        overheard = state == "transcribing" and previous not in ("listening", "dictation")
+        if event_type is not None and not overheard and not (speaking and previous in ("speaking", "responding")):
+            payload = {"detail": detail} if event_type == EventType.ERROR and detail else {}
+            self._publish_hud_event(HudEvent(event_type, payload))
         if self.on_state is not None:
             try:
                 self.on_state(state, detail)
@@ -701,6 +719,9 @@ class WakeWordSession:
             return
         self._set_state("idle", "")
         self._update_mic(True, self.listening.state.value)
+        mark_ready = getattr(self.jake_core, "mark_ready", None)
+        if callable(mark_ready):
+            mark_ready()  # microfono aperto e Whisper caricato: ora gli avvisi rimasti in coda possono uscire
         try:
             self._listen_loop()
         finally:

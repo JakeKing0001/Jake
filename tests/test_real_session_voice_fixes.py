@@ -201,3 +201,116 @@ class WhisperGpuMemoryTests(unittest.TestCase):
                 mock.patch("core.voice.stt_provider._gpu_total_vram_mb", return_value=8188):
             provider = WhisperSttProvider(device="cuda")
         self.assertEqual((provider.device, provider.compute_type), ("cuda", "float16"))
+
+
+class RecoverableTranscriptTests(unittest.TestCase):
+    """Seconda prova reale (27/09/2026, 23:26): corrotta -> chiedere; imperfetta ma chiara -> correggere con prudenza.
+    Esempi veri di Jake (training/intents.jsonl), core reale, router che registra la frase che riceve."""
+
+    def _core(self):
+        from core.nlu.examples import ExampleStore
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        routed = self.routed = []
+
+        class Router(FakeRouter):
+            def detect_intent(self, text):
+                routed.append(text)
+                return Command("GET_TIME", {}) if text == "che ore sono" else Command("ASK_QUESTION", {"question": text})
+
+        self.time, self.ask = FakeSkill(), FakeSkill()
+        return _bare_core(ledger_path=Path(tmp.name) / "ledger.jsonl", router=Router(),
+                          skill_registry=FakeRegistry({"GET_TIME": self.time, "ASK_QUESTION": self.ask}),
+                          example_store=ExampleStore(learned_path=Path(tmp.name) / "learned.jsonl"))
+
+    def _say(self, core, text, confidence):
+        token = set_current_stt_confidence(confidence)
+        try:
+            return core.answer(text)
+        finally:
+            reset_current_stt_confidence(token)
+
+    def test_a_fused_word_in_a_harmless_command_is_repaired(self):
+        core = self._core()
+        self._say(core, "chiore sono", 0.66)
+        self.assertEqual(self.routed, ["che ore sono"])
+        self.assertEqual(len(self.time.calls), 1)
+
+    def test_a_clear_question_with_one_foreign_looking_word_is_answered_about_the_right_thing(self):
+        core = self._core()
+        reply = self._say(core, "che cosa è un prozessor", 0.48)  # rifiutata nella prova reale: 0.48 < 0.50
+        self.assertNotEqual(reply, core.UNCLEAR_REPLY)
+        self.assertEqual(self.routed, ["che cosa è un processore"])
+
+    def test_strongly_corrupted_or_garbled_uncertain_speech_still_asks_to_repeat(self):
+        core = self._core()
+        for text, confidence in (("cosaem procesora", 0.44), ("gerizono", 0.42), ("direi io le sono non", 0.4)):
+            self.assertEqual(self._say(core, text, confidence), core.UNCLEAR_REPLY, text)
+        self.assertEqual(self.routed, [], "nessun significato inventato")
+
+    def test_no_fuzzy_shortcut_towards_a_sensitive_command(self):
+        from core.nlu.examples import ExampleStore
+        from core.nlu.transcript_repair import REPAIRED, TranscriptRepair
+        from core.risk import RiskLevel, risk_of
+
+        store = ExampleStore(learned_path=Path(tempfile.mkdtemp()) / "learned.jsonl")
+        verdict = TranscriptRepair.from_examples(store.all()).assess(
+            "spegni il pz", 0.7, store.find_exact, lambda intent: risk_of(intent) == RiskLevel.READ_ONLY)
+        self.assertNotEqual(verdict.verdict, REPAIRED)
+        self.assertEqual(verdict.text, "spegni il pz", "decide il router, e il PolicyEngine chiede conferma")
+
+
+class HudStateChainTests(unittest.TestCase):
+    """Seconda prova reale del 27/09/2026: "gli stati visivi non funzionano". Lo stato della sessione vocale non
+    arrivava mai all'HUD nativo (solo al vecchio HUD PySide): l'orb restava in IDLE per quasi tutto il turno.
+    Sessione vocale vera (STT/TTS finti), core vero, bus vero, e il riduttore di riferimento dell'HUD nativo
+    (core/hud_view_state.py, stesse regole di HudEventReducer.cpp): la sequenza di stati che l'orb mostra."""
+
+    def test_a_voice_command_goes_listening_transcribing_thinking_executing_speaking_idle(self):
+        import json as _json
+        from types import SimpleNamespace
+
+        from core.event_bus import EventBus
+        from core.hud_view_state import HudViewState
+        from core.voice.wake_word_session import WakeWordSession
+        from tests.voice_session_support import track
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        bus = EventBus()
+        core = _bare_core(ledger_path=Path(tmp.name) / "ledger.jsonl", event_bus=bus,
+                          skill_registry=FakeRegistry({"GET_TIME": FakeSkill()}),
+                          router=FakeRouter(Command("GET_TIME", {})))
+        heard = iter(["Jake.", "che ore sono"])
+
+        class Stt:
+            def transcribe(self, utterance, sample_rate):
+                return next(heard)
+
+        class Tts:
+            def speak(self, text):
+                time.sleep(0.05)
+
+            def stop(self):
+                pass
+
+        events = bus.subscribe()
+        session = track(WakeWordSession(core, Stt(), Tts(), vad_listener=SimpleNamespace(
+            on_level=None, muted=False, SAMPLE_RATE=16000, silence_frames_needed=23)))
+        session._handle_utterance(object())   # "Jake." -> in ascolto del comando
+        session._handle_utterance(object())   # il comando
+        self.assertTrue(session.wait_for_commands(5))
+        deadline = time.monotonic() + 3
+        while session.state != "idle" and time.monotonic() < deadline:
+            time.sleep(0.02)
+
+        view, shown = HudViewState(), []
+        while not events.empty():
+            view.apply_line(events.get_nowait().to_json())
+            if not shown or shown[-1] != view.state:
+                shown.append(view.state)
+        # IDLE fra EXECUTING e SPEAKING: la risposta testuale (JAKE_MESSAGE) un istante prima della voce, stesso thread;
+        # l'HUD non la mostra (Main.qml aspetta prima di tornare a riposo)
+        self.assertEqual(shown, ["IDLE", "LISTENING", "TRANSCRIBING", "THINKING", "EXECUTING", "IDLE", "SPEAKING", "IDLE"],
+                         _json.dumps(shown))

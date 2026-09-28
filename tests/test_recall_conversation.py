@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from core.memory_manager import MemoryManager
+from core.temporal_parser import find_relative_range
 from core.response_formatter import format_skill_result
 from skills.recall_conversation import RecallConversationSkill
 
@@ -35,9 +36,14 @@ class RecallConversationTests(unittest.TestCase):
     def test_topic_and_empty_period(self):
         result = RecallConversationSkill(self.memory).execute({"when": "ieri", "topic": "palestra"})
         self.assertEqual([i["text"] for i in result.data["items"]], ["orari della palestra"])
-        empty = RecallConversationSkill(self.memory).execute({"when": "la settimana scorsa"})
+        # un periodo passato che non contiene "ieri": di lunedi' "ieri" e' gia' nella settimana scorsa, il primo del
+        # mese nel mese scorso (il test falliva solo in quei giorni)
+        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        period = next(p for p in ("la settimana scorsa", "il mese scorso", "l'anno scorso")
+                      if not find_relative_range(p)[0][0] <= yesterday < find_relative_range(p)[0][1])
+        empty = RecallConversationSkill(self.memory).execute({"when": period})
         self.assertEqual(format_skill_result("RECALL_CONVERSATION", empty),
-                         'Non trovo conversazioni nostre per "la settimana scorsa".')
+                         f'Non trovo conversazioni nostre per "{period}".')
 
 
 if __name__ == "__main__":

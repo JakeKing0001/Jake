@@ -6,7 +6,8 @@ from core.skill_result import SkillResult
 
 
 class GetNewsSkill:
-    """Ultime notizie via NewsAPI.org. Richiede una 'news_api_key' in config/settings.json."""
+    """Ultime notizie via NewsData.io. Richiede una 'news_api_key' in config/settings.json (registrazione gratuita su
+    https://newsdata.io, la chiave e' nella dashboard)."""
 
     metadata = {
         "intent": "GET_NEWS",
@@ -22,6 +23,7 @@ class GetNewsSkill:
     }
 
     MAX_RESULTS = 5
+    URL = "https://newsdata.io/api/1/latest"
 
     def __init__(self, config, timeout: float = 8):
         self.config = config
@@ -33,42 +35,51 @@ class GetNewsSkill:
 
         api_key = self.config.get("news_api_key")
         if not api_key:
-            return SkillResult(success=False, data={"setting": "news_api_key"}, error="MISSING_API_KEY")
+            return SkillResult(success=False, data={"setting": "news_api_key", "signup": "https://newsdata.io"},
+                               error="MISSING_API_KEY")
 
         if not is_online():
             return SkillResult(success=False, data={}, error="NETWORK_UNAVAILABLE")
 
+        query = {"apikey": api_key, "language": "it"}
         if topic:
-            params = parse.urlencode({"q": topic, "language": "it", "sortBy": "publishedAt", "apiKey": api_key})
-            url = f"https://newsapi.org/v2/everything?{params}"
+            query["q"] = topic
         else:
-            params = parse.urlencode({"country": "it", "apiKey": api_key})
-            url = f"https://newsapi.org/v2/top-headlines?{params}"
+            query["country"] = "it"
+        url = f"{self.URL}?{parse.urlencode(query)}"
 
         try:
             payload = json.loads(read_url(url, self.timeout).decode("utf-8"))
-        except (error.URLError, TimeoutError, json.JSONDecodeError):
+        except error.HTTPError as exc:
+            if exc.code in (401, 403):  # chiave sbagliata o revocata: dirlo, non "rete non disponibile"
+                return SkillResult(success=False, data={"setting": "news_api_key", "invalid": True,
+                                                        "signup": "https://newsdata.io"}, error="MISSING_API_KEY")
+            return SkillResult(success=False, data={"topic": topic}, error="NETWORK_UNAVAILABLE")
+        except (error.URLError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError):
             return SkillResult(success=False, data={"topic": topic}, error="NETWORK_UNAVAILABLE")
 
-        # F1: stesso buco sistemico corretto in questa sessione per altri consumatori diretti di
-        # API esterne - un corpo JSON valido ma non nella forma attesa (non un dizionario, o
-        # "articles" non una lista di dizionari) faceva sollevare AttributeError, mai catturato.
+        # F1: un corpo JSON valido ma non nella forma attesa (non un dizionario, o "results" non una lista di
+        # dizionari) degrada a NOT_FOUND invece di sollevare AttributeError.
         if not isinstance(payload, dict):
             return SkillResult(success=False, data={"topic": topic}, error="NOT_FOUND")
-        raw_articles = payload.get("articles")
+        raw_articles = payload.get("results")
         if not isinstance(raw_articles, list):
             return SkillResult(success=False, data={"topic": topic}, error="NOT_FOUND")
 
-        articles = [article for article in raw_articles if isinstance(article, dict)][:self.MAX_RESULTS]
+        articles, seen = [], set()
+        for article in raw_articles:
+            title = article.get("title") if isinstance(article, dict) else None
+            # NewsData ripete la stessa notizia da testate diverse: un titolo una volta sola
+            if isinstance(title, str) and title.strip() and title.strip().lower() not in seen:
+                seen.add(title.strip().lower())
+                articles.append(article)
         if not articles:
             return SkillResult(success=False, data={"topic": topic}, error="NOT_FOUND")
 
         def _source_name(article: dict) -> str:
-            source = article.get("source")
-            return source.get("name", "") if isinstance(source, dict) else ""
+            source = article.get("source_name") or article.get("source_id")
+            return source if isinstance(source, str) else ""
 
-        headlines = [
-            {"title": article.get("title", ""), "source": _source_name(article)}
-            for article in articles
-        ]
+        headlines = [{"title": article["title"].strip(), "source": _source_name(article)}
+                     for article in articles[:self.MAX_RESULTS]]
         return SkillResult(success=True, data={"topic": topic, "headlines": headlines})

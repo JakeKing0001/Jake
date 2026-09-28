@@ -101,6 +101,13 @@ class FakeLogger:
         pass
 
 
+def _drain(subscriber) -> list:
+    events = []
+    while not subscriber.empty():
+        events.append(subscriber.get_nowait())
+    return events
+
+
 def _bare_core_for_answer(private_mode: bool) -> JakeCore:
     core = JakeCore.__new__(JakeCore)
     core.normalizer = FakeNormalizer()
@@ -108,9 +115,9 @@ def _bare_core_for_answer(private_mode: bool) -> JakeCore:
     core.memory_manager = FakeMemoryManagerForAnswer()
     core.logger = FakeLogger()
     core.context_summarizer = object()
-    core.private_mode = private_mode
     core.last_response = None
     core.event_bus = EventBus()  # v4.9.1: answer() pubblica USER_MESSAGE/JAKE_MESSAGE qui
+    core.private_mode = private_mode  # dopo il bus: con la modalita' privata il bus redige (F4.5.7)
     # F1.8.4 ("drain limitato"): letti/scritti da answer()/shutdown() - vedi core/jake_core.py.
     core._in_flight_answers = 0
     core._in_flight_lock = threading.Lock()
@@ -128,7 +135,14 @@ class PrivateModeSuppressesPersistenceTests(unittest.TestCase):
         self.assertEqual(core.memory_manager.logged, [])
         self.assertEqual(core.memory_manager.summarize_calls, 0)
         self.assertTrue(any("privata" in m.lower() for m in core.logger.messages))
-        self.assertTrue(subscriber.empty(), "uno scambio privato non deve essere trasmesso sul bus eventi (v4.9.1)")
+        # Contratto (v4.9.1 + F4.5.7): lo scambio privato non viene trasmesso - niente USER/JAKE_MESSAGE, niente
+        # testo della richiesta o della risposta in nessun evento. Escono solo stati puri (THINKING all'inizio, IDLE
+        # alla fine), che servono all'orb e non dicono nulla del contenuto.
+        events = _drain(subscriber)
+        self.assertEqual([e.type.value for e in events], ["THINKING", "IDLE"])
+        for event in events:
+            self.assertNotIn("ciao", event.to_json())
+            self.assertNotIn("risposta", event.to_json())
 
     def test_private_mode_still_updates_in_memory_short_term_history(self):
         """La cronologia in RAM serve alla sessione corrente (pronomi, agente): non e' una
@@ -150,10 +164,10 @@ class PrivateModeSuppressesPersistenceTests(unittest.TestCase):
 
         self.assertEqual(core.memory_manager.logged, [("user", "ciao"), ("jake", "risposta")])
         self.assertEqual(core.memory_manager.summarize_calls, 1)
-        from core.hud_protocol import EventType
-        first, second = subscriber.get_nowait(), subscriber.get_nowait()
-        self.assertEqual((first.type, first.payload), (EventType.USER_MESSAGE, {"text": "ciao"}))
-        self.assertEqual((second.type, second.payload), (EventType.JAKE_MESSAGE, {"text": "risposta"}))
+        # THINKING (solo stato) apre il turno; il contenuto esce a turno concluso, richiesta prima della risposta
+        events = [(e.type.value, e.payload) for e in _drain(subscriber)]
+        self.assertEqual(events, [("THINKING", {}), ("USER_MESSAGE", {"text": "ciao"}),
+                                  ("JAKE_MESSAGE", {"text": "risposta"})])
 
 
 if __name__ == "__main__":

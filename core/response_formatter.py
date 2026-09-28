@@ -306,7 +306,10 @@ def _format_error(intent: str, result: SkillResult) -> str:
     if error == "MODEL_ERROR":
         return "Il modello locale ha restituito un errore. Puoi dirmi \"riprova\"."
     if error == "MISSING_API_KEY":
-        return f"Per usarlo devi configurare '{data.get('setting', '')}' in config/settings.json (vedi config/settings.example.json)."
+        where = f" (la chiave gratuita si prende su {data['signup']})" if data.get("signup") else ""
+        if data.get("invalid"):
+            return f"La chiave '{data.get('setting', '')}' in config/settings.json non è valida{where}."
+        return f"Per usarlo devi configurare '{data.get('setting', '')}' in config/settings.json{where}."
     if error == "CITY_NOT_FOUND":
         return f"Non trovo la città {data.get('city', '')}"
     if error == "INVALID_URL":
@@ -381,7 +384,57 @@ def memory_provenance(entry: dict) -> str:
         return " (l'ho dedotto io, non me l'hai detto tu)"
     if source.startswith("agent:"):
         return " (salvato da un agente)"
+    if source == "conversation":
+        return f" (da una nostra conversazione{' del ' + date if date else ''})"
     return f" (fonte: {source})" if source else " (fonte sconosciuta)"
+
+
+_MONTHS = ("gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre",
+           "novembre", "dicembre")
+
+
+def _spoken_day(updated_at) -> str:
+    """"il 27 settembre" (l'anno solo se non e' quello corrente), "" se la data non si legge."""
+    from datetime import datetime
+
+    day = str(updated_at or "")[:10]
+    try:
+        when = datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        return ""
+    year = f" {when.year}" if when.year != datetime.now().year else ""
+    return f" il {when.day} {_MONTHS[when.month - 1]}{year}"
+
+
+def memory_citation(cited: list[dict]) -> str:
+    """Prova reale del 27/09/2026: da dove viene cio' che la risposta ha preso dalla memoria, detto come lo direbbe
+    una persona ("Lo so perche' me l'avevi detto il 27 settembre.") invece di "(Dai miei ricordi: riassunto
+    conversazione del 2026-09-27T07:26...)". Solo per i ricordi davvero usati: la scelta la fa chi chiama."""
+    def how(entry: dict) -> str:
+        source, day = str(entry.get("source") or ""), _spoken_day(entry.get("updated_at"))
+        if source == "user":
+            return f"me l'avevi detto{day}"
+        if source == "inferred":
+            return "l'ho dedotto io, non me l'avevi detto tu"
+        if source == "conversation":
+            return f"ne avevamo parlato{day}"
+        if source.startswith("agent:"):
+            return "l'aveva salvato un agente"
+        return "viene dai miei ricordi"
+
+    if not cited:
+        return ""
+    if len(cited) == 1:
+        reason = how(cited[0])
+        if reason.startswith("l'ho dedotto"):
+            return "(Questo " + reason + ".)"
+        return "(Lo so perché " + reason + ".)"
+    parts = []
+    for entry in cited:
+        key = str(entry.get("key") or "")
+        label = "una nostra conversazione" if str(entry.get("category")) == "summary" else key
+        parts.append(f"{label}: {how(entry)}")
+    return "(" + "; ".join(parts) + ".)"
 
 def _format_success(intent: str, result: SkillResult, registry=None) -> str | None:
     data = result.data or {}
@@ -447,7 +500,9 @@ def _format_success(intent: str, result: SkillResult, registry=None) -> str | No
         source = f" (fonte: {data['url']})" if data.get("url") else ""
         return f"{data['summary']}{source}"
     if intent == "GET_WEATHER":
-        return f"A {data['city']}: {data['description']}, {data.get('temperature')}°C (percepiti {data.get('feels_like')}°C)"
+        description = f"{data['description']}, " if data.get("description") else ""
+        wind = f", vento {round(data['wind_kmh'])} km/h" if isinstance(data.get("wind_kmh"), (int, float)) else ""
+        return f"A {data['city']}: {description}{data.get('temperature')}°C (percepiti {data.get('feels_like')}°C){wind}"
     if intent == "GET_NEWS":
         formatted = "; ".join(f"{h['title']} ({h['source']})" for h in data["headlines"])
         return f"Ultime notizie: {formatted}"

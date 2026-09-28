@@ -4,8 +4,9 @@ import QtQuick.Layouts
 import JakeHud
 
 // Action Center compatto (F4.6): ultima azione con esito/verifica, Annulla finche' l'undo non scade (con
-// il tempo rimasto), e "Ferma tutto" sempre presente. Tutto passa dagli skill del core (stessa policy
-// del comando vocale): l'HUD non esegue nulla da solo.
+// il tempo rimasto), e "Ferma tutto". Tutto passa dagli skill del core (stessa policy del comando vocale):
+// l'HUD non esegue nulla da solo. Due righe (testo sopra, azioni sotto): nella colonna accanto all'orb una riga
+// sola troncava il testo ("GET_WEATHE...", demo reale del 28/09/2026).
 GlassPanel {
     id: root
     property string activitySummary: ""
@@ -21,7 +22,7 @@ GlassPanel {
     signal undoRequested()
     signal retryRequested()
     signal stopRequested()
-    implicitHeight: showDetails && activityDetails.length > 0 ? 48 + detailsText.implicitHeight + 10 : 48
+    implicitHeight: layout.implicitHeight + 24
 
     Timer {
         interval: 1000
@@ -30,27 +31,12 @@ GlassPanel {
         onTriggered: root.nowSeconds = Date.now() / 1000
     }
 
-    Text {
-        id: detailsText
-        visible: root.showDetails && root.activityDetails.length > 0
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        anchors.margins: 12
-        text: root.activityDetails
-        color: Theme.textMuted
-        font.pixelSize: Theme.fontTiny
-        wrapMode: Text.WordWrap
-        Accessible.name: text
-    }
-
-    RowLayout {
+    ColumnLayout {
+        id: layout
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        height: 48
-        anchors.leftMargin: 14
-        anchors.rightMargin: 8
+        anchors.margins: 12
         spacing: 8
 
         Text {
@@ -63,35 +49,58 @@ GlassPanel {
                 : qsTr("Nessuna azione recente")
             color: root.activitySummary.length > 0 ? Theme.text : Theme.textFaint
             font.pixelSize: Theme.fontSmall
+            wrapMode: Text.WordWrap
+            maximumLineCount: 2
             elide: Text.ElideRight
             Accessible.name: text
         }
-        Button {
-            visible: root.activityDetails.length > 0
-            flat: true
-            text: root.showDetails ? qsTr("Meno") : qsTr("Dettagli")
-            Accessible.name: root.showDetails ? qsTr("Nascondi i dettagli dell'ultima azione") : qsTr("Mostra i dettagli dell'ultima azione")
-            onClicked: root.showDetails = !root.showDetails
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 6
+            Button {
+                visible: root.activityDetails.length > 0
+                flat: true
+                text: root.showDetails ? qsTr("Meno") : qsTr("Dettagli")
+                font.pixelSize: Theme.fontSmall
+                Accessible.name: root.showDetails ? qsTr("Nascondi i dettagli dell'ultima azione") : qsTr("Mostra i dettagli dell'ultima azione")
+                onClicked: root.showDetails = !root.showDetails
+            }
+            Item { Layout.fillWidth: true }
+            Button {
+                visible: root.retryAvailable
+                text: qsTr("Riprova")
+                font.pixelSize: Theme.fontSmall
+                Accessible.name: qsTr("Riprova l'ultima azione fallita")
+                onClicked: root.retryRequested()
+            }
+            Button {
+                visible: root.undoAvailable
+                text: qsTr("Annulla")
+                font.pixelSize: Theme.fontSmall
+                Accessible.name: qsTr("Annulla l'ultima azione")
+                onClicked: root.undoRequested()
+            }
+            Button {
+                id: stopButton
+                text: qsTr("Ferma tutto")
+                font.pixelSize: Theme.fontSmall
+                Accessible.name: qsTr("Ferma tutto: interrompe subito agenti e automazioni (Ctrl+Alt+Fine)")
+                palette.button: "#7f1d1d"
+                palette.buttonText: "#fecaca"
+                onClicked: root.stopRequested()
+            }
         }
-        Button {
-            visible: root.retryAvailable
-            text: qsTr("Riprova")
-            Accessible.name: qsTr("Riprova l'ultima azione fallita")
-            onClicked: root.retryRequested()
-        }
-        Button {
-            visible: root.undoAvailable
-            text: qsTr("Annulla")
-            Accessible.name: qsTr("Annulla l'ultima azione")
-            onClicked: root.undoRequested()
-        }
-        Button {
-            id: stopButton
-            text: qsTr("Ferma tutto")
-            Accessible.name: qsTr("Ferma tutto: interrompe subito agenti e automazioni (Ctrl+Alt+Fine)")
-            palette.button: "#7f1d1d"
-            palette.buttonText: "#fecaca"
-            onClicked: root.stopRequested()
+
+        Text {
+            id: detailsText
+            Layout.fillWidth: true
+            visible: root.showDetails && root.activityDetails.length > 0
+            text: root.activityDetails
+            color: Theme.textMuted
+            font.pixelSize: Theme.fontTiny
+            wrapMode: Text.WordWrap
+            Accessible.name: text
         }
     }
 }

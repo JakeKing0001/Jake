@@ -71,6 +71,7 @@ def _dispatch():
 def run_cli_mode():
     print(f"Jake {VERSION} avviato (modalita' testo). Scrivi 'esci' per chiudere.")
     core = JakeCore()
+    core.mark_ready()
     while True:
         try:
             user_text = input("Tu > ")
@@ -228,11 +229,17 @@ def _setup_voice(core=None):
         tts_provider.prewarm()
 
     print("Carico il modello vocale locale (puo' richiedere un download al primo avvio)...")
-    hotwords = core.skill_registry.app_names()[:80] if core is not None else None
+    from core.voice.stt_vocabulary import intent_phrases, spoken_app_names
+
+    # prompt italiano dagli intent reali + poche app pronunciabili (prova reale del 27/09/2026)
+    examples = core.example_store.all() if core is not None else []
+    hotwords = spoken_app_names(core.skill_registry.app_names(), mentioned=" ".join(e.text for e in examples))         if core is not None else None
+    phrases = intent_phrases(examples) if core is not None else None
     stt_provider = WhisperSttProvider(
         model_size=(config.get("stt_model") or None) if config else None,
         device=(config.get("stt_device") or None) if config else None,
         hotwords=hotwords,
+        phrases=phrases,
     )
     print(f"Riconoscimento vocale: {stt_provider.model_size} su {stt_provider.device}.")
     return tts_provider, stt_provider, server_manager
@@ -297,6 +304,7 @@ def run_tray_mode():
         return
 
     core = JakeCore()
+    core.mark_ready()
     run_tray(core)
 
 
@@ -351,6 +359,8 @@ def run_jarvis_mode(with_voice: bool = True):
         backdrop=str(core.config.get("hud_backdrop", "clear") or "clear"),
         quick_actions=quick_actions,
     )
+    if session is None:
+        core.mark_ready()  # con la voce lo segnala la sessione, a microfono aperto
     try:
         app.run()
     finally:

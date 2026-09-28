@@ -244,7 +244,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F1.7` | Observability | `DONE` |
 | `F1.8` | Runtime Reliability | `DONE` |
 | `F2.1` | Voice Quality (harness sintetico, VAD/WER offline e baseline CPU/GPU; mancano solo registrazioni consensuali vere - vedi Gate F2) | `VERIFY` |
-| `F2.2` | Speech Runtime (partial/final/confidenza/degrado collegati al percorso reale; "partial p95 < 1 s" misurato dal runner hardware del 25/09/2026, non ancora eseguito su hardware) | `VERIFY` |
+| `F2.2` | Speech Runtime (partial/final/confidenza/degrado collegati al percorso reale; "partial p95 < 1 s" misurato dal runner hardware del 25/09/2026, non ancora eseguito su hardware; 28/09/2026: pre-roll di 300 ms del VAD - l'attacco delle parole veniva tagliato -, prompt Whisper italiano dagli intent reali, trascrizione corrotta vs recuperabile su piu' segnali invece di una soglia unica) | `VERIFY` |
 | `F2.3` | Voice Quality (stati, guardie, cooldown - azzerato dopo un annullamento esplicito il 25/09/2026 - e indicatore collegati; restano la sessione wake di 24 h e F2.3.7 satelliti, che dipende da F7) | `VERIFY` |
 | `F2.4` | Audio Systems (AEC/barge-in collegati, `voice_barge_in` di default `off`; manca la prova sui tre profili hardware) | `VERIFY` |
 | `F2.5` | Speech Runtime (uscita predefinita rilevata, cache delle conferme RVC, pipeline di produzione misurata il 25/09/2026: primo campione p95 1,2-1,5 s, pause tra chunk < 1 ms; manca "prima emissione < 2 s" dalla fine della voce su hardware) | `VERIFY` |
@@ -260,20 +260,20 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F3.8` | Demonstration Learning (dimostrazione vera -> passi semantici, parametri, descrizione, versione/app/undo, sospensione su drift, ri-approvazione; sopravvive a riavvio, resize e dati diversi - 25/09/2026) | `DONE` |
 | `F4.1` | Protocol Architecture (26/09/2026: riduttore di riferimento Python e riduttore C++ superano la stessa suite di 18 fixture, ctest nella CI; sequence_id/trace_id consumati anche lato C++) | `DONE` |
 | `F4.2` | Native HUD (F4.2.1/F4.2.4 chiusi, F4.2.2 prima fetta chiusa, F4.2.3 Alt-Tab verificato - 16/09/2026; F4.2.5/F4.2.6 e resto di F4.2.3 richiedono test interattivi/visivi) | `DOING` |
-| `F4.3` | Native HUD (27/09/2026: qualita' adattiva dell'orb - batteria e fotogrammi lenti; blur di sistema per pannello provato e scartato con evidenza: serve una finestra nativa non-layered per pannello) | `DOING` |
-| `F4.4` | Interaction Design (26/09/2026: orb 3D Qt Quick 3D con nucleo volumetrico e particle shell, comportamento per stato interrupt-safe, reduced motion di Windows, qualita' high/low, fallback 2D; livelli audio reali di microfono e voce di Jake collegati all'orb; 27/09/2026 sera: particelle come massa viva a tre strati con moto individuale, orbite differenziali, componente radiale e reazioni per stato/audio/esito, modalita' demo JAKE_HUD_DEMO=1; giudizio estetico `VERIFY` dall'utente) | `DOING` |
+| `F4.3` | Native HUD (27/09/2026: qualita' adattiva dell'orb - batteria e fotogrammi lenti; blur di sistema per pannello provato e scartato con evidenza: serve una finestra nativa non-layered per pannello; 28/09/2026: vetro con rifrazione della luce DELL'HUD - aura e polvere sfocate una volta e ritagliate dietro ogni pannello -, orlo, bagliore di stato, ombra; il blur del desktop resta F4.3 aperto) | `DOING` |
+| `F4.4` | Interaction Design (26/09/2026: orb 3D Qt Quick 3D con nucleo volumetrico e particle shell, comportamento per stato interrupt-safe, reduced motion di Windows, qualita' high/low, fallback 2D; livelli audio reali di microfono e voce di Jake collegati all'orb; 27/09/2026 sera: particelle come massa viva a tre strati con moto individuale, orbite differenziali, componente radiale e reazioni per stato/audio/esito, modalita' demo JAKE_HUD_DEMO=1; 28/09/2026: gli stati REALI arrivano all'HUD nativo - prima la sessione vocale li dava solo al vecchio HUD PySide -, guscio in due popolazioni, scie di luce, scoppio in ERROR, scena sfumata senza bordi, polvere ambientale che si muove per stato; giudizio estetico `VERIFY` dall'utente) | `DOING` |
 | `F4.5` | Interaction Design (26/09/2026: trascrizione live, permission card, prove, diagnosi, notifiche nell'HUD nativo; 27/09/2026: modalita' privata = nessun contenuto verso HUD/companion/replay, con indicatore; piano live con stato e durata di ogni passo; modalita' di notifica e notifiche in attesa visibili; verifica visiva da fare) | `DOING` |
 | `F4.6` | Trust UX (26/09/2026: kill switch visibile e scorciatoia globale; action center con ultima azione, esito, verifica e undo con scadenza; 27/09/2026: dettagli dell'azione per l'utente - origine, esito/categoria, verifica, annullabilita', traccia - e motivo quando l'undo non e' piu' disponibile; retry sicuro dell'ultima azione fallita a voce e dal pulsante "Riprova"; undo rifiutato se il file/la cartella da cancellare e' cambiato dopo) | `DOING` |
-| `F4.7` | Accessibility (26/09/2026: nomi accessibili, focus ring, scrittura reale nella barra comandi di un overlay no-activate, scorciatoie globali Ctrl+Shift+J / Ctrl+Alt+Fine, reduced motion; 27/09/2026: alto contrasto da Windows o JAKE_HUD_HIGH_CONTRAST, verificato a schermo; "Dimensioni testo" di Windows applicata a tutto l'HUD (o JAKE_HUD_TEXT_SCALE), verificata a schermo al 150% di sistema; layout completo/compatto/focus ricordato per monitor, HUD sul bordo destro del monitor scelto, spostamento sull'altro monitor e riposizionamento all'hot-plug; screen reader da verificare) | `DOING` |
+| `F4.7` | Accessibility (26/09/2026: nomi accessibili, focus ring, scrittura reale nella barra comandi di un overlay no-activate, scorciatoie globali Ctrl+Shift+J / Ctrl+Alt+Fine, reduced motion; 27/09/2026: alto contrasto da Windows o JAKE_HUD_HIGH_CONTRAST, verificato a schermo; "Dimensioni testo" di Windows applicata a tutto l'HUD (o JAKE_HUD_TEXT_SCALE), verificata a schermo al 150% di sistema; layout completo/compatto/focus ricordato per monitor, spostamento sull'altro monitor e riposizionamento all'hot-plug; 28/09/2026: composizione centrata - orb al centro della finestra, finestra al centro dell'area utile del monitor, pannelli simmetrici che compaiono solo quando servono; screen reader da verificare) | `DOING` |
 | `F4.8` | Release Engineering (26/09/2026: core e HUD nativo avviati in ordine come processi separati, riavvio dell'HUD solo dopo un crash e con un tetto; installer/crash dump/rollback non iniziati; 27/09/2026: quando il supervisore smette di riavviare un HUD in crash revoca la sua credenziale e lo dice all'utente) | `DOING` |
 | `F5.1` | Memory Platform (F5.1.1/F5.1.3-F5.1.6 il 21/09/2026: schema versionato, migrazioni transazionali con backup, metadati, recupero; resta F5.1.2 separare entita'/episodi/procedure e la prova su una copia del database reale) | `DOING` |
 | `F5.2` | Memory Platform (27/09/2026: memoria episodica interrogabile - "di cosa abbiamo parlato ieri?" sulla cronologia reale per periodo e argomento) | `DOING` |
 | `F5.3` | Knowledge Model | `DOING` |
 | `F5.4` | Memory Reliability (27/09/2026: nessuna sovrascrittura silenziosa di fatti/preferenze - versione precedente conservata e dichiarata, un'inferenza non sostituisce un fatto detto dall'utente, conflitti registrati, "dimentica" cancella anche le versioni; conferma prima di cambiare un ricordo importante o fissato; decadimento per categoria nel ranking, fissati esclusi; consolidamento non ancora) | `DOING` |
-| `F5.5` | Retrieval Quality (27/09/2026: ricordi pertinenti con fonte anche nelle risposte libere e nei compiti dei tre agenti, retrieval ibrido parole+significato+periodo ("ieri", "la settimana scorsa" dentro la domanda), budget di contesto, grafo a un salto; metriche ancora da fare) | `DOING` |
+| `F5.5` | Retrieval Quality (27/09/2026: ricordi pertinenti con fonte anche nelle risposte libere e nei compiti dei tre agenti, retrieval ibrido parole+significato+periodo ("ieri", "la settimana scorsa" dentro la domanda), budget di contesto, grafo a un salto; 28/09/2026: nessun ricordo personale nelle domande di conoscenza generale, riassunti di conversazione solo se la domanda parla di conversazioni passate, citazione solo se il ricordo e' davvero nella risposta e detta in modo leggibile; metriche ancora da fare) | `DOING` |
 | `F5.6` | Context Runtime (27/09/2026: segnali non riletti non piu' presentati come attuali; appunti marcati privati da chi li copia mai letti) | `DOING` |
 | `F5.7` | Privacy Engineering (libreria completa il 21/09/2026; dal 26/09/2026 nel percorso reale: "dimentica" cancella anche registro e indici con ricevuta, l'uso dei ricordi viene registrato, "da dove sai X" spiega la provenienza; dal 27/09/2026 "esporta i miei ricordi" e "fissa il ricordo X" a voce; purge/backup non ancora esposti a voce/HUD) | `DOING` |
-| `F6.1` | Proactivity Platform (26/09/2026: promemoria, automazioni e avvisi passano dagli stessi freni in `JakeCore.notify` - duplicati, budget orario, quiet hours, conversazione in corso - e si sospendono insieme durante prove e benchmark) | `DOING` |
+| `F6.1` | Proactivity Platform (26/09/2026: promemoria, automazioni e avvisi passano dagli stessi freni in `JakeCore.notify` - duplicati, budget orario, quiet hours, conversazione in corso - e si sospendono insieme durante prove e benchmark; 28/09/2026: gli avvisi non urgenti aspettano che Jake sia pronto e poi escono in un solo riepilogo) | `DOING` |
 | `F6.2` | Proactivity Quality (27/09/2026: "perche' me l'hai detto?" spiega la fonte dell'ultima notifica) | `DOING` |
 | `F6.3` | Notification UX (libreria di decisione il 21/09/2026; collegata a JakeCore/EventBus/HUD il 22/09/2026; dal 27/09/2026 "meno notifiche cosi'", "non mostrarmelo piu'", "mostramelo di nuovo" e "rimandala" sull'ultima notifica, a voce e dai pulsanti del toast HUD, persistenti; nessuna consegna reale di call/companion) | `DOING` |
 | `F6.4` | Goal Runtime (27/09/2026: "devo X entro <giorno>" diventa una proposta di promemoria confermata col si'/no normale) | `DOING` |
@@ -10568,15 +10568,46 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 27/09/2026 sera (le versioni precedenti restano nella cronologia Git; la lista del 26/09 citava lavoro gia'
-fatto: orb 3D, retry/dettagli/precondizioni dell'Action Center, citazioni di memoria fuori da RECALL).
+Aggiornato 28/09/2026 (le versioni precedenti restano nella cronologia Git; la lista del 27/09 sera e' stata eseguita
+per la parte di sviluppo sull'HUD, vedi sotto).
 
 1. Utente: ripetere il gate hardware di F2 con `docs/f2-hardware-validation.md` (tre profili, interruzioni, sessione
-   wake di 24 h, poi `python -m benchmarks.f2_hardware_session evaluate`). Solo con `PASS` F2 passa a `DONE`.
-2. Utente: verifica a schermo dell'orb 3D con `JAKE_HUD_DEMO=1` (scorre IDLE, LISTENING, THINKING, EXECUTING,
-   successo, SPEAKING, WAITING, avviso, ERROR, PAUSED con livello audio sintetico) e poi con Jake acceso; con
-   "Effetti animazione" di Windows spento il moto deve quasi fermarsi. Stesso giro per chip "Privato", piano live,
-   "Riprova", chip delle notifiche in attesa.
-3. Sviluppo: F4.3 vetro con blur reale per pannello (richiede finestre native separate per pannello: oggi l'HUD e'
-   un unico overlay a schermo intero), poi continuita' di sessione PC <-> companion (F7.4.8) e Skill Forge con
-   specifica/test/canary (F8.3).
+   wake di 24 h, poi `python -m benchmarks.f2_hardware_session evaluate`). Solo con `PASS` F2 passa a `DONE`. Con il
+   microfono integrato del portatile la confidenza di Whisper resta bassa (0,45-0,67 anche su frasi corrette nella
+   prova del 27/09): una cuffia o un microfono dedicato e' la prima cosa da provare.
+2. Utente: prova reale con voce continua e HUD nativo - composizione centrata, stati reali (parola di attivazione ->
+   LISTENING, fine frase -> TRANSCRIBING, attesa del modello -> THINKING, skill -> EXECUTING, voce -> SPEAKING,
+   errore -> ERROR breve), pannelli che compaiono solo quando servono, layout compatto/focus, e le frasi della prova
+   del 27/09 ("chiore sono", "che cosa e' un Prozessor", "cos'e' un processore?" senza ricordi irrilevanti).
+3. Sviluppo: F4.3 blur del desktop per pannello (finestre native separate), continuita' di sessione PC <-> companion
+   (F7.4.8), Skill Forge con specifica/test/canary (F8.3).
+
+### Seconda prova reale del 27/09/2026 (HUD nativo + voce continua) - cosa e' cambiato il 28/09/2026
+
+- STT: il segmentatore apriva la frase al primo frame "parlato" di webrtcvad e scartava l'attacco delle parole
+  ("Jake" -> "ERIK"/"Take", "che ore" -> "chiore"): 300 ms di pre-roll aprono ora la frase, anche per i partial.
+  Il prompt di Whisper era quasi tutto nomi inglesi del menu Start: ora frasi italiane dagli intent reali (mai esempi
+  auto-imparati) e poche app pronunciabili. Misurato con Whisper vero su voce sintetica: confidenza +0,02..0,06.
+- Trascrizioni: "che cosa e' un Prozessor?" (0,48) era rifiutata da una soglia unica. `core/nlu/transcript_repair.py`
+  guarda insieme confidenza, parole note, riparazione vicina e unica, cornice di domanda intatta, esempio esatto e
+  rischio dell'intent: "chiore sono" -> GET_TIME, "prozessor" -> "processore"; "COSAEM Procesora" e "gerizono"
+  chiedono ancora di ripetere; nessuna scorciatoia verso comandi sensibili.
+- Memoria: "cosa e' un processore?" citava il riassunto di una conversazione passata (una parola in comune e il
+  marcatore [M1] del modello bastavano). Ora nessun ricordo per le domande di conoscenza generale, riassunti solo
+  per domande sulle conversazioni passate, citazione solo se il ricordo e' nella risposta, detta come "Lo so perche'
+  me l'avevi detto il 27 settembre.".
+- Avvisi all'avvio: trattenuti finche' la sessione non e' pronta, poi un riepilogo unico dal gate.
+- HUD: gli stati della sessione vocale non arrivavano all'HUD nativo (solo al vecchio HUD PySide) - l'orb restava in
+  IDLE quasi tutto il turno. Ora la catena e' completa e coperta da un test end-to-end. Composizione centrata, vetro
+  con rifrazione, polvere ambientale per stato, orb meno rigido; build Release, ctest, verifica a schermo.
+- Meteo su Open-Meteo (nessuna chiave), notizie su NewsData.io (chiave gratuita in `news_api_key`).
+- Contratto degli eventi di turno (CI della PR #167): THINKING e EXECUTING pubblicati direttamente dal core facevano
+  cadere tutti i percorsi che costruiscono un core parziale senza bus (conferme, permessi, auth, fallback). Ora un
+  solo punto, `JakeCore._publish_hud_event`, pubblica se il bus c'e' e non rompe il turno se un iscritto fallisce.
+  Ordine: THINKING {} -> EXECUTING {} (solo skill autorizzate) -> USER_MESSAGE -> JAKE_MESSAGE. Il contenuto esce
+  a turno concluso perche' solo allora si sa se il turno e' annullato o privato (l'HUD conosce gia' la richiesta:
+  l'ha scritta lui o l'ha vista nel TRANSCRIPT). Privato: solo THINKING/IDLE senza contenuto, niente
+  USER/JAKE_MESSAGE, redazione del bus invariata. Senza JAKE_MESSAGE (privato, risposta vuota, uscita) un IDLE {}
+  chiude lo stato. Annullato: solo gli stati gia' pubblicati, nulla dopo l'annullamento; lo stato finale e' della
+  sessione vocale (unica che puo' annullare), che torna a IDLE solo se nessuno stato piu' nuovo ha preso il posto.
+  In IDLE (parola di attivazione) esce il cambio di stato ma mai AUDIO_LEVEL del rumore della stanza.
