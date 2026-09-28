@@ -24,6 +24,24 @@ from tests.test_skill_manifest import SKILL_SOURCE, intent, manifest
 ENV = Environment(jake_version="5.9", python_version="3.12.6", windows_version="10.0")
 MARKER_SOURCE = SKILL_SOURCE
 
+# F8.3: il test dichiarato dal pacchetto viene eseguito davvero (nella sandbox) prima dell'installazione: deve esistere
+PACKAGE_TEST_SOURCE = """import unittest
+
+import skill
+
+
+class SkillTests(unittest.TestCase):
+    def test_the_skill_registers_its_intent(self):
+        seen = {}
+
+        class Registry:
+            def register_skill(self, intent, implementation):
+                seen[intent] = implementation
+
+        skill.register(Registry())
+        self.assertIn("TOSS_DEMO_COIN", seen)
+"""
+
 
 class FakeRegistry:
     def __init__(self):
@@ -42,13 +60,15 @@ class PackageTestCase(unittest.TestCase):
         self.trust.add("Davide", self.key.public_b64(), "davide.")
         self.store = SkillStore(self.tmp / "skills", self.trust, ENV, installed_versions=lambda name: None)
 
-    def source(self, name="src", version="1.0.0", skill_id="davide.moneta", source=MARKER_SOURCE, extra=None, **overrides) -> Path:
+    def source(self, name="src", version="1.0.0", skill_id="davide.moneta", source=MARKER_SOURCE, extra=None,
+               test_source=None, **overrides) -> Path:
+        test_source = PACKAGE_TEST_SOURCE if test_source is None else test_source
         directory = self.tmp / name
         directory.mkdir(parents=True, exist_ok=True)
         data = manifest(id=skill_id, version=version, **overrides)
         (directory / "skill.json").write_text(json.dumps(data), encoding="utf-8")
         (directory / "skill.py").write_text(source, encoding="utf-8")
-        (directory / "test_skill.py").write_text("# test\n", encoding="utf-8")
+        (directory / "test_skill.py").write_text(test_source, encoding="utf-8")
         for relative, content in (extra or {}).items():
             target = directory / relative
             target.parent.mkdir(parents=True, exist_ok=True)
