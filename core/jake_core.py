@@ -746,8 +746,29 @@ class JakeCore:
             # l'ultima notifica mostrata: a lei si riferiscono "meno notifiche cosi'", "non mostrarmelo piu'", "rimandala"
             self.last_notification = {"kind": kind, "message": gated, "key": notification_key(kind, gated),
                                       "source": source or self.NOTIFICATION_SOURCES.get(kind, ""), "at": time.time()}
-            self.event_bus.publish(HudEvent(EventType.NOTIFICATION, {"kind": kind, "text": gated}, trace_id=trace_id))
+            responder = self._remote_responder()
+            payload = {"kind": kind, "text": gated}
+            if responder:
+                payload["responder"] = responder
+            self.event_bus.publish(HudEvent(EventType.NOTIFICATION, payload, trace_id=trace_id))
+            if responder:
+                # F7.4 (un solo active responder): con un telefono attivo la notifica la riceve lui dal bus; il PC non la
+                # dice ne' la stampa - niente doppia risposta, niente voce in una stanza magari vuota
+                self.logger.info("Notifica %s consegnata al dispositivo attivo %s, non al PC", kind, responder)
+                return None
         return gated
+
+    def _remote_responder(self) -> str | None:
+        """Il dispositivo companion che risponde adesso al posto del PC, se c'e' (F7.4: DeviceRegistry col lease)."""
+        server = getattr(self, "companion_server", None)
+        if server is None or getattr(server, "running", False) is not True:
+            return None
+        try:
+            active = server.devices.active_device_id
+        except Exception:
+            self.logger.exception("Errore leggendo il dispositivo attivo")
+            return None
+        return active if isinstance(active, str) and active else None
 
     # Dopo una risposta si aspetta questo tempo prima di un riepilogo: la voce potrebbe ancora parlare.
     DIGEST_QUIET_AFTER_ANSWER_S = 60.0

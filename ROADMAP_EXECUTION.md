@@ -9920,6 +9920,11 @@ nessuna azione duplicata e ripresa di contesto, decisioni e ricevute sul PC.
   dispositivo (dall'HTTP o con `REVOKE_DEVICE`) lo rilascia subito. Reclamare dopo la scadenza non genera un
   handoff da se stesso. Test: registro con orologio finto; server reale con claim -> silenzio -> scaduto con
   handoff, stream aperto oltre il lease -> resta attivo, revoca -> stream chiuso e dispositivo rilasciato.
+- 28/09/2026 (F7.4, un solo active responder per le notifiche): con un telefono attivo promemoria, avvisi e
+  automazioni uscivano sia sul telefono (NOTIFICATION sul bus, consegnata dallo stream del companion) sia a voce o
+  in CLI sul PC. Ora `JakeCore.notify` pubblica l'evento con `responder` e non restituisce nulla da presentare al PC
+  finche' il dispositivo attivo (DeviceRegistry, con il lease) e' un telefono; al ritorno sul PC tutto come prima.
+  L'ultima notifica resta quella a cui si riferiscono "meno notifiche cosi'" e simili, anche detti dal telefono.
 
 ### F7.5 — Home Assistant profondo
 
