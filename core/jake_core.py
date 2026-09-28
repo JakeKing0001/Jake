@@ -49,7 +49,7 @@ from core.policy_engine import (
 from core.plugin_loader import load_plugins
 from core.profiles import ProfileError, ProfileManager
 from core.request_context import (
-    current_action_id, current_command_source_intent, current_device_id, current_session_id,
+    current_action_id, current_command_source_intent, current_conversation_channel, current_device_id, current_session_id,
     current_speaker_profile_id, current_stt_confidence, reset_current_command_source_intent,
     set_current_command_source_intent,
 )
@@ -1380,7 +1380,9 @@ class JakeCore:
         if profile_id:
             return f"profile:{profile_id}"
 
-        device_id = current_device_id()
+        # l'HUD nativo e' il PC: stesso scope della voce locale (una correzione scritta nell'HUD vale per l'ultimo
+        # comando detto a voce)
+        device_id = current_conversation_channel()
 
         if device_id:
             return f"device:{device_id}"
