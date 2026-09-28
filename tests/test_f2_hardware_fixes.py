@@ -253,13 +253,18 @@ class AudioLevelTests(unittest.TestCase):
                                kill_switch=KillSwitch(), EXIT_SENTINEL="__exit__", event_bus=mock.MagicMock())
         vad = SimpleNamespace(on_level=None, muted=False, SAMPLE_RATE=16000)
         session = WakeWordSession(core, mock.MagicMock(), mock.MagicMock(), vad_listener=vad)
+        def levels():
+            return [call.args[0] for call in core.event_bus.publish.call_args_list
+                    if call.args[0].type.value == "AUDIO_LEVEL"]
+
         session._set_state("idle", "")
         session._on_frame_level(0.8, True)
-        core.event_bus.publish.assert_not_called()  # ascolto della parola di attivazione: nulla esce
+        # ascolto della parola di attivazione: il cambio di stato IDLE esce (l'orb deve saperlo), il rumore della
+        # stanza no - nessun livello del microfono finche' Jake non ascolta un comando
+        self.assertEqual(levels(), [])
         session._set_state("listening", "")
         session._on_frame_level(0.8, True)
-        event = core.event_bus.publish.call_args.args[0]
-        self.assertEqual((event.type.value, event.payload), ("AUDIO_LEVEL", {"source": "mic", "level": 0.8}))
+        self.assertEqual([(e.type.value, e.payload) for e in levels()], [("AUDIO_LEVEL", {"source": "mic", "level": 0.8})])
 
 
 def _wait(predicate, timeout=2.0):

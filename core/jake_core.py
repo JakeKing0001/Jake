@@ -1216,6 +1216,29 @@ class JakeCore:
                 self._in_flight_answers -= 1
                 self._last_answer_finished_at = time.time()
 
+    def _publish_hud_event(self, event: HudEvent) -> None:
+        """Punto unico per lo stato del turno verso HUD/companion. Lo stato e' un effetto collaterale del runtime, non
+        parte della logica: senza bus (core parziali, avvio, fallback) si salta, e un iscritto che fallisce non rompe
+        il turno. La privacy resta del bus (EventBus.redactor, F4.5.7) e di answer(), che decide QUANDO il contenuto
+        esce. Contratto del turno:
+        - THINKING {} all'inizio, EXECUTING {} quando parte una skill autorizzata, THINKING {"status"} se il modello
+          tarda, ERROR {"detail"} generico: solo stato, mai il testo della richiesta o della risposta;
+        - USER_MESSAGE poi JAKE_MESSAGE solo a turno concluso, non annullato e non privato (sono il contenuto: l'HUD
+          conosce gia' la richiesta, l'ha scritta lui o l'ha vista nel TRANSCRIPT della voce);
+        - senza JAKE_MESSAGE (privato, risposta vuota, uscita) un IDLE {} chiude lo stato;
+        - turno annullato: dopo l'annullamento il core non pubblica nulla; lo stato finale e' di chi l'ha annullato
+          (la sessione vocale, l'unica che puo' farlo: _finish_turn torna a IDLE solo se nessuno stato piu' nuovo
+          ha preso il posto del turno)."""
+        publish = getattr(getattr(self, "event_bus", None), "publish", None)
+        if publish is None:
+            return
+        try:
+            publish(event)
+        except Exception:
+            logger = getattr(self, "logger", None)
+            if logger is not None:
+                logger.exception("Errore pubblicando lo stato %s verso l'HUD", event.type.value)
+
     def _answer_counted(self, text: str, raw_text: str) -> str:
         # F1.8.4 ("drain limitato"): conta questa chiamata come "in corso" da qui a return -
         # incrementato PRIMA di qualunque lavoro vero (skill/agente/piano), decrementato in un
@@ -1241,11 +1264,12 @@ class JakeCore:
         # prova reale del 27/09/2026: il primo timeout del modello vale per tutto il turno (niente cascata di attese)
         health_token = model_health.begin_turn()
         # l'HUD vede subito che Jake lavora a questa richiesta (anche scritta dall'HUD o dal telefono, senza sessione
-        # vocale che lo dica); EXECUTING arriva quando parte davvero una skill (_resolve_and_execute)
-        self.event_bus.publish(HudEvent(EventType.THINKING, {}))
+        # vocale che lo dica); EXECUTING arriva quando parte davvero una skill (_resolve_and_execute). Solo stato:
+        # il contenuto del turno esce alla fine, quando si sa che non e' annullato ne' privato (vedi _publish_hud_event)
+        self._publish_hud_event(HudEvent(EventType.THINKING, {}))
         # B5: una chiamata al modello lunga non deve sembrare un blocco: dopo qualche secondo l'HUD dice cosa aspetta
         turn_state = model_health.current()
-        slow_notice = threading.Timer(self.SLOW_TURN_NOTICE_S, lambda: self.event_bus.publish(HudEvent(
+        slow_notice = threading.Timer(self.SLOW_TURN_NOTICE_S, lambda: self._publish_hud_event(HudEvent(
             EventType.THINKING, {"status": "Sto aspettando il modello locale..." if (turn_state or {}).get("calling")
                                  else "Ci sto ancora lavorando..."})))
         slow_notice.daemon = True
@@ -1256,7 +1280,7 @@ class JakeCore:
             if failed is not None:
                 self.logger.warning("Modello locale non disponibile in questo turno: %s %s %s", failed.kind, failed.detail,
                                     failed.hint)
-                self.event_bus.publish(HudEvent(EventType.ERROR, {"detail": failed.detail or "modello non disponibile"}))
+                self._publish_hud_event(HudEvent(EventType.ERROR, {"detail": failed.detail or "modello non disponibile"}))
         except TurnCancelled:
             reset_current_command_source_intent(source_intent_token)
             raise
@@ -1265,7 +1289,7 @@ class JakeCore:
             # e riportata all'utente con un messaggio comprensibile invece di terminare il processo.
             self.logger.exception("Errore imprevisto elaborando: %s", text)
             response = "Mi dispiace, si è verificato un errore imprevisto. L'ho registrato nel log."
-            self.event_bus.publish(HudEvent(EventType.ERROR, {"detail": "errore imprevisto"}))
+            self._publish_hud_event(HudEvent(EventType.ERROR, {"detail": "errore imprevisto"}))
         finally:
             slow_notice.cancel()
             model_health.end_turn(health_token)
@@ -1298,12 +1322,18 @@ class JakeCore:
             if response:
                 self.last_response = response
         reset_current_command_source_intent(source_intent_token)
+        replied = bool(response) and response != self.EXIT_SENTINEL
         if self.private_mode:
             self.logger.info("Scambio in modalità privata: non registrato.")
         else:
-            self.event_bus.publish(HudEvent(EventType.USER_MESSAGE, {"text": text}))
-            if response and response != self.EXIT_SENTINEL:
-                self.event_bus.publish(HudEvent(EventType.JAKE_MESSAGE, {"text": response}))
+            self._publish_hud_event(HudEvent(EventType.USER_MESSAGE, {"text": text}))
+            if replied:
+                self._publish_hud_event(HudEvent(EventType.JAKE_MESSAGE, {"text": response}))
+        if self.private_mode or not replied:
+            # nessun JAKE_MESSAGE che riporti l'HUD a riposo (turno privato, risposta vuota, uscita): lo stato del
+            # turno si chiude comunque, senza contenuto - un comando scritto non deve lasciare l'orb su THINKING
+            self._publish_hud_event(HudEvent(EventType.IDLE, {}))
+        if not self.private_mode:
             self.memory_manager.log_turn("user", text)
             if response != self.EXIT_SENTINEL:
                 self.memory_manager.log_turn("jake", response)
@@ -2021,7 +2051,7 @@ class JakeCore:
             return ActionExecution(resolved, policy_result, policy_reason=policy_reason)
         if resolved.intent not in self.MODEL_ONLY_INTENTS:
             # una skill vera parte adesso (autorizzata): l'orb passa da "penso" a "eseguo"
-            self.event_bus.publish(HudEvent(EventType.EXECUTING, {}))
+            self._publish_hud_event(HudEvent(EventType.EXECUTING, {}))
         result = self.skill_registry.execute(
             resolved.intent, resolved.parameters, policy_engine=self.policy_engine,
             action_id=action_id, private=self.private_mode,

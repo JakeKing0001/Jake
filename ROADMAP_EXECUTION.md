@@ -10601,3 +10601,13 @@ per la parte di sviluppo sull'HUD, vedi sotto).
   IDLE quasi tutto il turno. Ora la catena e' completa e coperta da un test end-to-end. Composizione centrata, vetro
   con rifrazione, polvere ambientale per stato, orb meno rigido; build Release, ctest, verifica a schermo.
 - Meteo su Open-Meteo (nessuna chiave), notizie su NewsData.io (chiave gratuita in `news_api_key`).
+- Contratto degli eventi di turno (CI della PR #167): THINKING e EXECUTING pubblicati direttamente dal core facevano
+  cadere tutti i percorsi che costruiscono un core parziale senza bus (conferme, permessi, auth, fallback). Ora un
+  solo punto, `JakeCore._publish_hud_event`, pubblica se il bus c'e' e non rompe il turno se un iscritto fallisce.
+  Ordine: THINKING {} -> EXECUTING {} (solo skill autorizzate) -> USER_MESSAGE -> JAKE_MESSAGE. Il contenuto esce
+  a turno concluso perche' solo allora si sa se il turno e' annullato o privato (l'HUD conosce gia' la richiesta:
+  l'ha scritta lui o l'ha vista nel TRANSCRIPT). Privato: solo THINKING/IDLE senza contenuto, niente
+  USER/JAKE_MESSAGE, redazione del bus invariata. Senza JAKE_MESSAGE (privato, risposta vuota, uscita) un IDLE {}
+  chiude lo stato. Annullato: solo gli stati gia' pubblicati, nulla dopo l'annullamento; lo stato finale e' della
+  sessione vocale (unica che puo' annullare), che torna a IDLE solo se nessuno stato piu' nuovo ha preso il posto.
+  In IDLE (parola di attivazione) esce il cambio di stato ma mai AUDIO_LEVEL del rumore della stanza.

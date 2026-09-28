@@ -477,7 +477,13 @@ class JakeCoreCancelledTurnTests(unittest.TestCase):
             with self.assertRaises(TurnCancelled):
                 core._answer_inner("clicca il pulsante", "clicca il pulsante")
 
-        self.assertTrue(subscriber.empty(), "nessun USER/JAKE_MESSAGE di un turno annullato sul bus")
+        # Contratto: del turno annullato restano solo gli stati puri pubblicati mentre lavorava (THINKING), mai il
+        # contenuto (USER/JAKE_MESSAGE, testo della richiesta o della risposta vecchia). Dopo l'annullamento il core
+        # non pubblica nulla: lo stato finale e' della sessione che ha annullato (WakeWordSession._finish_turn).
+        events = []
+        while not subscriber.empty():
+            events.append(subscriber.get_nowait())
+        self.assertEqual([(e.type.value, e.payload) for e in events], [("THINKING", {})])
         core.context_summarizer.assert_not_called()
         self.assertNotEqual(core.last_response, "risposta vecchia")
         self.assertEqual(core.conversation_state.get_short_term_history(), before)
