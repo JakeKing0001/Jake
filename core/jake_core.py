@@ -34,7 +34,7 @@ from core.nlu.examples import ExampleStore
 from core.nlu.index import lexical_similarity
 from core.nlu.normalizer import TranscriptNormalizer
 from core.nlu.retriever import CapabilityRetriever
-from core.nlu.transcript_repair import AMBIGUOUS, REPAIRED, UNCLEAR, Assessment, TranscriptRepair
+from core.nlu.transcript_repair import AMBIGUOUS, REPAIRED, UNCLEAR, Assessment, TranscriptRepair, first_exact_clause
 from core.notification_center import NotificationCenter
 from core.notification_policy import NotificationPolicy, QuietHours
 from core.proactive_gate import DELIVER, DUPLICATE, MUTED, ProactiveGate, notification_key
@@ -1936,6 +1936,14 @@ class JakeCore:
                 ),
                 learn=False,
             )
+
+        if current_stt_confidence() is not None:
+            # turno vocale: una ripetizione o una coda di chiacchiera non devono nascondere un comando esatto
+            clause = first_exact_clause(text, self.example_store.find_exact,
+                                        lambda intent: risk_of(intent) == RiskLevel.READ_ONLY)
+            if clause is not None:
+                self.logger.info("Prima frase esatta '%s': il resto del turno non e' un comando ('%s')", clause, text)
+                text = clause
 
         assessment = self._assess_voice_turn(text)
         if assessment is not None and assessment.verdict in (UNCLEAR, AMBIGUOUS):

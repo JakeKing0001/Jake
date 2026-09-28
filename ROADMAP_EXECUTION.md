@@ -10719,6 +10719,11 @@ per la parte di sviluppo sull'HUD, vedi sotto).
   28 s, perche' ogni turno nuovo ripagava i ~25 s del classificatore d'intenti prima di ripiegare sulle regole. Ora,
   dopo un timeout del modello e finche' il modello non risponde di nuovo (al massimo 2 minuti), il solo
   instradamento aspetta 6 s (`model_health.routing_timeout`); domande libere e agenti mantengono la loro attesa.
+- Dal log del 28/09 mattina: "Jake, che ore sono? Jake, che ore sono? Jake." e "Jake, che ore sono? Allora, e' una
+  vostra storica in realta'." non erano un esempio esatto e finivano al modello. Nei turni vocali la prima frase
+  vale da sola quando e' un comando esatto: una ripetizione identica una volta sola (qualunque comando), una coda
+  diversa ignorata solo se il comando e' di sola lettura - un'azione non perde mai una parte della richiesta
+  (`transcript_repair.first_exact_clause`).
 - Contratto degli eventi di turno (CI della PR #167): THINKING e EXECUTING pubblicati direttamente dal core facevano
   cadere tutti i percorsi che costruiscono un core parziale senza bus (conferme, permessi, auth, fallback). Ora un
   solo punto, `JakeCore._publish_hud_event`, pubblica se il bus c'e' e non rompe il turno se un iscritto fallisce.
