@@ -289,7 +289,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F7.7` | Edge Devices | `BACKLOG` |
 | `F8.1` | Skill Platform (manifest validato e loader che rifiuta prima dell'import il 22/09/2026; dal 27/09/2026 il rischio dichiarato da un pacchetto verificato e approvato arriva a `risk_of`/PolicyEngine, mai sopra un intent integrato; hook non eseguiti) | `DOING` |
 | `F8.2` | Supply-chain Security (pacchetti firmati, catalogo, quarantena/revoca, pin/rollback il 22/09/2026; dal 27/09/2026 nel runtime: caricamento all'avvio con ricontrollo di firma/hash, installazione in due passi PLAN_SKILL_INSTALL -> INSTALL_SKILL_PACKAGE (ADMIN) legata al digest mostrato; UI HUD e distribuzione non ancora) | `DOING` |
-| `F8.3` | Skill Forge (27/09/2026: scansione dei segreti prima della sandbox - chiavi private, token per formato, credenziali letterali; 28/09/2026: la skill generata diventa un pacchetto firmato nel catalogo - fixture dall'esito reale nella sandbox, manifest scritto dalla Forge con capability dagli import e rischio minimo coerente, permessi mostrati prima del si', approvazione legata al digest, disinstallazione) | `DOING` |
+| `F8.3` | Skill Forge (27/09/2026: scansione dei segreti prima della sandbox - chiavi private, token per formato, credenziali letterali; 28/09/2026: la skill generata diventa un pacchetto firmato nel catalogo - fixture dall'esito reale nella sandbox, manifest scritto dalla Forge con capability dagli import e rischio minimo coerente, permessi mostrati prima del si', approvazione legata al digest, disinstallazione; prova nel runtime dopo l'installazione e canary con rollback automatico; specifica con casi di prova confermata prima del codice) | `DOING` |
 | `F8.4` | Model Runtime (router con capability/inventario/eval/warm-unload/redazione il 22/09/2026; dal 27/09/2026 JakeCore sceglie il modello col router: catalogo da config, modelli installati, telemetria reale di batteria/VRAM, osservazioni reali di successo/latenza di ogni chiamata; dal 27/09/2026 il modello lasciato dal router viene scaricato davvero da Ollama; la scelta del router e SET_MODEL arrivano a tutte le skill che usano il modello di ragionamento, ricontrollata a ogni giro dello scheduler) | `DOING` |
 | `F8.5` | Agent Runtime (27/09/2026: il supervisore ferma anche lo stesso strumento fallito 3 volte di fila con parametri diversi e chiede all'utente) | `DOING` |
 | `F8.6` | Release Safety (golden/security set, confronto, canary, rollback, canali firmati il 22/09/2026; senza runner reali ne' collegamento HUD) | `DOING` |
@@ -10161,8 +10161,17 @@ Criterio di uscita: una skill generata non può agire fuori manifest anche se il
   Test (`tests/test_skill_forge_packages.py`, solo il modello finto): installazione firmata con fixture 42 /
   `missing_parameters` dalla sandbox, test incluso eseguito sul pacchetto installato, ricarica dopo riavvio con
   hash intatti, import di rete -> external_action mostrato prima del si', prove tutte fallite -> nessun pacchetto,
-  digest diverso o assente -> niente installato, eliminazione completa. Restano F8.3.2 (specifica e casi di test
-  confermati PRIMA del codice) e l'esecuzione dei test dichiarati dai pacchetti di terzi.
+  digest diverso o assente -> niente installato, eliminazione completa. Resta l'esecuzione dei test dichiarati dai
+  pacchetti di terzi.
+- 28/09/2026 (F8.3.1/F8.3.2, specifica prima del codice): "impara a fare X" chiede ora al modello una SPECIFICA senza
+  codice - intent, parametri, frasi d'esempio, 1-4 casi di prova con l'esito atteso - validata dalla Forge (intent
+  libero, prove solo sui parametri dichiarati, almeno una che deve riuscire) e mostrata a parole per la conferma
+  ("Prima di scriverla, ecco cosa farebbe..."). Solo dopo il "si'" il codice: deve avere lo stesso intent, e le prove
+  della specifica sostituiscono quelle che il modello si sceglie (FIXTURES) e girano nella sandbox con l'esito
+  promesso, altrimenti il modello riceve il motivo e riscrive. Poi la conferma del pacchetto con permessi e rischio
+  (F8.3.6) come prima: due "si'", uno per cosa fara' e uno per cosa potra' toccare. Test: specifica mostrata senza
+  codice e senza bozze, prove del modello sostituite da quelle confermate, codice con un altro intent o che non
+  mantiene le prove rifiutato.
 - 28/09/2026 (F8.3.7/F8.3.8, prova dopo l'installazione): appena installata, la skill forgiata riesegue le sue prove
   nel runtime vero (`SkillRegistry.execute` -> worker isolato) e deve dare gli stessi esiti della sandbox (prima/
   dopo), altrimenti viene tolta subito. Poi resta in prova nel catalogo (`SkillStore.set_canary`, persistente) per

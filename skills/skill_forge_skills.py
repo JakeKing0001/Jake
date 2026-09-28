@@ -41,8 +41,26 @@ class CreateSkillSkill:
                 "examples": draft.examples, "file": path.name, "path": str(path),
             })
 
+        # F8.3.2: prima la specifica (cosa fara', con quali prove), confermata; solo dopo il codice
+        spec = None
+        if getattr(self.forge, "spec_first", False) is True:
+            if not (parameters.get("spec_confirmed") and parameters.get("spec_id")):
+                try:
+                    spec = self.forge.specify(request)
+                except ForgeError as exc:
+                    return SkillResult(success=False, data={"message": str(exc)}, error="FORGE_FAILED")
+                return SkillResult(success=False, data={
+                    "message": f"Prima di scriverla, ecco cosa farebbe la nuova capacità: {spec.summary()} Procedo?",
+                    "confirm_parameters": {"request": request, "spec_id": spec.spec_id, "spec_confirmed": True},
+                    "intent": spec.intent, "description": spec.description,
+                }, error="CONFIRMATION_REQUIRED")
+            spec = self.forge.specs.get(parameters["spec_id"])
+            if spec is None:
+                return SkillResult(success=False, data={"message": "La specifica non c'è più: richiedimelo."},
+                                   error="FORGE_FAILED")
+
         try:
-            draft = self.forge.propose(request)
+            draft = self.forge.propose(request, spec=spec) if spec is not None else self.forge.propose(request)
         except ForgeError as exc:
             return SkillResult(success=False, data={"message": str(exc)}, error="FORGE_FAILED")
 
