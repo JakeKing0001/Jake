@@ -48,6 +48,7 @@ class SessionContinuityTestCase(ApprovalEndToEndTestCase):
             server.devices = devices
         server.start()
         self.addCleanup(server.stop)
+        core.companion_server = server   # come in JakeCore.__init__ (F7.4.2: il PC riprende la sessione)
         self.events = core.event_bus.subscribe()
         return core, server, f"http://127.0.0.1:{server.port}"
 
@@ -129,6 +130,22 @@ class PhoneBackToPcTests(SessionContinuityTestCase):
         self.assertEqual(len(self.skill.calls), 1)
         self.assertEqual(status, 404, "gia' decisa sul PC: il telefono non la esegue una seconda volta")
 
+    def test_speaking_to_the_pc_takes_the_session_back_and_the_yes_finds_the_confirmation(self):
+        core, server, base = self._start()
+        task_id = self._ask_on_the_pc(core)
+        claim = self._claim_as(base, "phone-1", self.credential.token)
+        self.assertEqual(server.devices.active_device_id, "phone-1")
+
+        core.answer("sì")   # l'utente e' tornato al PC e risponde li', senza rilasciare dal telefono
+
+        self.assertIsNone(server.devices.active_device_id, "il PC risponde di nuovo")
+        self.assertEqual(len(self.skill.calls), 1)
+        self.assertIn(("phone-1", ""), [(e.payload["from"], e.payload["to"]) for e in self._events()
+                                        if e.type == EventType.DEVICE_HANDOFF])
+        status, _ = _post(f"{base}/approvals/{task_id}", {"decision": "approve", "session_id": claim["session_id"]},
+                          headers=self._auth())
+        self.assertEqual(status, 404, "decisa sul PC: il telefono non la esegue una seconda volta")
+
     def test_an_expired_lease_brings_the_confirmation_back_to_the_pc(self):
         now = [0.0]
         devices = DeviceRegistry(lease_s=10, clock=lambda: now[0])
@@ -142,15 +159,18 @@ class PhoneBackToPcTests(SessionContinuityTestCase):
 
         self.assertEqual(core.conversation_state.pending_channels()[None]["trace_id"], task_id)
 
-    def test_a_reconnecting_phone_does_not_take_a_confirmation_asked_on_the_pc_meanwhile(self):
+    def test_a_reconnecting_phone_does_not_take_a_confirmation_the_pc_asked_meanwhile(self):
+        """Il telefono resta attivo e si riconnette: una conferma chiesta nel frattempo dal PC senza un turno
+        dell'utente (un turno al PC renderebbe attivo il PC, F7.4.2) resta del PC."""
         core, _server, base = self._start()
         self._claim_as(base, "phone-1", self.credential.token)
-        task_id = self._ask_on_the_pc(core)   # l'utente e' tornato al PC e parla li'
+        core.conversation_state.set_pending_action({"intent": "FAKE", "parameters": {}, "reason": "confirmation_required",
+                                                    "trace_id": "pc-task"})
 
         claim = self._claim_as(base, "phone-1", self.credential.token)   # il telefono si riconnette
 
         self.assertIsNone(claim["continuity"]["pending"])
-        self.assertEqual(core.conversation_state.pending_channels()[None]["trace_id"], task_id)
+        self.assertEqual(core.conversation_state.pending_channels()[None]["trace_id"], "pc-task")
 
 
 class SimultaneousClaimTests(SessionContinuityTestCase):
