@@ -102,6 +102,11 @@ qt_add_executable(JakeHud
     src/OverlayStyler.cpp
     src/GlobalHotkeys.h
     src/GlobalHotkeys.cpp
+    src/DesktopGlass.h
+    src/DesktopGlass.cpp
+    src/GlassGeometry.h
+    src/NativeGlass.h
+    src/NativeGlass.cpp
 )
 
 # Modulo QML "JakeHud" (vedi "import JakeHud" in qml/Main.qml ed engine.loadFromModule in
@@ -154,6 +159,9 @@ target_link_libraries(JakeHud PRIVATE
 )
 
 if(WIN32)
+    # F4.3.1: vetro nativo dietro ai pannelli (NativeGlass): attributi DWM, Windows.UI.Composition (C++/WinRT,
+    # windowsapp) e la DispatcherQueue del thread della GUI (CoreMessaging).
+    target_link_libraries(JakeHud PRIVATE dwmapi windowsapp CoreMessaging)
     # Un exe collegato dinamicamente a Qt non e' distribuibile da solo: senza le DLL e i plugin
     # accanto al binario Windows mostra "Qt6*.dll non trovata". Ricavare windeployqt dalla
     # stessa installazione che ha fornito Qt6::qmake evita di usare per errore un'altra versione.
@@ -191,3 +199,11 @@ add_test(NAME hud_contract
     COMMAND JakeHudContractTests "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/fixtures/hud_contract.json")
 # Le DLL di Qt accanto al binario le copia windeployqt (POST_BUILD di JakeHud, stessa cartella).
 add_dependencies(JakeHudContractTests JakeHud)
+
+# F4.3.1: dove finisce, in pixel fisici, il vetro nativo dietro a un pannello logico (DPI, rientro, dissolvenza).
+qt_add_executable(JakeHudGlassGeometryTests tests/glass_geometry_tests.cpp)
+target_include_directories(JakeHudGlassGeometryTests PRIVATE src)
+target_link_libraries(JakeHudGlassGeometryTests PRIVATE Qt6::Core)
+set_target_properties(JakeHudGlassGeometryTests PROPERTIES WIN32_EXECUTABLE OFF)
+add_dependencies(JakeHudGlassGeometryTests JakeHud)
+add_test(NAME hud_glass_geometry COMMAND JakeHudGlassGeometryTests)

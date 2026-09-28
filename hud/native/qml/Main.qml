@@ -52,6 +52,8 @@ ApplicationWindow {
     // JAKE_HUD_DEMO=1 (src/main.cpp): l'orb scorre da solo tutti gli stati, con un livello audio sintetico e gli esiti
     // success/warning/error - per verificarne a schermo il comportamento senza Jake acceso. Il resto dell'HUD resta reale.
     property bool orbDemo: false
+    // F4.3.1: JAKE_HUD_GLASS=hud|off (src/main.cpp) tiene il vetro dell'HUD anche dove il vetro sul desktop e' possibile
+    property bool desktopGlassAllowed: true
 
     JakeClient {
         id: jake
@@ -61,12 +63,38 @@ ApplicationWindow {
         onVisibilityRequested: (visible) => {
             window.visible = visible;
             overlayStyler.forceVisibility(window, visible);
+            if (!visible)
+                desktopGlass.hideAll();
             if (visible)
                 overlayStyler.makeNoActivate(window);
         }
     }
 
     OverlayStyler { id: overlayStyler }
+
+    // F4.3.1: il desktop vero, sfocato da DWM, dietro ogni pannello visibile (src/DesktopGlass.h). Segue i pannelli
+    // registrati in Theme.panels alla stessa cadenza del click-through; si spegne con l'HUD e senza trasparenza.
+    DesktopGlass { id: desktopGlass }
+    function glassRegions() {
+        const regions = [];
+        for (let i = 0; i < Theme.panels.length; ++i) {
+            const panel = Theme.panels[i];
+            let opacity = 1, visible = true;
+            for (let item = panel; item; item = item.parent) {
+                opacity *= item.opacity;
+                visible = visible && item.visible;
+            }
+            const origin = panel.mapToItem(null, 0, 0);
+            regions.push({ x: origin.x, y: origin.y, width: panel.width, height: panel.height,
+                           radius: panel.radius, visible: visible, opacity: opacity });
+        }
+        return regions;
+    }
+    Timer {
+        interval: 60; repeat: true; running: Theme.desktopGlass && window.visible
+        onTriggered: desktopGlass.sync(window, window.glassRegions())
+    }
+    onVisibleChanged: if (!visible) desktopGlass.hideAll()
 
     GlobalHotkeys {
         id: hotkeys
@@ -217,6 +245,9 @@ ApplicationWindow {
         Theme.highContrast = highContrast
         Theme.textScale = textScale
         Theme.richGlass = orbQuality === "high" && !highContrast
+        Theme.desktopGlass = desktopGlassAllowed && desktopGlass.supported && !highContrast
+            && desktopGlass.transparencyEffectsEnabled()
+        console.info("Vetro dei pannelli:", Theme.desktopGlass ? "desktop (" + desktopGlass.mode + ")" : "HUD")
         Theme.backdrop = frosted
         if (jakeToken.length > 0)
             jake.setCredentials(jakeDeviceId, jakeToken)

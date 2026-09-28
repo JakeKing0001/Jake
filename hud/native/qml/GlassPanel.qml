@@ -11,6 +11,8 @@ import JakeHud
 // per tutti in Main.qml) - il vetro le "rifrange", sfocate e ritagliate alla sua forma. Poi la tinta scura che tiene
 // il testo leggibile, un orlo che prende luce in alto, un bagliore del colore dello stato dal basso e un'ombra
 // morbida che stacca il pannello dal fondo. In qualita' bassa restano tinta, orlo e bagliore.
+// F4.3.1: dove Windows lo permette, dietro al pannello c'e' il desktop vero sfocato (DesktopGlass in Main.qml, una
+// finestra nativa di DWM per pannello): la rifrazione simulata si spegne e la tinta si alleggerisce (Theme).
 Item {
     id: panel
     property alias hovered: hover.hovered
@@ -42,7 +44,7 @@ Item {
         anchors.fill: parent
         visible: false
         live: true
-        sourceItem: Theme.richGlass ? Theme.backdrop : null
+        sourceItem: Theme.richGlass && !Theme.desktopGlass ? Theme.backdrop : null
         property point origin: Qt.point(0, 0)
         sourceRect: Qt.rect(origin.x, origin.y, panel.width, panel.height)
         function sync() {
@@ -50,7 +52,7 @@ Item {
         }
     }
     // i pannelli si spostano quando altri compaiono o spariscono: la posizione nel fondo si riallinea da sola
-    Timer { interval: 250; repeat: true; running: Theme.richGlass && panel.visible; triggeredOnStart: true
+    Timer { interval: 250; repeat: true; running: Theme.richGlass && !Theme.desktopGlass && panel.visible; triggeredOnStart: true
             onTriggered: refraction.sync() }
     Rectangle {
         id: glassMask
@@ -61,7 +63,7 @@ Item {
     }
     MultiEffect {
         anchors.fill: parent
-        visible: Theme.richGlass && !Theme.highContrast && Theme.backdrop !== null
+        visible: Theme.richGlass && !Theme.desktopGlass && !Theme.highContrast && Theme.backdrop !== null
         source: refraction
         maskEnabled: true
         maskSource: glassMask
