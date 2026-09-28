@@ -8766,8 +8766,12 @@ reduced motion restano utilizzabili.
   vetro resta all'HUD; CPU dell'HUD in demo 49-55% con vetro e 48-52% senza (dominata dall'orb). Ripiego sul vetro
   dell'HUD senza Windows 11, con "Effetti di trasparenza" spenti, con il contrasto elevato o con
   `JAKE_HUD_GLASS=hud`. Test: `hud_glass_geometry` in ctest (DPI 100/125/150%, rientro, raggio, dissolvenza).
-  Restano: giudizio estetico dell'utente, prova su un secondo monitor a scala diversa, F4.3.3 profilo GPU/batteria,
-  F4.3.6 contrasto su desktop chiari.
+  Restano: giudizio estetico dell'utente, prova su un secondo monitor a scala diversa, F4.3.3 profilo GPU/batteria.
+- 28/09/2026 (F4.3.6, contrasto su desktop chiari, misurato): HUD in demo sopra un documento bianco con testo nero,
+  pixel dei pannelli letti dallo screenshot. Con la tinta 0,58-0,66 lo sfondo dei pannelli era #4b4d53 (luminanza
+  0,074): testo secondario a contrasto 3,50, sotto la soglia di leggibilita' 4,5 (testo principale 7,68). Tinta del
+  vetro vero portata a 0,82-0,88, il minimo che tiene il caso peggiore: sul bianco il pixel piu' chiaro dei pannelli
+  ha luminanza 0,045 e il testo secondario sale a 4,59; sopra un desktop colorato il desktop sfocato resta visibile.
 
 ### F4.4 — State machine e Orb 2.0
 
