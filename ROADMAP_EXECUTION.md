@@ -10676,6 +10676,11 @@ per la parte di sviluppo sull'HUD, vedi sotto).
   IDLE quasi tutto il turno. Ora la catena e' completa e coperta da un test end-to-end. Composizione centrata, vetro
   con rifrazione, polvere ambientale per stato, orb meno rigido; build Release, ctest, verifica a schermo.
 - Meteo su Open-Meteo (nessuna chiave), notizie su NewsData.io (chiave gratuita in `news_api_key`).
+- Dal log del 28/09 mattina: "Jake, che ore sono? Jake, che ore sono? Jake." e "Jake, che ore sono? Allora, e' una
+  vostra storica in realta'." non erano un esempio esatto e finivano al modello. Nei turni vocali la prima frase
+  vale da sola quando e' un comando esatto: una ripetizione identica una volta sola (qualunque comando), una coda
+  diversa ignorata solo se il comando e' di sola lettura - un'azione non perde mai una parte della richiesta
+  (`transcript_repair.first_exact_clause`).
 - Contratto degli eventi di turno (CI della PR #167): THINKING e EXECUTING pubblicati direttamente dal core facevano
   cadere tutti i percorsi che costruiscono un core parziale senza bus (conferme, permessi, auth, fallback). Ora un
   solo punto, `JakeCore._publish_hud_event`, pubblica se il bus c'e' e non rompe il turno se un iscritto fallisce.

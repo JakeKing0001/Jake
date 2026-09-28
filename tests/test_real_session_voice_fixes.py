@@ -231,6 +231,32 @@ class RecoverableTranscriptTests(unittest.TestCase):
         finally:
             reset_current_stt_confidence(token)
 
+    def test_a_command_repeated_in_one_utterance_counts_once_on_the_exact_lane(self):
+        """Prova reale del 28/09: "Jake, che ore sono? Jake, che ore sono? Jake." finiva al modello (GPU piena)."""
+        core = self._core()
+        self._say(core, "che ore sono? Jake, che ore sono? Jake.", 0.69)
+        self.assertEqual(self.routed, ["che ore sono"])
+        self.assertEqual(len(self.time.calls), 1)
+
+    def test_room_chatter_after_a_read_only_command_does_not_hide_it(self):
+        core = self._core()
+        self._say(core, "che ore sono? Allora, è una vostra storica in realtà.", 0.9)
+        self.assertEqual(self.routed, ["che ore sono"])
+
+    def test_an_action_never_loses_part_of_the_request(self):
+        from core.nlu.examples import ExampleStore
+        from core.nlu.transcript_repair import first_exact_clause
+        from core.risk import RiskLevel, risk_of
+
+        store = ExampleStore(learned_path=Path(tempfile.mkdtemp()) / "learned.jsonl")
+        action = next(e for e in store.all() if risk_of(e.intent) != RiskLevel.READ_ONLY and not e.parameters
+                      and "." not in e.text and "?" not in e.text)
+        read_only = lambda intent: risk_of(intent) == RiskLevel.READ_ONLY  # noqa: E731
+        self.assertIsNone(first_exact_clause(f"{action.text}. e poi un'altra cosa", store.find_exact, read_only),
+                          action.text)
+        self.assertEqual(first_exact_clause(f"{action.text}. {action.text}", store.find_exact, read_only), action.text,
+                         "ripetuta identica: una volta sola")
+
     def test_a_fused_word_in_a_harmless_command_is_repaired(self):
         core = self._core()
         self._say(core, "chiore sono", 0.66)

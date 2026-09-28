@@ -179,3 +179,30 @@ class TranscriptRepair:
         if confidence < needed:
             return Assessment(UNCLEAR, text, f"confidenza {confidence:.2f} < {needed:.2f}, {unknown} parole ignote")
         return Assessment(OK, text, "trascrizione affidabile")
+
+
+# Prova reale del 28/09/2026: "Jake, che ore sono? Jake, che ore sono? Jake." (ripetuto perche' Jake non rispondeva) e
+# "Jake, che ore sono? Allora, e' una vostra storica in realta'." (la stanza che continua a parlare) non erano un
+# esempio esatto: il turno finiva al classificatore del modello - 28 s con la GPU piena - per chiedere l'ora.
+_CLAUSE_SPLIT = re.compile(r"[.?!;]+|\b(?:jake|geek|jack|jache|jek|gec|jeik|cheic)\b", re.IGNORECASE)
+
+
+def first_exact_clause(text: str, find_exact, safe_intent) -> str | None:
+    """La prima frase di un turno vocale quando e' lei il comando: `find_exact(text) -> Example|None`,
+    `safe_intent(intent) -> bool` (sola lettura). None se non si applica (la frase intera decide come sempre).
+    - la stessa frase ripetuta (anche con "Jake" in mezzo) vale una volta sola, per qualunque comando esatto;
+    - una coda diversa si ignora SOLO se la prima frase e' un comando di sola lettura: "apri X. E poi..." resta intera,
+      un'azione non perde mai una parte della richiesta."""
+    if find_exact(text) is not None:
+        return None
+    clauses = [c.strip(" ,:").strip() for c in _CLAUSE_SPLIT.split(text or "")]
+    clauses = [c for c in clauses if c]
+    if len(clauses) < 2:
+        return None
+    first = clauses[0]
+    example = find_exact(first)
+    if example is None:
+        return None
+    if all(clause.lower() == first.lower() for clause in clauses):
+        return first
+    return first if safe_intent(example.intent) else None
