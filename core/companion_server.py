@@ -167,6 +167,27 @@ class CompanionServer:
             self.event_bus.publish(HudEvent(EventType.DEVICE_HANDOFF, {"from": device_id, "to": ""}))
             self.hand_over_pending(device_id, None)
 
+    def release_to_pc(self, device_id: str) -> tuple[bool, dict | None]:
+        """F7.4.8: `device_id` smette di rispondere e si torna al PC - con la conferma che aspettava li', e l'HUD lo sa.
+        (rilasciato davvero?, conferma riportata al PC o None)."""
+        with self._handoff_lock:
+            released = self.devices.release(device_id)
+            moved = self.hand_over_pending(device_id, None) if released else None
+            if released:
+                self.event_bus.publish(HudEvent(EventType.DEVICE_HANDOFF, {"from": device_id, "to": ""}))
+        return released, moved
+
+    def pc_takes_the_session(self) -> str | None:
+        """F7.4.2 (elezione per scelta esplicita e recency): l'utente parla o scrive al PC mentre un telefono era il
+        dispositivo attivo -> il PC torna a rispondere, come dopo un rilascio. Ritorna il dispositivo che lasciava."""
+        with self._handoff_lock:
+            active = self.devices.active_device_id
+            if active is None:
+                return None
+            self.release_to_pc(active)
+        _logger.info("Il PC riprende la sessione dal dispositivo %s", active)
+        return active
+
     def hand_over_pending(self, source: str | None, target: str | None) -> dict | None:
         """F7.4.8: la conferma in sospeso di chi rispondeva passa a chi risponde adesso (None = il PC). Chi la riceve
         lo vede: il telefono nella risposta del claim, il PC con una notifica nell'HUD e la carta di conferma."""
@@ -657,12 +678,7 @@ class _Handler(BaseHTTPRequestHandler):
         # deve poter rilasciare un device_id che non e' il proprio.
         if self._device_id_mismatch(device_id):
             return self._reject_body(403, "device_id_mismatch")
-        with self.companion._handoff_lock:
-            released = self.companion.devices.release(device_id)
-            # F7.4.8: si torna al PC - con la conferma che aspettava sul telefono, e l'HUD lo sa
-            moved = self.companion.hand_over_pending(device_id, None) if released else None
-            if released:
-                self.companion.event_bus.publish(HudEvent(EventType.DEVICE_HANDOFF, {"from": device_id, "to": ""}))
+        released, moved = self.companion.release_to_pc(device_id)
         self._audit("handoff_release", status=200, target_device=device_id, released=released,
                     pending_handed_over=moved is not None)
         self._json_response(200, {"released": released})

@@ -283,7 +283,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F7.1` | Companion Security (F7.1.1/.4/.5/.6/.7 il 22/09/2026; F7.1.2 - pairing HTTP - chiuso il 22/09/2026, vedi F7.2; TLS reale generato/persistito dal server il 22/09/2026; capability persistenti F7.1.3 dal 27/09/2026 - impostabili a voce con SET_DEVICE_ACCESS, valide subito e dopo un riavvio, riga corrotta = nessun permesso; manca la distribuzione del certificato al telefono oltre al pairing) | `DOING` |
 | `F7.2` | Mobile Companion (pairing/chat live/approve-deny sullo stesso task end-to-end il 22/09/2026; lista/revoca dispositivi via HTTP e prima app Android reale - MAI compilata/eseguita in questo ambiente - il 22/09/2026; dal 27/09/2026 revoca/rotazione chiudono anche lo stream gia' aperto; file dal telefono al PC con permesso esplicito; senza offline queue/wipe lato app) | `DOING` |
 | `F7.3` | Voice Devices | `BACKLOG` |
-| `F7.4` | Presence Runtime (27/09/2026: lease del dispositivo attivo - scade senza segni di vita, rinnovato da richieste e stream aperto, rilasciato alla revoca; 28/09/2026: la conferma in sospeso segue chi risponde PC -> telefono -> PC con lo stesso task_id, claim simultanei deterministici, esecuzione unica, riepilogo per il telefono) | `DOING` |
+| `F7.4` | Presence Runtime (27/09/2026: lease del dispositivo attivo - scade senza segni di vita, rinnovato da richieste e stream aperto, rilasciato alla revoca; 28/09/2026: la conferma in sospeso segue chi risponde PC -> telefono -> PC con lo stesso task_id, claim simultanei deterministici, esecuzione unica, riepilogo per il telefono; parlare al PC gli riporta la sessione) | `DOING` |
 | `F7.5` | Home Integration | `DOING` |
 | `F7.6` | Sync and Crypto (motore cifrato con conflitti deterministici, revoca, wipe e coda limitata il 21/09/2026; senza trasporto ne' collegamento a memoria/pairing) | `DOING` |
 | `F7.7` | Edge Devices | `BACKLOG` |
@@ -9908,8 +9908,14 @@ nessuna azione duplicata e ripresa di contesto, decisioni e ricevute sul PC.
   conferma, e nulla su una riconnessione di chi era gia' attivo. Un dispositivo revocato non riporta indietro la
   sua conferma. Test con server companion vero e pipeline reale: PC -> telefono -> approvazione, telefono -> PC ->
   "si'" locale e 404 al telefono, lease scaduto, riconnessione, due claim e due approvazioni simultanei, privato.
-  Restano: il PC che riprende la sessione da solo quando l'utente gli parla (F7.4.2), l'active responder per
-  voce e notifiche proattive (niente doppia risposta), il riepilogo nei pannelli F4.5 dell'HUD.
+  Restano: l'active responder per voce e notifiche proattive (niente doppia risposta), il riepilogo nei pannelli
+  F4.5 dell'HUD.
+- 28/09/2026 (F7.4.2, elezione per scelta esplicita e recency): con un telefono attivo, l'utente che torna al PC e
+  parla o scrive li' (voce, CLI, HUD nativo) doveva prima "rilasciare" dal telefono; il "si'" detto al PC non
+  trovava la conferma passata al telefono. Ora ogni turno dell'utente al PC riporta la sessione al PC con la
+  stessa logica del rilascio (`CompanionServer.release_to_pc`, sotto il lock di handoff): conferma di nuovo sul
+  PC, `DEVICE_HANDOFF` verso nessuno. Un comando dal telefono non fa elezione. Test: conferma passata al telefono,
+  "si'" detto al PC -> PC attivo, azione eseguita una volta, 404 all'approvazione successiva dal telefono.
 
 ### F7.5 — Home Assistant profondo
 

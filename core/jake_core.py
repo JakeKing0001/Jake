@@ -1048,6 +1048,9 @@ class JakeCore:
         return self._run_in_current_profile(lambda: self._answer_in_profile(text or ""))
 
     def _answer_in_profile(self, raw_text: str) -> str:
+        # F7.4.2: chi parla o scrive al PC (voce, CLI, HUD nativo) lo rende di nuovo il dispositivo che risponde, con la
+        # conferma che aspettava sul telefono: il "si'" detto qui la trova
+        self._pc_takes_the_session()
 
         # F2.6.4:
         # una passphrase NON deve attraversare normalizzatore, NLU, memoria,
@@ -1218,6 +1221,19 @@ class JakeCore:
                 self._last_answer_finished_at = time.time()
 
     CONTINUITY_TURNS = 6
+
+    def _pc_takes_the_session(self) -> None:
+        from core.native_hud import NATIVE_HUD_DEVICE_ID
+
+        if current_device_id() not in (None, NATIVE_HUD_DEVICE_ID):
+            return   # un telefono che parla resta il suo canale: nessuna elezione
+        server = getattr(self, "companion_server", None)
+        if server is None or not getattr(server, "running", False):
+            return
+        try:
+            server.pc_takes_the_session()
+        except Exception:
+            self.logger.exception("Errore riportando la sessione al PC")
 
     def _continuity_snapshot(self) -> dict:
         """F7.4.8: gli ultimi scambi della conversazione (unica per tutti i dispositivi) per chi prende la sessione dal
