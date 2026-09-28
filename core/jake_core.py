@@ -3202,6 +3202,7 @@ class JakeCore:
 
     def _publish_action_receipt(self, receipt) -> None:
         """F4.5/F4.6.1: ogni ricevuta del ledger ha una rappresentazione nell'HUD (action center)."""
+        self._observe_forge_trial(receipt)
         result = str(getattr(receipt, "result", "") or "")
         requested_by = str(getattr(receipt, "requested_by", "") or "")
         self.event_bus.publish(HudEvent(EventType.ACTION_RECEIPT, {
@@ -3211,6 +3212,25 @@ class JakeCore:
             "error_category": str(getattr(receipt, "error_category", "") or ""),
             "verified": str(getattr(receipt, "verified", "") or ""),
         }, trace_id=getattr(receipt, "trace_id", None)))
+
+    def _observe_forge_trial(self, receipt) -> None:
+        """F8.3.7: le skill forgiate in prova vedono ogni loro esecuzione reale; a prova finita (superata o skill
+        disattivata) l'utente lo sa dal canale degli avvisi (voce nella sessione vocale, CLI altrimenti)."""
+        forge = getattr(self, "skill_forge", None)
+        if forge is None or getattr(forge, "skill_store", None) is None:
+            return
+        try:
+            message = forge.observe_execution(str(receipt.intent or ""), str(getattr(receipt, "result", "") or ""),
+                                              str(getattr(receipt, "error_category", "") or ""))
+        except Exception:
+            self.logger.exception("Errore nel periodo di prova di una skill forgiata")
+            return
+        if message:
+            callback = getattr(getattr(self, "system_advisor", None), "on_advisory", None) or self._default_on_advisory
+            try:
+                callback(message)
+            except Exception:
+                self.logger.exception("Errore annunciando la fine della prova di una skill forgiata")
 
     def _publish_undo_available(self, descriptor) -> None:
         """F4.6.3: scadenza dell'undo visibile nell'HUD (mai i parametri compensatori)."""

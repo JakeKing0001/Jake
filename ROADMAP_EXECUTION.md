@@ -10130,8 +10130,18 @@ Criterio di uscita: una skill generata non può agire fuori manifest anche se il
   `missing_parameters` dalla sandbox, test incluso eseguito sul pacchetto installato, ricarica dopo riavvio con
   hash intatti, import di rete -> external_action mostrato prima del si', prove tutte fallite -> nessun pacchetto,
   digest diverso o assente -> niente installato, eliminazione completa. Restano F8.3.2 (specifica e casi di test
-  confermati PRIMA del codice), F8.3.7 canary con budget ridotto, F8.3.8 eval prima/dopo e rollback automatico,
-  e l'esecuzione dei test dichiarati dai pacchetti di terzi.
+  confermati PRIMA del codice) e l'esecuzione dei test dichiarati dai pacchetti di terzi.
+- 28/09/2026 (F8.3.7/F8.3.8, prova dopo l'installazione): appena installata, la skill forgiata riesegue le sue prove
+  nel runtime vero (`SkillRegistry.execute` -> worker isolato) e deve dare gli stessi esiti della sandbox (prima/
+  dopo), altrimenti viene tolta subito. Poi resta in prova nel catalogo (`SkillStore.set_canary`, persistente) per
+  5 esecuzioni reali: ogni ricevuta del ledger passa da `SkillForge.observe_execution`; input sbagliato, conferme,
+  policy e annullamenti non contano (non sono difetti del codice), 2 errori della skill o un solo blocco/timeout del
+  worker la mettono in quarantena e la tolgono dal registro da soli (rollback automatico), e l'utente lo sente dal
+  canale degli avvisi; 5 esecuzioni riuscite chiudono la prova. Il "budget ridotto" e' questo: poche esecuzioni e
+  soglie strette prima di fidarsi, non un limite di risorse diverso (il worker ha gia' memoria/CPU/processi
+  limitati dal Job Object per tutte). Test: prove rieseguite nel runtime, runtime diverso -> rimossa, promozione
+  dopo 5, errori dell'utente ignorati, 2 errori -> quarantena, timeout -> subito, stato dopo riavvio, ricevuta del
+  ledger -> annuncio.
 
 ### F8.4 — Model router
 

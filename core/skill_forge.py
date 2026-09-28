@@ -23,7 +23,12 @@ file sciolto in plugins/ ma un pacchetto come quelli degli editori, nella stessa
 4. prima del "si'" l'utente legge permessi e rischio generati dal manifest (`permission_summary`), e il "si'" vale
    per quel digest: `SkillStore.plan_install` -> `approve` -> `install`, poi il caricamento con ricontrollo di firma
    e hash, il rischio dichiarato a `risk_of` e l'esecuzione nel worker isolato (F1.6), come ogni pacchetto;
-5. "elimina la skill" la toglie dal catalogo e dal disco.
+5. "elimina la skill" la toglie dal catalogo e dal disco;
+6. F8.3.8: appena installata la skill riesegue le sue prove nel runtime vero (worker isolato) e deve dare gli stessi
+   esiti della sandbox, altrimenti viene tolta subito;
+7. F8.3.7: poi resta IN PROVA (canary, nel catalogo) per le prime CANARY_RUNS esecuzioni reali: un blocco del worker
+   o CANARY_MAX_FAILURES errori suoi (non quelli dell'utente o della policy) la mettono in quarantena e la
+   disattivano da soli, e l'utente lo sa; superata la prova diventa una skill normale.
 Senza catalogo (non leggibile all'avvio) resta il percorso storico del file in plugins/."""
 import ast
 import hashlib
@@ -32,6 +37,7 @@ import json
 import re
 import sys
 import tempfile
+import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -105,6 +111,12 @@ IMPORT_CAPABILITIES = {
     "PIL": ("screen",),
 }
 _PARAMETER_TYPES = {"string", "integer", "number", "boolean", "array", "object"}
+# F8.3.7: il periodo di prova. Contano solo gli errori della skill: input sbagliato, conferma, policy o annullamento
+# sono dell'utente o delle regole di Jake, non un difetto del codice generato.
+CANARY_RUNS = 5
+CANARY_MAX_FAILURES = 2
+_CANARY_NOT_THE_SKILLS_FAULT = frozenset({"pending", "denied", "invalid_input", "user_cancelled"})
+_CANARY_FATAL = frozenset({"timeout"})   # worker bloccato o terminato dal Job Object
 
 # Controlli statici indipendenti da FORBIDDEN_PATTERNS (v5.3, Self-Improvement controllato):
 # quella lista nera e' testuale (regex sul sorgente), quindi aggirabile con l'indirezione,
@@ -258,6 +270,7 @@ class SkillForge:
         self.skill_store = skill_store
         self.on_package_installed = on_package_installed
         self._signing_key = None
+        self._canary_lock = threading.Lock()
 
     # ---- disponibilita' ----------------------------------------------------------------
 
@@ -613,6 +626,13 @@ class SkillForge:
         if not loaded:
             store.uninstall(skill_id)
             raise ForgeError("il pacchetto non si e' caricato: l'ho rimosso.")
+        mismatch = self._evaluate_installed(plan.verified.manifest)
+        if mismatch:
+            store.uninstall(skill_id)
+            if hasattr(self.registry, "unregister_skill"):
+                self.registry.unregister_skill(draft.intent)
+            raise ForgeError(f"installata, non si comporta come nella prova ({mismatch}): l'ho rimossa.")
+        store.set_canary(skill_id, plan.verified.manifest.version, {"remaining": CANARY_RUNS, "failures": 0})
         self.drafts.pop(draft.draft_id, None)
         if self.on_skill_installed is not None:
             try:
@@ -623,6 +643,69 @@ class SkillForge:
         if self.logger:
             self.logger.info("Skill forgiata installata come pacchetto firmato: %s (%s)", skill_id, draft.digest[:12])
         return draft, store.usable_directory(skill_id)
+
+    def _evaluate_installed(self, manifest) -> str:
+        """F8.3.8, prima/dopo: le prove registrate nella sandbox si rieseguono nel runtime vero (per le skill dei
+        pacchetti e' il worker isolato di SkillRegistry) e devono avere lo stesso esito. Ritorna la prima differenza,
+        o "" se tutto torna. Solo l'esito (riuscita o errore dichiarato): l'output puo' dipendere da ora o caso."""
+        execute = getattr(self.registry, "execute", None)
+        if execute is None:
+            return ""
+        for spec in manifest.intents:
+            for fixture in spec.fixtures:
+                result = execute(spec.intent, dict(fixture["input"]))
+                expected = "output" in fixture
+                if bool(getattr(result, "success", False)) != expected:
+                    got = getattr(result, "error", None) or "riuscita"
+                    return f"{fixture['name']}: attesa {'riuscita' if expected else 'un errore'}, ottenuto {got}"
+        return ""
+
+    def observe_execution(self, intent: str, result: str, error_category: str) -> str | None:
+        """F8.3.7: ogni esecuzione reale (ricevuta del ledger) di una skill forgiata ancora in prova. Ritorna il
+        messaggio da dare all'utente quando la prova finisce (superata, o skill disattivata), altrimenti None."""
+        store = self.skill_store
+        if store is None or not intent:
+            return None
+        with self._canary_lock:
+            for skill_id in store.skills():
+                if not skill_id.startswith(FORGE_ID_PREFIX):
+                    continue
+                trial = store.canary(skill_id)
+                if trial is None or intent not in trial[2]:
+                    continue
+                version, state, intents = trial
+                return self._record_trial(skill_id, version, state, intents, result, error_category)
+        return None
+
+    def _record_trial(self, skill_id: str, version: str, state: dict, intents: list, result: str,
+                      error_category: str) -> str | None:
+        name = intents[0].replace("_", " ").lower() if intents else skill_id
+        if error_category in _CANARY_NOT_THE_SKILLS_FAULT:
+            return None
+        if result == "success":
+            state["remaining"] -= 1
+            if state["remaining"] > 0:
+                self.skill_store.set_canary(skill_id, version, state)
+                return None
+            self.skill_store.set_canary(skill_id, version, None)
+            if self.logger:
+                self.logger.info("Skill forgiata %s: prova superata", skill_id)
+            return f"La nuova capacità «{name}» ha superato il periodo di prova: resta attiva."
+        state["failures"] += 1
+        if error_category not in _CANARY_FATAL and state["failures"] < CANARY_MAX_FAILURES:
+            self.skill_store.set_canary(skill_id, version, state)
+            return None
+        # rollback automatico: quarantena nel catalogo (reversibile, la versione resta su disco per capire cosa
+        # e' successo) e l'intent esce subito dal registro
+        reason = "blocco o timeout nel worker" if error_category in _CANARY_FATAL else f"{state['failures']} errori"
+        self.skill_store.quarantine(skill_id, version, f"canary: {reason} ({result})")
+        for intent in intents:
+            if hasattr(self.registry, "unregister_skill"):
+                self.registry.unregister_skill(intent)
+        if self.logger:
+            self.logger.warning("Skill forgiata %s disattivata durante la prova: %s", skill_id, reason)
+        return (f"Ho disattivato la nuova capacità «{name}»: durante il periodo di prova ha dato {reason}. "
+                "L'ho messa in quarantena; puoi chiedermi di eliminarla o di riscriverla.")
 
     # ---- gestione ----------------------------------------------------------------------
 
