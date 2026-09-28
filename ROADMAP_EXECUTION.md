@@ -10682,19 +10682,28 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 28/09/2026 (le versioni precedenti restano nella cronologia Git; la lista del 27/09 sera e' stata eseguita
-per la parte di sviluppo sull'HUD, vedi sotto).
+Aggiornato 28/09/2026 sera (le versioni precedenti restano nella cronologia Git; lo sviluppo della lista del mattino
+- F4.3 vetro per pannello, F7.4.8 continuita' PC <-> companion, F8.3 Skill Forge con specifica/test/canary - e' su
+master, vedi le voci di F4.3, F7.4, F8.3 e le PR #168-#182).
 
 1. Utente: ripetere il gate hardware di F2 con `docs/f2-hardware-validation.md` (tre profili, interruzioni, sessione
    wake di 24 h, poi `python -m benchmarks.f2_hardware_session evaluate`). Solo con `PASS` F2 passa a `DONE`. Con il
-   microfono integrato del portatile la confidenza di Whisper resta bassa (0,45-0,67 anche su frasi corrette nella
-   prova del 27/09): una cuffia o un microfono dedicato e' la prima cosa da provare.
-2. Utente: prova reale con voce continua e HUD nativo - composizione centrata, stati reali (parola di attivazione ->
-   LISTENING, fine frase -> TRANSCRIBING, attesa del modello -> THINKING, skill -> EXECUTING, voce -> SPEAKING,
-   errore -> ERROR breve), pannelli che compaiono solo quando servono, layout compatto/focus, e le frasi della prova
-   del 27/09 ("chiore sono", "che cosa e' un Prozessor", "cos'e' un processore?" senza ricordi irrilevanti).
-3. Sviluppo: F4.3 blur del desktop per pannello (finestre native separate), continuita' di sessione PC <-> companion
-   (F7.4.8), Skill Forge con specifica/test/canary (F8.3).
+   microfono integrato la confidenza di Whisper resta bassa (0,45-0,67 anche su frasi corrette): una cuffia o un
+   microfono dedicato e' la prima cosa da provare. Liberare VRAM prima della prova (il 28/09 mattina: 55 MB liberi,
+   timeout del modello e partial da 58 s): il preflight lo segnala.
+2. Utente, prova reale con HUD nativo e voce - cose nuove da giudicare a schermo:
+   - vetro vero dietro i pannelli (Windows 11) su desktop scuri, chiari e colorati; su un documento bianco il testo
+     secondario misura 4,59 di contrasto, il giudizio estetico e' tuo;
+   - interruttore "Privato" nella barra di stato; un "si'" scritto nella barra dell'HUD per una domanda fatta a voce;
+   - con il telefono: claim -> la conferma chiesta sul PC arriva al telefono -> approvazione; oppure tornare al PC e
+     rispondere li'; le notifiche solo sul dispositivo attivo;
+   - "impara a ..." -> specifica da confermare -> permessi e rischio -> installazione firmata -> periodo di prova.
+3. Utente, decisione: quale installer per F0.6.1 (MSIX, Inno Setup o modalita' portable). Senza questa scelta
+   installazione, aggiornamento atomico e rollback (F0.6.3-F0.6.6) restano bloccati.
+4. Sviluppo, prossimi incrementi: esecuzione in sandbox dei test dichiarati dai pacchetti di terzi (F8.3); da quale
+   dispositivo arriva un messaggio e riepilogo di continuita' nei pannelli HUD (F7.4.6/F7.4.8); milestone e next
+   action dei goal (F6.4.3); separazione entita'/episodi/procedure (F5.1.2); profilo GPU/batteria con vetro vero e
+   HUD su un secondo monitor a scala diversa (F4.3.3).
 
 ### Seconda prova reale del 27/09/2026 (HUD nativo + voce continua) - cosa e' cambiato il 28/09/2026
 
