@@ -648,6 +648,30 @@ class SkillStore:
             self._save()
             return folder
 
+    # ---- F8.3.7: canary ----
+    def set_canary(self, skill_id: str, version: str, state: dict | None) -> None:
+        """Stato del periodo di prova di una versione ({"remaining": esecuzioni da superare, "failures": n}), o None
+        a prova superata. Nel catalogo, quindi sopravvive a un riavvio: una skill in prova resta in prova."""
+        with self._lock:
+            info = self._entry(skill_id)["versions"].get(version)
+            if info is None:
+                raise PackageError("not_installed", f"{skill_id} {version}")
+            if state is None:
+                info.pop("canary", None)
+            else:
+                info["canary"] = {"remaining": int(state["remaining"]), "failures": int(state.get("failures", 0))}
+            self._save()
+
+    def canary(self, skill_id: str) -> tuple[str, dict, list[str]] | None:
+        """(versione attiva, stato del canary, intent) se la versione attiva e' ancora in prova."""
+        with self._lock:
+            entry = self._data["skills"].get(skill_id)
+            version = entry and entry.get("active")
+            info = entry["versions"].get(version) if version else None
+            if not info or "canary" not in info or info.get("status") != "ok":
+                return None
+            return version, dict(info["canary"]), list(info.get("intents", []))
+
     # ---- F8.2.6: quarantena e revoca ----
     def _fallback(self, skill_id: str) -> None:
         """Riporta la versione attiva all'ultima sana della cronologia (o a nessuna)."""

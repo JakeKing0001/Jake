@@ -12,7 +12,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from core.skill_forge import FORGE_ID_PREFIX, ForgeError, SkillForge
+from core.skill_forge import CANARY_RUNS, FORGE_ID_PREFIX, ForgeError, SkillForge
+from core.skill_result import SkillResult
 from core.skill_manifest import MANIFEST_FILENAME, Environment
 from core.skill_package import SkillStore, TrustStore
 from skills.skill_forge_skills import CreateSkillSkill, DeleteCreatedSkillSkill
@@ -71,6 +72,8 @@ class Registry:
     def __init__(self):
         self.skills = {}
         self.sandboxed = {}
+        self.executed = []
+        self.runtime_breaks = False   # simula un runtime che si comporta diversamente dalla sandbox
 
     def list_capabilities(self):
         return [{"intent": intent} for intent in self.skills]
@@ -84,8 +87,14 @@ class Registry:
         self.skills.pop(intent, None)
         self.sandboxed.pop(intent, None)
 
+    def execute(self, intent, parameters, **kwargs):
+        self.executed.append((intent, parameters))
+        if self.runtime_breaks:
+            return SkillResult(success=False, data={}, error="SANDBOX_WORKER_UNAVAILABLE")
+        return self.skills[intent].execute(parameters)
 
-class ForgePackageTests(unittest.TestCase):
+
+class ForgeTestCase(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="jake_forge_packages_test_"))
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
@@ -99,6 +108,9 @@ class ForgePackageTests(unittest.TestCase):
         return SkillForge(self.registry, client=FakeClient(*answers), plugins_dir=self.tmp / "plugins",
                           skill_store=self._store())
 
+
+
+class ForgePackageTests(ForgeTestCase):
     def test_a_forged_skill_is_installed_as_a_signed_package_with_fixtures_from_the_sandbox(self):
         forge = self._forge(DOUBLER)
         create = CreateSkillSkill(forge)
@@ -183,3 +195,79 @@ class ForgePackageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AfterInstallTests(ForgeTestCase):
+    """F8.3.8 (prove rieseguite nel runtime vero appena installata) e F8.3.7 (periodo di prova con rollback)."""
+
+    def _install(self):
+        forge = self._forge(DOUBLER)
+        create = CreateSkillSkill(forge)
+        installed = create.execute(create.execute({"request": "raddoppia"}).data["confirm_parameters"])
+        return forge, installed
+
+    def test_the_trial_runs_are_repeated_in_the_real_runtime_right_after_installing(self):
+        forge, installed = self._install()
+        self.assertTrue(installed.success, installed)
+        self.assertEqual(self.registry.executed, [("DOUBLE_NUMBER", {"number": 21}), ("DOUBLE_NUMBER", {})])
+        version, state, intents = forge.skill_store.canary(f"{FORGE_ID_PREFIX}double_number")
+        self.assertEqual((version, state, intents), ("1.0.0", {"remaining": CANARY_RUNS, "failures": 0}, ["DOUBLE_NUMBER"]))
+
+    def test_a_skill_that_behaves_differently_once_installed_is_removed_at_once(self):
+        self.registry.runtime_breaks = True
+        forge, installed = self._install()
+        self.assertEqual(installed.error, "FORGE_FAILED")
+        self.assertIn("non si comporta come nella prova", installed.data["message"])
+        self.assertEqual(forge.skill_store.skills(), [])
+        self.assertNotIn("DOUBLE_NUMBER", self.registry.skills)
+
+    def test_enough_successful_real_runs_end_the_trial(self):
+        forge, _ = self._install()
+        messages = [forge.observe_execution("DOUBLE_NUMBER", "success", "success") for _ in range(CANARY_RUNS)]
+        self.assertEqual(messages[:-1], [None] * (CANARY_RUNS - 1))
+        self.assertIn("ha superato il periodo di prova", messages[-1])
+        self.assertIsNone(forge.skill_store.canary(f"{FORGE_ID_PREFIX}double_number"))
+        self.assertIsNone(forge.observe_execution("DOUBLE_NUMBER", "OPERATION_FAILED", "uncategorized"),
+                          "dopo la prova e' una skill normale")
+
+    def test_user_errors_do_not_count_but_two_skill_errors_disable_it(self):
+        forge, _ = self._install()
+        skill_id = f"{FORGE_ID_PREFIX}double_number"
+        self.assertIsNone(forge.observe_execution("DOUBLE_NUMBER", "MISSING_PARAMETERS", "invalid_input"))
+        self.assertIsNone(forge.observe_execution("DOUBLE_NUMBER", "CONFIRMATION_REQUIRED", "pending"))
+        self.assertIsNone(forge.observe_execution("DOUBLE_NUMBER", "OPERATION_FAILED", "uncategorized"))
+        # la prova sopravvive a un riavvio: un catalogo nuovo la ricorda
+        self.assertEqual(self._store().canary(skill_id)[1], {"remaining": CANARY_RUNS, "failures": 1})
+
+        message = forge.observe_execution("DOUBLE_NUMBER", "OPERATION_FAILED", "uncategorized")
+
+        self.assertIn("Ho disattivato la nuova capacità", message)
+        self.assertNotIn("DOUBLE_NUMBER", self.registry.skills)
+        self.assertEqual(forge.skill_store.describe(skill_id)["versions"]["1.0.0"]["status"], "quarantined")
+
+    def test_a_blocked_worker_disables_it_at_the_first_time(self):
+        forge, _ = self._install()
+        message = forge.observe_execution("DOUBLE_NUMBER", "SANDBOX_WORKER_TIMEOUT", "timeout")
+        self.assertIn("blocco o timeout", message)
+        self.assertNotIn("DOUBLE_NUMBER", self.registry.skills)
+
+    def test_every_ledger_receipt_reaches_the_trial_and_the_end_is_announced(self):
+        import logging
+        from types import SimpleNamespace
+
+        from core.event_bus import EventBus
+        from core.jake_core import JakeCore
+
+        forge, _ = self._install()
+        announced = []
+        core = JakeCore.__new__(JakeCore)
+        core.skill_forge, core.event_bus = forge, EventBus()
+        core.logger = logging.getLogger("test.forge_canary")
+        core.system_advisor = SimpleNamespace(on_advisory=announced.append)
+        receipt = SimpleNamespace(action_id="a", intent="DOUBLE_NUMBER", requested_by="user", result="SANDBOX_WORKER_TIMEOUT",
+                                  error_category="timeout", verified="unverified", trace_id="t")
+
+        core._publish_action_receipt(receipt)
+
+        self.assertEqual(len(announced), 1)
+        self.assertIn("Ho disattivato", announced[0])
