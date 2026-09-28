@@ -18,11 +18,12 @@ from collections.abc import Callable
 from pathlib import Path
 
 from core.logger import get_logger
+from core.request_context import NATIVE_HUD_DEVICE_ID  # noqa: F401 - riesportato: chi avvia l'HUD lo cerca qui
 
 DEFAULT_EXE = Path(__file__).resolve().parent.parent / "hud" / "native" / "build" / "JakeHud.exe"
 # Identita' companion dell'HUD nativo locale: una credenziale per-dispositivo come quella di un telefono
 # accoppiato (F7), ruotata a ogni avvio del core, con capability minime e revocata allo shutdown.
-NATIVE_HUD_DEVICE_ID = "native-hud-local"
+# NATIVE_HUD_DEVICE_ID vive in core/request_context.py: per la conversazione l'HUD e' una superficie del PC
 NATIVE_HUD_CREDENTIAL_TTL_S = 30 * 24 * 3600
 
 

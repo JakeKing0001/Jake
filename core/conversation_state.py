@@ -2,7 +2,7 @@ import threading
 from collections import deque
 from copy import deepcopy
 
-from core.request_context import current_device_id
+from core.request_context import current_conversation_channel
 
 
 class ConversationStateManager:
@@ -29,7 +29,7 @@ class ConversationStateManager:
     cancellava silenziosamente la richiesta del primo dispositivo, che a quel punto non poteva
     piu' confermarla (un "si'" successivo avrebbe confermato l'azione SBAGLIATA, quella del
     secondo dispositivo). Corretto sostituendo lo slot singolo con un dizionario `{canale: azione}`
-    (`_pending_actions`), dove il canale e' `core.request_context.current_device_id()` - lo stesso
+    (`_pending_actions`), dove il canale e' `core.request_context.current_conversation_channel()` - lo stesso
     identificatore per-thread gia' introdotto per il ledger (F1.2.3/F1.8.1, fondamenta): `None`
     (la voce locale, o un client companion che non manda `device_id`) e ogni device_id noto hanno
     ora ciascuno il proprio slot indipendente, senza bisogno di passare un parametro esplicito a
@@ -48,7 +48,7 @@ class ConversationStateManager:
 
     def __init__(self, short_term_limit: int = 10):
         # F1.8.1: una voce per canale (vedi il docstring della classe), non uno slot singolo -
-        # la chiave e' current_device_id() (None per la voce locale), letta internamente da ogni
+        # la chiave e' current_conversation_channel() (None per la voce locale), letta internamente da ogni
         # metodo sotto invece di essere un parametro esplicito.
         self._pending_actions: dict[str | None, dict] = {}
         self._pending_action_lock = threading.Lock()
@@ -100,32 +100,32 @@ class ConversationStateManager:
         return deepcopy(self._last_search_results)
 
     def get_pending_action(self):
-        """Restituisce l'azione in attesa PER QUESTO CANALE (current_device_id()), se presente,
+        """Restituisce l'azione in attesa PER QUESTO CANALE (current_conversation_channel()), se presente,
         SENZA consumarla - usato solo da controlli in sola lettura (es. core/voice/
         wake_word_session.py, per decidere se rilassare il requisito della wake word). Chi deve
         poi AGIRE su un'azione in sospeso (JakeCore._process) deve usare take_pending_action(),
         non questo + clear_pending_action() separati (vedi F1.8.1 nel docstring della classe)."""
         with self._pending_action_lock:
-            action = self._pending_actions.get(current_device_id())
+            action = self._pending_actions.get(current_conversation_channel())
             return deepcopy(action) if action is not None else None
 
     def has_pending_action(self) -> bool:
         """Indica se esiste un'azione in attesa di conferma PER QUESTO CANALE (sola lettura,
         stesso avvertimento di get_pending_action())."""
         with self._pending_action_lock:
-            return current_device_id() in self._pending_actions
+            return current_conversation_channel() in self._pending_actions
 
     def set_pending_action(self, action: dict):
-        """Salva una nuova azione in attesa di conferma PER QUESTO CANALE (current_device_id()),
+        """Salva una nuova azione in attesa di conferma PER QUESTO CANALE (current_conversation_channel()),
         senza toccare quella di nessun altro canale."""
         with self._pending_action_lock:
-            self._pending_actions[current_device_id()] = deepcopy(action)
+            self._pending_actions[current_conversation_channel()] = deepcopy(action)
         self._notify_pending(action)
 
     def clear_pending_action(self):
         """Cancella l'azione in attesa PER QUESTO CANALE."""
         with self._pending_action_lock:
-            removed = self._pending_actions.pop(current_device_id(), None)
+            removed = self._pending_actions.pop(current_conversation_channel(), None)
         if removed is not None:
             self._notify_pending(None)
 
@@ -148,7 +148,7 @@ class ConversationStateManager:
         conferma. Un canale diverso (un altro device_id, o la voce locale) ha il proprio slot
         indipendente: non vede ne' interferisce con questa azione."""
         with self._pending_action_lock:
-            action = self._pending_actions.pop(current_device_id(), None)
+            action = self._pending_actions.pop(current_conversation_channel(), None)
         if action is not None:
             self._notify_pending(None)
         return deepcopy(action) if action is not None else None
