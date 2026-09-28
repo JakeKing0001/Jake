@@ -7,6 +7,15 @@ from pathlib import Path
 from core.memory_schema import SENSITIVITY_LEVELS, ensure_schema
 
 
+
+def fold_text(text) -> str:
+    """Minuscole e senza accenti: "Caffè" e "caffe" sono la stessa parola per chi cerca e per chi riconosce una chiave."""
+    import unicodedata
+
+    decomposed = unicodedata.normalize("NFKD", str(text or "").casefold())
+    return "".join(char for char in decomposed if not unicodedata.combining(char))
+
+
 class MemoryManager:
     """Gestisce la memoria a lungo termine di Jake su SQLite (ricordi, preferenze, cronologia).
 
@@ -48,6 +57,9 @@ class MemoryManager:
         # background - stesso accorgimento gia' usato in ReminderManager per lo stesso motivo.
         connection = sqlite3.connect(db_path, check_same_thread=False)
         connection.row_factory = sqlite3.Row
+        # F5.4/F5.5: confronto senza maiuscole ne' accenti anche dentro le query ("caffè" trova "caffe" e viceversa)
+        connection.create_function("fold", 1, lambda text: fold_text(text) if text is not None else None,
+                                   deterministic=True)
         # F5.7.6: senza secure_delete SQLite lascia il contenuto di una riga cancellata nelle pagine libere
         # del file finche' non le riscrive: "cancellato" non sarebbe cancellato. Con questa opzione le pagine
         # liberate vengono azzerate.
@@ -138,6 +150,10 @@ class MemoryManager:
                 duplicate_key = self._find_duplicate_key(embedding, category, project, exclude_key=key)
                 if duplicate_key is not None:
                     key = duplicate_key
+            # F5.4 (consolidamento): "caffe", "Caffè" e "caffè " sono lo STESSO ricordo - prima diventavano tre righe con
+            # valori diversi, le risposte li ricevevano tutti e il versionamento (niente sovrascritture silenziose) non
+            # scattava mai perche' la chiave sembrava nuova
+            key = self._existing_key_for(key.strip(), category)
 
             previous_row = self._connection.execute(
                 "SELECT value, source FROM memories WHERE key = ? AND category = ?", (key, category),
@@ -186,6 +202,58 @@ class MemoryManager:
 
     KNOWLEDGE_CATEGORIES = frozenset({"fact", "preference"})
 
+    @staticmethod
+    def canonical_key(key: str) -> str:
+        """L'identita' di una chiave: senza maiuscole, accenti, spazi doppi o punteggiatura ai bordi."""
+        return " ".join(fold_text(key).split()).strip(" .,;:!?'\"")
+
+    def _existing_key_for(self, key: str, category: str) -> str:
+        """La chiave gia' salvata che rappresenta lo stesso ricordo (stessa categoria), o `key` se non c'e'."""
+        if self._connection.execute("SELECT 1 FROM memories WHERE key = ? AND category = ?", (key, category)).fetchone():
+            return key
+        wanted = self.canonical_key(key)
+        for row in self._connection.execute("SELECT key FROM memories WHERE category = ?", (category,)).fetchall():
+            if self.canonical_key(row[0]) == wanted:
+                return row[0]
+        return key
+
+    def consolidate_duplicates(self) -> int:
+        """F5.4: unisce i ricordi gia' salvati che sono lo stesso ricordo con chiavi scritte in modo diverso (database
+        nati prima della chiave canonica). Resta il piu' recente; per fatti e preferenze gli altri valori diventano
+        versioni precedenti (niente sparisce in silenzio) e i collegamenti del grafo passano al superstite. Ritorna
+        quante righe sono state unite."""
+        merged = 0
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT key, category, value, source, updated_at FROM memories ORDER BY updated_at DESC").fetchall()
+            groups: dict[tuple, list] = {}
+            for row in rows:
+                groups.setdefault((self.canonical_key(row["key"]), row["category"]), []).append(row)
+            now = self._now()
+            for (_, category), members in groups.items():
+                if len(members) < 2:
+                    continue
+                survivor = members[0]
+                for duplicate in members[1:]:
+                    if category in self.KNOWLEDGE_CATEGORIES and " ".join(str(duplicate["value"]).lower().split()) != \
+                            " ".join(str(survivor["value"]).lower().split()):
+                        self._record_version(survivor["key"], category, duplicate["value"], duplicate["source"], now,
+                                             "consolidated")
+                    for side in ("subject", "object"):
+                        self._connection.execute(
+                            f"UPDATE OR IGNORE memory_relations SET {side}_key = ? WHERE {side}_key = ? AND {side}_category = ?",
+                            (survivor["key"], duplicate["key"], category))
+                        self._connection.execute(
+                            f"DELETE FROM memory_relations WHERE {side}_key = ? AND {side}_category = ?",
+                            (duplicate["key"], category))
+                    self._connection.execute("DELETE FROM memories WHERE key = ? AND category = ?",
+                                             (duplicate["key"], category))
+                    self._audit(duplicate["key"], category, "consolidated", "jake", f"unito a '{survivor['key']}'")
+                    merged += 1
+            if merged:
+                self._connection.commit()
+        return merged
+
     def _record_version(self, key: str, category: str, value: str, source: str, at: str, reason: str) -> None:
         self._connection.execute(
             "INSERT INTO memory_versions (memory_key, memory_category, value, source, valid_until, recorded_at, reason) "
@@ -195,6 +263,7 @@ class MemoryManager:
     def entry(self, key: str, category: str = "fact") -> dict | None:
         """Il ricordo attuale con i campi che decidono quanto pesa cambiarlo (F5.4.3): importanza e pin."""
         with self._lock:
+            key = self._existing_key_for(str(key).strip(), category)
             row = self._connection.execute(
                 "SELECT value, importance, pinned, source FROM memories WHERE key = ? AND category = ?", (key, category),
             ).fetchone()
@@ -203,6 +272,7 @@ class MemoryManager:
     def versions(self, key: str, category: str = "fact") -> list[dict]:
         """F5.4.2: le versioni precedenti di un ricordo (e le inferenze rifiutate), dalla piu' recente."""
         with self._lock:
+            key = self._existing_key_for(str(key).strip(), category)
             rows = self._connection.execute(
                 "SELECT value, source, valid_until, reason FROM memory_versions WHERE memory_key = ? AND memory_category = ? "
                 "ORDER BY id DESC", (key, category),
@@ -391,11 +461,11 @@ class MemoryManager:
         lowered_question = (question or "").lower()
         if temporal is not None:
             lowered_question = lowered_question.replace(temporal[1], " ")
-        words = [w for w in re.findall(r"[\w']+", lowered_question)
+        words = [fold_text(w) for w in re.findall(r"[\w']+", lowered_question)
                  if len(w) >= 4 and w not in self._STOPWORDS]
         candidates: dict[tuple, dict] = {}
         if words:
-            clauses = " OR ".join(["lower(key) LIKE ? OR lower(value) LIKE ?"] * len(words))
+            clauses = " OR ".join(["fold(key) LIKE ? OR fold(value) LIKE ?"] * len(words))
             params = [p for w in words for p in (f"%{w}%", f"%{w}%")]
             with self._lock:
                 rows = self._connection.execute(
@@ -403,12 +473,12 @@ class MemoryManager:
                     "AND (expires_at IS NULL OR expires_at >= ?) ORDER BY updated_at DESC LIMIT 50",
                     (*params, self._now()),
                 ).fetchall()
-            lowered = (question or "").lower()
+            lowered = fold_text(question or "")
             for row in rows:
                 entry = dict(row)
-                haystack = f"{entry['key']} {entry['value']}".lower()
+                haystack = fold_text(f"{entry['key']} {entry['value']}")
                 hits = sum(1 for w in words if w in haystack)
-                exact = entry["key"].lower() in lowered
+                exact = fold_text(entry["key"]).strip() in lowered
                 base = hits / len(words) + 0.05 * int(entry.get("importance") or 0)
                 freshness = self._freshness(entry)
                 # F5.4.5: il decadimento pesa sulle parole in comune, mai su una chiave citata esplicitamente
@@ -517,25 +587,41 @@ class MemoryManager:
             return cursor.rowcount
 
     def forget(self, key: str, category: str | None = None) -> bool:
-        """Elimina i ricordi con la chiave indicata. Restituisce True se qualcosa e' stato rimosso."""
+        """Elimina i ricordi con la chiave indicata. Restituisce True se qualcosa e' stato rimosso.
+        F5.4: la chiave vale anche scritta in modo diverso ("dimentica il Caffè" cancella "caffe")."""
         with self._lock:
-            if category:
-                cursor = self._connection.execute(
-                    "DELETE FROM memories WHERE key = ? AND category = ?", (key, category)
-                )
-                self._connection.execute(
-                    "DELETE FROM memory_relations WHERE (subject_key = ? AND subject_category = ?) "
-                    "OR (object_key = ? AND object_category = ?)", (key, category, key, category),
-                )
-            else:
-                cursor = self._connection.execute("DELETE FROM memories WHERE key = ?", (key,))
-                # Senza categoria puo' esserci piu' di un ricordo con questa chiave: rimuove i
-                # collegamenti di ognuno, per non lasciare archi del grafo che puntano al nulla.
-                self._connection.execute(
-                    "DELETE FROM memory_relations WHERE subject_key = ? OR object_key = ?", (key, key),
-                )
+            wanted = self.canonical_key(key)
+            clause, params = ("category = ?", (category,)) if category else ("1 = 1", ())
+            keys = sorted({row[0] for row in self._connection.execute(
+                f"SELECT key FROM memories WHERE {clause}", params).fetchall() if self.canonical_key(row[0]) == wanted})
+            if len(keys) > 1 or (keys and keys[0] != key):
+                removed = False
+                for match in keys:
+                    removed = self._forget_exact(match, category) or removed
+                self._connection.commit()
+                return removed
+            removed = self._forget_exact(key, category)
             self._connection.commit()
-            return cursor.rowcount > 0
+            return removed
+
+    def _forget_exact(self, key: str, category: str | None) -> bool:
+        """Cancella la chiave esatta (e i suoi collegamenti). Il chiamante tiene il lock e fa il commit."""
+        if category:
+            cursor = self._connection.execute(
+                "DELETE FROM memories WHERE key = ? AND category = ?", (key, category)
+            )
+            self._connection.execute(
+                "DELETE FROM memory_relations WHERE (subject_key = ? AND subject_category = ?) "
+                "OR (object_key = ? AND object_category = ?)", (key, category, key, category),
+            )
+        else:
+            cursor = self._connection.execute("DELETE FROM memories WHERE key = ?", (key,))
+            # Senza categoria puo' esserci piu' di un ricordo con questa chiave: rimuove i
+            # collegamenti di ognuno, per non lasciare archi del grafo che puntano al nulla.
+            self._connection.execute(
+                "DELETE FROM memory_relations WHERE subject_key = ? OR object_key = ?", (key, key),
+            )
+        return cursor.rowcount > 0
 
     def count_memories(self) -> int:
         with self._lock:
