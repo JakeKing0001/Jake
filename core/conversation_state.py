@@ -4,6 +4,7 @@ from collections import deque
 from copy import deepcopy
 
 from core.request_context import current_device_id
+from core.risk import RiskLevel, risk_of
 
 
 class ConversationStateManager:
@@ -178,12 +179,16 @@ class ConversationStateManager:
         per quell'intent non la esegue. Non si sposta (None):
         - niente in sospeso su `source`, o `target` ha gia' la sua conferma (non si sovrascrive mai, F1.8.1);
         - una richiesta di autenticazione: la prova d'identita' resta legata al PC dove e' stata chiesta;
+        - un'azione ADMIN (es. approvare il pairing di un nuovo dispositivo, che il PC chiede nel proprio canale): un
+          telefono che prende la sessione non deve poter autorizzare un altro dispositivo o cambiare il sistema (F7.4.5);
         - una domanda piu' vecchia di HANDOVER_MAX_AGE_S."""
         if source == target:
             return None
         with self._pending_action_lock:
             action = self._pending_actions.get(source)
             if action is None or target in self._pending_actions or action.get("reason") != "confirmation_required":
+                return None
+            if risk_of(str(action.get("intent") or "")) == RiskLevel.ADMIN:
                 return None
             if time.monotonic() - self._pending_since.get(source, 0.0) > self.HANDOVER_MAX_AGE_S:
                 return None

@@ -9902,7 +9902,8 @@ nessuna azione duplicata e ripresa di contesto, decisioni e ricevute sul PC.
   conferma ricompare nell'HUD, una notifica "di nuovo sul PC" dice cosa aspetta). Claim, rilascio e scadenza
   girano sotto un solo lock del server: con due claim simultanei la conferma finisce sempre sul dispositivo attivo
   e l'azione parte una volta sola. La risposta del claim porta `continuity` (conferma in sospeso senza parametri,
-  ultimi 6 scambi - nessuno in modalita' privata). Non si spostano: autenticazioni (legate al PC), domande piu'
+  ultimi 6 scambi - nessuno in modalita' privata). Non si spostano: autenticazioni (legate al PC), azioni ADMIN
+  (il pairing di un nuovo dispositivo lo approva solo il PC: la policy non blocca gli ADMIN da un telefono), domande piu'
   vecchie di 10 minuti (F7.4.9: niente approvazioni fuori dal loro momento), un canale che ha gia' la sua
   conferma, e nulla su una riconnessione di chi era gia' attivo. Un dispositivo revocato non riporta indietro la
   sua conferma. Test con server companion vero e pipeline reale: PC -> telefono -> approvazione, telefono -> PC ->

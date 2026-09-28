@@ -14,6 +14,7 @@ from core.conversation_state import ConversationStateManager
 from core.device_registry import DeviceRegistry
 from core.hud_protocol import EventType
 from core.request_context import reset_current_device_id, set_current_device_id
+from core.risk import PACKAGE_RISK, RiskLevel, register_package_risk
 from core.skill_result import SkillResult
 from tests.test_companion_approvals import ApprovalEndToEndTestCase, _post, _StampingOrchestrator, step
 from tests.test_jake_core_pipeline import FakeRegistry, FakeSkill
@@ -22,6 +23,13 @@ REQUEST = "cancella il file vecchio"
 
 
 class SessionContinuityTestCase(ApprovalEndToEndTestCase):
+    def setUp(self):
+        super().setUp()
+        # un intent non censito vale ADMIN per risk_of (e un ADMIN non passa al telefono): qui e' un'azione distruttiva
+        # dichiarata, come dal manifest di un pacchetto - il caso reale di una conferma approvata dal telefono
+        register_package_risk("FAKE", RiskLevel.DESTRUCTIVE)
+        self.addCleanup(PACKAGE_RISK.pop, "FAKE", None)
+
     def _start(self, devices: DeviceRegistry | None = None):
         self.skill = FakeSkill(SkillResult(success=True, data={}))
         core = self._core(
@@ -185,7 +193,7 @@ class SimultaneousClaimTests(SessionContinuityTestCase):
         self.assertEqual(len(self.skill.calls), 1)
 
 
-class HandOverRulesTests(ApprovalEndToEndTestCase):
+class HandOverRulesTests(SessionContinuityTestCase):
     def _state_with(self, action: dict) -> ConversationStateManager:
         state = ConversationStateManager()
         state.set_pending_action(action)
@@ -195,6 +203,14 @@ class HandOverRulesTests(ApprovalEndToEndTestCase):
         state = self._state_with({"intent": "SHUTDOWN", "parameters": {}, "reason": "auth_required", "trace_id": "t"})
         self.assertIsNone(state.hand_over_pending(None, "phone-1"))
         self.assertIn(None, state.pending_channels())
+
+    def test_approving_a_new_device_stays_on_the_pc(self):
+        """Il pairing di un nuovo dispositivo (ADMIN) lo approva solo il PC: un telefono che reclama la sessione non
+        deve portarsi via la domanda e autorizzare un altro dispositivo."""
+        state = self._state_with({"intent": "APPROVE_PAIRING", "parameters": {"challenge_id": "c"},
+                                  "reason": "confirmation_required"})
+        self.assertIsNone(state.hand_over_pending(None, "phone-1"))
+        self.assertEqual(state.pending_channels()[None]["intent"], "APPROVE_PAIRING")
 
     def test_an_old_confirmation_is_not_handed_over(self):
         state = self._state_with({"intent": "FAKE", "parameters": {}, "reason": "confirmation_required"})
