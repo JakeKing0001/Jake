@@ -312,6 +312,8 @@ ApplicationWindow {
         onLayoutRequested: window.cycleLayout()
         onScreenRequested: window.nextScreen()
         onStopRequested: jake.sendCommand("ferma tutto")
+        // le stesse frasi esatte del comando vocale (training/intents.jsonl): niente modello, risposta immediata
+        onPrivateModeRequested: (enabled) => jake.sendCommand(enabled ? "attiva la modalità privata" : "disattiva la modalità privata")
     }
 
     // F4.4.7: orb 3D (Qt Quick 3D) se disponibile, altrimenti l'orb 2D con la stessa interfaccia. Al centro.

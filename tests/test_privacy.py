@@ -170,5 +170,26 @@ class PrivateModeSuppressesPersistenceTests(unittest.TestCase):
                                   ("JAKE_MESSAGE", {"text": "risposta"})])
 
 
+
+class HudPrivateToggleTests(unittest.TestCase):
+    """F5.7: l'interruttore "Privato" dell'HUD manda le stesse frasi del comando vocale; devono andare alla corsia
+    esatta (niente modello: con la GPU piena la classificazione andava in timeout) con il valore giusto."""
+
+    def test_the_phrases_sent_by_the_hud_switch_are_exact_commands(self):
+        from core.nlu.examples import ExampleStore
+        from core.nlu.normalizer import TranscriptNormalizer
+
+        store, normalizer = ExampleStore(), TranscriptNormalizer()
+
+        def exact(text):
+            example = store.find_exact(normalizer.normalize(text))
+            return example and (example.intent, example.parameters)
+
+        self.assertEqual(exact("attiva la modalità privata"), ("SET_PRIVATE_MODE", {"enabled": True}))
+        self.assertEqual(exact("disattiva la modalità privata"), ("SET_PRIVATE_MODE", {"enabled": False}))
+        self.assertEqual(exact("apri il browser in modalità privata"), ("OPEN_INCOGNITO_WINDOW", {}),
+                         "la finestra in incognito del browser resta un'altra cosa")
+
+
 if __name__ == "__main__":
     unittest.main()

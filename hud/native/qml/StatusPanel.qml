@@ -24,6 +24,8 @@ GlassPanel {
     signal screenRequested()
     // "Ferma tutto" sempre raggiungibile anche quando l'Action Center non e' mostrato (compare solo quando serve)
     signal stopRequested()
+    // F5.7: la modalita' privata si comanda da qui, non solo a voce (stessa frase esatta del comando vocale)
+    signal privateModeRequested(bool enabled)
     implicitHeight: 36
     radius: height / 2
 
@@ -72,6 +74,16 @@ GlassPanel {
             visible: root.privateMode
             dot: Theme.warn
             label: qsTr("Privato: niente testo, niente registro")
+        }
+        ToolButton {
+            text: root.privateMode ? qsTr("● Privato") : qsTr("○ Privato")
+            font.pixelSize: Theme.fontSmall
+            Layout.preferredHeight: 26
+            palette.buttonText: root.privateMode ? Theme.warn : Theme.textMuted
+            Accessible.name: root.privateMode
+                ? qsTr("Modalità privata attiva: niente testo, niente registro. Disattivala")
+                : qsTr("Attiva la modalità privata: niente testo verso HUD e telefono, niente registro")
+            onClicked: root.privateModeRequested(!root.privateMode)
         }
         ToolButton {
             text: root.layoutMode === "full" ? "▣" : root.layoutMode === "compact" ? "▤" : "◉"

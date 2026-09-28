@@ -704,3 +704,9 @@
 {"text": "hai qualcosa in sospeso", "intent": "STATUS_OVERVIEW", "parameters": {}}
 {"text": "di cosa abbiamo parlato ieri", "intent": "RECALL_CONVERSATION", "parameters": {"when": "ieri"}}
 {"text": "cosa ti ho chiesto sulla palestra la settimana scorsa", "intent": "RECALL_CONVERSATION", "parameters": {"when": "la settimana scorsa", "topic": "palestra"}}
+{"text": "attiva la modalità privata", "intent": "SET_PRIVATE_MODE", "parameters": {"enabled": true}}
+{"text": "modalità privata", "intent": "SET_PRIVATE_MODE", "parameters": {"enabled": true}}
+{"text": "non registrare questa conversazione", "intent": "SET_PRIVATE_MODE", "parameters": {"enabled": true}}
+{"text": "disattiva la modalità privata", "intent": "SET_PRIVATE_MODE", "parameters": {"enabled": false}}
+{"text": "esci dalla modalità privata", "intent": "SET_PRIVATE_MODE", "parameters": {"enabled": false}}
+{"text": "torna a registrare normalmente", "intent": "SET_PRIVATE_MODE", "parameters": {"enabled": false}}
