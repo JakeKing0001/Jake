@@ -119,13 +119,21 @@ class CompanionServer:
         token: str | None = None, credential_store: DeviceCredentialStore | None = None,
         tls_context: ssl.SSLContext | None = None, guard: CompanionGuard | None = None,
         pairing_service=None, conversation_state=None, on_pairing_requested=None, tls_fingerprint: str | None = None,
-        files_dir: Path | None = None,
+        files_dir: Path | None = None, continuity_provider=None,
     ):
         self.event_bus = event_bus or EventBus()
         # F7.2.5: dove finiscono i file inviati dal telefono (una sottocartella per dispositivo); None = funzione spenta
         self.files_dir = Path(files_dir) if files_dir is not None else None
         self.command_handler = command_handler or (lambda text: "")
         self.devices = DeviceRegistry(on_expired=self._active_device_expired)
+        # F7.4.7/F7.4.8: claim, release e scadenza del lease cambiano chi risponde E dove sta la conferma in sospeso;
+        # le due cose avvengono sotto questo lock, cosi' due claim simultanei finiscono sempre con la conferma sul
+        # dispositivo che risulta attivo (mai su quello che ha perso la corsa). Rientrante: la scadenza puo' essere
+        # scoperta da una lettura del registro fatta mentre il lock e' gia' preso.
+        self._handoff_lock = threading.RLock()
+        # F7.4.8: cosa mostrare al telefono che prende la sessione (JakeCore._continuity_snapshot: gli ultimi scambi,
+        # niente in modalita' privata). None: solo la conferma in sospeso.
+        self.continuity_provider = continuity_provider
         self.host = host
         self.port = port
         self.token = token
@@ -153,8 +161,69 @@ class CompanionServer:
 
     def _active_device_expired(self, device_id: str) -> None:
         """F7.4.3: il dispositivo attivo non da' piu' segni di vita (crash, rete persa): non lo e' piu', e chi mostra
-        il dispositivo attivo (HUD, altri companion) lo sa con lo stesso evento di un handoff, verso nessuno."""
-        self.event_bus.publish(HudEvent(EventType.DEVICE_HANDOFF, {"from": device_id, "to": ""}))
+        il dispositivo attivo (HUD, altri companion) lo sa con lo stesso evento di un handoff, verso nessuno.
+        F7.4.8: la conferma che aspettava sul telefono torna al PC, che ora risponde."""
+        with self._handoff_lock:
+            self.event_bus.publish(HudEvent(EventType.DEVICE_HANDOFF, {"from": device_id, "to": ""}))
+            self.hand_over_pending(device_id, None)
+
+    def release_to_pc(self, device_id: str) -> tuple[bool, dict | None]:
+        """F7.4.8: `device_id` smette di rispondere e si torna al PC - con la conferma che aspettava li', e l'HUD lo sa.
+        (rilasciato davvero?, conferma riportata al PC o None)."""
+        with self._handoff_lock:
+            released = self.devices.release(device_id)
+            moved = self.hand_over_pending(device_id, None) if released else None
+            if released:
+                self.event_bus.publish(HudEvent(EventType.DEVICE_HANDOFF, {"from": device_id, "to": ""}))
+        return released, moved
+
+    def pc_takes_the_session(self) -> str | None:
+        """F7.4.2 (elezione per scelta esplicita e recency): l'utente parla o scrive al PC mentre un telefono era il
+        dispositivo attivo -> il PC torna a rispondere, come dopo un rilascio. Ritorna il dispositivo che lasciava."""
+        with self._handoff_lock:
+            active = self.devices.active_device_id
+            if active is None:
+                return None
+            self.release_to_pc(active)
+        _logger.info("Il PC riprende la sessione dal dispositivo %s", active)
+        return active
+
+    def hand_over_pending(self, source: str | None, target: str | None) -> dict | None:
+        """F7.4.8: la conferma in sospeso di chi rispondeva passa a chi risponde adesso (None = il PC). Chi la riceve
+        lo vede: il telefono nella risposta del claim, il PC con una notifica nell'HUD e la carta di conferma."""
+        state = self.conversation_state
+        moved = state.hand_over_pending(source, target) if state is not None else None
+        if moved is not None:
+            what = (moved.get("text") or "").strip() or moved.get("intent", "")
+            where = "sul telefono" if target else "di nuovo sul PC"
+            self.event_bus.publish(HudEvent(EventType.NOTIFICATION, {
+                "kind": "handoff", "text": f"Conferma in sospeso {where}: «{what}». Rispondi sì o no.",
+                "task_id": moved.get("trace_id"), "from": source or "", "to": target or "",
+            }, trace_id=moved.get("trace_id")))
+        return moved
+
+    def continuity_for(self, device_id: str) -> dict:
+        """Cio' che il dispositivo che prende la sessione deve sapere per continuare senza farsi rispiegare nulla:
+        la conferma che ora aspetta lui (task_id, intent, rischio - mai i parametri, F4.5.7) e, se il core lo
+        fornisce, gli ultimi scambi."""
+        from core.risk import risk_of
+
+        continuity: dict = {"pending": None}
+        state = self.conversation_state
+        if state is not None:
+            pending = state.pending_channels().get(device_id)
+            if pending is not None:
+                continuity["pending"] = {
+                    "task_id": pending.get("trace_id"), "intent": pending.get("intent"),
+                    "reason": pending.get("reason"), "risk": risk_of(pending.get("intent", "")).value,
+                    "request": pending.get("text", ""), "handed_over_from": pending.get("handed_over_from"),
+                }
+        if self.continuity_provider is not None:
+            try:
+                continuity.update(self.continuity_provider() or {})
+            except Exception:
+                _logger.exception("Errore preparando la continuita' di sessione")
+        return continuity
 
     def start(self) -> None:
         if self._httpd is not None:
@@ -580,11 +649,19 @@ class _Handler(BaseHTTPRequestHandler):
         # stesso device_id di prima - il client lo deve rimandare in /command (campo opzionale
         # "session_id", stesso schema gia' usato per "device_id") perche' il resto della catena
         # di chiamate su QUEL thread lo veda tramite core/request_context.py.
-        previous, session_id = self.companion.devices.claim(device_id, name)
-        self._audit("handoff_claim", status=200, target_device=device_id, previous_device=previous)
+        with self.companion._handoff_lock:
+            # chi rispondeva PRIMA di questo claim (None = il PC): se e' un altro, la sua conferma in sospeso passa qui.
+            # Un claim di chi era gia' attivo (riconnessione) non sposta nulla: una conferma chiesta nel frattempo al PC
+            # resta del PC.
+            before = self.companion.devices.active_device_id
+            previous, session_id = self.companion.devices.claim(device_id, name)
+            moved = self.companion.hand_over_pending(before, device_id) if before != device_id else None
+            continuity = self.companion.continuity_for(device_id)
+        self._audit("handoff_claim", status=200, target_device=device_id, previous_device=previous,
+                    pending_handed_over=moved is not None)
         if previous:
             self.companion.event_bus.publish(HudEvent(EventType.DEVICE_HANDOFF, {"from": previous, "to": device_id}))
-        self._json_response(200, {"active_device": device_id, "session_id": session_id})
+        self._json_response(200, {"active_device": device_id, "session_id": session_id, "continuity": continuity})
         return None
 
     def _handle_release(self, device_id: str):
@@ -601,8 +678,9 @@ class _Handler(BaseHTTPRequestHandler):
         # deve poter rilasciare un device_id che non e' il proprio.
         if self._device_id_mismatch(device_id):
             return self._reject_body(403, "device_id_mismatch")
-        released = self.companion.devices.release(device_id)
-        self._audit("handoff_release", status=200, target_device=device_id, released=released)
+        released, moved = self.companion.release_to_pc(device_id)
+        self._audit("handoff_release", status=200, target_device=device_id, released=released,
+                    pending_handed_over=moved is not None)
         self._json_response(200, {"released": released})
         return None
 

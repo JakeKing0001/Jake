@@ -38,6 +38,13 @@ class TodoManager:
             );
             """
         )
+        # F6.4.5: quante volte Jake ha gia' ricordato una todo, e quando (sopravvive al riavvio). Colonne aggiunte a un
+        # database esistente senza toccare le righe.
+        columns = {row[1] for row in self._connection.execute("PRAGMA table_info(todos)").fetchall()}
+        if "nudges" not in columns:
+            self._connection.execute("ALTER TABLE todos ADD COLUMN nudges INTEGER NOT NULL DEFAULT 0")
+        if "nudged_at" not in columns:
+            self._connection.execute("ALTER TABLE todos ADD COLUMN nudged_at TEXT")
         self._connection.commit()
 
     @staticmethod
@@ -68,10 +75,18 @@ class TodoManager:
         with self._lock:
             cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
             rows = self._connection.execute(
-                "SELECT id, text, created_at FROM todos WHERE done = 0 AND created_at <= ? ORDER BY created_at ASC",
+                "SELECT id, text, created_at, nudges, nudged_at FROM todos WHERE done = 0 AND created_at <= ? "
+                "ORDER BY created_at ASC",
                 (cutoff,),
             ).fetchall()
             return [dict(row) for row in rows]
+
+    def record_nudge(self, todo_id: int) -> None:
+        """F6.4.5: Jake l'ha appena ricordata all'utente (proattivamente)."""
+        with self._lock:
+            self._connection.execute("UPDATE todos SET nudges = nudges + 1, nudged_at = ? WHERE id = ?",
+                                     (self._now(), todo_id))
+            self._connection.commit()
 
     def complete_matching(self, query: str) -> dict | None:
         """Segna come completato il primo task ancora aperto il cui testo contiene 'query'

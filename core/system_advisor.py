@@ -17,6 +17,14 @@ from core.logger import get_logger
 BATTERY_LOW_PERCENT = 15
 DISK_FREE_LOW_GB = 3.0
 STALE_TODO_DAYS = 3
+# F6.4.5 ("rinegoziare invece di inviare reminder infiniti"): prova reale del 28/09/2026 - "comprare il pane" veniva
+# riannunciata a OGNI avvio (10:20, 10:22, 10:26), perche' il "gia' detto" stava solo in memoria. Ora una todo si
+# ricorda al massimo ogni TODO_NUDGE_INTERVAL_DAYS, dalla seconda volta Jake propone di chiuderla, e dopo
+# TODO_MAX_NUDGES smette: resta nella lista, la vede chi la chiede.
+TODO_NUDGE_INTERVAL_DAYS = 3
+TODO_MAX_NUDGES = 3
+# stesso problema per l'avviso sui Download: al massimo una volta ogni tanti giorni, anche dopo un riavvio
+DOWNLOADS_WARN_INTERVAL_DAYS = 7
 # F6 (Proactive Intelligence & Autonomy, "digital housekeeping... prima come suggerimenti" -
 # vedi ROADMAP.md): soglie deliberatamente larghe, per non diventare invadenti su una cartella
 # che quasi tutti lasciano accumulare per settimane senza che sia un problema reale.
@@ -30,6 +38,7 @@ class SystemAdvisor:
     def __init__(
         self, on_advisory=None, interval_seconds: float = 300, enabled: bool = True, todo_manager=None,
         downloads_dir: Path | None = None, memory_manager=None, stop_timeout_seconds: float = 2.0,
+        state_path: Path | None = None,
     ):
         self.on_advisory = on_advisory
         self.interval_seconds = interval_seconds
@@ -52,6 +61,8 @@ class SystemAdvisor:
         self._disk_warned = False
         self._downloads_warned = False
         self._stale_todo_ids_warned: set = set()  # (v4.2) gia' segnalate: non ripeterle ogni giro
+        # F6.4.5: cio' che e' gia' stato detto e deve sopravvivere a un riavvio (None = solo in memoria, come nei test)
+        self._state_path = Path(state_path) if state_path else None
 
     def start(self) -> None:
         if not self.enabled or (self._thread is not None and self._thread.is_alive()):
@@ -136,15 +147,70 @@ class SystemAdvisor:
         stale = self.todo_manager.list_stale_pending(days=STALE_TODO_DAYS)
         stale_ids = {todo["id"] for todo in stale}
         self._stale_todo_ids_warned &= stale_ids  # dimentica gli id non piu' in sospeso/stale
-        new_ones = [todo for todo in stale if todo["id"] not in self._stale_todo_ids_warned]
+        new_ones = [todo for todo in stale if todo["id"] not in self._stale_todo_ids_warned and self._due_for_nudge(todo)]
         if not new_ones:
             return
         self._stale_todo_ids_warned |= {todo["id"] for todo in new_ones}
-        if len(new_ones) == 1:
-            self._advise(f"C'e' un'attivita' in sospeso da un po' nella todo list: \"{new_ones[0]['text']}\".")
+        record = getattr(self.todo_manager, "record_nudge", None)
+        for todo in new_ones:
+            if record is not None:
+                record(todo["id"])
+        first = new_ones[0]
+        if int(first.get("nudges") or 0) >= 1:
+            # gia' ricordata: invece di ripeterla, si propone di chiuderla (e dopo TODO_MAX_NUDGES si smette)
+            self._advise(f"\"{first['text']}\" è in lista da {self._age_days(first)} giorni e te l'ho già ricordata: "
+                         f"se è fatta dimmi \"segna come fatto {first['text']}\", se non serve più "
+                         f"\"togli dalla lista {first['text']}\".")
+        elif len(new_ones) == 1:
+            self._advise(f"C'e' un'attivita' in sospeso da un po' nella todo list: \"{first['text']}\".")
         else:
-            oldest = new_ones[0]["text"]
-            self._advise(f"Hai {len(new_ones)} attivita' in sospeso da un po' nella todo list, la piu' vecchia e': \"{oldest}\".")
+            self._advise(f"Hai {len(new_ones)} attivita' in sospeso da un po' nella todo list, la piu' vecchia e': \"{first['text']}\".")
+
+    @staticmethod
+    def _due_for_nudge(todo: dict) -> bool:
+        from datetime import datetime, timezone
+
+        if int(todo.get("nudges") or 0) >= TODO_MAX_NUDGES:
+            return False
+        last = todo.get("nudged_at")
+        if not last:
+            return True
+        try:
+            then = datetime.fromisoformat(str(last))
+        except ValueError:
+            return True
+        return (datetime.now(timezone.utc) - then).total_seconds() >= TODO_NUDGE_INTERVAL_DAYS * 86400
+
+    @staticmethod
+    def _age_days(todo: dict) -> int:
+        from datetime import datetime, timezone
+
+        try:
+            return max(1, (datetime.now(timezone.utc) - datetime.fromisoformat(str(todo["created_at"]))).days)
+        except (KeyError, ValueError):
+            return STALE_TODO_DAYS
+
+    def _load_state(self) -> dict:
+        if self._state_path is None or not self._state_path.exists():
+            return {}
+        try:
+            import json
+
+            data = json.loads(self._state_path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def _save_state(self, state: dict) -> None:
+        if self._state_path is None:
+            return
+        try:
+            import json
+
+            self._state_path.parent.mkdir(parents=True, exist_ok=True)
+            self._state_path.write_text(json.dumps(state), encoding="utf-8")
+        except OSError:
+            self._logger.exception("Stato degli avvisi non salvato")
 
     def _check_downloads_clutter(self) -> None:
         """Nota da solo se la cartella Download ha accumulato troppo spazio o troppi file
@@ -184,8 +250,11 @@ class SystemAdvisor:
 
         total_gb = total_bytes / (1024 ** 3)
         cluttered = total_gb >= DOWNLOADS_SIZE_WARN_GB or old_count >= DOWNLOADS_OLD_FILES_WARN_COUNT
-        if cluttered and not self._downloads_warned:
+        state = self._load_state()
+        recently = time.time() - float(state.get("downloads_warned_at") or 0) < DOWNLOADS_WARN_INTERVAL_DAYS * 86400
+        if cluttered and not self._downloads_warned and not recently:
             self._downloads_warned = True
+            self._save_state({**state, "downloads_warned_at": time.time()})
             detail = f" ({old_count} più vecchi di {DOWNLOADS_OLD_FILE_DAYS} giorni)" if old_count else ""
             self._advise(
                 f"La cartella Download ha accumulato {total_gb:.1f} GB{detail}: "
@@ -206,6 +275,11 @@ class SystemAdvisor:
         removed = self.memory_manager.purge_expired()
         if removed:
             self._logger.info("Rimossi %d ricordi scaduti.", removed)
+        # F5.4: stessi ricordi con chiavi scritte in modo diverso (database precedenti) uniti, i valori vecchi come versioni
+        consolidate = getattr(self.memory_manager, "consolidate_duplicates", None)
+        merged = consolidate() if callable(consolidate) else 0
+        if isinstance(merged, int) and merged:
+            self._logger.info("Uniti %d ricordi duplicati (stessa chiave scritta in modo diverso).", merged)
 
     def _advise(self, message: str) -> None:
         self._logger.info("Avviso proattivo: %s", message)

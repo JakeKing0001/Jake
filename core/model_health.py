@@ -10,7 +10,12 @@ Qui:
 - `classify` distingue server spento, timeout (server vivo ma modello troppo lento), modello mancante, errore interno;
 - `diagnose` dice PERCHE' era lento quando lo si puo' sapere (modello solo in parte sulla GPU, GPU quasi piena);
 - per turno (`begin_turn`/`end_turn`, un ContextVar) il primo fallimento vale per tutte le chiamate successive dello
-  stesso turno: falliscono subito invece di ripetere la stessa attesa. Il turno dopo riparte da zero."""
+  stesso turno: falliscono subito invece di ripetere la stessa attesa. Il turno dopo riparte da zero.
+- fra un turno e l'altro (prova reale del 28/09/2026, GPU con 55 MB liberi): ogni turno nuovo ripagava i ~25 s del
+  classificatore d'intenti prima di ripiegare sulle regole - "che ore sono?" con una coda confusa ha risposto dopo
+  28 s. Dopo un timeout, e finche' il modello non risponde di nuovo (al massimo RECENT_TIMEOUT_S), il solo
+  instradamento (`routing_timeout`) usa un'attesa corta: se il modello e' ancora lento si ripiega subito su regole e
+  recupero; le risposte vere del modello (domande libere, agenti) mantengono la loro attesa."""
 from __future__ import annotations
 
 import contextvars
@@ -30,6 +35,28 @@ class ModelFailure:
 
 
 _TURN: contextvars.ContextVar[dict | None] = contextvars.ContextVar("model_turn_health", default=None)
+
+RECENT_TIMEOUT_S = 120.0
+SHORT_ROUTING_TIMEOUT_S = 6.0
+# monotonic dell'ultimo timeout non ancora smentito da una risposta riuscita (processo, non turno)
+_last_timeout_at: float | None = None
+
+
+def routing_timeout(default: float, now: float | None = None) -> float:
+    """L'attesa per il classificatore d'intenti: corta subito dopo un timeout recente, altrimenti `default`."""
+    import time
+
+    at = _last_timeout_at
+    current_time = time.monotonic() if now is None else now
+    if at is not None and current_time - at <= RECENT_TIMEOUT_S:
+        return min(default, SHORT_ROUTING_TIMEOUT_S)
+    return default
+
+
+def succeeded() -> None:
+    """Il modello ha risposto: la lentezza di prima non vale piu'."""
+    global _last_timeout_at
+    _last_timeout_at = None
 
 
 def begin_turn() -> contextvars.Token:
@@ -67,6 +94,11 @@ def failure() -> ModelFailure | None:
 
 
 def record(failure_: ModelFailure) -> None:
+    global _last_timeout_at
+    if failure_.kind == TIMEOUT:
+        import time
+
+        _last_timeout_at = time.monotonic()
     state = _TURN.get()
     if state is not None and state.get("failure") is None and failure_.kind in (OFFLINE, TIMEOUT):
         state["failure"] = failure_  # solo cio' che si ripeterebbe uguale nello stesso turno

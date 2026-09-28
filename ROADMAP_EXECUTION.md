@@ -269,21 +269,21 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F5.1` | Memory Platform (F5.1.1/F5.1.3-F5.1.6 il 21/09/2026: schema versionato, migrazioni transazionali con backup, metadati, recupero; resta F5.1.2 separare entita'/episodi/procedure e la prova su una copia del database reale) | `DOING` |
 | `F5.2` | Memory Platform (27/09/2026: memoria episodica interrogabile - "di cosa abbiamo parlato ieri?" sulla cronologia reale per periodo e argomento) | `DOING` |
 | `F5.3` | Knowledge Model | `DOING` |
-| `F5.4` | Memory Reliability (27/09/2026: nessuna sovrascrittura silenziosa di fatti/preferenze - versione precedente conservata e dichiarata, un'inferenza non sostituisce un fatto detto dall'utente, conflitti registrati, "dimentica" cancella anche le versioni; conferma prima di cambiare un ricordo importante o fissato; decadimento per categoria nel ranking, fissati esclusi; consolidamento non ancora) | `DOING` |
+| `F5.4` | Memory Reliability (27/09/2026: nessuna sovrascrittura silenziosa di fatti/preferenze - versione precedente conservata e dichiarata, un'inferenza non sostituisce un fatto detto dall'utente, conflitti registrati, "dimentica" cancella anche le versioni; conferma prima di cambiare un ricordo importante o fissato; decadimento per categoria nel ranking, fissati esclusi; 28/09/2026: consolidamento - la stessa chiave scritta con maiuscole, accenti o spazi diversi e' un solo ricordo con versioni, i duplicati dei database vecchi uniti dalla manutenzione, ricerca per parole senza accenti) | `DOING` |
 | `F5.5` | Retrieval Quality (27/09/2026: ricordi pertinenti con fonte anche nelle risposte libere e nei compiti dei tre agenti, retrieval ibrido parole+significato+periodo ("ieri", "la settimana scorsa" dentro la domanda), budget di contesto, grafo a un salto; 28/09/2026: nessun ricordo personale nelle domande di conoscenza generale, riassunti di conversazione solo se la domanda parla di conversazioni passate, citazione solo se il ricordo e' davvero nella risposta e detta in modo leggibile; 28/09/2026 sera: metriche nell'eval di rilascio - golden set della memoria su database vero, recall@3 e MRR 1,0, 5 casi di sicurezza; i ricordi segreti non entrano piu' nel contesto automatico) | `DOING` |
 | `F5.6` | Context Runtime (27/09/2026: segnali non riletti non piu' presentati come attuali; appunti marcati privati da chi li copia mai letti) | `DOING` |
 | `F5.7` | Privacy Engineering (libreria completa il 21/09/2026; dal 26/09/2026 nel percorso reale: "dimentica" cancella anche registro e indici con ricevuta, l'uso dei ricordi viene registrato, "da dove sai X" spiega la provenienza; dal 27/09/2026 "esporta i miei ricordi" e "fissa il ricordo X" a voce; purge/backup non ancora esposti a voce/HUD); 28/09/2026: modalita' privata dall'HUD con un interruttore nella barra di stato, e le frasi "attiva/disattiva la modalita' privata" nella corsia esatta - prima passavano dal modello e con la GPU piena andavano in timeout) | `DOING` |
 | `F6.1` | Proactivity Platform (26/09/2026: promemoria, automazioni e avvisi passano dagli stessi freni in `JakeCore.notify` - duplicati, budget orario, quiet hours, conversazione in corso - e si sospendono insieme durante prove e benchmark; 28/09/2026: gli avvisi non urgenti aspettano che Jake sia pronto e poi escono in un solo riepilogo) | `DOING` |
 | `F6.2` | Proactivity Quality (27/09/2026: "perche' me l'hai detto?" spiega la fonte dell'ultima notifica) | `DOING` |
 | `F6.3` | Notification UX (libreria di decisione il 21/09/2026; collegata a JakeCore/EventBus/HUD il 22/09/2026; dal 27/09/2026 "meno notifiche cosi'", "non mostrarmelo piu'", "mostramelo di nuovo" e "rimandala" sull'ultima notifica, a voce e dai pulsanti del toast HUD, persistenti; nessuna consegna reale di call/companion) | `DOING` |
-| `F6.4` | Goal Runtime (27/09/2026: "devo X entro <giorno>" diventa una proposta di promemoria confermata col si'/no normale) | `DOING` |
+| `F6.4` | Goal Runtime (27/09/2026: "devo X entro <giorno>" diventa una proposta di promemoria confermata col si'/no normale; 28/09/2026: una todo dimenticata si ricorda al massimo ogni 3 giorni, poi si propone di chiuderla, dopo 3 volte basta - anche dopo un riavvio) | `DOING` |
 | `F6.5` | Automation Runtime (27/09/2026: modalita' di notifica a tempo che torna da sola alla precedente con il riepilogo) | `DOING` |
 | `F6.6` | Meeting Experience (libreria di regole il 21/09/2026: brief senza dati inventati, consenso e indicatore, follow-up gated; dal 27/09/2026 "com'e' la mia giornata" usa il brief con promemoria e todo reali; nessun connettore reale) | `DOING` |
 | `F6.7` | Runtime Reliability (monitor/housekeeping il 22/09/2026; task monitor collegato a JakeCore/EventBus/HUD lo stesso giorno - vedi F6.3; dal 27/09/2026 "avvisami quando finisce la build" su un processo reale, notifica dalla pipeline unica; housekeeping senza connettori reali ne' pilot) | `DOING` |
 | `F7.1` | Companion Security (F7.1.1/.4/.5/.6/.7 il 22/09/2026; F7.1.2 - pairing HTTP - chiuso il 22/09/2026, vedi F7.2; TLS reale generato/persistito dal server il 22/09/2026; capability persistenti F7.1.3 dal 27/09/2026 - impostabili a voce con SET_DEVICE_ACCESS, valide subito e dopo un riavvio, riga corrotta = nessun permesso; manca la distribuzione del certificato al telefono oltre al pairing) | `DOING` |
 | `F7.2` | Mobile Companion (pairing/chat live/approve-deny sullo stesso task end-to-end il 22/09/2026; lista/revoca dispositivi via HTTP e prima app Android reale - MAI compilata/eseguita in questo ambiente - il 22/09/2026; dal 27/09/2026 revoca/rotazione chiudono anche lo stream gia' aperto; file dal telefono al PC con permesso esplicito; senza offline queue/wipe lato app) | `DOING` |
 | `F7.3` | Voice Devices | `BACKLOG` |
-| `F7.4` | Presence Runtime (27/09/2026: lease del dispositivo attivo - scade senza segni di vita, rinnovato da richieste e stream aperto, rilasciato alla revoca) | `DOING` |
+| `F7.4` | Presence Runtime (27/09/2026: lease del dispositivo attivo - scade senza segni di vita, rinnovato da richieste e stream aperto, rilasciato alla revoca; 28/09/2026: la conferma in sospeso segue chi risponde PC -> telefono -> PC con lo stesso task_id, claim simultanei deterministici, esecuzione unica, riepilogo per il telefono; parlare al PC gli riporta la sessione) | `DOING` |
 | `F7.5` | Home Integration | `DOING` |
 | `F7.6` | Sync and Crypto (motore cifrato con conflitti deterministici, revoca, wipe e coda limitata il 21/09/2026; senza trasporto ne' collegamento a memoria/pairing) | `DOING` |
 | `F7.7` | Edge Devices | `BACKLOG` |
@@ -9181,6 +9181,15 @@ Criterio di uscita: il corpus conflitti supera la policy review senza sovrascrit
   ("fissa il ricordo X", `pinned=false` per toglierlo) usa `MemoryPrivacyDashboard.pin`: un ricordo fissato non
   decade e cambiarlo chiede conferma. Test su memoria reale con export in cartella temporanea.
 
+- 28/09/2026 (F5.4, consolidamento): riprodotto - "caffe", "Caffè" e "caffè " diventavano tre ricordi con tre valori;
+  le risposte li ricevevano tutti, il versionamento non scattava (la chiave sembrava nuova) e "dimentica il Caffè" non
+  toccava "caffe". Ora `remember`, `entry`, `versions` e `forget` riconoscono la stessa chiave senza maiuscole, accenti,
+  spazi doppi o punteggiatura ai bordi (`canonical_key`); i valori sostituiti restano versioni. `consolidate_duplicates`
+  unisce i duplicati gia' presenti nei database vecchi (resta il piu' recente, gli altri valori diventano versioni
+  "consolidated", i collegamenti del grafo passano al superstite) ed e' chiamato dalla manutenzione del SystemAdvisor.
+  La ricerca per parole ignora accenti e maiuscole con una funzione `fold` registrata su SQLite ("come prendo il
+  caffè?" trova "caffe"). Test su database vero; l'eval della memoria resta a recall@3 e MRR 1,0.
+
 ### F5.5 — Retrieval con citazioni locali
 
 Dipende da: F5.2–F5.4.
@@ -9513,6 +9522,13 @@ Criterio di uscita: una demo attraversa creazione, blocco, revisione e completam
   promemoria arriva la mattina del giorno di scadenza (alle 17/18 per oggi/stasera) e conserva le parole
   dell'utente con maiuscole e accenti. Test sul JakeCore reale con SetReminderSkill e ReminderManager veri.
   Milestone, rinegoziazione e blocker (F6.4.3-F6.4.7) non ancora.
+- 28/09/2026 (F6.4.5, rinegoziare invece di ricordare all'infinito): nel log della prova del 28/09 "comprare il pane" e
+  "la cartella Download ha accumulato 4.2 GB" erano ripetuti a ogni avvio (10:20, 10:22, 10:26): il "gia' detto"
+  stava solo in memoria. Ora la todo registra quante volte e quando e' stata ricordata (colonne `nudges`/`nudged_at`
+  aggiunte ai database esistenti): al massimo ogni 3 giorni, dalla seconda volta Jake propone di chiuderla con le
+  frasi esatte ("segna come fatto ...", "togli dalla lista ..."), dopo 3 promemoria smette (resta nella lista).
+  L'avviso sui Download al massimo una volta a settimana, anche dopo un riavvio (`data/advisor_state.json`). Test con
+  database e file di stato veri e advisor ricreato a ogni "avvio".
 
 ### F6.5 — Routine apprese e focus assistant
 
@@ -9924,6 +9940,29 @@ nessuna azione duplicata e ripresa di contesto, decisioni e ricevute sul PC.
   dispositivo (dall'HTTP o con `REVOKE_DEVICE`) lo rilascia subito. Reclamare dopo la scadenza non genera un
   handoff da se stesso. Test: registro con orologio finto; server reale con claim -> silenzio -> scaduto con
   handoff, stream aperto oltre il lease -> resta attivo, revoca -> stream chiuso e dispositivo rilasciato.
+- 28/09/2026 (F7.4.4/F7.4.7/F7.4.8, prima fetta della continuita'): buco reale - un compito avviato sul PC che
+  chiedeva conferma notificava anche il telefono col suo task_id, ma `/approvals/<task_id>` cercava la conferma nel
+  canale del telefono (`no_matching_pending_decision`): la decisione restava bloccata sul PC. Ora
+  `ConversationStateManager.hand_over_pending` sposta in modo atomico la conferma di chi rispondeva a chi risponde
+  adesso: il claim del telefono la porta con se' (stesso trace_id/action_id/parametri; al "si'" la policy si
+  ricontrolla nel contesto del telefono), il rilascio e la scadenza del lease la riportano al PC (la carta di
+  conferma ricompare nell'HUD, una notifica "di nuovo sul PC" dice cosa aspetta). Claim, rilascio e scadenza
+  girano sotto un solo lock del server: con due claim simultanei la conferma finisce sempre sul dispositivo attivo
+  e l'azione parte una volta sola. La risposta del claim porta `continuity` (conferma in sospeso senza parametri,
+  ultimi 6 scambi - nessuno in modalita' privata). Non si spostano: autenticazioni (legate al PC), azioni ADMIN
+  (il pairing di un nuovo dispositivo lo approva solo il PC: la policy non blocca gli ADMIN da un telefono), domande piu'
+  vecchie di 10 minuti (F7.4.9: niente approvazioni fuori dal loro momento), un canale che ha gia' la sua
+  conferma, e nulla su una riconnessione di chi era gia' attivo. Un dispositivo revocato non riporta indietro la
+  sua conferma. Test con server companion vero e pipeline reale: PC -> telefono -> approvazione, telefono -> PC ->
+  "si'" locale e 404 al telefono, lease scaduto, riconnessione, due claim e due approvazioni simultanei, privato.
+  Restano: il riepilogo nei pannelli F4.5 dell'HUD (il PC che riprende la sessione e l'active responder per
+  le notifiche sono le voci qui sotto).
+- 28/09/2026 (F7.4.2, elezione per scelta esplicita e recency): con un telefono attivo, l'utente che torna al PC e
+  parla o scrive li' (voce, CLI, HUD nativo) doveva prima "rilasciare" dal telefono; il "si'" detto al PC non
+  trovava la conferma passata al telefono. Ora ogni turno dell'utente al PC riporta la sessione al PC con la
+  stessa logica del rilascio (`CompanionServer.release_to_pc`, sotto il lock di handoff): conferma di nuovo sul
+  PC, `DEVICE_HANDOFF` verso nessuno. Un comando dal telefono non fa elezione. Test: conferma passata al telefono,
+  "si'" detto al PC -> PC attivo, azione eseguita una volta, 404 all'approvazione successiva dal telefono.
 - 28/09/2026 (F7.4, un solo active responder per le notifiche): con un telefono attivo promemoria, avvisi e
   automazioni uscivano sia sul telefono (NOTIFICATION sul bus, consegnata dallo stream del companion) sia a voce o
   in CLI sul PC. Ora `JakeCore.notify` pubblica l'evento con `responder` e non restituisce nulla da presentare al PC
@@ -10676,6 +10715,10 @@ per la parte di sviluppo sull'HUD, vedi sotto).
   IDLE quasi tutto il turno. Ora la catena e' completa e coperta da un test end-to-end. Composizione centrata, vetro
   con rifrazione, polvere ambientale per stato, orb meno rigido; build Release, ctest, verifica a schermo.
 - Meteo su Open-Meteo (nessuna chiave), notizie su NewsData.io (chiave gratuita in `news_api_key`).
+- Dal log della prova del 28/09 mattina (GPU con 55 MB liberi): "che ore sono?" con una coda confusa ha risposto dopo
+  28 s, perche' ogni turno nuovo ripagava i ~25 s del classificatore d'intenti prima di ripiegare sulle regole. Ora,
+  dopo un timeout del modello e finche' il modello non risponde di nuovo (al massimo 2 minuti), il solo
+  instradamento aspetta 6 s (`model_health.routing_timeout`); domande libere e agenti mantengono la loro attesa.
 - Dal log del 28/09 mattina: "Jake, che ore sono? Jake, che ore sono? Jake." e "Jake, che ore sono? Allora, e' una
   vostra storica in realta'." non erano un esempio esatto e finivano al modello. Nei turni vocali la prima frase
   vale da sola quando e' un comando esatto: una ripetizione identica una volta sola (qualunque comando), una coda

@@ -290,6 +290,7 @@ class JakeCore:
             on_pairing_requested=self._on_pairing_requested,
             # F7.2.5: i file dal telefono (solo dispositivi con accesso "file") finiscono qui, uno per dispositivo
             files_dir=Path(config.get("companion_files_dir") or Path.home() / "Documents" / "Jake" / "Dal telefono"),
+            continuity_provider=self._continuity_snapshot,
         )
         self.native_hud = None
         if bool(config.get("companion_server_enabled", False)):
@@ -551,6 +552,8 @@ class JakeCore:
             enabled=bool(config.get("system_advisor_enabled", True)),
             todo_manager=self.skill_registry.todo_manager,
             memory_manager=self.memory_manager,
+            # F6.4.5: cio' che gli avvisi hanno gia' detto sopravvive al riavvio (niente "Download pieni" a ogni avvio)
+            state_path=Path(config.get("advisor_state_path") or Path(__file__).resolve().parent.parent / "data" / "advisor_state.json"),
         )
         self.system_advisor.start()
 
@@ -1071,6 +1074,9 @@ class JakeCore:
         return self._run_in_current_profile(lambda: self._answer_in_profile(text or ""))
 
     def _answer_in_profile(self, raw_text: str) -> str:
+        # F7.4.2: chi parla o scrive al PC (voce, CLI, HUD nativo) lo rende di nuovo il dispositivo che risponde, con la
+        # conferma che aspettava sul telefono: il "si'" detto qui la trova
+        self._pc_takes_the_session()
 
         # F2.6.4:
         # una passphrase NON deve attraversare normalizzatore, NLU, memoria,
@@ -1239,6 +1245,28 @@ class JakeCore:
             with self._in_flight_lock:
                 self._in_flight_answers -= 1
                 self._last_answer_finished_at = time.time()
+
+    CONTINUITY_TURNS = 6
+
+    def _pc_takes_the_session(self) -> None:
+        if current_conversation_channel() is not None:
+            return   # un telefono che parla resta il suo canale: nessuna elezione (voce, CLI e HUD sono il PC)
+        server = getattr(self, "companion_server", None)
+        if server is None or not getattr(server, "running", False):
+            return
+        try:
+            server.pc_takes_the_session()
+        except Exception:
+            self.logger.exception("Errore riportando la sessione al PC")
+
+    def _continuity_snapshot(self) -> dict:
+        """F7.4.8: gli ultimi scambi della conversazione (unica per tutti i dispositivi) per chi prende la sessione dal
+        PC: sul telefono si riparte da dove si era, senza rispiegare. In modalita' privata nulla: lo scambio privato non
+        esce verso companion e HUD (v4.9.1)."""
+        if self.private_mode:
+            return {"recent": []}
+        turns = self.conversation_state.get_short_term_history()[-self.CONTINUITY_TURNS:]
+        return {"recent": [{"role": turn.get("role"), "text": turn.get("text", "")} for turn in turns]}
 
     def _publish_hud_event(self, event: HudEvent) -> None:
         """Punto unico per lo stato del turno verso HUD/companion. Lo stato e' un effetto collaterale del runtime, non
