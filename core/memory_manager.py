@@ -439,9 +439,15 @@ class MemoryManager:
 
         generic = query_kind(question) == GENERIC
         about_conversation = refers_to_conversation(question)
+        # F5.5/F5.7 (eval della memoria, 28/09/2026): un ricordo marcato 'secret' (pin, password) entrava nel contesto
+        # automatico di qualunque risposta che ne nominasse le parole - e da li' poteva essere detto a voce o arrivare
+        # a HUD/companion. Nel contesto automatico mai: lo legge solo chi lo chiede esplicitamente (RECALL e il
+        # dashboard della privacy, con le loro regole).
+        secret = self._secret_keys()
         candidates = {k: e for k, e in candidates.items()
                       if (not generic or e["why"].startswith("chiave citata"))
-                      and (e.get("category") != "summary" or about_conversation)}
+                      and (e.get("category") != "summary" or about_conversation)
+                      and k not in secret}
         if temporal is not None:
             (since, until), phrase = temporal
             candidates = {k: e for k, e in candidates.items() if since <= str(e.get("updated_at") or "") <= until}
@@ -451,7 +457,8 @@ class MemoryManager:
         if ranked:
             top = ranked[0]
             for related in self.related(top["key"], top.get("category", "fact")):
-                if related.get("value") is None or (related["key"], related.get("category", "fact")) in candidates:
+                identity = (related["key"], related.get("category", "fact"))
+                if related.get("value") is None or identity in candidates or identity in secret:
                     continue
                 related = dict(related)
                 related["why"] = f"collegato a '{top['key']}' ({related.get('predicate')})"
@@ -466,6 +473,11 @@ class MemoryManager:
             chosen.append(entry)
             used += size
         return chosen
+
+    def _secret_keys(self) -> set[tuple]:
+        with self._lock:
+            rows = self._connection.execute("SELECT key, category FROM memories WHERE sensitivity = 'secret'").fetchall()
+        return {(row[0], row[1]) for row in rows}
 
     # F5.4.5 (decadimento per categoria): dopo quanti giorni senza uso ne' aggiornamenti un ricordo pesa la meta' nella
     # scelta dei ricordi pertinenti. Solo un peso nel ranking: nessun ricordo viene cancellato o nascosto per questo
