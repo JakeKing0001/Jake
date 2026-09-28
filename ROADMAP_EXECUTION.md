@@ -269,7 +269,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F5.1` | Memory Platform (F5.1.1/F5.1.3-F5.1.6 il 21/09/2026: schema versionato, migrazioni transazionali con backup, metadati, recupero; resta F5.1.2 separare entita'/episodi/procedure e la prova su una copia del database reale) | `DOING` |
 | `F5.2` | Memory Platform (27/09/2026: memoria episodica interrogabile - "di cosa abbiamo parlato ieri?" sulla cronologia reale per periodo e argomento) | `DOING` |
 | `F5.3` | Knowledge Model | `DOING` |
-| `F5.4` | Memory Reliability (27/09/2026: nessuna sovrascrittura silenziosa di fatti/preferenze - versione precedente conservata e dichiarata, un'inferenza non sostituisce un fatto detto dall'utente, conflitti registrati, "dimentica" cancella anche le versioni; conferma prima di cambiare un ricordo importante o fissato; decadimento per categoria nel ranking, fissati esclusi; consolidamento non ancora) | `DOING` |
+| `F5.4` | Memory Reliability (27/09/2026: nessuna sovrascrittura silenziosa di fatti/preferenze - versione precedente conservata e dichiarata, un'inferenza non sostituisce un fatto detto dall'utente, conflitti registrati, "dimentica" cancella anche le versioni; conferma prima di cambiare un ricordo importante o fissato; decadimento per categoria nel ranking, fissati esclusi; 28/09/2026: consolidamento - la stessa chiave scritta con maiuscole, accenti o spazi diversi e' un solo ricordo con versioni, i duplicati dei database vecchi uniti dalla manutenzione, ricerca per parole senza accenti) | `DOING` |
 | `F5.5` | Retrieval Quality (27/09/2026: ricordi pertinenti con fonte anche nelle risposte libere e nei compiti dei tre agenti, retrieval ibrido parole+significato+periodo ("ieri", "la settimana scorsa" dentro la domanda), budget di contesto, grafo a un salto; 28/09/2026: nessun ricordo personale nelle domande di conoscenza generale, riassunti di conversazione solo se la domanda parla di conversazioni passate, citazione solo se il ricordo e' davvero nella risposta e detta in modo leggibile; 28/09/2026 sera: metriche nell'eval di rilascio - golden set della memoria su database vero, recall@3 e MRR 1,0, 5 casi di sicurezza; i ricordi segreti non entrano piu' nel contesto automatico) | `DOING` |
 | `F5.6` | Context Runtime (27/09/2026: segnali non riletti non piu' presentati come attuali; appunti marcati privati da chi li copia mai letti) | `DOING` |
 | `F5.7` | Privacy Engineering (libreria completa il 21/09/2026; dal 26/09/2026 nel percorso reale: "dimentica" cancella anche registro e indici con ricevuta, l'uso dei ricordi viene registrato, "da dove sai X" spiega la provenienza; dal 27/09/2026 "esporta i miei ricordi" e "fissa il ricordo X" a voce; purge/backup non ancora esposti a voce/HUD); 28/09/2026: modalita' privata dall'HUD con un interruttore nella barra di stato, e le frasi "attiva/disattiva la modalita' privata" nella corsia esatta - prima passavano dal modello e con la GPU piena andavano in timeout) | `DOING` |
@@ -9180,6 +9180,15 @@ Criterio di uscita: il corpus conflitti supera la policy review senza sovrascrit
   Markdown e una JSON dalla privacy dashboard, senza i ricordi segreti (e dice quanti ne ha esclusi); `PIN_MEMORY`
   ("fissa il ricordo X", `pinned=false` per toglierlo) usa `MemoryPrivacyDashboard.pin`: un ricordo fissato non
   decade e cambiarlo chiede conferma. Test su memoria reale con export in cartella temporanea.
+
+- 28/09/2026 (F5.4, consolidamento): riprodotto - "caffe", "Caffè" e "caffè " diventavano tre ricordi con tre valori;
+  le risposte li ricevevano tutti, il versionamento non scattava (la chiave sembrava nuova) e "dimentica il Caffè" non
+  toccava "caffe". Ora `remember`, `entry`, `versions` e `forget` riconoscono la stessa chiave senza maiuscole, accenti,
+  spazi doppi o punteggiatura ai bordi (`canonical_key`); i valori sostituiti restano versioni. `consolidate_duplicates`
+  unisce i duplicati gia' presenti nei database vecchi (resta il piu' recente, gli altri valori diventano versioni
+  "consolidated", i collegamenti del grafo passano al superstite) ed e' chiamato dalla manutenzione del SystemAdvisor.
+  La ricerca per parole ignora accenti e maiuscole con una funzione `fold` registrata su SQLite ("come prendo il
+  caffè?" trova "caffe"). Test su database vero; l'eval della memoria resta a recall@3 e MRR 1,0.
 
 ### F5.5 — Retrieval con citazioni locali
 

@@ -275,6 +275,11 @@ class SystemAdvisor:
         removed = self.memory_manager.purge_expired()
         if removed:
             self._logger.info("Rimossi %d ricordi scaduti.", removed)
+        # F5.4: stessi ricordi con chiavi scritte in modo diverso (database precedenti) uniti, i valori vecchi come versioni
+        consolidate = getattr(self.memory_manager, "consolidate_duplicates", None)
+        merged = consolidate() if callable(consolidate) else 0
+        if isinstance(merged, int) and merged:
+            self._logger.info("Uniti %d ricordi duplicati (stessa chiave scritta in modo diverso).", merged)
 
     def _advise(self, message: str) -> None:
         self._logger.info("Avviso proattivo: %s", message)
