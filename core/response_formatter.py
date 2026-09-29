@@ -260,6 +260,8 @@ def _format_error(intent: str, result: SkillResult) -> str:
             return f"Non ho un'automazione salvata chiamata '{data.get('name', '')}': creala prima con un'automazione."
         if intent == "DELETE_TRIGGER":
             return f"Non ho nessun trigger chiamato '{data.get('name', '')}'."
+        if intent == "NEXT_STEP":
+            return f"Non trovo nessun obiettivo aperto che parli di '{data.get('goal', '')}'."
         if intent in ("COMPLETE_TODO", "DELETE_TODO"):
             return f"Non trovo nessuna attività da fare che corrisponda a '{data.get('text', '')}'."
         if intent in ("SNOOZE_REMINDER", "DELETE_REMINDER"):
@@ -593,10 +595,31 @@ def _format_success(intent: str, result: SkillResult, registry=None) -> str | No
     if intent == "ADD_TODO":
         return f"Aggiunto alla lista delle cose da fare: {data['text']}."
     if intent == "LIST_TODOS":
-        formatted = "; ".join(f"{t['id']}. {t['text']}" for t in data["todos"])
-        return f"Cose da fare: {formatted}"
+        def one(t):
+            if not t.get("steps_total"):
+                return f"{t['id']}. {t['text']}"
+            upcoming = f", prossimo: {t['next_step']}" if t.get("next_step") else ", tutti i passi fatti"
+            return f"{t['id']}. {t['text']} ({t['steps_done']}/{t['steps_total']} passi{upcoming})"
+        return "Cose da fare: " + "; ".join(one(t) for t in data["todos"])
     if intent == "COMPLETE_TODO":
-        return f"Segnato come fatto: {data['text']}."
+        reply = f"Segnato come fatto: {data['text']}."
+        if data.get("goal"):
+            if data.get("next_step"):
+                reply += f" Per «{data['goal']}» il prossimo passo è: {data['next_step']}."
+            else:
+                reply += (f" Era l'ultimo passo di «{data['goal']}»: se è davvero concluso dimmi "
+                          f"\"segna come fatto {data['goal']}\".")
+        return reply
+    if intent == "PLAN_GOAL":
+        return (f"Ok, «{data['goal']}» ha {data['steps_total']} passi. Il prossimo è: {data['next_step']}."
+                if data.get("next_step") else f"Ok, i passi di «{data['goal']}» sono già tutti fatti.")
+    if intent == "NEXT_STEP":
+        if not data.get("steps_total"):
+            return f"«{data['goal']}» non ha ancora dei passi: dimmi quali sono e li segno."
+        if not data.get("next_step"):
+            return f"Tutti i {data['steps_total']} passi di «{data['goal']}» sono fatti."
+        return (f"Per «{data['goal']}» il prossimo passo è: {data['next_step']} "
+                f"({data['steps_done']} di {data['steps_total']} fatti).")
     if intent == "SYSTEM_POWER":
         labels = {"shutdown": "Spengo il computer.", "restart": "Riavvio il computer.", "sleep": "Metto il computer in sospensione.", "lock": "Ho bloccato lo schermo."}
         return labels.get(data["action"], "Fatto.")

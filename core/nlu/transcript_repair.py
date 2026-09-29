@@ -28,7 +28,7 @@ _FOREIGN_LETTERS = re.compile(r"[kwyxj]")
 
 # parole funzionali e verbi frequenti: senza di loro ogni frase avrebbe "parole sconosciute"
 CORE_WORDS = set("""
-a ad al alla alle allo agli ai anche ancora avere ce che chi ci come con cosa cos cosi da dal dalla dei del della delle
+a ad al alla alle agli ai anche ancora avere ce che chi ci come con cosa cos cosi da dal dalla dei del della delle
 dello dentro di dove dopo e ed era ero gli ha hai hanno ho i il in io la le lei li lo loro lui ma me mi mia mie miei mio
 molto ne nei nel nella no noi non o ogni per perche piu poi quale quali qual quando quanta quante quanti quanto quello
 questa queste questi questo se sei si sia siamo sono su sua sue sul sulla suo suoi te ti tra tu tua tuo un una uno vi voi
@@ -127,7 +127,7 @@ class TranscriptRepair:
 
     # ---- valutazione di una frase -------------------------------------------------------------------------
     def assess(self, text: str, confidence: float | None, find_exact=None, safe_intent=None) -> Assessment:
-        """`find_exact(text) -> Example|None`, `safe_intent(intent) -> bool` (solo lettura)."""
+        """`find_exact(text) -> Example|None`, `safe_intent(intent) -> bool` (sola lettura)."""
         if confidence is None:
             return Assessment(OK, text, "testo senza confidenza (scritto)")
         tokens = words(text)
@@ -169,15 +169,19 @@ class TranscriptRepair:
                         fixed = re.sub(rf"\b{re.escape(old)}\b", new, fixed, flags=re.I)
                 return Assessment(REPAIRED, fixed, "domanda con cornice chiara, parola corretta")
             return Assessment(OK, text, "domanda con cornice chiara")
-        if ambiguous:
-            token, options = ambiguous[0]
-            return Assessment(AMBIGUOUS, text, f"'{token}' potrebbe essere {' o '.join(options)}", options)
+
+        # Now check confidence threshold for short/long words
         if len(tokens) <= self.SHORT_WORDS:
             needed = self.SHORT_MIN
         else:
             needed = self.LONG_MIN if unknown * 3 <= len(tokens) else self.SHORT_MIN
         if confidence < needed:
             return Assessment(UNCLEAR, text, f"confidenza {confidence:.2f} < {needed:.2f}, {unknown} parole ignote")
+
+        if ambiguous:
+            token, options = ambiguous[0]
+            return Assessment(AMBIGUOUS, text, f"'{token}' potrebbe essere {' o '.join(options)}", options)
+
         return Assessment(OK, text, "trascrizione affidabile")
 
 

@@ -45,28 +45,76 @@ class TodoManager:
             self._connection.execute("ALTER TABLE todos ADD COLUMN nudges INTEGER NOT NULL DEFAULT 0")
         if "nudged_at" not in columns:
             self._connection.execute("ALTER TABLE todos ADD COLUMN nudged_at TEXT")
+        # F6.4.3: un goal e' una todo con dei passi (todo figlie); il prossimo passo e' il primo ancora aperto
+        if "parent_id" not in columns:
+            self._connection.execute("ALTER TABLE todos ADD COLUMN parent_id INTEGER")
         self._connection.commit()
 
     @staticmethod
     def _now() -> str:
         return datetime.now(timezone.utc).isoformat()
 
-    def add(self, text: str) -> int | None:
+    def add(self, text: str, parent_id: int | None = None) -> int | None:
         with self._lock:
             cursor = self._connection.execute(
-                "INSERT INTO todos (text, created_at, done) VALUES (?, ?, 0)",
-                (text, self._now()),
+                "INSERT INTO todos (text, created_at, done, parent_id) VALUES (?, ?, 0, ?)",
+                (text, self._now(), parent_id),
             )
             self._connection.commit()
             return cursor.lastrowid
 
     def list_pending(self, limit: int = 20) -> list[dict]:
+        """Le attivita' aperte di primo livello; un goal porta con se' l'avanzamento e il prossimo passo (F6.4.3)."""
         with self._lock:
             rows = self._connection.execute(
-                "SELECT id, text FROM todos WHERE done = 0 ORDER BY id ASC LIMIT ?",
+                "SELECT id, text FROM todos WHERE done = 0 AND parent_id IS NULL ORDER BY id ASC LIMIT ?",
                 (limit,),
             ).fetchall()
-            return [dict(row) for row in rows]
+            items = []
+            for row in rows:
+                item = dict(row)
+                steps = self._steps(row["id"])
+                if steps:
+                    item.update(self._progress(steps))
+                items.append(item)
+            return items
+
+    # ---- F6.4.3: goal, passi e prossimo passo ---------------------------------------------------------------
+
+    def _steps(self, goal_id: int) -> list[dict]:
+        return [dict(r) for r in self._connection.execute(
+            "SELECT id, text, done FROM todos WHERE parent_id = ? ORDER BY id ASC", (goal_id,)).fetchall()]
+
+    @staticmethod
+    def _progress(steps: list[dict]) -> dict:
+        pending = [s for s in steps if not s["done"]]
+        return {"steps_total": len(steps), "steps_done": len(steps) - len(pending),
+                "next_step": pending[0]["text"] if pending else None}
+
+    def _find_goal(self, query: str) -> dict | None:
+        row = self._connection.execute(
+            "SELECT id, text FROM todos WHERE done = 0 AND parent_id IS NULL AND text LIKE ? ORDER BY id ASC LIMIT 1",
+            (f"%{query}%",)).fetchone()
+        return dict(row) if row is not None else None
+
+    def plan_goal(self, goal: str, steps: list[str]) -> dict:
+        """Il goal (nuovo, o quello aperto con lo stesso testo) con questi passi in fondo alla sua lista."""
+        with self._lock:
+            found = self._find_goal(goal)
+            goal_id = int(found["id"] if found else self.add(goal) or 0)
+            for step in steps:
+                self.add(step, parent_id=goal_id)
+            steps_now = self._steps(goal_id)
+            return {"goal": found["text"] if found else goal, **self._progress(steps_now)}
+
+    def next_step(self, goal_query: str) -> dict | None:
+        with self._lock:
+            found = self._find_goal(goal_query)
+            if found is None:
+                return None
+            steps = self._steps(found["id"])
+            return {"goal": found["text"], **self._progress(steps)} if steps else {"goal": found["text"],
+                                                                                    "steps_total": 0}
 
     def list_stale_pending(self, days: float = 3) -> list[dict]:
         """Attivita' ancora aperte create da almeno 'days' giorni (v4.2, Proactive
@@ -102,7 +150,16 @@ class TodoManager:
                 "UPDATE todos SET done = 1, done_at = ? WHERE id = ?", (self._now(), row["id"])
             )
             self._connection.commit()
-            return dict(row)
+            completed = dict(row)
+            # F6.4.3/F6.4.4: l'ultimo passo di un goal non chiude il goal da solo (fatto e' cio' che l'utente dice):
+            # chi risponde lo propone
+            parent = self._connection.execute("SELECT parent_id FROM todos WHERE id = ?", (row["id"],)).fetchone()
+            if parent is not None and parent[0] is not None:
+                goal = self._connection.execute("SELECT text, done FROM todos WHERE id = ?", (parent[0],)).fetchone()
+                steps = self._steps(parent[0])
+                completed["goal"] = goal["text"] if goal else None
+                completed.update(self._progress(steps))
+            return completed
 
     def delete_matching(self, query: str) -> dict | None:
         with self._lock:
