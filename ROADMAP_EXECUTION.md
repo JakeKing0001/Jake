@@ -8767,6 +8767,13 @@ reduced motion restano utilizzabili.
   dell'HUD senza Windows 11, con "Effetti di trasparenza" spenti, con il contrasto elevato o con
   `JAKE_HUD_GLASS=hud`. Test: `hud_glass_geometry` in ctest (DPI 100/125/150%, rientro, raggio, dissolvenza).
   Restano: giudizio estetico dell'utente, prova su un secondo monitor a scala diversa, F4.3.3 profilo GPU/batteria.
+- 29/09/2026 (F4.3.5/F4.4.5/F4.7, l'HUD segue Windows mentre e' aperto): batteria, "Dimensioni testo", "Effetti
+  animazione", contrasto elevato e "Effetti di trasparenza" erano letti una sola volta da `main.cpp`: staccare
+  l'alimentatore o ingrandire il testo non cambiava nulla fino al riavvio. `src/SystemWatch.cpp` li rilegge ogni 3 s
+  (chiamate Win32 da microsecondi) e il QML li usa come binding (qualita' dell'orb e della rifrazione, scala del
+  testo, movimento, contrasto, vetro sul desktop); le variabili d'ambiente esplicite vincono sempre. ctest
+  `hud_system_settings`; HUD avviato senza errori QML e verificato a schermo. Staccare davvero l'alimentatore e
+  cambiare le impostazioni con l'HUD aperto: VERIFY utente.
 - 28/09/2026 (F4.3.6, contrasto su desktop chiari, misurato): HUD in demo sopra un documento bianco con testo nero,
   pixel dei pannelli letti dallo screenshot. Con la tinta 0,58-0,66 lo sfondo dei pannelli era #4b4d53 (luminanza
   0,074): testo secondario a contrasto 3,50, sotto la soglia di leggibilita' 4,5 (testo principale 7,68). Tinta del

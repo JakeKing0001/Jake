@@ -44,10 +44,19 @@ ApplicationWindow {
     property string jakeDeviceId: ""
     property string jakeToken: ""
     // Impostati da src/main.cpp: accessibilita' e qualita' dell'orb (F4.4.5, F4.3.5).
-    property bool reducedMotion: false
-    property bool highContrast: false
-    property real textScale: 1.0
-    property string orbQuality: "high"
+    // Scelte esplicite da src/main.cpp (variabili d'ambiente): vincono sulle impostazioni di Windows
+    property bool reducedMotionForced: false
+    property bool highContrastForced: false
+    property real textScaleOverride: 0
+    property string qualityChoice: ""
+    // F4.3.5/F4.4.5/F4.7: le impostazioni di Windows seguite anche a HUD aperto (alimentatore staccato, "Dimensioni testo",
+    // "Effetti animazione", contrasto elevato, trasparenza): prima valevano solo quelle lette all'avvio
+    SystemWatch { id: system }
+    readonly property bool reducedMotion: reducedMotionForced || system.reducedMotion
+    readonly property bool highContrast: highContrastForced || system.highContrast
+    readonly property real textScale: textScaleOverride > 0 ? textScaleOverride : system.textScale
+    readonly property string orbQuality: qualityChoice === "low" || qualityChoice === "high" ? qualityChoice
+        : system.onBattery ? "low" : "high"
     property bool orb3d: false
     // JAKE_HUD_DEMO=1 (src/main.cpp): l'orb scorre da solo tutti gli stati, con un livello audio sintetico e gli esiti
     // success/warning/error - per verificarne a schermo il comportamento senza Jake acceso. Il resto dell'HUD resta reale.
@@ -242,11 +251,6 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
-        Theme.highContrast = highContrast
-        Theme.textScale = textScale
-        Theme.richGlass = orbQuality === "high" && !highContrast
-        Theme.desktopGlass = desktopGlassAllowed && desktopGlass.supported && !highContrast
-            && desktopGlass.transparencyEffectsEnabled()
         console.info("Vetro dei pannelli:", Theme.desktopGlass ? "desktop (" + desktopGlass.mode + ")" : "HUD")
         Theme.backdrop = frosted
         if (jakeToken.length > 0)
@@ -256,6 +260,11 @@ ApplicationWindow {
         overlayStyler.setClickThrough(window, true)
         chooseScreen()
     }
+    Binding { target: Theme; property: "highContrast"; value: window.highContrast }
+    Binding { target: Theme; property: "textScale"; value: window.textScale }
+    Binding { target: Theme; property: "richGlass"; value: window.orbQuality === "high" && !window.highContrast }
+    Binding { target: Theme; property: "desktopGlass"
+              value: window.desktopGlassAllowed && desktopGlass.supported && !window.highContrast && system.transparencyEffects }
     Binding { target: Theme; property: "stateColor"; value: orb.item && orb.item.glowColor !== undefined ? orb.item.glowColor : Theme.ok }
 
     // ---- geometria -----------------------------------------------------------------------------------------
