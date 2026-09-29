@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from core.memory_schema import SENSITIVITY_LEVELS, ensure_schema, kind_of
+from core.secrets_vault import SecretsVault
 
 
 
@@ -40,10 +41,20 @@ class MemoryManager:
     # correlati (es. "mi piace il caffe'" e "mi piace il te'").
     DEDUP_SIMILARITY_THRESHOLD = 0.93
 
+    def _decrypt_if_needed(self, value: str, sensitivity: str) -> str:
+        """Decritta un valore se e' stato cifrato per sensibilita'."""
+        if sensitivity in ("sensitive", "secret") and self._vault.is_protected(value):
+            decrypted = self._vault.unprotect(value)
+            # Se la decifratura fallisce, restituiamo il valore originale per non perdere dati
+            # In un sistema reale, questo potrebbe indicare un problema con il vault DPAPI
+            return decrypted if decrypted is not None else value
+        return value
+
     def __init__(self, db_path: Path | None = None):
         self.db_path = Path(db_path) if db_path else self.DEFAULT_DB_PATH
         self._lock = threading.RLock()
         self._connection, self.migration_report = self._open_validated_connection(self.db_path)
+        self._vault = SecretsVault()
 
     @staticmethod
     def _open_validated_connection(db_path: Path) -> tuple[sqlite3.Connection, object]:
@@ -141,7 +152,18 @@ class MemoryManager:
         self._validate_metadata(sensitivity, confidence, valid_from, valid_until)
         with self._lock:
             now = self._now()
-            embedding_json = json.dumps(embedding) if embedding else None
+
+            # F5.7.1/F5.7.6: campo cifrato per valori di memoria classificati sensibili
+            # (ADR 0004): cifriamo il valore se la sensibilita' e' "sensitive" o "secret"
+            encrypted_value = None
+            if sensitivity in ("sensitive", "secret"):
+                encrypted_value = self._vault.protect(value)
+                # Per i valori cifrati, memorizziamo il valore cifrato e teniamo il valore
+                # in chiaro solo in memoria per il processing immediato
+                storage_value = encrypted_value
+            else:
+                storage_value = value
+
             expires_at = (
                 (datetime.now(timezone.utc) + timedelta(days=ttl_days)).isoformat() if ttl_days is not None else None
             )
@@ -154,6 +176,9 @@ class MemoryManager:
             # valori diversi, le risposte li ricevevano tutti e il versionamento (niente sovrascritture silenziose) non
             # scattava mai perche' la chiave sembrava nuova
             key = self._existing_key_for(key.strip(), category)
+
+            # Prepara l'embedding per lo storage
+            embedding_json = json.dumps(embedding) if embedding is not None else None
 
             previous_row = self._connection.execute(
                 "SELECT value, source FROM memories WHERE key = ? AND category = ?", (key, category),
@@ -190,7 +215,7 @@ class MemoryManager:
                     source = excluded.source,
                     expires_at = excluded.expires_at
                 """,
-                (key, value, category, importance, now, now, embedding_json, project, source, expires_at, kind_of(category)),
+                (key, storage_value, category, importance, now, now, embedding_json, project, source, expires_at, kind_of(category)),
             )
             # chi ha creato un ricordo NUOVO senza dirlo e' la sua fonte (user / inferred / agent:x): la provenienza
             # che gia' si registra. Su un ricordo esistente created_by non cambia (vedi _apply_metadata).
@@ -267,7 +292,17 @@ class MemoryManager:
             row = self._connection.execute(
                 "SELECT value, importance, pinned, source FROM memories WHERE key = ? AND category = ?", (key, category),
             ).fetchone()
-        return dict(row) if row is not None else None
+        if row is not None:
+            row_dict = dict(row)
+            # Per decifrare, abbiamo bisogno della sensibilita' dalla tabella memories
+            sensitivity_row = self._connection.execute(
+                "SELECT sensitivity FROM memories WHERE key = ? AND category = ?", (key, category)
+            ).fetchone()
+            sensitivity = sensitivity_row["sensitivity"] if sensitivity_row else "unknown"
+            # Decrittiamo il valore se necessario
+            row_dict["value"] = self._decrypt_if_needed(row_dict["value"], sensitivity)
+            return row_dict
+        return None
 
     def versions(self, key: str, category: str = "fact") -> list[dict]:
         """F5.4.2: le versioni precedenti di un ricordo (e le inferenze rifiutate), dalla piu' recente."""
@@ -277,7 +312,20 @@ class MemoryManager:
                 "SELECT value, source, valid_until, reason FROM memory_versions WHERE memory_key = ? AND memory_category = ? "
                 "ORDER BY id DESC", (key, category),
             ).fetchall()
-        return [dict(row) for row in rows]
+            # Decrittiamo i valori se necessario
+            result = []
+            for row in rows:
+                row_dict = dict(row)
+                # Per le versioni, controlliamo la sensibilita' della versione originale
+                # Nota: la tabella memory_versions non ha una colonna sensitivity, quindi
+                # dobbiamo prendere la sensitivita' dal ricordo corrente
+                sensitivity_row = self._connection.execute(
+                    "SELECT sensitivity FROM memories WHERE key = ? AND category = ?", (key, category)
+                ).fetchone()
+                sensitivity = sensitivity_row["sensitivity"] if sensitivity_row else "unknown"
+                row_dict["value"] = self._decrypt_if_needed(row_dict["value"], sensitivity)
+                result.append(row_dict)
+            return result
 
     @staticmethod
     def _validate_metadata(sensitivity, confidence, valid_from, valid_until) -> None:
@@ -400,7 +448,15 @@ class MemoryManager:
                 f"{where} ORDER BY importance DESC, updated_at DESC LIMIT ?",
                 (*params, limit),
             ).fetchall()
-            return [dict(row) for row in rows]
+            # Decrittiamo i valori se necessario
+            result = []
+            for row in rows:
+                row_dict = dict(row)
+                # Decrittiamo il valore se e' stato cifrato
+                sensitivity = row_dict.get("sensitivity", "unknown")
+                row_dict["value"] = self._decrypt_if_needed(row_dict["value"], sensitivity)
+                result.append(row_dict)
+            return result
 
     def semantic_recall(
         self, query_embedding: list, category: str | None = None, project: str | None = None, limit: int = 5,
@@ -436,7 +492,12 @@ class MemoryManager:
         for row in rows:
             embedding = json.loads(row["embedding"])
             score = EmbeddingProvider.cosine_similarity(query_embedding, embedding)
+            # Decrittiamo il valore se necessario
+            value = row["value"]
+            sensitivity = row["sensitivity"] if "sensitivity" in row.keys() else "unknown"
+            decrypted_value = self._decrypt_if_needed(value, sensitivity)
             entry = {k: row[k] for k in ("key", "value", "category", "importance", "updated_at", "project", "source", "expires_at")}
+            entry["value"] = decrypted_value
             entry["score"] = score
             scored.append(entry)
 

@@ -119,11 +119,14 @@ class TodoManager:
     def list_stale_pending(self, days: float = 3) -> list[dict]:
         """Attivita' ancora aperte create da almeno 'days' giorni (v4.2, Proactive
         Intelligence: usata da SystemAdvisor per notare da solo una todo dimenticata, invece
-        di aspettare che l'utente chieda LIST_TODOS). Le piu' vecchie per prime."""
+        di aspettare che l'utente chieda LIST_TODOS). Le piu' vecchie per prime.
+
+        SOLO gli elementi di primo livello (goal) vengono considerati per i promemoria proattivi,
+        non i singoli step figli."""
         with self._lock:
             cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
             rows = self._connection.execute(
-                "SELECT id, text, created_at, nudges, nudged_at FROM todos WHERE done = 0 AND created_at <= ? "
+                "SELECT id, text, created_at, nudges, nudged_at FROM todos WHERE done = 0 AND parent_id IS NULL AND created_at <= ? "
                 "ORDER BY created_at ASC",
                 (cutoff,),
             ).fetchall()
@@ -138,38 +141,63 @@ class TodoManager:
 
     def complete_matching(self, query: str) -> dict | None:
         """Segna come completato il primo task ancora aperto il cui testo contiene 'query'
-        (case-insensitive). Restituisce il task completato, o None se non trovato."""
+        (case-insensitive). Restituisce il task completato, o None se non trovato.
+
+        Se il task e' un goal, completa anche tutti i suoi passi figli nella stessa transazione."""
         with self._lock:
             row = self._connection.execute(
-                "SELECT id, text FROM todos WHERE done = 0 AND text LIKE ? ORDER BY id ASC LIMIT 1",
+                "SELECT id, text, parent_id FROM todos WHERE done = 0 AND text LIKE ? ORDER BY id ASC LIMIT 1",
                 (f"%{query}%",),
             ).fetchone()
             if row is None:
                 return None
+
+            todo_id = row["id"]
+            parent_id = row["parent_id"]
             self._connection.execute(
-                "UPDATE todos SET done = 1, done_at = ? WHERE id = ?", (self._now(), row["id"])
+                "UPDATE todos SET done = 1, done_at = ? WHERE id = ?", (self._now(), todo_id)
             )
+
+            # Se stiamo completando un goal, completa anche tutti i suoi passi figli
+            if parent_id is None:  # Questo e' un goal (non ha parent)
+                self._connection.execute(
+                    "UPDATE todos SET done = 1, done_at = ? WHERE parent_id = ? AND done = 0",
+                    (self._now(), todo_id)
+                )
+
             self._connection.commit()
             completed = dict(row)
+
             # F6.4.3/F6.4.4: l'ultimo passo di un goal non chiude il goal da solo (fatto e' cio' che l'utente dice):
             # chi risponde lo propone
-            parent = self._connection.execute("SELECT parent_id FROM todos WHERE id = ?", (row["id"],)).fetchone()
-            if parent is not None and parent[0] is not None:
-                goal = self._connection.execute("SELECT text, done FROM todos WHERE id = ?", (parent[0],)).fetchone()
-                steps = self._steps(parent[0])
+            if parent_id is not None:  # Questo e' un passo, controlla il goal padre
+                goal = self._connection.execute("SELECT text, done FROM todos WHERE id = ?", (parent_id,)).fetchone()
+                steps = self._steps(parent_id)
                 completed["goal"] = goal["text"] if goal else None
                 completed.update(self._progress(steps))
+            elif parent_id is None:  # Questo e' un goal, mostra i suoi passi
+                steps = self._steps(todo_id)
+                completed.update(self._progress(steps))
+
             return completed
 
     def delete_matching(self, query: str) -> dict | None:
         with self._lock:
             row = self._connection.execute(
-                "SELECT id, text FROM todos WHERE done = 0 AND text LIKE ? ORDER BY id ASC LIMIT 1",
+                "SELECT id, text, parent_id FROM todos WHERE done = 0 AND text LIKE ? ORDER BY id ASC LIMIT 1",
                 (f"%{query}%",),
             ).fetchone()
             if row is None:
                 return None
-            self._connection.execute("DELETE FROM todos WHERE id = ?", (row["id"],))
+
+            todo_id = row["id"]
+            parent_id = row["parent_id"]
+
+            # Se stiamo eliminando un goal, elimina anche tutti i suoi passi figli
+            if parent_id is None:  # Questo e' un goal (non ha parent)
+                self._connection.execute("DELETE FROM todos WHERE parent_id = ?", (todo_id,))
+
+            self._connection.execute("DELETE FROM todos WHERE id = ?", (todo_id,))
             self._connection.commit()
             return dict(row)
 
