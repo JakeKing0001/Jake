@@ -4,7 +4,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from core.memory_schema import SENSITIVITY_LEVELS, ensure_schema
+from core.memory_schema import SENSITIVITY_LEVELS, ensure_schema, kind_of
 
 
 
@@ -179,8 +179,8 @@ class MemoryManager:
             self._connection.execute(
                 """
                 INSERT INTO memories
-                    (key, value, category, importance, created_at, updated_at, embedding, project, source, expires_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (key, value, category, importance, created_at, updated_at, embedding, project, source, expires_at, kind)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(key, category) DO UPDATE SET
                     value = excluded.value,
                     importance = excluded.importance,
@@ -190,7 +190,7 @@ class MemoryManager:
                     source = excluded.source,
                     expires_at = excluded.expires_at
                 """,
-                (key, value, category, importance, now, now, embedding_json, project, source, expires_at),
+                (key, value, category, importance, now, now, embedding_json, project, source, expires_at, kind_of(category)),
             )
             # chi ha creato un ricordo NUOVO senza dirlo e' la sua fonte (user / inferred / agent:x): la provenienza
             # che gia' si registra. Su un ricordo esistente created_by non cambia (vedi _apply_metadata).
@@ -352,6 +352,7 @@ class MemoryManager:
         self, key: str | None = None, category: str | None = None, query: str | None = None,
         project: str | None = None, limit: int = 5,
         since: str | None = None, until: str | None = None, include_expired: bool = False,
+        kind: str | None = None,
     ) -> list[dict]:
         """Recupera ricordi per chiave esatta e/o ricerca libera su chiave/valore.
 
@@ -372,6 +373,10 @@ class MemoryManager:
         if category:
             clauses.append("category = ?")
             params.append(category)
+        if kind:
+            # F5.1.2: "entity" | "episode" | "procedure" | "record" (core/memory_schema.MEMORY_KINDS)
+            clauses.append("kind = ?")
+            params.append(kind)
         if project:
             clauses.append("project = ?")
             params.append(project)
@@ -514,9 +519,14 @@ class MemoryManager:
         # a HUD/companion. Nel contesto automatico mai: lo legge solo chi lo chiede esplicitamente (RECALL e il
         # dashboard della privacy, con le loro regole).
         secret = self._secret_keys()
+        # F5.1.2: gli episodi (riassunti, eventi) solo per domande sul passato; le procedure (automazioni, dimostrazioni:
+        # passi strutturati, rumore per una risposta normale) solo se la domanda chiede come si fa o le nomina
+        procedural = bool(re.search(r"\b(come (si fa|faccio|posso|si)|procedura|passaggi|automazione|routine)\b",
+                                    lowered_question))
         candidates = {k: e for k, e in candidates.items()
                       if (not generic or e["why"].startswith("chiave citata"))
-                      and (e.get("category") != "summary" or about_conversation)
+                      and (kind_of(e.get("category")) != "episode" or about_conversation)
+                      and (kind_of(e.get("category")) != "procedure" or procedural or e["why"].startswith("chiave citata"))
                       and k not in secret}
         if temporal is not None:
             (since, until), phrase = temporal

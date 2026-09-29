@@ -56,7 +56,7 @@ class FreshDatabaseTests(unittest.TestCase):
     def test_a_new_database_is_created_at_the_current_version_with_no_backup(self):
         memory = MemoryManager(self.path)
         self.addCleanup(memory.close)
-        self.assertEqual(memory.migration_report.applied, [1, 2, 3])
+        self.assertEqual(memory.migration_report.applied, list(range(1, SCHEMA_VERSION + 1)))
         self.assertEqual(memory.migration_report.to_version, SCHEMA_VERSION)
         self.assertIsNone(memory.migration_report.backup_path)  # niente dati: niente da salvare
         self.assertEqual(current_version(memory.connection), SCHEMA_VERSION)
@@ -92,7 +92,7 @@ class UpgradeTests(unittest.TestCase):
         memory = MemoryManager(self.path)
         self.addCleanup(memory.close)
         self.assertEqual(memory.migration_report.from_version, 0)
-        self.assertEqual(memory.migration_report.applied, [1, 2, 3])
+        self.assertEqual(memory.migration_report.applied, list(range(1, SCHEMA_VERSION + 1)))
         recalled = {r["key"]: r for r in memory.recall(limit=10)}
         self.assertEqual(recalled["compleanno"]["value"], "5 marzo")
         self.assertEqual(recalled["compleanno"]["importance"], 3)
