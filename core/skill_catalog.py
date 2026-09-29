@@ -209,7 +209,9 @@ def build_web_skills(config, web_search_skill) -> dict:
 def build_memory_notes_todo_skills(memory_manager, embedding_provider, todo_manager) -> dict:
     from core.memory_privacy import MemoryPrivacyDashboard
     from skills.explain_memory import ExplainMemorySkill
-    from skills.memory_controls import ExportMemoriesSkill, PinMemorySkill
+    from skills.memory_controls import (
+        ExportMemoriesSkill, ListMemoriesSkill, PinMemorySkill, SetMemorySensitivitySkill,
+    )
     from skills.recall_conversation import RecallConversationSkill
 
     # F5.7: la privacy dashboard diventa il percorso reale di "dimentica", "da dove sai" e dell'uso
@@ -224,6 +226,8 @@ def build_memory_notes_todo_skills(memory_manager, embedding_provider, todo_mana
         "EXPLAIN_MEMORY": ExplainMemorySkill(dashboard),
         "EXPORT_MEMORIES": ExportMemoriesSkill(dashboard),
         "PIN_MEMORY": PinMemorySkill(dashboard),
+        "SET_MEMORY_SENSITIVITY": SetMemorySensitivitySkill(dashboard),
+        "LIST_MEMORIES": ListMemoriesSkill(dashboard),
         "RECALL_CONVERSATION": RecallConversationSkill(memory_manager),
         "LINK_MEMORY": LinkMemorySkill(memory_manager),
         "PURGE_OLD_HISTORY": PurgeOldHistorySkill(memory_manager),
