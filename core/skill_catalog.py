@@ -53,7 +53,7 @@ from skills.forget import ForgetSkill
 from skills.link_memory import LinkMemorySkill
 from skills.privacy import PurgeOldHistorySkill
 from skills.notes import AddNoteSkill, ListNotesSkill, SearchNotesSkill, ExportNotesSkill, ClearNotesSkill
-from skills.todo import AddTodoSkill, ListTodosSkill, CompleteTodoSkill, DeleteTodoSkill
+from skills.todo import AddTodoSkill, ListTodosSkill, CompleteTodoSkill, DeleteTodoSkill, NextStepSkill, PlanGoalSkill
 
 from skills.workflow import SaveWorkflowSkill, RunWorkflowSkill
 from skills.computer_procedure import RecordComputerProcedureSkill, RunComputerProcedureSkill
@@ -236,6 +236,8 @@ def build_memory_notes_todo_skills(memory_manager, embedding_provider, todo_mana
         "LIST_TODOS": ListTodosSkill(todo_manager),
         "COMPLETE_TODO": CompleteTodoSkill(todo_manager),
         "DELETE_TODO": DeleteTodoSkill(todo_manager),
+        "PLAN_GOAL": PlanGoalSkill(todo_manager),
+        "NEXT_STEP": NextStepSkill(todo_manager),
     }
 
 

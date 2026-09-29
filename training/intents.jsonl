@@ -710,3 +710,6 @@
 {"text": "disattiva la modalità privata", "intent": "SET_PRIVATE_MODE", "parameters": {"enabled": false}}
 {"text": "esci dalla modalità privata", "intent": "SET_PRIVATE_MODE", "parameters": {"enabled": false}}
 {"text": "torna a registrare normalmente", "intent": "SET_PRIVATE_MODE", "parameters": {"enabled": false}}
+{"text": "per finire la tesi i passi sono scrivere l'introduzione, fare gli esperimenti e rileggere", "intent": "PLAN_GOAL", "parameters": {"goal": "finire la tesi", "steps": ["scrivere l'introduzione", "fare gli esperimenti", "rileggere"]}}
+{"text": "qual è il prossimo passo per la tesi", "intent": "NEXT_STEP", "parameters": {"goal": "tesi"}}
+{"text": "cosa mi manca per il trasloco", "intent": "NEXT_STEP", "parameters": {"goal": "trasloco"}}

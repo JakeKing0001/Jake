@@ -295,6 +295,8 @@ SKILL_RISK: dict[str, RiskLevel] = {
     # F5.7: una copia dei ricordi in Documenti (senza i segreti) e il fissaggio di un ricordo, entrambi reversibili
     "EXPORT_MEMORIES": RiskLevel.LOCAL_REVERSIBLE,
     "PIN_MEMORY": RiskLevel.LOCAL_REVERSIBLE,
+    "PLAN_GOAL": RiskLevel.LOCAL_REVERSIBLE,
+    "NEXT_STEP": RiskLevel.READ_ONLY,
     "RECALL_CONVERSATION": RiskLevel.READ_ONLY,  # osserva la fine di un processo, non lo tocca
     # F7.1.3: cambia chi puo' comandare Jake da un altro dispositivo -> impostazione di sicurezza
     "SET_DEVICE_ACCESS": RiskLevel.ADMIN,
