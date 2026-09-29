@@ -7,55 +7,13 @@
 #include <QQmlContext>
 #include <QtGlobal>
 
+#include "SystemWatch.h"
+
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
 
-namespace {
-// F4.4.5/F4.7.2: "reduced motion" segue l'impostazione di Windows "Mostra animazioni" (Accessibilita').
-bool systemPrefersReducedMotion() {
-#ifdef Q_OS_WIN
-    BOOL animations = TRUE;
-    if (SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0))
-        return animations == FALSE;
-#endif
-    return false;
-}
 
-// F4.7.4: "Dimensioni testo" di Windows (Accessibilita' > Dimensioni testo, 100-225%). Qt non la applica al QML:
-// senza, l'HUD resta piccolo anche per chi ha ingrandito il testo di tutto il sistema.
-double systemTextScale() {
-#ifdef Q_OS_WIN
-    DWORD value = 0;
-    DWORD size = sizeof(value);
-    if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Accessibility", L"TextScaleFactor",
-                     RRF_RT_REG_DWORD, nullptr, &value, &size) == ERROR_SUCCESS && value >= 100 && value <= 225)
-        return value / 100.0;
-#endif
-    return 1.0;
-}
-
-// F4.3.5: a batteria (non in carica) l'orb parte in qualita' bassa, salvo scelta esplicita.
-bool systemOnBattery() {
-#ifdef Q_OS_WIN
-    SYSTEM_POWER_STATUS status{};
-    if (GetSystemPowerStatus(&status))
-        return status.ACLineStatus == 0;
-#endif
-    return false;
-}
-
-// F4.7.3: "Contrasto elevato" di Windows (Accessibilita'), letto all'avvio.
-bool systemUsesHighContrast() {
-#ifdef Q_OS_WIN
-    HIGHCONTRASTW contrast{};
-    contrast.cbSize = sizeof(contrast);
-    if (SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0))
-        return (contrast.dwFlags & HCF_HIGHCONTRASTON) != 0;
-#endif
-    return false;
-}
-} // namespace
 
 int main(int argc, char *argv[]) {
     QGuiApplication app(argc, argv);
@@ -78,18 +36,16 @@ int main(int argc, char *argv[]) {
     parser.process(app);
 
     QVariantMap initial;
-    initial.insert(QStringLiteral("reducedMotion"),
-                   systemPrefersReducedMotion() || qEnvironmentVariable("JAKE_HUD_REDUCED_MOTION") == QLatin1String("1"));
-    initial.insert(QStringLiteral("highContrast"),
-                   systemUsesHighContrast() || qEnvironmentVariable("JAKE_HUD_HIGH_CONTRAST") == QLatin1String("1"));
+    // Le impostazioni di Windows (animazioni, contrasto, dimensioni testo, batteria) le segue SystemWatch in QML, anche
+    // quando cambiano con l'HUD aperto; qui passano solo le scelte esplicite, che vincono sempre.
+    initial.insert(QStringLiteral("reducedMotionForced"), qEnvironmentVariable("JAKE_HUD_REDUCED_MOTION") == QLatin1String("1"));
+    initial.insert(QStringLiteral("highContrastForced"), qEnvironmentVariable("JAKE_HUD_HIGH_CONTRAST") == QLatin1String("1"));
     bool scaleOk = false;
     const double envScale = qEnvironmentVariable("JAKE_HUD_TEXT_SCALE").toDouble(&scaleOk);
-    initial.insert(QStringLiteral("textScale"), scaleOk && envScale >= 1.0 && envScale <= 2.25 ? envScale : systemTextScale());
-    // JAKE_HUD_QUALITY=low|high per GPU deboli/batteria (F4.3.5); senza, a batteria si parte in qualita' bassa.
+    initial.insert(QStringLiteral("textScaleOverride"), scaleOk && envScale >= 1.0 && envScale <= 2.25 ? envScale : 0.0);
+    // JAKE_HUD_QUALITY=low|high per GPU deboli/batteria (F4.3.5); senza, bassa solo mentre si e' a batteria.
     // JAKE_HUD_ORB=2d forza l'orb 2D. L'orb scende comunque da solo se i fotogrammi sono lenti (Orb3D.qml).
-    const QString quality = qEnvironmentVariable("JAKE_HUD_QUALITY");
-    initial.insert(QStringLiteral("orbQuality"), quality == QLatin1String("low") || (quality.isEmpty() && systemOnBattery())
-                   ? QStringLiteral("low") : QStringLiteral("high"));
+    initial.insert(QStringLiteral("qualityChoice"), qEnvironmentVariable("JAKE_HUD_QUALITY"));
 #ifdef JAKE_HAS_QUICK3D
     const bool use3d = qEnvironmentVariable("JAKE_HUD_ORB") != QLatin1String("2d");
 #else

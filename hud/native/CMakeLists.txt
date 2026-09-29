@@ -107,6 +107,8 @@ qt_add_executable(JakeHud
     src/GlassGeometry.h
     src/NativeGlass.h
     src/NativeGlass.cpp
+    src/SystemWatch.h
+    src/SystemWatch.cpp
 )
 
 # Modulo QML "JakeHud" (vedi "import JakeHud" in qml/Main.qml ed engine.loadFromModule in
@@ -207,3 +209,11 @@ target_link_libraries(JakeHudGlassGeometryTests PRIVATE Qt6::Core)
 set_target_properties(JakeHudGlassGeometryTests PROPERTIES WIN32_EXECUTABLE OFF)
 add_dependencies(JakeHudGlassGeometryTests JakeHud)
 add_test(NAME hud_glass_geometry COMMAND JakeHudGlassGeometryTests)
+
+# F4.3.5/F4.7: impostazioni di Windows seguite dall'HUD (qualita' per batteria, dimensioni testo).
+qt_add_executable(JakeHudSystemSettingsTests tests/system_settings_tests.cpp src/SystemWatch.h src/SystemWatch.cpp)
+target_include_directories(JakeHudSystemSettingsTests PRIVATE src)
+target_link_libraries(JakeHudSystemSettingsTests PRIVATE Qt6::Core Qt6::Qml)
+set_target_properties(JakeHudSystemSettingsTests PROPERTIES WIN32_EXECUTABLE OFF)
+add_dependencies(JakeHudSystemSettingsTests JakeHud)
+add_test(NAME hud_system_settings COMMAND JakeHudSystemSettingsTests)
