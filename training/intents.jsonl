@@ -710,7 +710,6 @@
 {"text": "disattiva la modalità privata", "intent": "SET_PRIVATE_MODE", "parameters": {"enabled": false}}
 {"text": "esci dalla modalità privata", "intent": "SET_PRIVATE_MODE", "parameters": {"enabled": false}}
 {"text": "torna a registrare normalmente", "intent": "SET_PRIVATE_MODE", "parameters": {"enabled": false}}
-
 {"text": "segna come segreto il pin del bancomat", "intent": "SET_MEMORY_SENSITIVITY", "parameters": {"key": "pin del bancomat", "sensitivity": "secret"}}
 {"text": "la password del wifi è un'informazione riservata", "intent": "SET_MEMORY_SENSITIVITY", "parameters": {"key": "password del wifi", "sensitivity": "secret"}}
 {"text": "cosa sai di me", "intent": "LIST_MEMORIES", "parameters": {}}

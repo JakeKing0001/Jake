@@ -269,7 +269,6 @@ SKILL_RISK: dict[str, RiskLevel] = {
     "GET_MOON_PHASE": RiskLevel.READ_ONLY,
     "CONVERT_CURRENCY": RiskLevel.READ_ONLY,
     "GET_NEXT_HOLIDAY": RiskLevel.READ_ONLY,
-
     "RESEARCH": RiskLevel.READ_ONLY,
 
     # -- comunicazione: inviare un messaggio e' l'unica azione visibile a terzi ---------
@@ -295,10 +294,8 @@ SKILL_RISK: dict[str, RiskLevel] = {
     # F5.7: una copia dei ricordi in Documenti (senza i segreti) e il fissaggio di un ricordo, entrambi reversibili
     "EXPORT_MEMORIES": RiskLevel.LOCAL_REVERSIBLE,
     "PIN_MEMORY": RiskLevel.LOCAL_REVERSIBLE,
-
     "SET_MEMORY_SENSITIVITY": RiskLevel.LOCAL_REVERSIBLE,
     "LIST_MEMORIES": RiskLevel.READ_ONLY,
-
     "PLAN_GOAL": RiskLevel.LOCAL_REVERSIBLE,
     "NEXT_STEP": RiskLevel.READ_ONLY,
     "RECALL_CONVERSATION": RiskLevel.READ_ONLY,  # osserva la fine di un processo, non lo tocca
