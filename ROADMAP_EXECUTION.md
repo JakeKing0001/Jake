@@ -20,3 +20,43 @@ fix di integrità goal/step per F6.4.3/F6.4.4.
    suggerimenti, focus/meeting), F7 (coda offline, trasporto di sync, continuita' residua, remote wipe), F8
    (runtime degli agenti: loop e budget, eval e rollback), F0 (packaging/preflight/performance non legati
    all'installer).
+
+## Registro owner e stato dei pacchetti attivi
+
+Questo registro riguarda l'incremento in corso; il catalogo storico completo resta nella cronologia Git.
+`DOING` indica lavoro e verifiche ancora aperti, non il completamento della fase.
+
+| Pacchetto | Owner logico | Stato |
+|---|---|---|
+| `F4.3` | Sviluppo HUD | `DOING` |
+| `F4.7` | Sviluppo HUD / utente per monitor fisici | `DOING` |
+
+## Incremento del 29/09/2026 — materiale HUD e regressioni
+
+### F4.3 — Vetro, fallback e risorse
+
+- Proseguite le modifiche locali al vetro: gradiente multistop, grana, riflesso speculare e ombra interna
+  conservati, senza tipi QML non risolti (`OpacityMask`/`RadialGradient`) o texture inesistente.
+- Superficie decorativa statica e ritagliata agli angoli; texture e cattura del backdrop si spengono quando
+  il pannello e' nascosto o la qualita' scende. La tinta leggibile resta sempre presente.
+- Test nativo `hud_glass_material`: carica e disegna gli stessi sorgenti QML dell'app, fallisce sui warning,
+  verifica 48 combinazioni di fondo/stato/qualita'/modalita' vetro, transizioni, resize e rilascio delle risorse.
+  CI configurata per pubblicare screenshot diagnostici e log CTest.
+- Ancora da verificare: compositing DWM sul desktop reale e budget GPU/frame-time. Il rendering software
+  offscreen non sostituisce queste prove e non chiude F4.
+
+### F4.7 — Contrasto e scala del materiale
+
+- Tinta e testo secondario regolati sul rendering effettivo: contrasto almeno 4,5 nell'area interna dei
+  pannelli sui fondi di prova bianco, scuro e colorato. In contrasto elevato: nero pieno, bordo bianco
+  anche con accento scuro, niente decorazioni.
+- La stessa suite gira anche al 150% (`hud_glass_material_hidpi`); il controllo degli angoli impedisce
+  regressioni a pannelli quadrati. Nessuna dichiarazione di supporto multi-monitor basata su questa simulazione.
+- Ancora da verificare: spostamento fra monitor a DPI diversi, scala testo reale e accessibilita' dell'intero HUD.
+
+Verifiche locali dell'incremento: build MSVC/Qt 6.7.3 riuscita, 5/5 CTest, 213 test Python HUD e test
+della struttura roadmap superati, `qmllint` e lint Python dei file toccati puliti. Non eseguita la CI remota
+ne' la suite Python completa del repository.
+
+Prossima azione di sviluppo: proseguire F4 su orb/stati e budget GPU, mantenendo aperte le verifiche manuali
+del punto 2; poi F5 nell'ordine sopra. I gate F2 e la decisione sull'installer non cambiano.

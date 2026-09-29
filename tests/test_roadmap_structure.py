@@ -1,4 +1,4 @@
-"""F0.3.6: ogni pacchetto della roadmap deve avere owner logico e stato espliciti."""
+"""F0.3.6: ogni pacchetto attivo della roadmap compatta ha owner e stato espliciti."""
 from pathlib import Path
 import re
 import unittest
@@ -12,8 +12,10 @@ class RoadmapOwnershipTests(unittest.TestCase):
     def test_every_package_has_exactly_one_owner_and_state(self):
         content = ROADMAP.read_text(encoding="utf-8")
         package_ids = re.findall(r"(?m)^### (F\d+\.\d+)\b", content)
+        self.assertTrue(package_ids, "nessun pacchetto attivo: il registro non deve passare per vacuita'")
+        self.assertEqual(len(package_ids), len(set(package_ids)), "sezioni pacchetto duplicate")
         registry_match = re.search(
-            r"(?ms)^### 5\.1 — Registro owner e stato dei pacchetti\s+(.*?)^## 6\.", content,
+            r"(?ms)^## Registro owner e stato dei pacchetti attivi\s+(.*?)(?=^## |\Z)", content,
         )
         self.assertIsNotNone(registry_match, "registro owner/stato assente")
         rows = re.findall(
