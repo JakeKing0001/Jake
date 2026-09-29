@@ -10693,28 +10693,24 @@ F8.5, ledger maturo, deadlock detection e una UI che renda visibile ogni delega.
 
 ## 24. Prossima azione esatta
 
-Aggiornato 28/09/2026 sera (le versioni precedenti restano nella cronologia Git; lo sviluppo della lista del mattino
-- F4.3 vetro per pannello, F7.4.8 continuita' PC <-> companion, F8.3 Skill Forge con specifica/test/canary - e' su
-master, vedi le voci di F4.3, F7.4, F8.3 e le PR #168-#182).
+Aggiornato 29/09/2026 (le versioni precedenti restano nella cronologia Git). Sviluppo del 28/09 su master (#168-#185),
+compresi provenienza dei messaggi companion nell'HUD (#184, F7.4.6) e test dei pacchetti di terzi nella sandbox
+(#185, F8.3).
 
-1. Utente: ripetere il gate hardware di F2 con `docs/f2-hardware-validation.md` (tre profili, interruzioni, sessione
-   wake di 24 h, poi `python -m benchmarks.f2_hardware_session evaluate`). Solo con `PASS` F2 passa a `DONE`. Con il
-   microfono integrato la confidenza di Whisper resta bassa (0,45-0,67 anche su frasi corrette): una cuffia o un
-   microfono dedicato e' la prima cosa da provare. Liberare VRAM prima della prova (il 28/09 mattina: 55 MB liberi,
-   timeout del modello e partial da 58 s): il preflight lo segnala.
-2. Utente, prova reale con HUD nativo e voce - cose nuove da giudicare a schermo:
-   - vetro vero dietro i pannelli (Windows 11) su desktop scuri, chiari e colorati; su un documento bianco il testo
-     secondario misura 4,59 di contrasto, il giudizio estetico e' tuo;
-   - interruttore "Privato" nella barra di stato; un "si'" scritto nella barra dell'HUD per una domanda fatta a voce;
-   - con il telefono: claim -> la conferma chiesta sul PC arriva al telefono -> approvazione; oppure tornare al PC e
-     rispondere li'; le notifiche solo sul dispositivo attivo;
-   - "impara a ..." -> specifica da confermare -> permessi e rischio -> installazione firmata -> periodo di prova.
-3. Utente, decisione: quale installer per F0.6.1 (MSIX, Inno Setup o modalita' portable). Senza questa scelta
-   installazione, aggiornamento atomico e rollback (F0.6.3-F0.6.6) restano bloccati.
-4. Sviluppo, prossimi incrementi: esecuzione in sandbox dei test dichiarati dai pacchetti di terzi (F8.3); da quale
-   dispositivo arriva un messaggio e riepilogo di continuita' nei pannelli HUD (F7.4.6/F7.4.8); milestone e next
-   action dei goal (F6.4.3); separazione entita'/episodi/procedure (F5.1.2); profilo GPU/batteria con vetro vero e
-   HUD su un secondo monitor a scala diversa (F4.3.3).
+1. Utente: gate hardware di F2 con `docs/f2-hardware-validation.md` (tre profili, interruzioni, sessione wake di 24 h,
+   poi `python -m benchmarks.f2_hardware_session evaluate`). Solo con `PASS` F2 passa a `DONE`. Microfono dedicato e
+   VRAM libera prima della prova (il 28/09 mattina: 55 MB liberi): il preflight lo segnala.
+2. Utente, verifica a schermo: vetro vero dietro i pannelli su desktop scuri/chiari/colorati, orb 3D per stato,
+   HUD su un secondo monitor a scala diversa; interruttore "Privato"; con il telefono: conferma che passa al telefono
+   e ritorno al PC, notifiche solo sul dispositivo attivo, "Tu (da Telefono)" nella conversazione; "impara a ..." con
+   specifica, permessi, installazione firmata e periodo di prova.
+3. Utente, decisione: installer per F0.6.1 (MSIX, Inno Setup o portable). Fino ad allora F0.6.3-F0.6.6 restano
+   `BLOCKED`.
+4. Sviluppo, gap rimasti in ordine: F4 (rifinitura HUD/glass, orb e stati, GPU/batteria, secondo monitor e testo),
+   F5 (separazione entita'/episodi/procedure, retrieval, controlli privacy), F6 (milestone e next action dei goal,
+   suggerimenti, focus/meeting), F7 (coda offline, trasporto di sync, continuita' residua, remote wipe), F8
+   (runtime degli agenti: loop e budget, eval e rollback), F0 (packaging/preflight/performance non legati
+   all'installer).
 
 ### Seconda prova reale del 27/09/2026 (HUD nativo + voce continua) - cosa e' cambiato il 28/09/2026
 
