@@ -99,9 +99,8 @@ jobs:
 
       - uses: seanmiddleditch/gha-setup-ninja@v5
 
-      # Qui si verifica che l'HUD compili, che il riduttore degli eventi superi il contratto
-      # condiviso con Python e che l'eseguibile resti aperto dopo l'avvio; il comportamento
-      # visivo resta una verifica manuale.
+      # Build, contratto eventi, geometria/impostazioni e materiale QML renderizzato offscreen.
+      # DWM, GPU/frame-time, input e monitor fisici restano una verifica manuale.
       - uses: jurplel/install-qt-action@v4
         with:
           version: "6.7.3"
@@ -117,16 +116,15 @@ jobs:
         working-directory: hud/native
         run: cmake --build --preset windows-ninja
 
-      # F4.1: il riduttore C++ degli eventi esegue la stessa suite di fixture del riferimento
-      # Python (tests/fixtures/hud_contract.json, tests/test_hud_contract.py).
-      - name: Contratto eventi HUD (stesse fixture del client Python)
+      # F4.1/F4.3/F4.7: include i pixel del vetro al 100% e 150%, fallback e contrasto elevato.
+      - name: Test HUD (contratto, geometria, impostazioni e materiale QML)
         working-directory: hud/native
-        run: ctest --test-dir build --output-on-failure
+        run: cmake -E env "JAKE_HUD_TEST_ARTIFACT_DIR=${{ github.workspace }}/.ci-artifacts/hud-glass" ctest --test-dir build --output-on-failure
 
       - name: Avvia e chiudi subito (fuma il binario, nessun server companion in questo job)
         working-directory: hud/native/build
         run: |
-          $proc = Start-Process -FilePath ".\JakeHud.exe" -PassThru
+          $proc = Start-Process -FilePath ".\JakeHud.exe" -PassThru -WindowStyle Hidden
           Start-Sleep -Seconds 3
           $stillRunning = -not $proc.HasExited
           Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
@@ -134,3 +132,15 @@ jobs:
             Write-Error "JakeHud.exe e' terminato entro 3 secondi dall'avvio (dovrebbe restare aperto in attesa del companion server)."
             exit 1
           }
+
+      - name: Pubblica diagnostica HUD
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-hud-test-diagnostics
+          path: |
+            .ci-artifacts/hud-glass/
+            hud/native/build/Testing/Temporary/LastTest.log
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14

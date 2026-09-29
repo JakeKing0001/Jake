@@ -1,0 +1,3 @@
+module JakeHud
+singleton Theme 1.0 qml/Theme.qml
+GlassPanel 1.0 qml/GlassPanel.qml

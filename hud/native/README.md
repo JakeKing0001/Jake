@@ -210,30 +210,36 @@ ambiente); il caso di un server che riparte con un `EventBus` NUOVO (contatore `
 azzerato) mentre il client conserva ancora un `m_lastSequenceId` più alto da prima - scenario
 dichiarato apertamente non gestito, non lo stesso della disconnessione breve testata sopra.
 
-## Stato di verifica
+## Stato di verifica — 29/09/2026
 
-A differenza di tutto il resto di Jake (Python, con test automatici in `tests/`), questo codice
-**non ha una suite di test**: C++/QML non fanno parte della toolchain di test del progetto. È
-stato però compilato ed eseguito davvero in questo ambiente il giorno in cui è stato scritto
-(MSVC 19.51 via Visual Studio Build Tools, Qt 6.7.3 msvc2019_64, CMake+Ninja), non solo scritto
-alla cieca:
+Le sezioni precedenti conservano le prove storiche; lo stato operativo e' in `ROADMAP_EXECUTION.md`.
+L'HUD dispone ora di build e test CTest in CI:
 
-- **Compila ed esegue senza errori.** `cmake --build` termina senza errori (dopo aver corretto un
-  bug reale trovato in questo modo: `JakeClient.h` non era nel percorso di inclusione per il file
-  auto-generato di registrazione dei tipi QML — vedi `target_include_directories` in
-  `CMakeLists.txt`). L'eseguibile si avvia e resta in esecuzione senza warning QML su stderr.
-- **Distribuisce il runtime Qt.** Il passo `POST_BUILD` esegue il `windeployqt` appartenente alla
-  stessa installazione Qt usata da CMake e copia DLL, plugin e moduli QML accanto a
-  `JakeHud.exe`; la cartella `build/` risultante non richiede Qt nel `PATH`.
-- **Si collega davvero al server companion vero.** Avviato `CompanionServer` reale (lo stesso
-  `core/companion_server.py`, non un doppio finto) su una porta reale: `event_bus.
-  subscriber_count()` è passato da 0 a 1 nel momento in cui l'eseguibile compilato ha aperto la
-  connessione a `GET /events`, confermando che il client C++ parla davvero HTTP/SSE con il server
-  Python reale, non solo che il codice "sembra giusto".
+- `hud_contract`: stesse fixture del contratto eventi Python.
+- `hud_glass_geometry`: conversioni logiche/fisiche, raggi e visibilita' del vetro nativo.
+- `hud_system_settings`: impostazioni di accessibilita' e alimentazione.
+- `hud_glass_material` e `hud_glass_material_hidpi`: i sorgenti reali di `Theme.qml` e
+  `GlassPanel.qml` caricati e renderizzati offscreen al 100% e 150%. Ogni warning QML fa fallire il test;
+  vengono controllati contrasto del testo secondario (almeno 4,5), angoli arrotondati, qualita' ridotta,
+  contrasto elevato, resize e rilascio delle risorse dei pannelli nascosti.
 
-Quello che **non** è verificato: l'aspetto visivo (nessuno screenshot, nessuna GUI osservabile in
-questo ambiente), l'interazione utente reale con mouse/tastiera, il comportamento su una macchina
-diversa da questa, e ovviamente tutte le fasi successive (4.9.3+) non ancora scritte.
+Il vetro mantiene gradiente, grana, riflesso e ombra interna in una superficie statica; non richiede
+Qt5Compat o immagini di rumore esterne. La tinta resta presente anche senza effetti.
+`windeployqt` continua a distribuire il runtime dell'app; CTest usa il plugin offscreen del medesimo SDK Qt.
+
+Per riprodurre le verifiche dalla radice del repository, dopo la build:
+
+```powershell
+ctest --test-dir hud/native/build --output-on-failure
+# Facoltativo: conserva i PNG per ogni combinazione, separati per scala.
+$env:JAKE_HUD_TEST_ARTIFACT_DIR = "$PWD/.ci-artifacts/hud-glass"
+ctest --test-dir hud/native/build --output-on-failure
+```
+
+La CI pubblica screenshot e log nell'artifact `native-hud-test-diagnostics`. Queste prove non avviano
+il core, non richiedono un companion e non modificano le preferenze dell'utente.
+**Restano manuali**: compositing DWM sul desktop reale, prestazioni GPU/frame-time, orb 3D,
+input/accessibilita' dell'intero HUD e passaggio tra monitor fisici con scale diverse.
 
 ## Come ricompilare
 

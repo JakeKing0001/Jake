@@ -22,11 +22,11 @@ QtObject {
     // Vetro (seconda prova reale del 27/09/2026): tinta scura ma non piena - sotto c'e' la rifrazione della luce
     // dell'HUD (GlassPanel). Quasi opaca: il testo delle finestre sotto non deve trapelare (screenshot reale del
     // 26/09/2026, pannelli illeggibili con un vetro troppo trasparente).
-    // Con il vetro vero (F4.3.6, misurato a schermo il 28/09/2026): sopra un documento bianco una tinta 0,58-0,66
-    // lasciava il testo secondario a contrasto 3,5 (sotto 4,5, la soglia di leggibilita'). 0,82-0,88 e' il minimo che
-    // tiene 4,5 anche sul bianco; sopra un desktop scuro o colorato il desktop sfocato si vede comunque.
-    readonly property color glassTop: highContrast ? "#000000" : Qt.rgba(0.11, 0.12, 0.16, desktopGlass ? 0.82 : 0.93)
-    readonly property color glassBottom: highContrast ? "#000000" : Qt.rgba(0.06, 0.07, 0.09, desktopGlass ? 0.88 : 0.95)
+    // F4.3.6: il test pixel offscreen del materiale completo (29/09/2026) copre anche riflessi/grana e fondo bianco.
+    // La precedente tinta desktop 0,82-0,88 non bastava col nuovo riflesso; resta traslucida, ma il testo secondario
+    // deve mantenere contrasto >= 4,5 in tutti i profili. Il compositing DWM reale resta una verifica separata.
+    readonly property color glassTop: highContrast ? "#000000" : Qt.rgba(0.11, 0.12, 0.16, desktopGlass ? 0.90 : 0.93)
+    readonly property color glassBottom: highContrast ? "#000000" : Qt.rgba(0.06, 0.07, 0.09, desktopGlass ? 0.93 : 0.95)
     readonly property color glassBorder: highContrast ? "#ffffff" : Qt.rgba(1, 1, 1, 0.09)
     readonly property color glassRim: Qt.rgba(1, 1, 1, 0.34)
     readonly property color glassHighlight: highContrast ? "transparent" : Qt.rgba(1, 1, 1, 0.07)
@@ -42,7 +42,8 @@ QtObject {
     property bool desktopGlass: false
 
     readonly property color text: highContrast ? "#ffffff" : "#f3f4f6"
-    readonly property color textMuted: highContrast ? "#ffffff" : "#a1a7b3"
+    // Il testo secondario resta distinto dal primario, ma leggibile anche sopra il riflesso del vetro.
+    readonly property color textMuted: highContrast ? "#ffffff" : "#aab1be"
     readonly property color textFaint: highContrast ? "#e5e7eb" : "#6b7280"
     readonly property color accent: highContrast ? "#00ffff" : "#4fd1ff"
     readonly property color ok: "#3ddc84"

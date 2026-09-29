@@ -217,3 +217,26 @@ target_link_libraries(JakeHudSystemSettingsTests PRIVATE Qt6::Core Qt6::Qml)
 set_target_properties(JakeHudSystemSettingsTests PROPERTIES WIN32_EXECUTABLE OFF)
 add_dependencies(JakeHudSystemSettingsTests JakeHud)
 add_test(NAME hud_system_settings COMMAND JakeHudSystemSettingsTests)
+
+# F4.3/F4.7: carica e disegna il vero materiale QML, non solo il protocollo C++.
+# Modulo separato nello stesso processo di test: Theme/GlassPanel sono gli stessi sorgenti dell'HUD,
+# senza avviare rete, hotkey, finestre DWM o scrivere le preferenze dell'utente.
+qt_add_executable(JakeHudGlassMaterialTests tests/glass_material_tests.cpp)
+# Risorse raw per esercitare anche il caricamento QML (l'app sopra verifica la compilazione).
+# Non un secondo qt_add_qml_module con URI JakeHud: genererebbe qmake_JakeHud nello stesso binary dir.
+set_source_files_properties(tests/glass_material.qmldir PROPERTIES QT_RESOURCE_ALIAS qmldir)
+qt_add_resources(JakeHudGlassMaterialTests glass_test_resources
+    PREFIX "/qt/qml/JakeHud"
+    FILES tests/glass_material.qmldir qml/Theme.qml qml/GlassPanel.qml
+)
+target_link_libraries(JakeHudGlassMaterialTests PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick)
+set_target_properties(JakeHudGlassMaterialTests PROPERTIES WIN32_EXECUTABLE OFF)
+add_dependencies(JakeHudGlassMaterialTests JakeHud)
+add_test(NAME hud_glass_material COMMAND JakeHudGlassMaterialTests)
+add_test(NAME hud_glass_material_hidpi COMMAND JakeHudGlassMaterialTests)
+set_tests_properties(hud_glass_material hud_glass_material_hidpi PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>"
+    TIMEOUT 30
+)
+set_property(TEST hud_glass_material APPEND PROPERTY ENVIRONMENT "QT_SCALE_FACTOR=1")
+set_property(TEST hud_glass_material_hidpi APPEND PROPERTY ENVIRONMENT "QT_SCALE_FACTOR=1.5")
