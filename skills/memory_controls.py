@@ -3,7 +3,11 @@
 - EXPORT_MEMORIES ("esporta i miei ricordi"): una copia leggibile (Markdown) e una machine-readable (JSON) in una
   cartella dell'utente. I ricordi segreti restano fuori (li dice quanti), come nell'export della dashboard.
 - PIN_MEMORY ("fissa il ricordo X", "puoi dimenticarlo" -> pinned=false): un ricordo fissato non decade nel ranking
-  (F5.4.6) e cambiarlo chiede conferma (F5.4.3)."""
+  (F5.4.6) e cambiarlo chiede conferma (F5.4.3).
+- SET_MEMORY_SENSITIVITY ("segna come segreto il pin del bancomat"): un ricordo segreto non entra mai nel contesto
+  automatico delle risposte ne' negli export (F5.5/F5.7) - prima si poteva marcare solo dal codice.
+- LIST_MEMORIES ("quali ricordi segreti hai?", "cosa sai di me"): quali ricordi ci sono, per tipo e sensibilita', con
+  le sole chiavi - mai i valori, che restano a RECALL."""
 from datetime import datetime
 from pathlib import Path
 
@@ -41,6 +45,18 @@ class ExportMemoriesSkill:
         })
 
 
+def _one_record(dashboard, key: str):
+    """Il ricordo indicato con le parole dell'utente: (record, None) o (None, SkillResult di errore)."""
+    records = dashboard.search(key, limit=3)
+    exact = [r for r in records if r.key.lower() == key.lower()]
+    matches = exact or records
+    if not matches:
+        return None, SkillResult(success=False, data={"key": key}, error="NOT_FOUND")
+    if len(matches) > 1:
+        return None, SkillResult(success=False, data={"candidates": [r.key for r in matches]}, error="AMBIGUOUS")
+    return matches[0], None
+
+
 class PinMemorySkill:
     metadata = {
         "intent": "PIN_MEMORY",
@@ -63,13 +79,77 @@ class PinMemorySkill:
         if not key:
             return SkillResult(success=False, data={}, error="MISSING_PARAMETERS")
         pinned = parameters.get("pinned") is not False
-        records = self.dashboard.search(key, limit=3)
-        exact = [r for r in records if r.key.lower() == key.lower()]
-        matches = exact or records
-        if not matches:
-            return SkillResult(success=False, data={"key": key}, error="NOT_FOUND")
-        if len(matches) > 1:
-            return SkillResult(success=False, data={"candidates": [r.key for r in matches]}, error="AMBIGUOUS")
-        record = matches[0]
+        record, problem = _one_record(self.dashboard, key)
+        if problem is not None:
+            return problem
         self.dashboard.pin(record.key, record.category, pinned=pinned)
         return SkillResult(success=True, data={"key": record.key, "pinned": pinned})
+
+
+SENSITIVITY_WORDS = {"public": "pubblico", "personal": "personale", "sensitive": "sensibile", "secret": "segreto"}
+
+
+class SetMemorySensitivitySkill:
+    metadata = {
+        "intent": "SET_MEMORY_SENSITIVITY",
+        "description": (
+            "Cambia quanto e' riservato un ricordo: 'secret' (mai nel contesto delle risposte ne' negli export), "
+            "'sensitive', 'personal' o 'public'. Per 'segna come segreto X', 'X e' un'informazione riservata', "
+            "'X non e' piu' segreto'."
+        ),
+        "parameters": {
+            "key": {"type": "string", "required": True, "description": "Il ricordo, con le parole dell'utente."},
+            "sensitivity": {"type": "string", "required": True,
+                            "description": "Uno tra secret, sensitive, personal, public."},
+        },
+    }
+
+    def __init__(self, dashboard):
+        self.dashboard = dashboard
+
+    def execute(self, parameters: dict = None):
+        parameters = parameters or {}
+        key = str(parameters.get("key") or "").strip()
+        sensitivity = str(parameters.get("sensitivity") or "").strip().lower()
+        if not key or sensitivity not in SENSITIVITY_WORDS:
+            return SkillResult(success=False, data={"levels": list(SENSITIVITY_WORDS)}, error="MISSING_PARAMETERS")
+        record, problem = _one_record(self.dashboard, key)
+        if problem is not None:
+            return problem
+        self.dashboard.edit(record.key, record.category, sensitivity=sensitivity)
+        return SkillResult(success=True, data={"key": record.key, "sensitivity": sensitivity})
+
+
+class ListMemoriesSkill:
+    metadata = {
+        "intent": "LIST_MEMORIES",
+        "description": (
+            "Elenca quali ricordi Jake ha (solo i nomi, mai i contenuti), anche per sensibilita' (secret, sensitive, "
+            "personal, public) o tipo (entity = fatti e preferenze, episode = conversazioni ed eventi, procedure = "
+            "automazioni). Per 'cosa sai di me', 'quali ricordi segreti hai', 'che automazioni ricordi'."
+        ),
+        "parameters": {
+            "sensitivity": {"type": "string", "required": False, "description": "secret, sensitive, personal o public."},
+            "kind": {"type": "string", "required": False, "description": "entity, episode o procedure."},
+        },
+    }
+
+    MAX_KEYS = 12
+
+    def __init__(self, dashboard):
+        self.dashboard = dashboard
+
+    def execute(self, parameters: dict = None):
+        from core.memory_schema import MEMORY_KINDS, kind_of
+
+        parameters = parameters or {}
+        sensitivity = str(parameters.get("sensitivity") or "").strip().lower() or None
+        kind = str(parameters.get("kind") or "").strip().lower() or None
+        if (sensitivity and sensitivity not in SENSITIVITY_WORDS) or (kind and kind not in MEMORY_KINDS):
+            return SkillResult(success=False, data={}, error="INVALID_PARAMETERS")
+        records = [r for r in self.dashboard.search(sensitivity=sensitivity, limit=500)
+                   if kind is None or kind_of(r.category) == kind]
+        return SkillResult(success=True, data={
+            "count": len(records), "keys": [r.key for r in records[: self.MAX_KEYS]],
+            "sensitivity": sensitivity, "kind": kind,
+        })

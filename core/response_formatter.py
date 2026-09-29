@@ -120,7 +120,7 @@ def _format_control_error(intent: str, error: str | None, data: dict) -> str | N
             return f"Non sto sorvegliando nessun processo '{data.get('process', '')}'."
         if intent in ("SET_DEVICE_ACCESS", "REVOKE_DEVICE"):
             return f"Non trovo nessun dispositivo associato chiamato '{data.get('device', '')}'."
-        if intent == "PIN_MEMORY":
+        if intent in ("PIN_MEMORY", "SET_MEMORY_SENSITIVITY"):
             return f"Non ricordo nulla che si chiami '{data.get('key', '')}'."
         if intent in ("PLAN_SKILL_INSTALL", "INSTALL_SKILL_PACKAGE"):
             return f"Non trovo il pacchetto {data.get('package_path', '')}."
@@ -130,6 +130,8 @@ def _format_control_error(intent: str, error: str | None, data: dict) -> str | N
         return f"Non sono riuscito a scrivere l'export in {data.get('path', '')}: {data.get('reason', '')}."
     if error == "AMBIGUOUS" and intent == "PIN_MEMORY":
         return f"Più ricordi corrispondono: {', '.join(data.get('candidates') or [])}. Quale fisso?"
+    if error == "AMBIGUOUS" and intent == "SET_MEMORY_SENSITIVITY":
+        return f"Più ricordi corrispondono: {', '.join(data.get('candidates') or [])}. Quale intendi?"
     if error == "AMBIGUOUS" and intent in ("SET_DEVICE_ACCESS", "REVOKE_DEVICE"):
         return f"Più dispositivi corrispondono: {', '.join(data.get('candidates') or [])}. Quale intendi?"
     if error == "INVALID_PARAMETERS" and intent == "SET_DEVICE_ACCESS":
@@ -160,6 +162,22 @@ def _format_control_success(intent: str, data: dict) -> str | None:
         excluded = data.get("excluded_secret") or 0
         return (f"Ho esportato {data['count']} ricordi in {data['markdown']} (e in JSON accanto)."
                 + (f" {excluded} ricordi segreti non sono inclusi." if excluded else ""))
+    if intent == "SET_MEMORY_SENSITIVITY":
+        from skills.memory_controls import SENSITIVITY_WORDS
+        level = str(data.get("sensitivity") or "")
+        word = SENSITIVITY_WORDS.get(level, level)
+        extra = " Non lo userò più nelle risposte e resta fuori dagli export." if data.get("sensitivity") == "secret" else ""
+        return f"Ok, {data['key']} ora è {word}.{extra}"
+    if intent == "LIST_MEMORIES":
+        from skills.memory_controls import SENSITIVITY_WORDS
+        kinds = {"entity": "fatti e preferenze", "episode": "conversazioni ed eventi", "procedure": "procedure"}
+        what = " ".join(filter(None, [kinds.get(str(data.get("kind") or "")), (f"di livello {SENSITIVITY_WORDS[data['sensitivity']]}"
+                                                                     if data.get("sensitivity") else "")]))
+        if not data.get("count"):
+            return f"Non ho ricordi {what}.".replace("  ", " ") if what else "Non ho ancora nessun ricordo."
+        more = data["count"] - len(data["keys"])
+        return (f"Ho {data['count']} ricordi{' ' + what if what else ''}: " + ", ".join(data["keys"])
+                + (f" e altri {more}" if more > 0 else "") + ".")
     if intent == "PIN_MEMORY":
         if data.get("pinned"):
             return f"Ok, {data['key']} è fissato: non perde importanza col tempo e per cambiarlo ti chiederò conferma."
