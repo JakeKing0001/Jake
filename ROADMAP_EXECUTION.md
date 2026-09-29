@@ -266,7 +266,7 @@ distinguere sotto-passi già verificati da ciò che manca.
 | `F4.6` | Trust UX (26/09/2026: kill switch visibile e scorciatoia globale; action center con ultima azione, esito, verifica e undo con scadenza; 27/09/2026: dettagli dell'azione per l'utente - origine, esito/categoria, verifica, annullabilita', traccia - e motivo quando l'undo non e' piu' disponibile; retry sicuro dell'ultima azione fallita a voce e dal pulsante "Riprova"; undo rifiutato se il file/la cartella da cancellare e' cambiato dopo) | `DOING` |
 | `F4.7` | Accessibility (26/09/2026: nomi accessibili, focus ring, scrittura reale nella barra comandi di un overlay no-activate, scorciatoie globali Ctrl+Shift+J / Ctrl+Alt+Fine, reduced motion; 27/09/2026: alto contrasto da Windows o JAKE_HUD_HIGH_CONTRAST, verificato a schermo; "Dimensioni testo" di Windows applicata a tutto l'HUD (o JAKE_HUD_TEXT_SCALE), verificata a schermo al 150% di sistema; layout completo/compatto/focus ricordato per monitor, spostamento sull'altro monitor e riposizionamento all'hot-plug; 28/09/2026: composizione centrata - orb al centro della finestra, finestra al centro dell'area utile del monitor, pannelli simmetrici che compaiono solo quando servono; screen reader da verificare) | `DOING` |
 | `F4.8` | Release Engineering (26/09/2026: core e HUD nativo avviati in ordine come processi separati, riavvio dell'HUD solo dopo un crash e con un tetto; installer/crash dump/rollback non iniziati; 27/09/2026: quando il supervisore smette di riavviare un HUD in crash revoca la sua credenziale e lo dice all'utente) | `DOING` |
-| `F5.1` | Memory Platform (F5.1.1/F5.1.3-F5.1.6 il 21/09/2026: schema versionato, migrazioni transazionali con backup, metadati, recupero; resta F5.1.2 separare entita'/episodi/procedure e la prova su una copia del database reale) | `DOING` |
+| `F5.1` | Memory Platform (F5.1.1/F5.1.3-F5.1.6 il 21/09/2026: schema versionato, migrazioni transazionali con backup, metadati, recupero; 29/09/2026: F5.1.2 tipo di memoria esplicito - entita', episodio, procedura, record - con migrazione v4, e migrazione verificata e ripristinata su una copia del database reale) | `DONE` |
 | `F5.2` | Memory Platform (27/09/2026: memoria episodica interrogabile - "di cosa abbiamo parlato ieri?" sulla cronologia reale per periodo e argomento) | `DOING` |
 | `F5.3` | Knowledge Model | `DOING` |
 | `F5.4` | Memory Reliability (27/09/2026: nessuna sovrascrittura silenziosa di fatti/preferenze - versione precedente conservata e dichiarata, un'inferenza non sostituisce un fatto detto dall'utente, conflitti registrati, "dimentica" cancella anche le versioni; conferma prima di cambiare un ricordo importante o fissato; decadimento per categoria nel ranking, fissati esclusi; 28/09/2026: consolidamento - la stessa chiave scritta con maiuscole, accenti o spazi diversi e' un solo ricordo con versioni, i duplicati dei database vecchi uniti dalla manutenzione, ricerca per parole senza accenti) | `DOING` |
@@ -9128,6 +9128,16 @@ Criterio di uscita: migrazione su copia del database reale verificata e ripristi
     controllo (uno corrotto viene saltato per uno piu' vecchio); senza backup validi solleva `MemoryCorruptError` e il file
     resta dov'e'. Non affrontato: "migrazione su copia del database REALE" (`data/jake_memory.db` non e' stato toccato
     da questa sessione), collegamento del recupero all'avvio di `JakeCore`.
+
+- 29/09/2026 (F5.1.2 e criterio d'uscita): migrazione v4 `kind` (entity / episode / procedure / record) calcolato
+  dalla categoria per i ricordi esistenti e mantenuto a ogni scrittura, indicizzato, filtrabile con
+  `recall(kind=...)`. Relazioni (`memory_relations`), fonti (`source`/`created_by`) e versioni (`memory_versions`)
+  restano nelle loro strutture. Il retrieval lo usa: episodi solo per domande sul passato, procedure (passi
+  strutturati delle automazioni) solo se la domanda chiede come si fa o le nomina - prima un workflow poteva entrare
+  nel contesto di una risposta qualunque per una parola in comune. Verificato su una COPIA di `data/jake_memory.db`
+  (302 ricordi: 3 fatti, 296 riassunti, 3 workflow): migrazione 3 -> 4 con backup, integrity check ok, 296 episodi
+  richiamabili; file poi corrotto di proposito e ripristinato dal backup (versione 3, 302 righe). Test:
+  `tests/test_memory_kinds.py`.
 
 ### F5.2 — Quattro livelli di memoria
 

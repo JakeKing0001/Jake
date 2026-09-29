@@ -31,6 +31,22 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 SENSITIVITY_LEVELS = ("unknown", "public", "personal", "sensitive", "secret")
+
+# F5.1.2: che tipo di memoria e' un ricordo, oltre alla sua categoria. Entita' (fatti e preferenze su persone, cose,
+# luoghi, progetti), episodi (cosa e' successo: riassunti di conversazioni, eventi), procedure (come si fa: automazioni,
+# dimostrazioni, routine), record (tutto il resto, per costruzione strutturato). Le relazioni restano in
+# memory_relations, le fonti in `source`/`created_by`, le versioni in memory_versions.
+MEMORY_KINDS = ("entity", "episode", "procedure", "record")
+_KIND_OF_CATEGORY = {
+    "fact": "entity", "preference": "entity", "person": "entity", "contact": "entity", "place": "entity",
+    "project": "entity",
+    "summary": "episode", "episode": "episode", "event": "episode",
+    "workflow": "procedure", "procedure": "procedure", "demonstration": "procedure", "routine": "procedure",
+}
+
+
+def kind_of(category: str | None) -> str:
+    return _KIND_OF_CATEGORY.get(str(category or ""), "record")
 BACKUPS_TO_KEEP = 5
 
 
@@ -123,10 +139,19 @@ def _v3_versions(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_versions_memory ON memory_versions(memory_key, memory_category)")
 
 
+def _v4_kinds(conn: sqlite3.Connection) -> None:
+    """F5.1.2: il tipo di memoria esplicito su ogni ricordo, calcolato dalla categoria per quelli gia' salvati."""
+    _add_column_if_missing(conn, "memories", "kind", "TEXT NOT NULL DEFAULT 'record'")
+    for category, kind in _KIND_OF_CATEGORY.items():
+        conn.execute("UPDATE memories SET kind = ? WHERE category = ?", (kind, category))
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_kind ON memories(kind)")
+
+
 MIGRATIONS: list[Migration] = [
     Migration(1, "schema di base (memorie, cronologia, relazioni) e colonne storiche", _v1_baseline),
     Migration(2, "metadati F5.1.3 (sensibilita', owner, autore, confidenza, validita', pin, uso) e registro eventi", _v2_metadata),
     Migration(3, "versioni precedenti e conflitti rifiutati (F5.4.1/F5.4.2)", _v3_versions),
+    Migration(4, "tipo di memoria esplicito: entita', episodio, procedura, record (F5.1.2)", _v4_kinds),
 ]
 SCHEMA_VERSION = MIGRATIONS[-1].version
 
