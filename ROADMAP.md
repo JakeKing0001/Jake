@@ -1970,12 +1970,24 @@ skill regressiva viene fermata dagli eval o ripristinata automaticamente.
 - ✅ **F0.6.1 deciso e F0.6.3/F0.6.4/F0.6.6/F0.6.7 sbloccati** (02/10/2026): installer = `setup.ps1` portable per
   utente; nuova disinstallazione che conserva i dati personali salvo `-PurgeData`; `tools/updater.py` aggiorna
   solo in fast-forward, rifiuta con modifiche locali, reinstalla le dipendenze solo se il lock cambia, verifica
-  compilazione e import del nucleo e altrimenti torna al commit precedente. Firma degli aggiornamenti ancora ⬜.
+  compilazione e import del nucleo e altrimenti torna al commit precedente. F0.6.5 collegato lo stesso giorno: con
+  `release_public_key` (ancora di fiducia locale, fuori da Git) la stable si installa solo da un `releases/stable.json`
+  firmato Ed25519 col commit esatto (stessa firma di `core/release_eval.py`); un manifest manomesso e' rifiutato.
 
 - ✅ **F6 focus assistant collegato al percorso reale** (02/10/2026): `START_POMODORO` mette la modalita' studio per
   la stessa durata (notifiche non urgenti in coda) e alla fine torna da sola la modalita' di prima con il riepilogo;
   `STOP_POMODORO` la ripristina subito. Non scavalca mai una modalita' scelta dall'utente (non disturbare, sonno,
   riunione). Riusa il timer di `SET_NOTIFICATION_MODE`, nessun secondo meccanismo.
+
+- ✅ **3.2: JakeCore e SkillRegistry divisi davvero** (02/10/2026), completando una bozza di estrazione rimasta
+  fuori da Git con soli segnaposto. `SkillRegistry` ora e' il catalogo e delega l'esecuzione a
+  `core/skill_executor.py` (policy fail-closed, percorsi parlati, lock per risorsa, snapshot) e le skill dei plugin
+  a `core/plugin_manager.py` (worker sandboxato, violazioni, quarantena), che possiedono il proprio stato.
+  `jake_core.py` scende da 3658 a ~2500 righe: notifiche, routing dei modelli, companion/HUD nativo, pubblicazione
+  eventi, agente, dialogo e ciclo di vita stanno in sette moduli (mixin con i metodi spostati alla lettera,
+  comportamento invariato: 670 test su JakeCore verdi senza modifiche). Limite dichiarato: i mixin lavorano
+  ancora sullo stato condiviso di JakeCore via `self`; separare anche lo stato (oggetti con dipendenze esplicite)
+  e' il passo successivo, non fatto qui. `__init__` (~600 righe di cablaggio) resta da spezzare.
 
 ## Nuove funzionalità “Jarvis”, non concordate prima
 

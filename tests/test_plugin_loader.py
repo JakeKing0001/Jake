@@ -9,6 +9,8 @@ from pathlib import Path
 
 from core.plugin_loader import load_plugin_file, load_plugins
 from core.policy_engine import PolicyEngine
+from core.plugin_manager import PluginManager
+from core.skill_executor import SkillExecutor
 from core.skill_registry import SkillRegistry
 
 
@@ -211,6 +213,8 @@ class UnclassifiedPluginIntentIsStillGatedTests(PluginLoaderTestCase):
         registry = SkillRegistry.__new__(SkillRegistry)
         registry.skills = {}
         registry.logger = None
+        registry._plugins = PluginManager()
+        registry._executor = SkillExecutor(registry._plugins)
         registry._forged_intents = {}
         registry._sandbox_worker = None
         registry._plugin_violation_counts = {}

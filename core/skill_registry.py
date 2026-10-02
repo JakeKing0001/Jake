@@ -8,7 +8,6 @@ from core.skill_catalog import (
     build_misc_skills, build_research_skills, build_communication_skills, build_smart_home_skills,
 )
 from core.ollama_client import OllamaClient
-from core.path_resolver import resolve_user_path
 from core.memory_manager import MemoryManager
 from core.conversation_state import ConversationStateManager
 from core.nest_client import NestClient
@@ -24,24 +23,19 @@ from core.reminder_manager import ReminderManager
 from core.todo_manager import TodoManager
 from core.risk import risk_of
 from core.logger import get_logger
-from core.resource_lock import ResourceLockManager
-from core.sandboxed_skill_worker import SandboxedSkillWorker
-from core.action_snapshot import capture_snapshot, SnapshotStore
-from core.skill_result import SkillResult
-from core.turn_cancellation import current_turn_cancelled
+from core.plugin_manager import PluginManager
+from core.skill_executor import SkillExecutor
 from copy import deepcopy
-from pathlib import Path
-import contextlib
-import os
+from typing import TYPE_CHECKING
 
 
 class SkillRegistry:
-    # F1.6.8: numero di violazioni (SANDBOX_WORKER_TIMEOUT) attribuite allo STESSO plugin prima
-    # di metterlo in quarantena. Non 1 (un singolo timeout puo' capitare per una chiamata di rete
-    # lenta dentro la skill, non necessariamente malevolenza/un bug vero), non un numero grande
-    # (un plugin che continua a far cadere il worker condiviso danneggia anche tutte le altre
-    # skill forgiate, non solo se stesso - vedi _get_or_start_sandbox_worker).
-    _QUARANTINE_THRESHOLD = 3
+    """Catalogo delle skill: costruzione, registrazione, capacita' e rischio. L'esecuzione e' delegata a
+    `SkillExecutor` (core/skill_executor.py) e le skill dei plugin a `PluginManager` (core/plugin_manager.py)."""
+
+    _QUARANTINE_THRESHOLD = PluginManager.QUARANTINE_THRESHOLD
+    PATH_PARAMETERS = SkillExecutor.PATH_PARAMETERS
+    _FILESYSTEM_MUTATION_INTENTS = SkillExecutor.FILESYSTEM_MUTATION_INTENTS
 
     def __init__(
         self,
@@ -72,14 +66,6 @@ class SkillRegistry:
         self.procedure_manager = ProcedureManager(self.memory_manager)
         self.reminder_manager = reminder_manager or ReminderManager()
         self.todo_manager = TodoManager()
-        # F1.8.1 (ultimo pezzo, "una coda per azioni concorrenti"): vedi _resource_lock_keys() più
-        # sotto per quali intent lo usano davvero e perché.
-        self._resource_locks = ResourceLockManager()
-        # F1.3.4 (adozione - prima fetta, vedi core/action_snapshot.py): un'istanza propria,
-        # stesso principio minimale gia' usato per self._resource_locks sopra - nulla la
-        # inietta ancora dall'esterno perche' oggi solo execute() la consuma.
-        self.snapshot_store = SnapshotStore()
-
         # Client Ollama condiviso (v3.0: 127.0.0.1, keep_alive lungo) e rubrica.
         self.ollama_client = OllamaClient()
         self.contact_book = ContactBook(self.memory_manager)
@@ -114,29 +100,8 @@ class SkillRegistry:
         self.skills.update(build_research_skills(self.config, web_search_skill, search_files_skill))
         self.skills.update(build_communication_skills(self.ollama_client, model, self.contact_book))
 
-        # F1.6 (collegamento del worker sandboxato alle skill forgiate): {intent: percorso del
-        # file plugin} per OGNI intent registrato tramite un plugin (Skill Forge o plugins/ di
-        # terze parti) - vedi register_skill()/core/plugin_loader.py. Le skill built-in non ci
-        # finiscono mai (self.skills.update(...) sopra non passa mai da register_skill()).
-        self._forged_intents: dict[str, str] = {}
-        # Worker persistente (core/sandboxed_skill_worker.py), avviato PIGRAMENTE solo alla prima
-        # invocazione di una skill forgiata - Jake non paga il costo di avvio di un processo in
-        # piu' se non ha mai installato nessuna skill forgiata. Invalidato (rimesso a None) da
-        # register_skill() quando arriva un NUOVO intent forgiato dopo che il worker esiste gia':
-        # il worker carica i plugin UNA VOLTA all'avvio, quindi un elenco di plugin cambiato dopo
-        # richiede un riavvio per essere visto.
-        self._sandbox_worker: SandboxedSkillWorker | None = None
-        # F1.6.8 ("terminare e mettere in quarantena plugin che viola limiti o protocollo"):
-        # {plugin_path: conteggio} delle violazioni (SANDBOX_WORKER_TIMEOUT - il worker non ha
-        # risposto in tempo, o e' morto a meta' richiesta, es. terminato dal Job Object per aver
-        # superato memoria/CPU) attribuite a quel plugin. Vuoto per default: nessun plugin ha mai
-        # violato nulla finche' non succede per davvero.
-        self._plugin_violation_counts: dict[str, int] = {}
-        # Popolato quando un plugin raggiunge _QUARANTINE_THRESHOLD violazioni - i suoi intent
-        # smettono di essere eseguibili (SKILL_QUARANTINED) e il plugin viene escluso da un
-        # futuro riavvio del worker, invece di continuare a farlo ripartire con lo stesso
-        # plugin che lo fa cadere in continuazione a ogni chiamata.
-        self._quarantined_plugins: set[str] = set()
+        self._plugins = PluginManager(logger=self.logger)
+        self._executor = SkillExecutor(self._plugins)
 
     def get_skill(self, intent: str):
         return self.skills.get(intent, None)
@@ -172,10 +137,7 @@ class SkillRegistry:
         carica i plugin una volta sola all'avvio, quindi un nuovo intent forgiato arrivato dopo
         (un'installazione a caldo dalla Skill Forge) richiede un riavvio per essere servito."""
         if plugin_path is not None:
-            self._forged_intents[intent] = plugin_path
-            if self._sandbox_worker is not None:
-                self._sandbox_worker.stop()
-                self._sandbox_worker = None
+            self._plugins.register(intent, plugin_path)
         existing = self.skills.get(intent)
         if existing is not None and existing is not skill:
             self.logger.warning(
@@ -222,16 +184,6 @@ class SkillRegistry:
         importare core/risk.py direttamente."""
         return risk_of(intent)
 
-    PATH_PARAMETERS = ("path", "destination")
-
-    # F1.8.1 (ultimo pezzo, "una coda per azioni concorrenti"): le quattro skill di mutazione
-    # filesystem gia' raggruppate insieme per F1.2.2 (stessa capability, stessi due parametri
-    # PATH_PARAMETERS) condividono tutte un controllo-poi-agisci non atomico (`target.exists()`
-    # poi `mkdir`/`rename`/`shutil.move`/`unlink` alcune righe piu' sotto, MAI sotto lock) - vedi
-    # _resource_lock_keys() sotto per il buco reale riprodotto empiricamente (non ipotizzato) e il
-    # perche' del limite dichiarato sul parametro "destination".
-    _FILESYSTEM_MUTATION_INTENTS = frozenset({"CREATE_PATH", "RENAME_PATH", "MOVE_PATH", "DELETE_PATH"})
-
     def unregister_skill(self, intent: str) -> bool:
         return self.skills.pop(intent, None) is not None
 
@@ -248,215 +200,85 @@ class SkillRegistry:
         self, intent: str, parameters: dict | None = None, policy_engine=None, *,
         action_id: str | None = None, private: bool = False,
     ):
-        """F1.3.4 (adozione - prima fetta, vedi core/action_snapshot.py): action_id/private sono
-        opzionali (default None/False, nessun cambio di comportamento per chi non li passa ancora
-        - oggi l'agente/PlanExecutor, vedi il docstring di JakeCore._resolve_and_execute per quale
-        chiamante passa gia' cosa) - quando presenti e l'intent e' DELETE_PATH, cattura un
-        ActionSnapshot del file PRIMA di chiamare la skill vera (vedi _maybe_capture_snapshot
-        sotto), DENTRO lo stesso lock per resource key gia' acquisito per questa mutazione (vedi
-        _resource_lock_keys) - senza quel lock un'altra mutazione concorrente sullo stesso
-        percorso potrebbe intervenire esattamente nella finestra tra la cattura e la cancellazione
-        vera, lo stesso principio "mutare esattamente nel punto giusto" gia' applicato al buco
-        reale di F1.8.1 per il lock stesso.
-
-        F1.2.1 (percorso 7, l'ultimo dei tre "percorso N" dichiarati aperti - i percorsi 3 e 6
-        sono gia' fail-closed, vedi docs/action-execution-paths.md): questo dispatcher grezzo non
-        controllava MAI la policy da solo - un chiamante che lo invoca direttamente, saltando
-        `JakeCore._authorize_command()` (o `PlanExecutor`/`decide_automated`), eseguiva la skill
-        SENZA alcun controllo su `blocked_intents`. Nei due chiamanti di produzione reali
-        (`JakeCore._resolve_and_execute`/`_run_confirmed_action`) questo non era gia' sfruttabile -
-        entrambi chiamano `_authorize_command()` PRIMA di arrivare qui - ma era un default
-        pericoloso per un futuro chiamante che se lo dimenticasse, stesso principio "nega per
-        default" gia' applicato ai percorsi 3/6. `policy_engine=None` e' quindi FAIL-CLOSED (come
-        i percorsi 3/6, non piu' "nessun controllo"): solo `blocked_intents` viene ricontrollato
-        qui (non una decisione interattiva/automatica completa - CONFIRM/REQUIRE_AUTH non hanno
-        senso in un dispatcher sincrono senza un utente pronto a rispondere, la decisione vera e'
-        gia' stata presa da chi ha chiamato prima di arrivare qui), stesso identico principio
-        minimale gia' applicato a `rollback_effect()` (percorso 6)."""
-        skill = self.get_skill(intent)
-        if skill is None:
-            return None
-        if policy_engine is None or intent in policy_engine.blocked_intents:
-            return SkillResult(success=False, data={}, error="POLICY_BLOCKED")
-        # "Jake, basta": un turno vocale annullato non avvia piu' nessuna skill (le compensazioni
-        # di rollback girano con core.turn_cancellation.cancellation_suspended()).
-        if current_turn_cancelled():
-            return SkillResult(success=False, data={}, error="CANCELLED")
-
-        # Percorsi "parlati" (v3.0): "desktop\note.txt", "download" -> percorso reale.
-        if parameters:
-            for name in self.PATH_PARAMETERS:
-                value = parameters.get(name)
-                if isinstance(value, os.PathLike):
-                    value = os.fspath(value)
-                if isinstance(value, str) and value.strip():
-                    resolved = resolve_user_path(value, prefer_existing=intent != "CREATE_PATH")
-                    if resolved != value:
-                        parameters = dict(parameters)
-                        parameters[name] = resolved
-
-        # F1.6: una skill forgiata (o di un plugin di terze parti) esegue nel worker sandboxato
-        # invece che qui in processo - vedi register_skill() per come un intent finisce in
-        # _forged_intents, e il docstring del modulo core/sandboxed_skill_worker.py per il
-        # perche' (un Job Object/l'integrita' Low si applicano a un PROCESSO, non a una singola
-        # chiamata dentro il processo di Jake).
-        lock_keys = self._resource_lock_keys(intent, parameters)
-
-        if intent in self._forged_intents:
-            if lock_keys:
-                with self._acquire_all_writes(lock_keys):
-                    if current_turn_cancelled():  # annullato mentre si aspettava il lock
-                        return SkillResult(success=False, data={}, error="CANCELLED")
-                    return self._execute_forged(intent, parameters or {})
-            return self._execute_forged(intent, parameters or {})
-
-        if lock_keys:
-            with self._acquire_all_writes(lock_keys):
-                if current_turn_cancelled():  # annullato mentre si aspettava il lock
-                    return SkillResult(success=False, data={}, error="CANCELLED")
-                self._maybe_capture_snapshot(intent, parameters, action_id, private)
-                return skill.execute(parameters)
-        self._maybe_capture_snapshot(intent, parameters, action_id, private)
-        return skill.execute(parameters)
-
-    def _maybe_capture_snapshot(
-        self, intent: str, parameters: dict | None, action_id: str | None, private: bool,
-    ) -> None:
-        """F1.3.4 (adozione - prima fetta): DELETE_PATH e' oggi l'unico candidato - e' l'unica
-        delle quattro mutazioni filesystem senza un rollback naturale (vedi
-        core/execution_safety.py::INTENT_SAFETY_REGISTRY, "cancellare non ha un inverso
-        naturale"), quindi solo uno snapshot del contenuto PRIMA della cancellazione rende un
-        futuro ripristino possibile - CREATE_PATH/RENAME_PATH/MOVE_PATH hanno gia' un rollback
-        vero (ri-eseguire l'inverso), non serve loro anche uno snapshot. `action_id=None` (il
-        default di execute()) preserva il comportamento di sempre - nessuno snapshot - per ogni
-        chiamante che non ne passa ancora uno."""
-        if intent != "DELETE_PATH" or action_id is None or not parameters:
-            return
-        path = parameters.get("path")
-        if not isinstance(path, str) or not path.strip():
-            return
-        snapshot = capture_snapshot(action_id, path, private=private)
-        if snapshot is not None:
-            self.snapshot_store.save(snapshot)
-
-    def _resource_lock_keys(self, intent: str, parameters: dict | None) -> tuple[str, ...]:
-        """Le resource key da serializzare per QUESTA chiamata - vuoto per ogni intent che non è
-        una delle quattro mutazioni filesystem (nessun cambio di comportamento per gli altri ~200
-        intent, lock creati pigramente solo quando davvero richiesti).
-
-        Buco reale riprodotto empiricamente prima di scrivere questo fix (due thread veri, `Path.
-        exists()` rallentato ad arte nella finestra esatta tra il controllo e l'azione, stesso
-        principio "mutare esattamente nel punto giusto" già usato altrove in questa sessione): due
-        `MOVE_PATH` concorrenti con sorgenti diverse ma stesso nome file verso la STESSA cartella
-        di destinazione superano ENTRAMBI il controllo "il file di destinazione non esiste ancora"
-        prima che uno dei due lo crei - risultato, ENTRAMBI riportano `success=True`, ma uno dei
-        due file sparisce silenziosamente sovrascritto dall'altro, senza alcun `ALREADY_EXISTS` e
-        senza errore di sorta. Lock per RESOURCE KEY (non un lock unico globale sul filesystem,
-        che serializzerebbe anche mutazioni su percorsi completamente indipendenti) tramite
-        `core/resource_lock.py::ResourceLockManager`, il meccanismo già costruito e testato in
-        isolamento (fase 7 del piano multi-device, F1.4) ma mai ancora collegato a un chokepoint
-        di produzione reale prima di questo incremento.
-
-        Stesso identico limite già accettato per la capability filesystem di F1.2.2
-        (`PolicyEngine._filesystem_capability_allows`): "destination" è la CARTELLA indicata dal
-        chiamante, non il percorso finale con il nome del file già appeso (calcolarlo
-        duplicherebbe la logica interna della skill, es. `destination_dir / source.name` di
-        `MovePathSkill`) - una serializzazione dell'intera cartella di destinazione, più larga del
-        necessario ma mai più stretta, quindi comunque corretta per il buco sopra. Stesso limite
-        anche per `RENAME_PATH`: `new_name` non è tra `PATH_PARAMETERS`, quindi due `RENAME_PATH`
-        con `path` diversi ma stesso `new_name` nella stessa cartella non vengono serializzati tra
-        loro - un residuo dichiarato apertamente, non nascosto, della stessa forma già accettata
-        altrove in questa sessione (es. `allowed_apps`/`allowed_contacts` sulla stringa grezza)."""
-        if intent not in self._FILESYSTEM_MUTATION_INTENTS or not parameters:
-            return ()
-        keys = []
-        for name in self.PATH_PARAMETERS:
-            value = parameters.get(name)
-            if isinstance(value, os.PathLike):
-                value = os.fspath(value)
-            if not isinstance(value, str) or not value.strip():
-                continue
-            try:
-                resolved = Path(value).expanduser().resolve()
-            except (OSError, ValueError):
-                continue
-            keys.append(f"filesystem:{os.path.normcase(str(resolved))}")
-        return tuple(sorted(set(keys)))
-
-    @contextlib.contextmanager
-    def _acquire_all_writes(self, resource_keys: tuple[str, ...]):
-        """Acquisisce più lock in ordine ORDINATO (già garantito da `_resource_lock_keys`, che
-        restituisce `sorted(set(...))`) per evitare il classico deadlock che si otterrebbe se due
-        chiamate concorrenti (es. un MOVE_PATH e il suo inverso) bloccassero le stesse due
-        resource key in ordine opposto."""
-        with contextlib.ExitStack() as stack:
-            for key in resource_keys:
-                stack.enter_context(self._resource_locks.acquire_write(key))
-            yield
-
-    def _execute_forged(self, intent: str, parameters: dict) -> SkillResult:
-        plugin_path = self._forged_intents.get(intent)
-        if plugin_path is not None and plugin_path in self._quarantined_plugins:
-            return SkillResult(success=False, data={}, error="SKILL_QUARANTINED")
-        worker = self._get_or_start_sandbox_worker()
-        if worker is None:
-            return SkillResult(success=False, data={}, error="SANDBOX_WORKER_UNAVAILABLE")
-        result = worker.invoke(intent, parameters)
-        # F1.6.8: SANDBOX_WORKER_TIMEOUT copre sia "il worker non ha risposto in tempo" sia "il
-        # worker e' morto a meta' richiesta" (es. terminato dal Job Object per aver superato
-        # memoria/CPU, vedi core/sandboxed_skill_worker.py) - entrambi attribuibili a QUESTA
-        # chiamata. SANDBOX_WORKER_UNAVAILABLE non conta: puo' capitare per un ambiente rotto
-        # (pywin32 mancante) che non e' colpa di nessun plugin specifico.
-        if plugin_path is not None and result.error == "SANDBOX_WORKER_TIMEOUT":
-            self._record_plugin_violation(plugin_path)
-        return result
-
-    def _record_plugin_violation(self, plugin_path: str) -> None:
-        count = self._plugin_violation_counts.get(plugin_path, 0) + 1
-        self._plugin_violation_counts[plugin_path] = count
-        if count < self._QUARANTINE_THRESHOLD:
-            return
-        self._quarantined_plugins.add(plugin_path)
-        self.logger.warning(
-            "Plugin %s messo in quarantena dopo %d violazioni (timeout/crash nel worker sandboxato)",
-            plugin_path, count,
-        )
-        # Il worker gia' vivo potrebbe aver caricato il plugin appena messo in quarantena: fermato
-        # e dimenticato, cosi' il PROSSIMO avvio (_get_or_start_sandbox_worker sotto) lo esclude
-        # dall'elenco dei plugin caricati - altrimenti resterebbe servibile fino al prossimo
-        # riavvio naturale del worker.
-        if self._sandbox_worker is not None:
-            self._sandbox_worker.stop()
-            self._sandbox_worker = None
+        """Esegue la skill dell'intent: vedi SkillExecutor.execute (policy fail-closed con `policy_engine=None`,
+        lock per risorsa, snapshot di DELETE_PATH, worker sandboxato per i plugin). None se l'intent non esiste."""
+        return self._executor.execute(self.get_skill(intent), intent, parameters, policy_engine,
+                                      action_id=action_id, private=private)
 
     def clear_quarantine(self, plugin_path: str) -> None:
-        """F1.6.8: rimuove un plugin dalla quarantena - un'azione esplicita (non c'e' modo
-        automatico di 'scontare' le violazioni passate), pensata per un amministratore che ha
-        controllato/corretto il plugin, non per un ripristino silenzioso."""
-        self._quarantined_plugins.discard(plugin_path)
-        self._plugin_violation_counts.pop(plugin_path, None)
-
-    def _get_or_start_sandbox_worker(self) -> SandboxedSkillWorker | None:
-        if self._sandbox_worker is not None and self._sandbox_worker.is_alive():
-            return self._sandbox_worker
-        project_root = str(Path(__file__).resolve().parent.parent)
-        # F1.6.8: un plugin in quarantena non viene MAI ricaricato da un worker nuovo, anche se
-        # altri intent forgiati (non in quarantena) lo richiedono nel frattempo.
-        plugin_paths = sorted(set(self._forged_intents.values()) - self._quarantined_plugins)
-        worker = SandboxedSkillWorker(
-            project_root=project_root, plugin_paths=plugin_paths, logger=self.logger,
-        )
-        try:
-            worker.start()
-        except Exception:
-            self.logger.exception("Impossibile avviare il worker sandboxato per le skill forgiate")
-            return None
-        self._sandbox_worker = worker
-        return worker
+        """F1.6.8: rimuove un plugin dalla quarantena - azione esplicita di un amministratore."""
+        self._plugins.clear_quarantine(plugin_path)
 
     def stop_sandbox_worker(self) -> None:
-        """Chiamato da JakeCore.shutdown(): nessun worker da fermare se nessuna skill forgiata
-        e' mai stata invocata (self._sandbox_worker resta None per costruzione in quel caso)."""
-        if self._sandbox_worker is not None:
-            self._sandbox_worker.stop()
-            self._sandbox_worker = None
+        """Chiamato da JakeCore.shutdown()."""
+        self._plugins.stop_worker()
+
+    # ---- compatibilita': stato che ora vive nei componenti ---------------------------------
+
+    if not TYPE_CHECKING:
+        def __getattr__(self, name):
+            # Un registro costruito con SkillRegistry.__new__ (test e benchmark che impostano a mano solo gli attributi
+            # che servono) non ha i componenti: si creano alla prima richiesta, cosi' i setter qui sotto funzionano.
+            if name in ("_plugins", "_executor"):
+                plugins = PluginManager(logger=self.__dict__.get("logger"))
+                self.__dict__["_plugins"] = plugins
+                self.__dict__["_executor"] = SkillExecutor(plugins)
+                return self.__dict__[name]
+            raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
+
+    def _resource_lock_keys(self, intent: str, parameters: dict | None) -> tuple[str, ...]:
+        return self._executor.resource_lock_keys(intent, parameters)
+
+    def _record_plugin_violation(self, plugin_path: str) -> None:
+        self._plugins.record_violation(plugin_path)
+
+    def _get_or_start_sandbox_worker(self):
+        return self._plugins.get_or_start_worker()
+
+    @property
+    def snapshot_store(self):
+        return self._executor.snapshot_store
+
+    @snapshot_store.setter
+    def snapshot_store(self, value) -> None:
+        self._executor.snapshot_store = value
+
+    @property
+    def _resource_locks(self):
+        return self._executor.resource_locks
+
+    @_resource_locks.setter
+    def _resource_locks(self, value) -> None:
+        self._executor.resource_locks = value
+
+    @property
+    def _forged_intents(self) -> dict[str, str]:
+        return self._plugins.forged_intents
+
+    @_forged_intents.setter
+    def _forged_intents(self, value: dict[str, str]) -> None:
+        self._plugins.forged_intents = value
+
+    @property
+    def _sandbox_worker(self):
+        return self._plugins.worker
+
+    @_sandbox_worker.setter
+    def _sandbox_worker(self, value) -> None:
+        self._plugins.worker = value
+
+    @property
+    def _plugin_violation_counts(self) -> dict[str, int]:
+        return self._plugins.violation_counts
+
+    @_plugin_violation_counts.setter
+    def _plugin_violation_counts(self, value: dict[str, int]) -> None:
+        self._plugins.violation_counts = value
+
+    @property
+    def _quarantined_plugins(self) -> set[str]:
+        return self._plugins.quarantined
+
+    @_quarantined_plugins.setter
+    def _quarantined_plugins(self, value: set[str]) -> None:
+        self._plugins.quarantined = value

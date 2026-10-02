@@ -111,6 +111,7 @@ voce ──VAD──▶ Whisper (GPU) ──▶ TranscriptNormalizer ──▶ R
 | `vision_model` | `qwen2.5vl:7b` | descrivere/cliccare lo schermo |
 | `low_memory` / `ollama_keep_alive` / `ollama_secondary_keep_alive` | `false` / `30m` / `2m` | quanto Ollama tiene in RAM/VRAM un modello dopo l'uso: solo `ollama_model` resta caldo a lungo, visione/coding/embedding vengono scaricati dopo 2 minuti. `low_memory: true` scende a `5m`/`0` (meno RAM, ma la prima frase dopo una pausa ricarica il modello) |
 | `rvc_idle_shutdown_minutes` | `20` (`5` con `low_memory`) | minuti senza parlare dopo cui il server della voce personaggio si chiude e libera la RAM; `0` = mai |
+| `release_public_key` | `""` | chiave pubblica di chi pubblica le release: se impostata, `python -m tools.updater` installa una versione stabile solo se `releases/stable.json` e' firmato da questa chiave (`--keygen` / `--sign vX` per chi pubblica) |
 | `tts_engine` / `tts_voice` / `tts_rate` | `edge` / `it-IT-DiegoNeural` / `+8%` | `offline` per la voce di Windows; altre voci: Giuseppe, Elsa, Isabella |
 | `stt_model` / `stt_device` | auto | forzare es. `medium` / `cpu` |
 | `follow_up_seconds` | 6 | secondi in cui si può parlare senza wake word dopo una risposta (0 per disattivare) |

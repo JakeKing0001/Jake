@@ -286,6 +286,15 @@ class ReleaseSigningKey:
     def generate(cls) -> ReleaseSigningKey:
         return cls(Ed25519PrivateKey.generate())
 
+    @classmethod
+    def from_private_b64(cls, text: str) -> ReleaseSigningKey:
+        return cls(Ed25519PrivateKey.from_private_bytes(_unb64(text.strip())))
+
+    @property
+    def private_b64(self) -> str:
+        return _b64(self._private.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw,
+                                                serialization.NoEncryption()))
+
     @property
     def public_b64(self) -> str:
         raw = self._private.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
@@ -340,6 +349,12 @@ class ReleaseTrustStore:
 
     def add(self, key: ReleaseSigningKey) -> None:
         self._keys[key.key_id] = key.public_b64
+
+    def add_public(self, public_b64: str) -> str:
+        """F0.6.5: chi verifica ha solo la chiave pubblica (nelle impostazioni locali, mai nel repository)."""
+        key_id = hashlib.sha256(_unb64(public_b64)).hexdigest()[:16]
+        self._keys[key_id] = public_b64
+        return key_id
 
     def revoke(self, key_id: str) -> None:
         self._revoked.add(key_id)

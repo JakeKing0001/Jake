@@ -20,6 +20,8 @@ from core.action_snapshot import SnapshotStore
 from core.policy_engine import PolicyEngine
 from core.resource_lock import ResourceLockManager
 from core.sandboxed_skill_worker import SandboxedSkillWorker
+from core.plugin_manager import PluginManager
+from core.skill_executor import SkillExecutor
 from core.skill_registry import SkillRegistry
 from core.skill_result import SkillResult
 
@@ -43,6 +45,8 @@ def _bare_registry(skills: dict = None) -> SkillRegistry:
     registry = SkillRegistry.__new__(SkillRegistry)
     registry.skills = dict(skills or {})
     registry.logger = FakeLoggerCapturingWarnings()
+    registry._plugins = PluginManager(logger=registry.logger)  # 3.2: stato dei plugin estratto da SkillRegistry
+    registry._executor = SkillExecutor(registry._plugins)
     registry._forged_intents = {}  # F1.6: letto da execute()/register_skill()
     registry._sandbox_worker = None
     registry._plugin_violation_counts = {}  # F1.6.8: letto da _execute_forged()/_record_plugin_violation()
@@ -667,7 +671,7 @@ class ForgedSkillQuarantineTests(unittest.TestCase):
         for _ in range(SkillRegistry._QUARANTINE_THRESHOLD):
             self.registry._record_plugin_violation("C:\\plugins\\flaky.py")
 
-        with mock.patch("core.skill_registry.SandboxedSkillWorker") as worker_cls:
+        with mock.patch("core.plugin_manager.SandboxedSkillWorker") as worker_cls:
             worker_cls.return_value.start.return_value = None
             self.registry._get_or_start_sandbox_worker()
 
