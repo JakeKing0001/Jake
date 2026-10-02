@@ -131,9 +131,9 @@ class MemoryPrivacyDashboard:
             ).fetchall()
         return [self._record(row, now, tuple(reasons)) for row in rows]
 
-    @staticmethod
-    def _record(row, now: str, why: tuple[str, ...] = ()) -> MemoryRecord:
+    def _record(self, row, now: str, why: tuple[str, ...] = ()) -> MemoryRecord:
         data = dict(row)
+        data["value"] = self.memory.reveal(data["value"])
         data["pinned"] = bool(data["pinned"])
         data["has_embedding"] = bool(data["has_embedding"])
         return MemoryRecord(**data, expired=bool(data["expires_at"] and data["expires_at"] < now), why=why)
@@ -296,7 +296,7 @@ class MemoryPrivacyDashboard:
             ).fetchone()
             if existing is None:
                 return None
-            value = existing["value"]
+            value = self.memory.reveal(existing["value"])
             connection = self.memory.connection
             removed = {
                 "memory_relations": connection.execute(
@@ -378,7 +378,7 @@ class MemoryPrivacyDashboard:
             raise PermissionError(f"per cancellare tutta la memoria serve la frase esatta '{CONFIRM_PHRASE}'")
         connection = self.memory.connection
         with self.memory.lock:
-            samples = [r[0] for r in connection.execute(
+            samples = [self.memory.reveal(r[0]) for r in connection.execute(
                 "SELECT value FROM memories WHERE length(value) >= 8 LIMIT 50").fetchall()]
             counts = {}
             for table in ("memories", "memory_relations", "conversation_history", "memory_audit"):
@@ -443,6 +443,7 @@ class MemoryPrivacyDashboard:
             if data["sensitivity"] == "secret" and not include_secret:
                 excluded += 1
                 continue
+            data["value"] = self.memory.reveal(data["value"])
             if not include_embeddings:
                 data.pop("embedding", None)
             data["pinned"] = bool(data["pinned"])

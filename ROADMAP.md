@@ -1962,6 +1962,10 @@ skill regressiva viene fermata dagli eval o ripristinata automaticamente.
   `SecretsVault.is_protected`, che non esiste (mypy rosso su master), e `recall()` non seleziona la colonna
   `sensitivity`, quindi un ricordo "sensibile" sarebbe tornato cifrato o avrebbe sollevato un errore. Ora decide
   il marcatore DPAPI sul valore; test di regressione in `tests/test_memory_sensitivity_controls.py`.
+  Stessa radice in altri quattro punti, trovati dalla suite completa in CI: la ricerca testuale (`fold()` in
+  SQLite), `relevant_for`, il pannello privacy/export e la cancellazione leggevano il testo cifrato (un'allergia
+  segnata come sensibile non veniva piu' trovata; il backup esportava un valore DPAPI legato all'utente Windows,
+  inutilizzabile su un altro PC). Ora si decifra in lettura e il ripristino ricifra i valori sensibili.
 
 - ✅ **F0.6.1 deciso e F0.6.3/F0.6.4/F0.6.6/F0.6.7 sbloccati** (02/10/2026): installer = `setup.ps1` portable per
   utente; nuova disinstallazione che conserva i dati personali salvo `-PurgeData`; `tools/updater.py` aggiorna
