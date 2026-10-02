@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from core.memory_schema import SENSITIVITY_LEVELS, ensure_schema, kind_of
-from core.secrets_vault import SecretsVault
+from core.secrets_vault import SecretsVault, is_protected
 
 
 
@@ -42,8 +42,9 @@ class MemoryManager:
     DEDUP_SIMILARITY_THRESHOLD = 0.93
 
     def _decrypt_if_needed(self, value: str, sensitivity: str) -> str:
-        """Decritta un valore se e' stato cifrato per sensibilita'."""
-        if sensitivity in ("sensitive", "secret") and self._vault.is_protected(value):
+        """Decritta un valore se e' stato cifrato per sensibilita'. Decide il marcatore DPAPI sul valore, non la
+        sensibilita' letta: recall() non seleziona la colonna sensitivity, e un ricordo poi declassato resta cifrato."""
+        if is_protected(value):
             decrypted = self._vault.unprotect(value)
             # Se la decifratura fallisce, restituiamo il valore originale per non perdere dati
             # In un sistema reale, questo potrebbe indicare un problema con il vault DPAPI
