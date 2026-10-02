@@ -1,6 +1,6 @@
 ## 24. Prossima azione esatta
 
-Aggiornato 29/09/2026 (le versioni precedenti restano nella cronologia Git). Sviluppo del 28/09 su master (#168-#190),
+Aggiornato 02/10/2026 (le versioni precedenti restano nella cronologia Git). PR #191: RAM ridotta (modelli Ollama secondari scaricati dopo 2 minuti, `low_memory`, server RVC chiuso dopo inattivita'), master di nuovo verde (lint, mypy e quattro letture dei ricordi sensibili cifrati), decisione installer F0.6.1, updater atomico, focus assistant collegato al pomodoro. Stato al 29/09: Sviluppo del 28/09 su master (#168-#190),
 compresi provenienza dei messaggi companion nell'HUD (#184, F7.4.6), test dei pacchetti di terzi nella sandbox
 (#185, F8.3), merge di PR #186-#189 e aggiornamento di #190 con correzione della logica di riparazione trascrizione
 (e verificato con test_strongly_corrupted_or_garbled_uncertain_speech_still_asks_to_repeat), oltre al
