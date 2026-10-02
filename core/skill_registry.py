@@ -26,6 +26,7 @@ from core.logger import get_logger
 from core.plugin_manager import PluginManager
 from core.skill_executor import SkillExecutor
 from copy import deepcopy
+from typing import TYPE_CHECKING
 
 
 class SkillRegistry:
@@ -213,6 +214,17 @@ class SkillRegistry:
         self._plugins.stop_worker()
 
     # ---- compatibilita': stato che ora vive nei componenti ---------------------------------
+
+    if not TYPE_CHECKING:
+        def __getattr__(self, name):
+            # Un registro costruito con SkillRegistry.__new__ (test e benchmark che impostano a mano solo gli attributi
+            # che servono) non ha i componenti: si creano alla prima richiesta, cosi' i setter qui sotto funzionano.
+            if name in ("_plugins", "_executor"):
+                plugins = PluginManager(logger=self.__dict__.get("logger"))
+                self.__dict__["_plugins"] = plugins
+                self.__dict__["_executor"] = SkillExecutor(plugins)
+                return self.__dict__[name]
+            raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
 
     def _resource_lock_keys(self, intent: str, parameters: dict | None) -> tuple[str, ...]:
         return self._executor.resource_lock_keys(intent, parameters)
