@@ -44,6 +44,7 @@ class TodoManagerGoalStepTests(unittest.TestCase):
         cursor.execute("SELECT id, text, done FROM todos ORDER BY id")
         rows = cursor.fetchall()
         self.assertEqual(len(rows), 3)  # goal + 2 passi
+        self.assertEqual({row[0] for row in rows}, {goal_id, step1_id, step2_id})
         for row in rows:
             self.assertEqual(row[2], 1)  # done = 1 per tutti
 
@@ -57,6 +58,8 @@ class TodoManagerGoalStepTests(unittest.TestCase):
         # Verifica che esistano
         pending = self.manager.list_pending()
         self.assertEqual(len(pending), 1)
+        rows = self.manager._connection.execute("SELECT id FROM todos").fetchall()
+        self.assertEqual({row[0] for row in rows}, {goal_id, step1_id, step2_id})
 
         # Elimina il goal
         result = self.manager.delete_matching("finire la tesi")

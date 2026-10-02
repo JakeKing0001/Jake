@@ -170,7 +170,9 @@ def restore_from_backup(
             columns = [c for c in record if c not in ("id", "has_embedding")]
             connection.execute(
                 f"INSERT INTO memories ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})",
-                [int(record[c]) if c == "pinned" else record[c] for c in columns],
+                [int(record[c]) if c == "pinned"
+                 else memory.protect_if_sensitive(record[c], record.get("sensitivity")) if c == "value"
+                 else record[c] for c in columns],
             )
             memory._audit(record["key"], record["category"], "restored", "backup")
             restored_keys.add((record["key"], record["category"]))

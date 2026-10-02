@@ -21,6 +21,14 @@ class MemorySensitivityControlsTests(unittest.TestCase):
         self.memory.remember("backup serale", '{"steps": ["copia"]}', category="workflow")
         self.dashboard = MemoryPrivacyDashboard(self.memory)
 
+    def test_a_sensitive_memory_is_stored_encrypted_and_recalled_in_clear(self):
+        # Regressione: _decrypt_if_needed chiamava SecretsVault.is_protected, che non esiste (AttributeError).
+        self.memory.remember("numero tessera", "123456", sensitivity="sensitive")
+        raw = self.memory._connection.execute(
+            "SELECT value FROM memories WHERE key = ?", ("numero tessera",)).fetchone()[0]
+        self.assertNotEqual(raw, "123456")
+        self.assertEqual(self.memory.recall(key="numero tessera")[0]["value"], "123456")
+
     def test_marking_a_memory_secret_keeps_it_out_of_answers_and_exports(self):
         self.assertEqual([e["key"] for e in self.memory.relevant_for("qual e' il codice del cancello?")],
                          ["codice del cancello"])

@@ -160,11 +160,25 @@ def _character_name_from_args(config=None) -> str | None:
     return CHARACTER_ALIASES.get(configured, configured)
 
 
+def _rvc_idle_seconds(config=None) -> float | None:
+    """Minuti di silenzio dopo cui il server RVC si chiude per liberare RAM (0 = mai)."""
+    if config is None:
+        from core.config import Config
+
+        config = Config()
+    low_memory = str(config.get("low_memory", False)).lower() in {"1", "true", "yes", "on"}
+    try:
+        minutes = float(config.get("rvc_idle_shutdown_minutes", 5 if low_memory else 20))
+    except (TypeError, ValueError):
+        minutes = 20.0
+    return minutes * 60 if minutes > 0 else None
+
+
 def _build_character_tts_provider(base_tts_provider, character_name: str):
     from core.voice.character_tts_provider import CharacterTtsProvider
     from core.voice.rvc_server_manager import RvcServerManager
 
-    manager = RvcServerManager(model_name=character_name)
+    manager = RvcServerManager(model_name=character_name, idle_shutdown_seconds=_rvc_idle_seconds())
     if not manager.is_installed():
         print(
             f"Nota: il modello vocale '{character_name}' non è installato in rvc_models/, "

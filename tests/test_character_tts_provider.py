@@ -34,6 +34,15 @@ def _provider():
 
 
 class SpeakTests(unittest.TestCase):
+    def test_after_idle_shutdown_speaks_with_base_voice_and_restarts_in_background(self):
+        provider, base, server_manager = _provider()
+        server_manager.idle_stopped = True
+        with mock.patch.object(provider, "prewarm") as prewarm:
+            provider.speak("ciao")
+        base.speak.assert_called_once_with("ciao")
+        prewarm.assert_called_once()
+        server_manager.ensure_running.assert_not_called()
+
     def test_server_unavailable_falls_back_to_the_base_voice(self):
         provider, base, server_manager = _provider()
         server_manager.ensure_running.return_value = False

@@ -119,5 +119,39 @@ class StartStopPomodoroTests(_WithManager):
         self.assertEqual(len(self.manager.list_upcoming()), 1)
 
 
+
+
+class PomodoroFocusTests(unittest.TestCase):
+    """F6 focus assistant: NotificationCenter e SET_NOTIFICATION_MODE veri, timer finto."""
+
+    def _focus(self):
+        from unittest import mock
+
+        from core.notification_center import NotificationCenter, NotificationMode
+        from skills.notification_mode import SetNotificationModeSkill
+        from skills.reminders_extra import PomodoroFocus, StartPomodoroSkill, StopPomodoroSkill
+
+        center = NotificationCenter()
+        mode_skill = SetNotificationModeSkill(center, timer_factory=lambda *a, **k: mock.MagicMock())
+        focus = PomodoroFocus(center, mode_skill)
+        reminders = mock.MagicMock()
+        return center, NotificationMode, StartPomodoroSkill(reminders, focus), StopPomodoroSkill(reminders, focus)
+
+    def test_pomodoro_silences_then_restores_normal_mode(self):
+        center, Mode, start, stop = self._focus()
+        result = start.execute({"minutes": 30})
+        self.assertEqual(center.mode, Mode.STUDY)
+        self.assertIn("focus_until", result.data)
+        stop.execute({})
+        self.assertEqual(center.mode, Mode.NORMAL)
+
+    def test_pomodoro_never_overrides_a_mode_chosen_by_the_user(self):
+        center, Mode, start, stop = self._focus()
+        center.set_mode(Mode.DO_NOT_DISTURB)
+        result = start.execute({"minutes": 30})
+        self.assertNotIn("focus_until", result.data)
+        stop.execute({})
+        self.assertEqual(center.mode, Mode.DO_NOT_DISTURB)
+
 if __name__ == "__main__":
     unittest.main()

@@ -2,6 +2,7 @@ import json
 from urllib import error, request
 from core.ollama_client import DEFAULT_BASE_URL
 from core.network import read_url
+from core.ollama_client import keep_alive_for
 
 
 class ContextSummarizer:
@@ -20,7 +21,7 @@ class ContextSummarizer:
         payload = {
             "model": self.model,
             "stream": False,
-            "keep_alive": "30m",
+            "keep_alive": keep_alive_for(self.model),
             "options": {"num_ctx": 8192, "temperature": 0.2},
             "messages": [
                 {

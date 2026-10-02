@@ -5,6 +5,7 @@ from core.language_guard import keep_reply_language
 from core.skill_result import SkillResult
 from core.ollama_client import DEFAULT_BASE_URL
 from core.network import read_url
+from core.ollama_client import keep_alive_for
 
 
 class AskQuestionSkill:
@@ -170,7 +171,7 @@ class AskQuestionSkill:
         messages.append({"role": "user", "content": question})
 
         payload = {"model": self.model, "stream": False,
-            "keep_alive": "30m", "options": {"num_ctx": 8192, "temperature": temperature}, "messages": messages}
+            "keep_alive": keep_alive_for(self.model), "options": {"num_ctx": 8192, "temperature": temperature}, "messages": messages}
         from core import model_health
 
         failed = model_health.failure()

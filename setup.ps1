@@ -5,13 +5,35 @@
 #
 # Uso: powershell -ExecutionPolicy Bypass -File setup.ps1
 # Uso (con avvio automatico all'accensione del PC): powershell -ExecutionPolicy Bypass -File setup.ps1 -Autostart
+# Rilanciarlo e' sicuro (idempotente): ripara cio' che manca e non tocca dati e impostazioni.
+# Aggiornare: .venv\Scripts\python.exe -m tools.updater   (rollback automatico se la nuova versione non parte)
+# Disinstallare: setup.ps1 -Uninstall              (tiene data\ e config\settings.json)
+#                setup.ps1 -Uninstall -PurgeData   (cancella anche ricordi, cronologia e impostazioni)
 
 param(
-    [switch]$Autostart
+    [switch]$Autostart,
+    [switch]$Uninstall,
+    [switch]$PurgeData
 )
 
 $root = $PSScriptRoot
 Set-Location $root
+
+if ($Uninstall) {
+    $vbsPath = Join-Path ([Environment]::GetFolderPath("Startup")) "JakeTray.vbs"
+    if (Test-Path $vbsPath) { Remove-Item $vbsPath -Force; Write-Host "Avvio automatico rimosso." }
+    if (Test-Path "$root\.venv") { Remove-Item "$root\.venv" -Recurse -Force; Write-Host "Ambiente Python rimosso." }
+    if ($PurgeData) {
+        foreach ($item in @("$root\data", "$root\config\settings.json")) {
+            if (Test-Path $item) { Remove-Item $item -Recurse -Force; Write-Host "Rimosso: $item" }
+        }
+        Write-Host "Dati personali cancellati." -ForegroundColor Yellow
+    } else {
+        Write-Host "Dati personali e impostazioni conservati in data\ e config\settings.json." -ForegroundColor Green
+    }
+    Write-Host "Per eliminare Jake del tutto, cancella ora la cartella: $root"
+    exit 0
+}
 
 function Step-Failed($step, $err) {
     Write-Host ""

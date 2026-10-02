@@ -109,6 +109,8 @@ voce ──VAD──▶ Whisper (GPU) ──▶ TranscriptNormalizer ──▶ R
 | `coder_model` | `qwen2.5-coder:7b` | fucina (se assente usa `ollama_model`) |
 | `embedding_model` | `nomic-embed-text` | recupero semantico |
 | `vision_model` | `qwen2.5vl:7b` | descrivere/cliccare lo schermo |
+| `low_memory` / `ollama_keep_alive` / `ollama_secondary_keep_alive` | `false` / `30m` / `2m` | quanto Ollama tiene in RAM/VRAM un modello dopo l'uso: solo `ollama_model` resta caldo a lungo, visione/coding/embedding vengono scaricati dopo 2 minuti. `low_memory: true` scende a `5m`/`0` (meno RAM, ma la prima frase dopo una pausa ricarica il modello) |
+| `rvc_idle_shutdown_minutes` | `20` (`5` con `low_memory`) | minuti senza parlare dopo cui il server della voce personaggio si chiude e libera la RAM; `0` = mai |
 | `tts_engine` / `tts_voice` / `tts_rate` | `edge` / `it-IT-DiegoNeural` / `+8%` | `offline` per la voce di Windows; altre voci: Giuseppe, Elsa, Isabella |
 | `stt_model` / `stt_device` | auto | forzare es. `medium` / `cpu` |
 | `follow_up_seconds` | 6 | secondi in cui si può parlare senza wake word dopo una risposta (0 per disattivare) |

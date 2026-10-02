@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from core.memory_schema import SENSITIVITY_LEVELS, ensure_schema, kind_of
-from core.secrets_vault import SecretsVault
+from core.secrets_vault import SecretsVault, is_protected
 
 
 
@@ -42,12 +42,23 @@ class MemoryManager:
     DEDUP_SIMILARITY_THRESHOLD = 0.93
 
     def _decrypt_if_needed(self, value: str, sensitivity: str) -> str:
-        """Decritta un valore se e' stato cifrato per sensibilita'."""
-        if sensitivity in ("sensitive", "secret") and self._vault.is_protected(value):
+        """Decritta un valore se e' stato cifrato per sensibilita'. Decide il marcatore DPAPI sul valore, non la
+        sensibilita' letta: recall() non seleziona la colonna sensitivity, e un ricordo poi declassato resta cifrato."""
+        if is_protected(value):
             decrypted = self._vault.unprotect(value)
             # Se la decifratura fallisce, restituiamo il valore originale per non perdere dati
             # In un sistema reale, questo potrebbe indicare un problema con il vault DPAPI
             return decrypted if decrypted is not None else value
+        return value
+
+    def reveal(self, value):
+        """Valore in chiaro di un campo letto direttamente dal database (cifrato a riposo se sensibile)."""
+        return self._decrypt_if_needed(value, "") if isinstance(value, str) else value
+
+    def protect_if_sensitive(self, value, sensitivity):
+        """Come remember(): un valore 'sensitive'/'secret' si scrive cifrato, mai due volte."""
+        if sensitivity in ("sensitive", "secret") and isinstance(value, str) and not is_protected(value):
+            return self._vault.protect(value)
         return value
 
     def __init__(self, db_path: Path | None = None):
@@ -69,8 +80,17 @@ class MemoryManager:
         connection = sqlite3.connect(db_path, check_same_thread=False)
         connection.row_factory = sqlite3.Row
         # F5.4/F5.5: confronto senza maiuscole ne' accenti anche dentro le query ("caffè" trova "caffe" e viceversa)
-        connection.create_function("fold", 1, lambda text: fold_text(text) if text is not None else None,
-                                   deterministic=True)
+        vault = SecretsVault()
+
+        def fold_plain(text):
+            # ADR 0004: i valori sensibili sono cifrati a riposo; le ricerche testuali li confrontano in chiaro
+            if text is None:
+                return None
+            if is_protected(text):
+                text = vault.unprotect(text) or ""
+            return fold_text(text)
+
+        connection.create_function("fold", 1, fold_plain, deterministic=True)
         # F5.7.6: senza secure_delete SQLite lascia il contenuto di una riga cancellata nelle pagine libere
         # del file finche' non le riscrive: "cancellato" non sarebbe cancellato. Con questa opzione le pagine
         # liberate vengono azzerate.
@@ -542,6 +562,7 @@ class MemoryManager:
             lowered = fold_text(question or "")
             for row in rows:
                 entry = dict(row)
+                entry["value"] = self.reveal(entry["value"])
                 haystack = fold_text(f"{entry['key']} {entry['value']}")
                 hits = sum(1 for w in words if w in haystack)
                 exact = fold_text(entry["key"]).strip() in lowered

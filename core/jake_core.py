@@ -639,6 +639,7 @@ class JakeCore:
             ("APPROVE_PAIRING", ApprovePairingSkill(self.pairing_service, self.sync_keyring)),
         ):
             self.skill_registry.register_skill(intent, skill)
+        self._wire_pomodoro_focus()
 
         # Modello di permessi centralizzato (v3.2, F1: core/policy_engine.py): ogni skill
         # DESTRUCTIVE o ADMIN che non gestisce gia' da sola una conferma su misura finisce qui
@@ -3474,6 +3475,20 @@ class JakeCore:
                     logger.warning("Non sono riuscito a scaricare il modello %s", previous)
 
         threading.Thread(target=unload, name="jake-model-unload", daemon=True).start()
+
+    def _wire_pomodoro_focus(self) -> None:
+        """F6 focus assistant: START/STOP_POMODORO silenziano e ripristinano le notifiche con la stessa modalita' a tempo
+        di SET_NOTIFICATION_MODE (un solo timer, un solo ritorno automatico con il riepilogo)."""
+        from skills.reminders_extra import PomodoroFocus
+
+        skills = self.skill_registry.skills
+        mode_skill = skills.get("SET_NOTIFICATION_MODE")
+        if mode_skill is None:
+            return
+        focus = PomodoroFocus(self.notification_center, mode_skill)
+        for intent in ("START_POMODORO", "STOP_POMODORO"):
+            if hasattr(skills.get(intent), "focus"):
+                skills[intent].focus = focus
 
     def _propagate_model(self, previous: str, chosen: str) -> None:
         """F8.4 (router ovunque) + bug reale: ASK_QUESTION, traduzioni, riassunti, correzione testi e gli altri

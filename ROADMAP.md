@@ -1941,6 +1941,42 @@ un progresso sulla fase nel suo complesso.
 **Criterio di uscita:** una skill nuova non può ottenere permessi non dichiarati; una release o
 skill regressiva viene fermata dagli eval o ripristinata automaticamente.
 
+### Cosa e' stato fatto in questa sessione
+
+- ✅ **Uso di RAM/VRAM ridotto con una politica unica di `keep_alive`** (`core/ollama_client.py::
+  keep_alive_for`, 02/10/2026). Nove chiamanti (visione, pianificatore, riassunti, domande,
+  traduzioni, ricerca, appunti, testo) chiedevano a Ollama di tenere il proprio modello caldo 30
+  minuti, e il router dei modelli non scarica mai da solo un modello inattivo: una sola domanda
+  sullo schermo lasciava `qwen2.5vl:7b` accanto a `qwen2.5:7b` (e `qwen2.5-coder:7b` dopo la
+  fucina) fino a ~15 GB per mezz'ora. Ora solo `ollama_model` resta caldo 30 minuti; visione,
+  coding ed embedding vengono scaricati dopo 2 minuti. `low_memory: true` scende a 5 minuti / 0,
+  e `ollama_keep_alive` / `ollama_secondary_keep_alive` permettono valori propri. Misurato anche
+  il lato Python: l'import del nucleo pesa ~43 MB, quindi la RAM vera era in Ollama. Resta da
+  fare: il resto del model router di F8 (scelta per latenza/qualita'/privacy/batteria).
+
+- ✅ **Server RVC chiuso dopo inattivita'** (`core/voice/rvc_server_manager.py`, 02/10/2026): il processo con
+  torch e il modello del timbro (1-2 GB) restava acceso per tutta la sessione. Dopo `rvc_idle_shutdown_minutes`
+  (20, 5 con `low_memory`, 0 = mai) senza parlare si chiude; la frase successiva esce subito con la voce di base
+  e il timbro riparte in background, senza i 20-30 s di ricarica nel turno.
+- ✅ **Bug reale corretto nei ricordi sensibili** (`core/memory_manager.py::_decrypt_if_needed`): chiamava
+  `SecretsVault.is_protected`, che non esiste (mypy rosso su master), e `recall()` non seleziona la colonna
+  `sensitivity`, quindi un ricordo "sensibile" sarebbe tornato cifrato o avrebbe sollevato un errore. Ora decide
+  il marcatore DPAPI sul valore; test di regressione in `tests/test_memory_sensitivity_controls.py`.
+  Stessa radice in altri quattro punti, trovati dalla suite completa in CI: la ricerca testuale (`fold()` in
+  SQLite), `relevant_for`, il pannello privacy/export e la cancellazione leggevano il testo cifrato (un'allergia
+  segnata come sensibile non veniva piu' trovata; il backup esportava un valore DPAPI legato all'utente Windows,
+  inutilizzabile su un altro PC). Ora si decifra in lettura e il ripristino ricifra i valori sensibili.
+
+- ✅ **F0.6.1 deciso e F0.6.3/F0.6.4/F0.6.6/F0.6.7 sbloccati** (02/10/2026): installer = `setup.ps1` portable per
+  utente; nuova disinstallazione che conserva i dati personali salvo `-PurgeData`; `tools/updater.py` aggiorna
+  solo in fast-forward, rifiuta con modifiche locali, reinstalla le dipendenze solo se il lock cambia, verifica
+  compilazione e import del nucleo e altrimenti torna al commit precedente. Firma degli aggiornamenti ancora ⬜.
+
+- ✅ **F6 focus assistant collegato al percorso reale** (02/10/2026): `START_POMODORO` mette la modalita' studio per
+  la stessa durata (notifiche non urgenti in coda) e alla fine torna da sola la modalita' di prima con il riepilogo;
+  `STOP_POMODORO` la ripristina subito. Non scavalca mai una modalita' scelta dall'utente (non disturbare, sonno,
+  riunione). Riusa il timer di `SET_NOTIFICATION_MODE`, nessun secondo meccanismo.
+
 ## Nuove funzionalità “Jarvis”, non concordate prima
 
 Queste proposte ampliano il sogno; non vanno tutte costruite subito.
