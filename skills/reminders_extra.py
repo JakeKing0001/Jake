@@ -102,8 +102,10 @@ class StartPomodoroSkill:
         },
     }
 
-    def __init__(self, reminder_manager):
+    def __init__(self, reminder_manager, focus=None):
         self.reminder_manager = reminder_manager
+        # F6 focus assistant: oggetto con start(minutes) -> dict | None e end(); collegato da JakeCore
+        self.focus = focus
 
     DEFAULT_MINUTES = 25
 
@@ -112,7 +114,12 @@ class StartPomodoroSkill:
         minutes = self._parse_minutes(parameters.get("minutes"))
         due_utc = datetime.now(timezone.utc) + timedelta(minutes=minutes)
         self.reminder_manager.add("fine sessione pomodoro, fai una pausa", due_utc)
-        return SkillResult(success=True, data={"minutes": minutes})
+        data = {"minutes": minutes}
+        if self.focus is not None:
+            focus = self.focus.start(minutes)
+            if focus and focus.get("until"):
+                data["focus_until"] = focus["until"]
+        return SkillResult(success=True, data=data)
 
     @classmethod
     def _parse_minutes(cls, raw) -> int:
@@ -134,11 +141,43 @@ class StopPomodoroSkill:
         "parameters": {},
     }
 
-    def __init__(self, reminder_manager):
+    def __init__(self, reminder_manager, focus=None):
         self.reminder_manager = reminder_manager
+        self.focus = focus
 
     def execute(self, parameters: dict = None):
         deleted = self.reminder_manager.delete_matching("pomodoro")
+        if self.focus is not None:
+            self.focus.end()
         if deleted is None:
             return SkillResult(success=False, data={}, error="NOT_FOUND")
         return SkillResult(success=True, data={})
+
+
+class PomodoroFocus:
+    """F6 focus assistant: durante un pomodoro le notifiche non urgenti restano in coda (modalita' studio a tempo) e
+    alla fine torna da sola la modalita' di prima. Non scavalca mai una modalita' scelta dall'utente (non disturbare,
+    sonno, riunione...): agisce solo partendo da quella normale."""
+
+    def __init__(self, notification_center, mode_skill):
+        self.notification_center = notification_center
+        self.mode_skill = mode_skill
+        self._previous: str | None = None
+
+    def start(self, minutes: int) -> dict | None:
+        from core.notification_center import NotificationMode
+
+        if self.notification_center.mode != NotificationMode.NORMAL:
+            return None
+        result = self.mode_skill.execute({"mode": NotificationMode.STUDY.value, "minutes": minutes})
+        if not result.success:
+            return None
+        self._previous = result.data.get("previous")
+        return result.data
+
+    def end(self) -> None:
+        from core.notification_center import NotificationMode
+
+        previous, self._previous = self._previous, None
+        if previous and self.notification_center.mode == NotificationMode.STUDY:
+            self.mode_skill.execute({"mode": previous})

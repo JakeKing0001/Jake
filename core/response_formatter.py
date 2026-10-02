@@ -740,7 +740,8 @@ def _format_success(intent: str, result: SkillResult, registry=None) -> str | No
     if intent == "SET_DAILY_REMINDER":
         return f"Ok, ogni giorno alle {data['at_time']} ti ricorderò: {data['text']}."
     if intent == "START_POMODORO":
-        return f"Sessione avviata: ti avviserò tra {data['minutes']} minuti."
+        quiet = f" Fino alle {data['focus_until']} tengo in coda le notifiche non urgenti." if data.get("focus_until") else ""
+        return f"Sessione avviata: ti avviserò tra {data['minutes']} minuti.{quiet}"
     if intent == "STOP_POMODORO":
         return "Sessione pomodoro interrotta."
     if intent == "DELETE_TODO":

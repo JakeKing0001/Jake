@@ -1968,6 +1968,11 @@ skill regressiva viene fermata dagli eval o ripristinata automaticamente.
   solo in fast-forward, rifiuta con modifiche locali, reinstalla le dipendenze solo se il lock cambia, verifica
   compilazione e import del nucleo e altrimenti torna al commit precedente. Firma degli aggiornamenti ancora ⬜.
 
+- ✅ **F6 focus assistant collegato al percorso reale** (02/10/2026): `START_POMODORO` mette la modalita' studio per
+  la stessa durata (notifiche non urgenti in coda) e alla fine torna da sola la modalita' di prima con il riepilogo;
+  `STOP_POMODORO` la ripristina subito. Non scavalca mai una modalita' scelta dall'utente (non disturbare, sonno,
+  riunione). Riusa il timer di `SET_NOTIFICATION_MODE`, nessun secondo meccanismo.
+
 ## Nuove funzionalità “Jarvis”, non concordate prima
 
 Queste proposte ampliano il sogno; non vanno tutte costruite subito.
