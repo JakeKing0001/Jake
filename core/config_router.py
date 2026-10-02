@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
+from core.request_context import add_turn_timing, current_turn_trace
 
 
 class ModelRoutingMixin:
@@ -63,6 +64,12 @@ class ModelRoutingMixin:
         from core.model_router import Capability, EvalRecord
 
         self.model_router.evals.record(EvalRecord(Capability.REASON, model, success, latency_ms))
+        add_turn_timing("llm", latency_ms)
+        turn = current_turn_trace()
+        if turn is not None:
+            models = turn.setdefault("models", [])
+            if model not in models:
+                models.append(model)
 
     @property
     def model(self) -> str:

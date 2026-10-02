@@ -9,6 +9,7 @@ USAGE = f"""Jake {VERSION} - assistente personale locale
   python main.py --no-voice      solo HUD e barra comandi (Ctrl+Shift+J), senza microfono
   python main.py --cli           modalita' testo nel terminale
   python main.py --preflight     controlla cosa serve a Jake su questa macchina
+  python main.py --diagnostics   scrive data/jake_diagnostic_bundle.json da condividere dopo una prova
   python main.py --voice         push-to-talk nel terminale (tieni premuto F9)
   python main.py --voice --wake-word   voce continua nel terminale, senza HUD
   python main.py --tray          vecchia icona tray con pannello Tk (v1.1)
@@ -48,6 +49,12 @@ def _dispatch():
     if "--version" in sys.argv:
         print(f"Jake {VERSION} (protocollo {PROTOCOL_VERSION})")
         return
+    if "--diagnostics" in sys.argv:
+        # baseline pre-sperimentazione: bundle condivisibile della sessione recente (redatto, nessun audio/segreto)
+        from tools.diagnostic_bundle import main as diagnostics
+
+        diagnostics([])
+        sys.exit(0)
     if "--preflight" in sys.argv:
         # F0.6.2: controlla cosa serve a Jake su questa macchina, senza avviarlo
         from tools.preflight import main as preflight

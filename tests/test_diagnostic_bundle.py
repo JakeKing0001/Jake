@@ -97,5 +97,37 @@ class BuildBundleTests(unittest.TestCase):
         self.assertEqual(bundle["sessions"], sessions)
 
 
+class SharedBundlePrivacyTests(unittest.TestCase):
+    """Baseline pre-sperimentazione: il bundle si condivide, quindi niente credenziali, utente o testo."""
+
+    def test_config_credentials_are_redacted_but_their_presence_is_visible(self):
+        from tools.diagnostic_bundle import redact_config
+
+        redacted = redact_config({"admin_passphrase": "dpapi:1:abc", "home_assistant_token": "", "news_api_key": "k",
+                                  "ollama_model": "qwen2.5:7b", "hud_hotkey": "ctrl+shift+j"})
+        self.assertEqual(redacted, {"admin_passphrase": "<redacted>", "home_assistant_token": "",
+                                    "news_api_key": "<redacted>", "ollama_model": "qwen2.5:7b",
+                                    "hud_hotkey": "ctrl+shift+j"})
+
+    def test_ledger_user_is_redacted_and_summary_classifies_errors_and_timings(self):
+        actions = [
+            {"ts": 1, "kind": "state", "state": "LISTENING"},
+            {"ts": 2, "kind": "turn", "trace_id": "t1", "route": "exact", "intent": "GET_TIME", "outcome": "ok",
+             "timings_ms": {"routing": 2.0, "total": 40.0}},
+            {"ts": 3, "kind": "turn", "trace_id": "t2", "route": "llm", "outcome": "ok", "error": "model_timeout",
+             "timings_ms": {"routing": 6000.0, "total": 6100.0}, "memory_used": True},
+            {"ts": 4, "kind": "speech", "trace_id": "t2", "tts_ms": 900.0},
+            {"ts": 5, "kind": "turn", "private": True},
+        ]
+        bundle = build_bundle(actions, [{"intent": "OPEN_APP", "windows_user": "mario"}], [])
+        self.assertEqual(bundle["ledger"][0]["windows_user"], "<redacted>")
+        summary = bundle["summary"]
+        self.assertEqual((summary["turns"], summary["private_turns"], summary["memory_used_turns"]), (2, 1, 1))
+        self.assertEqual(summary["routes"], {"exact": 1, "llm": 1})
+        self.assertEqual([e["error"] for e in summary["errors"]], ["model_timeout"])
+        self.assertEqual(summary["timings_ms"]["tts"]["n"], 1)
+        self.assertEqual(summary["state_timeline"][0]["state"], "LISTENING")
+
+
 if __name__ == "__main__":
     unittest.main()

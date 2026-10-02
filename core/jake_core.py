@@ -52,6 +52,7 @@ from core.policy_engine import (
 )
 from core.proactive_gate import ProactiveGate
 from core.profiles import ProfileError, ProfileManager
+from core.request_context import add_turn_timing, begin_turn_trace, current_trace_id, end_turn_trace, note_turn
 from core.request_context import (
     current_action_id,
     current_command_source_intent,
@@ -200,6 +201,7 @@ class JakeCore(NotificationMixin, ModelRoutingMixin, CompanionMixin, EventPublis
         # parte solo se companion_server_enabled e' esplicitamente vero in config.json, stesso
         # pattern gia' usato da system_advisor_enabled.
         self.event_bus = EventBus()
+        self.event_bus.observer = self._record_state_event
         # F4.5.6: l'HUD vede modalita' di notifica e quante notifiche aspettano, non solo quelle mostrate
         self.notification_center.on_state_change = self._publish_notification_state
 
@@ -925,12 +927,27 @@ class JakeCore(NotificationMixin, ModelRoutingMixin, CompanionMixin, EventPublis
         # che sta per fermare, anche se questo turno solleva un'eccezione imprevista.
         with self._in_flight_lock:
             self._in_flight_answers += 1
+        # Baseline pre-sperimentazione: un trace_id per turno, riusato da azioni/agente/ledger e dalla riga del turno
+        trace_token = begin_turn_trace(new_trace_id())
+        started = time.monotonic()
+        outcome = "ok"
         try:
             return self._answer_inner(text, raw_text)
+        except TurnCancelled:
+            outcome = "cancelled"
+            raise
+        except Exception:
+            outcome = "crashed"
+            raise
         finally:
             with self._in_flight_lock:
                 self._in_flight_answers -= 1
                 self._last_answer_finished_at = time.time()
+            try:
+                self._log_turn_summary(started, outcome)
+            except Exception:
+                self.logger.exception("Errore scrivendo il riepilogo del turno")
+            end_turn_trace(trace_token)
 
     def _answer_inner(self, text: str, raw_text: str) -> str:
         text = self._resolve_pronouns(text)
@@ -957,6 +974,7 @@ class JakeCore(NotificationMixin, ModelRoutingMixin, CompanionMixin, EventPublis
             response = self._process(text)
             failed = model_health.failure()
             if failed is not None:
+                note_turn(error=f"model_{failed.kind}")
                 self.logger.warning("Modello locale non disponibile in questo turno: %s %s %s", failed.kind, failed.detail,
                                     failed.hint)
                 self._publish_hud_event(HudEvent(EventType.ERROR, {"detail": failed.detail or "modello non disponibile"}))
@@ -967,6 +985,7 @@ class JakeCore(NotificationMixin, ModelRoutingMixin, CompanionMixin, EventPublis
             # Nessuna eccezione imprevista deve mai far crashare Jake: viene registrata nel log
             # e riportata all'utente con un messaggio comprensibile invece di terminare il processo.
             self.logger.exception("Errore imprevisto elaborando: %s", text)
+            note_turn(error="unexpected")
             response = "Mi dispiace, si è verificato un errore imprevisto. L'ho registrato nel log."
             self._publish_hud_event(HudEvent(EventType.ERROR, {"detail": "errore imprevisto"}))
         finally:
@@ -1396,8 +1415,11 @@ class JakeCore(NotificationMixin, ModelRoutingMixin, CompanionMixin, EventPublis
             if agent_response != self.NO_PLAN:
                 return agent_response
 
+        routing_started = time.monotonic()
         command = self.router.detect_intent(text)
         self.last_route = self.router.last_route
+        add_turn_timing("routing", (time.monotonic() - routing_started) * 1000)
+        note_turn(route=self.last_route or "unknown", intent=command.intent)
 
         self.logger.info(
             "Instradamento: %s -> %s %s",
@@ -1580,8 +1602,9 @@ class JakeCore(NotificationMixin, ModelRoutingMixin, CompanionMixin, EventPublis
         intent = command.intent
         action_id = action_id or new_action_id()
 
-        trace_id = new_trace_id()
+        trace_id = current_trace_id() or new_trace_id()
         started = time.monotonic()
+        note_turn(intent=intent)
 
         scope = self._dialogue_scope()
 
