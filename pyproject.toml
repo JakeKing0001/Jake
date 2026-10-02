@@ -30,7 +30,16 @@ files = [
     "core/risk.py",
     "core/logger.py",
     "core/jake_core.py",
+    "core/notification_manager.py",
+    "core/config_router.py",
+    "core/companion_manager.py",
+    "core/event_bus_handler.py",
+    "core/agent_manager.py",
+    "core/memory_context_manager.py",
+    "core/lifecycle_manager.py",
     "core/skill_registry.py",
+    "core/skill_executor.py",
+    "core/plugin_manager.py",
     "core/router.py",
     "core/policy_engine.py",
     "core/plan_executor.py",
@@ -147,3 +156,12 @@ no_implicit_optional = true
 # rassegna): con "silent" mypy segue comunque gli import per inferire i tipi, ma segnala errori
 # solo nei file elencati sopra, cosi' la lista puo' crescere un modulo alla volta per davvero.
 follow_imports = "silent"
+
+# 3.2: metodi di JakeCore spostati in mixin. Lavorano sullo stato di JakeCore via self, che mypy non vede dal mixin:
+# solo per questi moduli si tace attr-defined; tutti gli altri controlli restano attivi, e JakeCore resta controllato.
+[[tool.mypy.overrides]]
+module = [
+    "core.notification_manager", "core.config_router", "core.companion_manager", "core.event_bus_handler",
+    "core.agent_manager", "core.memory_context_manager", "core.lifecycle_manager",
+]
+disable_error_code = ["attr-defined"]

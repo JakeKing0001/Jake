@@ -1,69 +1,68 @@
-import contextlib
-import copy
 import threading
 import time
-from pathlib import Path
 from datetime import time as datetime_time
+from pathlib import Path
 
-from core import fallbacks
-from core import intent_patterns
+from core import fallbacks, intent_patterns, orchestrator
 from core.action_contracts import ActionError, ActionProposal, validate_action_error, validate_action_proposal
 from core.action_ledger import ActionLedger, ActionReceipt, authorization_of, idempotency_key_of, new_action_id
 from core.agent import TaskAgent
-from core.agent_checkpoint import AgentCheckpoint, AgentCheckpointStore
+from core.agent_checkpoint import AgentCheckpointStore
+from core.agent_manager import AgentMixin
 from core.auth_gate import AuthGate
 from core.autonomy_budget import AutonomyBudget
 from core.command import Command
 from core.companion_guard import CompanionAudit, CompanionGuard, is_loopback_host
+from core.companion_manager import CompanionMixin
 from core.companion_server import DEFAULT_HOST as DEFAULT_COMPANION_HOST
 from core.companion_server import CompanionServer
 from core.companion_tls import build_server_context, current_fingerprint, ensure_certificate
+from core.config_router import ModelRoutingMixin
 from core.context_summarizer import ContextSummarizer
 from core.desktop_context import DesktopContextTracker
 from core.device_credential_store import DeviceCredentialStore
 from core.event_bus import EventBus
+from core.event_bus_handler import EventPublishingMixin
 from core.execution_safety import ActionExecution
 from core.hud_protocol import EventType, HudEvent
 from core.identity import current_windows_user
 from core.kill_switch import KillSwitch
-from core.turn_cancellation import TurnCancelled, current_turn_cancelled
 from core.learning_manager import LearningManager
+from core.lifecycle_manager import LifecycleMixin
 from core.logger import get_logger, log_action, new_trace_id
+from core.memory_context_manager import META_TURN_INTENTS, DialogueMixin
 from core.nlu import chitchat
 from core.nlu.examples import ExampleStore
-from core.nlu.index import lexical_similarity
 from core.nlu.normalizer import TranscriptNormalizer
 from core.nlu.retriever import CapabilityRetriever
-from core.nlu.transcript_repair import AMBIGUOUS, REPAIRED, UNCLEAR, Assessment, TranscriptRepair, first_exact_clause
+from core.nlu.transcript_repair import AMBIGUOUS, REPAIRED, UNCLEAR, first_exact_clause
 from core.notification_center import NotificationCenter
+from core.notification_manager import NotificationMixin
 from core.notification_policy import NotificationPolicy, QuietHours
-from core.proactive_gate import DELIVER, DUPLICATE, MUTED, ProactiveGate, notification_key
 from core.ollama_client import OllamaClient
-from core import orchestrator
 from core.orchestrator import JakeOrchestrator
 from core.pairing_service import PairingService
+from core.plugin_loader import load_plugins
 from core.policy_engine import (
-    POLICY_REASON_LOW_RECOGNITION_CONFIDENCE, POLICY_REASONS, PolicyDecision, PolicyEngine,
+    POLICY_REASON_LOW_RECOGNITION_CONFIDENCE,
+    POLICY_REASONS,
+    PolicyDecision,
+    PolicyEngine,
     strip_authorization_signals,
 )
-from core.plugin_loader import load_plugins
+from core.proactive_gate import ProactiveGate
 from core.profiles import ProfileError, ProfileManager
 from core.request_context import (
-    current_action_id, current_command_source_intent, current_conversation_channel, current_device_id, current_session_id,
-    current_speaker_profile_id, current_stt_confidence, reset_current_command_source_intent,
+    current_action_id,
+    current_command_source_intent,
+    current_device_id,
+    current_speaker_profile_id,
+    current_stt_confidence,
+    reset_current_command_source_intent,
     set_current_command_source_intent,
 )
-from core.taint import wrap_external_content
 from core.response_formatter import format_plan_outcome, format_skill_result
 from core.risk import RiskLevel, risk_of
-from core.voice.dialogue import (
-    DialogueContext,
-    ReplyKind,
-    classify_reply,
-    needs_confirmation,
-)
-from core.voice.dialogue_runtime import DialogueRuntime
-from core.voice.language_normalizer import resolve_ellipsis, resolve_ordinals
 from core.router import Router
 from core.scheduler import ReminderScheduler
 from core.schema_validation import validate_confirm_envelope
@@ -74,19 +73,35 @@ from core.skill_registry import SkillRegistry
 from core.skill_result import SkillResult
 from core.sync_crypto import Keyring
 from core.system_advisor import SystemAdvisor
+from core.taint import wrap_external_content
 from core.task_monitor import MonitorStore, TaskMonitorRegistry
 from core.task_notification_bridge import TaskNotificationBridge
 from core.trigger_scheduler import TriggerScheduler
+from core.turn_cancellation import TurnCancelled, current_turn_cancelled
 from core.undo_store import UndoStore, generate_undo_descriptor
+from core.voice.dialogue import (
+    DialogueContext,
+    ReplyKind,
+    classify_reply,
+    needs_confirmation,
+)
+from core.voice.dialogue_runtime import DialogueRuntime
+from core.voice.language_normalizer import resolve_ellipsis
 from skills.kill_switch import KillSwitchSkill, ResetKillSwitchSkill
 from skills.learn import CorrectLastSkill, ForgetLearnedSkill, LearnCommandSkill, ListLearnedSkill
 from skills.model_control import ListModelsSkill, SetModelSkill
-from skills.session_control import (
-    HelpSkill, PauseListeningSkill, PrivateModeSkill, RepeatLastSkill, ResumeInterruptedTaskSkill,
-    StartDictationSkill, StopDictationSkill, StopTalkingSkill,
-)
 from skills.notification_mode import GetNotificationModeSkill, SetNotificationModeSkill
 from skills.pairing import ApprovePairingSkill
+from skills.session_control import (
+    HelpSkill,
+    PauseListeningSkill,
+    PrivateModeSkill,
+    RepeatLastSkill,
+    ResumeInterruptedTaskSkill,
+    StartDictationSkill,
+    StopDictationSkill,
+    StopTalkingSkill,
+)
 from skills.skill_forge_skills import CreateSkillSkill, DeleteCreatedSkillSkill, ListCreatedSkillsSkill
 from skills.undo import UndoLastActionSkill
 
@@ -105,12 +120,9 @@ def _parse_quiet_hours(start: str | None, end: str | None) -> QuietHours | None:
         return None
 
 
-# Meta-comandi che eseguono DENTRO di se' il vero comando (correzione, "riprova"): il turno e l'ultimo scambio
-# restano quelli del comando vero, non del meta-comando che l'ha lanciato.
-META_TURN_INTENTS = frozenset({"CORRECT_LAST", "RETRY_LAST_ACTION"})
 
 
-class JakeCore:
+class JakeCore(NotificationMixin, ModelRoutingMixin, CompanionMixin, EventPublishingMixin, AgentMixin, DialogueMixin, LifecycleMixin):
     EXIT_SENTINEL = "l'utente vuole uscire"
     NO_PLAN = "Non so ancora fare questa cosa"
 
@@ -584,6 +596,7 @@ class JakeCore:
         self.skill_registry.register_skill("RETRY_LAST_ACTION", RetryLastActionSkill(self))
         # F6.6: "com'e' la mia giornata" - il brief con fonti dichiarate, dalle fonti locali reali
         from skills.daily_brief import DailyBriefSkill
+
         # F7.2.7: "ho perso il telefono" - revoca subito il dispositivo (anche lo stream aperto)
         from skills.device_access import RevokeDeviceSkill
         self.skill_registry.register_skill("REVOKE_DEVICE", RevokeDeviceSkill(self))
@@ -592,8 +605,12 @@ class JakeCore:
         # F6.3.4: controllo dell'utente sull'ultima notifica proattiva mostrata
         from skills.notification_feedback import ExplainLastNotificationSkill
         self.skill_registry.register_skill("EXPLAIN_LAST_NOTIFICATION", ExplainLastNotificationSkill(self))
-        from skills.notification_feedback import (LessNotificationsLikeThisSkill, MuteNotificationSkill,
-                                                  SnoozeNotificationSkill, UnmuteNotificationSkill)
+        from skills.notification_feedback import (
+            LessNotificationsLikeThisSkill,
+            MuteNotificationSkill,
+            SnoozeNotificationSkill,
+            UnmuteNotificationSkill,
+        )
         self.skill_registry.register_skill("LESS_NOTIFICATIONS_LIKE_THIS", LessNotificationsLikeThisSkill(self))
         self.skill_registry.register_skill("MUTE_NOTIFICATION", MuteNotificationSkill(self))
         self.skill_registry.register_skill("UNMUTE_NOTIFICATION", UnmuteNotificationSkill(self))
@@ -709,212 +726,20 @@ class JakeCore:
 
     # ---- callback di default -------------------------------------------------------------
 
-    # F6.2.7: perche' esiste una notifica, quando chi la produce non lo dice (vedi `source` di notify)
-    NOTIFICATION_SOURCES = {
-        "reminder": "e' un promemoria che hai chiesto tu",
-        "advisory": "e' un controllo automatico dello stato del PC (batteria, disco, attivita' dimenticate)",
-        "trigger": "e' il risultato di un'automazione che hai programmato",
-        "pairing": "un dispositivo nuovo ha chiesto di collegarsi a Jake",
-    }
 
-    def notify(self, kind: str, message: str, *, trace_id: str | None = None, critical: bool = False,
-               source: str | None = None) -> str | None:
-        """Punto unico da cui passa ogni notifica proattiva (promemoria/avviso/automazione)
-        prima di essere presentata, sia in CLI (qui sotto) sia in voce (vedi WakeWordSession,
-        core/voice/wake_word_session.py, che chiama questo stesso metodo): applica la modalita'
-        di notifica corrente (v4.3). Restituisce il messaggio da presentare subito, o None se
-        e' stato solo messo in coda per quando la modalita' tornera' a permetterlo.
 
-        F1.7.2: `trace_id` (opzionale - solo un'automazione ne ha gia' uno reale, vedi
-        `_default_on_trigger_fired`) collega l'evento HUD alle ricevute nel ledger che la stessa
-        esecuzione ha gia' prodotto - senza, una notifica "Ho eseguito X" non aveva NESSUN modo
-        di essere ricollegata a cosa e' successo davvero. Non propagato al percorso in coda
-        (`NotificationCenter._queued`/`set_mode()`): una notifica rimandata riemerge oggi solo
-        dentro il risultato testuale di `SET_NOTIFICATION_MODE`, mai come un secondo `HudEvent` -
-        non c'e' un evento successivo a cui riattaccare il trace_id, dichiarato apertamente."""
-        gated = self.notification_center.gate(kind, message)
-        if gated is not None and kind == "advisory" and not critical and not getattr(self, "ready_for_notifications", True):
-            self.notification_center.defer(kind, gated)
-            self.logger.info("Notifica %s rimandata: Jake non ha ancora finito di avviarsi", kind)
-            return None
-        gate = getattr(self, "proactive_gate", None)
-        if gated is not None and gate is not None:
-            # F6.1/F6.3: un duplicato si scarta; budget, quiet hours o conversazione in corso -> in coda
-            outcome, reason = gate.check(kind, gated, critical=critical)
-            if outcome != DELIVER:
-                if outcome not in (DUPLICATE, MUTED):
-                    self.notification_center.defer(kind, gated)
-                self.logger.info("Notifica %s %s: %s", kind, "rimandata" if outcome not in (DUPLICATE, MUTED) else "scartata", reason)
-                return None
-        if gated is not None:
-            # l'ultima notifica mostrata: a lei si riferiscono "meno notifiche cosi'", "non mostrarmelo piu'", "rimandala"
-            self.last_notification = {"kind": kind, "message": gated, "key": notification_key(kind, gated),
-                                      "source": source or self.NOTIFICATION_SOURCES.get(kind, ""), "at": time.time()}
-            responder = self._remote_responder()
-            payload = {"kind": kind, "text": gated}
-            if responder:
-                payload["responder"] = responder
-            self.event_bus.publish(HudEvent(EventType.NOTIFICATION, payload, trace_id=trace_id))
-            if responder:
-                # F7.4 (un solo active responder): con un telefono attivo la notifica la riceve lui dal bus; il PC non la
-                # dice ne' la stampa - niente doppia risposta, niente voce in una stanza magari vuota
-                self.logger.info("Notifica %s consegnata al dispositivo attivo %s, non al PC", kind, responder)
-                return None
-        return gated
 
-    def _remote_responder(self) -> str | None:
-        """Il dispositivo companion che risponde adesso al posto del PC, se c'e' (F7.4: DeviceRegistry col lease)."""
-        server = getattr(self, "companion_server", None)
-        if server is None or getattr(server, "running", False) is not True:
-            return None
-        try:
-            active = server.devices.active_device_id
-        except Exception:
-            self.logger.exception("Errore leggendo il dispositivo attivo")
-            return None
-        return active if isinstance(active, str) and active else None
 
-    # Dopo una risposta si aspetta questo tempo prima di un riepilogo: la voce potrebbe ancora parlare.
-    DIGEST_QUIET_AFTER_ANSWER_S = 60.0
-    DIGEST_MAX_ITEMS = 3
 
-    def _scheduler_tick(self) -> None:
-        """Un giro periodico dello scheduler: notifiche rimandate (F6.3) e scelta del modello (F8.4.4)."""
-        self.release_deferred_notifications()
-        try:
-            self._route_models_tick()
-        except Exception:
-            self.logger.exception("Errore ricontrollando la scelta del modello")
 
-    def release_deferred_notifications(self, prefix: str = "Mentre eri impegnato: ") -> str | None:
-        """F6.3: le notifiche rimandate dal gate (budget, quiet hours, conversazione) non restano in coda
-        per sempre. Appena le condizioni lo permettono escono come UN riepilogo attraverso il canale degli
-        avvisi (stampa in CLI, voce nella sessione vocale). Ritorna il riepilogo consegnato, o None."""
-        gate = getattr(self, "proactive_gate", None)
-        center = getattr(self, "notification_center", None)
-        if gate is None or center is None or center.suspended:
-            return None
-        if gate.conversation_active() or gate.in_quiet_hours() or not gate.budget_available():
-            return None  # il riepilogo stesso deve poter passare, o verrebbe rimandato di nuovo
-        if time.time() - getattr(self, "_last_answer_finished_at", 0.0) < self.DIGEST_QUIET_AFTER_ANSWER_S:
-            return None
-        items = center.take_deferred()
-        if not items:
-            return None
-        shown = [item["message"].rstrip(".") for item in items[: self.DIGEST_MAX_ITEMS]]
-        digest = prefix + "; ".join(shown) + "."
-        if len(items) > self.DIGEST_MAX_ITEMS:
-            digest += f" E altre {len(items) - self.DIGEST_MAX_ITEMS} notifiche."
-        callback = getattr(getattr(self, "system_advisor", None), "on_advisory", None) or self._default_on_advisory
-        callback(digest)
-        return digest
 
-    def present_notification(self, kind: str, message: str, source: str | None = None) -> str | None:
-        """F6.1: UNA strada per mostrare una notifica - gate (modalita', duplicati, budget, quiet hours,
-        preferenze) e poi un unico presentatore: stampa in CLI, voce nella sessione vocale (che la rimanda se
-        Jake sta parlando). Usata dalle fonti nuove (es. WATCH_PROCESS) invece di un callback per ciascuna."""
-        gated = self.notify(kind, message, source=source)
-        if gated is None:
-            return None
-        presenter = getattr(self, "notification_presenter", None)
-        if presenter is not None:
-            try:
-                presenter(kind, gated)
-            except Exception:
-                self.logger.exception("Errore presentando una notifica")
-        else:
-            print(f"\nJake > {gated}\nTu > ", end="", flush=True)
-        return gated
 
-    def _on_missed_reminders(self, reminders: list[dict]) -> None:
-        """F6.1.5: promemoria scaduti mentre Jake era spento (o il PC in sospensione): un solo riepilogo, con l'ora
-        a cui erano previsti, invece di una raffica di notifiche al riavvio."""
-        from datetime import datetime as _datetime
 
-        parts = []
-        for reminder in reminders:
-            try:
-                at = _datetime.fromisoformat(reminder["due_at"]).astimezone().strftime("%H:%M")
-            except (KeyError, ValueError):
-                at = ""
-            parts.append(f"{reminder.get('text') or 'timer'}" + (f" (alle {at})" if at else ""))
-        count = len(reminders)
-        head = "è scaduto un promemoria" if count == 1 else f"sono scaduti {count} promemoria"
-        self.present_notification("reminder", f"Mentre non ero attivo {head}: " + "; ".join(parts) + ".",
-                                  source="sono promemoria scaduti mentre Jake non era attivo")
 
-    @staticmethod
-    def reminder_source(reminder: dict) -> str:
-        what = "un timer" if reminder.get("kind") == "timer" else "un promemoria"
-        return f"e' {what} che hai impostato tu"
 
-    def _default_on_reminder_due(self, reminder: dict) -> None:
-        message = self.notify("reminder", self.format_due_reminder(reminder), source=self.reminder_source(reminder))
-        if message is None:
-            return
-        print(f"\nJake > {message}\nTu > ", end="", flush=True)
 
-    @staticmethod
-    def format_due_reminder(reminder: dict) -> str:
-        if reminder.get("kind") == "timer":
-            label = reminder.get("text") or "timer"
-            return "Il timer è scaduto!" if label == "timer" else f"Il timer per {label} è scaduto!"
-        return f"Promemoria: {reminder['text']}"
 
-    READY_FALLBACK_S = 120.0
-    READY_SETTLE_S = 4.0  # dopo "sono pronto": il tempo di un saluto prima degli avvisi rimasti in coda
 
-    def mark_ready(self) -> None:
-        """La sessione ha finito di avviarsi (microfono aperto, modello vocale caricato, prompt pronto)."""
-        if getattr(self, "ready_for_notifications", True):
-            return
-        self.ready_for_notifications = True
-        fallback = getattr(self, "_ready_fallback", None)
-        if fallback is not None:
-            fallback.cancel()
-        timer = threading.Timer(self.READY_SETTLE_S, self.release_deferred_notifications,
-                                kwargs={"prefix": "All'avvio ho notato: "})
-        timer.daemon = True
-        timer.start()
-
-    def _default_on_advisory(self, message: str) -> None:
-        gated = self.notify("advisory", message)
-        if gated is None:
-            return
-        print(f"\nJake > {gated}\nTu > ", end="", flush=True)
-
-    def _on_pairing_requested(self, challenge, requested_name: str, sync_public_key: dict | None) -> None:
-        """F7.1.2 (Companion Mobile MVP): il lato "conferma sul PC" del pairing - collegato da
-        core/companion_server.py::_handle_pairing_start subito dopo aver aperto la challenge.
-        Imposta una richiesta di conferma sul canale LOCALE (voce/CLI: current_device_id() e'
-        sempre None sul thread che gestisce /pairing/start, mai impostato per quell'endpoint -
-        vedi core/companion_guard.py::EndpointClass.PAIRING) con lo STESSO meccanismo gia' usato
-        per ogni altra azione ADMIN (_handle_confirmation/_finalize_pending_action): un "si'" (e
-        la passphrase, se ne e' stata configurata una - APPROVE_PAIRING e' classificato ADMIN in
-        core/risk.py) autorizza per davvero. Nessun dispositivo nasce da solo: se l'utente non e'
-        li' a leggere, la challenge scade da sola dopo 5 minuti (core/pairing_service.py) - questo
-        metodo non riprova ne' attende, e' chiamato una volta sola per richiesta.
-
-        "text" e' deliberatamente VUOTO (a differenza di ogni altra azione che la popola per
-        l'apprendimento, vedi _finalize_pending_action): imparare "pairing di X" come comando
-        insegnato riprodurrebbe un challenge_id ormai scaduto/consumato, inutile e fuorviante."""
-        label = (requested_name or "").strip() or "sconosciuto"
-        self.conversation_state.set_pending_action({
-            "intent": "APPROVE_PAIRING",
-            "parameters": {
-                "challenge_id": challenge.challenge_id, "requested_name": requested_name,
-                "sync_public_key": sync_public_key,
-            },
-            "reason": "confirmation_required",
-            "text": "",
-        })
-        message = self.notify(
-            "pairing",
-            f"Un nuovo dispositivo '{label}' chiede di collegarsi a Jake. Autorizzi il pairing? (scade tra 5 minuti)",
-        )
-        if message is None:
-            return
-        print(f"\nJake > {message}\nTu > ", end="", flush=True)
 
     def _default_on_trigger_fired(self, trigger: dict, outcome, total_steps: int) -> None:
         # F1.3.8: il percorso automatico (nessun turno di conversazione, nessun utente in
@@ -931,143 +756,13 @@ class JakeCore:
             return
         print(f"\nJake > {message}\nTu > ", end="", flush=True)
 
-    def _agent_memories(self, request: str) -> str:
-        """F5.5 (agente): gli stessi ricordi pertinenti delle risposte libere (core/memory_manager.py::relevant_for,
-        con budget di caratteri), con la loro fonte, per i compiti degli agenti."""
-        from core.response_formatter import memory_provenance
 
-        memory = getattr(self, "memory_manager", None)
-        if memory is None or not hasattr(memory, "relevant_for"):
-            return ""
-        return "\n".join(f"- {m['key']}: {m['value']}{memory_provenance(m)}" for m in memory.relevant_for(request))
 
-    def _agent_context(self) -> str:
-        parts = [part for part in (self.desktop_context.context_summary(), self.conversation_state.entities_summary()) if part]
-        return " | ".join(parts)
 
-    def _on_agent_step(self, step_index: int, description: str) -> None:
-        self.session_hooks.call("set_state", "working", description)
-        # F4.5.2: il passo in corso; l'esito e la durata arrivano da _on_agent_step_completed
-        self._running_step: tuple[int, str, float] | None = (step_index, description, time.monotonic())
-        self.event_bus.publish(HudEvent(EventType.AGENT_STEP, {"step": step_index, "description": description,
-                                                               "status": "running"}))
 
-    def _publish_plan_outcome_effect_proof_events(self, outcome) -> None:
-        """Estrae da un `PlanOutcome` (core/plan_executor.py) le stesse due liste che
-        `_publish_effect_proof_events` sotto si aspetta, condivisa dai due chiamanti che
-        ricevono un PlanOutcome (`_try_plan`, `_default_on_trigger_fired`) invece di ripetere la
-        stessa estrazione due volte. `outcome.trace_id` (F1.7.2) e' gia' lo stesso che correla
-        ogni passo del piano nel ledger - propagato qui (F4.1.1) cosi' l'evento sul bus porta la
-        stessa correlazione, non solo la ricevuta scritta su disco."""
-        verified_steps = [
-            (step_outcome.step.intent, step_outcome.verified)
-            for step_outcome in (*outcome.completed, *([outcome.stopped_step] if outcome.stopped_step else []))
-            if step_outcome.verified is not None
-        ]
-        self._publish_effect_proof_events(
-            verified_steps, [step_outcome.step.intent for step_outcome in outcome.rolled_back],
-            trace_id=outcome.trace_id,
-        )
 
-    def _publish_effect_proof_events(
-        self, verified_steps: list[tuple[str, str]], rolled_back_intents: list[str], *, trace_id: str | None = None,
-    ) -> None:
-        """F1.3.8 ("esporre undo e prove a HUD/companion tramite eventi versionati"): prima di
-        questo, un rollback (core/execution_safety.py::rollback_effect) o una verifica
-        indipendente dell'effetto (F1.3.3, verify_effect) erano visibili SOLO nel ledger
-        (data/jake_ledger.jsonl) - un HUD o un'app companion non aveva modo di saperlo in tempo
-        reale, solo rileggendo il ledger dopo. Chiamato sia dal percorso agente
-        (core/agent.py::AgentOutcome) sia dal percorso piano (core/plan_executor.py::
-        PlanOutcome), che espongono la stessa informazione con forme leggermente diverse -
-        l'estrazione resta al chiamante, qui solo la pubblicazione condivisa. Nessun evento
-        quando non c'e' nulla da riportare (nessun intent verificabile in questo turno, nessun
-        rollback) - non aggiunge rumore al caso comune."""
-        for intent in rolled_back_intents:
-            self.event_bus.publish(HudEvent(EventType.UNDO, {"intent": intent}, trace_id=trace_id))
-        for intent, verified in verified_steps:
-            self.event_bus.publish(HudEvent(EventType.VERIFICATION, {"intent": intent, "verified": verified}, trace_id=trace_id))
 
-    def _on_agent_step_completed(self, outcome) -> None:
-        """F1.8.4 ("checkpoint... da cui riprendere"): collegato a `on_step_completed` di
-        ciascuno dei tre TaskAgent (general/coding/research, vedi __init__) - chiamato dopo OGNI
-        passo che l'agente completa (riuscito o fallito), sovrascrive il checkpoint sul disco con
-        il progresso aggiornato. `outcome.trace_id`/`.request`/`.agent_name` sono popolati da
-        `TaskAgent.run()` stesso (F1.8.4) - `agent_name` conta DAVVERO qui (non solo "general"
-        come nella prima fetta): un checkpoint salvato con l'agente sbagliato riprenderebbe il
-        compito con la persona/gli strumenti fissi sbagliati (vedi core/orchestrator.py). Solo
-        intent/parametri/esito di ogni passo vengono salvati (mai l'intero `SkillResult` - i dati
-        grezzi di una skill potrebbero contenere contenuto esterno/sensibile che non ha senso
-        duplicare su un secondo file, il ledger e' gia' la fonte di verita' per quello)."""
-        running, self._running_step = getattr(self, "_running_step", None), None
-        if running is not None and outcome.steps:
-            # F4.5.2: piano e passi live - esito e durata del passo appena finito (un passo senza parametri non
-            # e' mai partito: non ha un "running" da chiudere)
-            step_index, description, started = running
-            last = outcome.steps[-1]
-            self.event_bus.publish(HudEvent(EventType.AGENT_STEP, {
-                "step": step_index, "description": description,
-                "status": "done" if last.result is not None and last.result.success else "failed",
-                "duration_ms": round((time.monotonic() - started) * 1000),
-            }))
-        if outcome.trace_id is None or outcome.request is None or outcome.agent_name is None:
-            return
-        checkpoint = AgentCheckpoint(
-            trace_id=outcome.trace_id, agent_name=outcome.agent_name, request=outcome.request,
-            completed_steps=[
-                {
-                    "intent": step.intent, "parameters": step.parameters,
-                    "success": bool(step.result and step.result.success),
-                }
-                for step in outcome.steps
-            ],
-        )
-        try:
-            self.agent_checkpoints.save(checkpoint)
-        except OSError:
-            self.logger.exception("Errore salvando il checkpoint del compito in corso")
 
-        # F6.7 (adozione, stesso hook della riga sopra): segue il compito in silenzio (F6.7.1,
-        # nessun evento a ogni passo) e salva lo snapshot dei compiti ancora in corso - un
-        # monitor RUNNING sopravvive a un'interruzione anomala (F6.7.7), senza alcuna ripresa
-        # automatica (vedi il docstring di core/task_notification_bridge.py). Un errore qui
-        # (bridge o disco) non deve MAI fermare il compito in corso, stesso principio del
-        # checkpoint sopra.
-        try:
-            self.task_bridge.track_progress(outcome, session_id=current_session_id(), device_id=current_device_id())
-            self.task_monitor_store.save(self.task_monitor)
-        except Exception:
-            self.logger.exception("Errore aggiornando il task monitor del compito in corso")
-
-    def _publish_task_event(self, action) -> None:
-        """F6.3/F6.7: avvolge OGNI chiamata al ponte task monitor/notifiche usata da _run_agent (decisione
-        richiesta, fine del compito) - un errore qui (bridge, notification_policy, disco) non deve MAI
-        impedire a Jake di rispondere, stesso principio gia' applicato a _on_agent_step_completed sopra."""
-        try:
-            action()
-            self.task_monitor_store.save(self.task_monitor)
-        except Exception:
-            self.logger.exception("Errore nel ponte task monitor / notifiche")
-
-    def _on_skill_installed(self, draft) -> None:
-        # F1: always_confirm_intents/require_auth_intents (vedi sopra) sono popolati una sola
-        # volta in __init__, leggendo self.skill_registry.skills COM'ERA in quel momento - una
-        # skill installata piu' tardi dalla Skill Forge non ci finiva mai dentro. risk_of()
-        # ricade su ADMIN per un intent non censito in core/risk.py (vedi il modulo), quindi
-        # needs_central_confirmation()/needs_central_auth() sarebbero comunque vere per lei -
-        # ma senza questo aggiornamento _resolve_and_execute non lo saprebbe mai ed eseguirebbe
-        # la skill appena creata (codice scritto da un modello, non rivisto da un umano) SENZA
-        # alcuna conferma ne' autenticazione al primo utilizzo: esattamente il tipo di buco che
-        # il censimento del rischio dovrebbe rendere impossibile. Scoperto rileggendo il ciclo
-        # di vita di una skill forgiata, non da un test che falliva. Stesso metodo usato per il
-        # censimento iniziale in __init__ (core/policy_engine.py, PolicyEngine.sync_with_registry):
-        # un solo posto invece di due copie della stessa logica che potrebbero divergere.
-        self.policy_engine.register_intent(draft.intent)
-        self.retriever.refresh()
-        for example in draft.examples:
-            try:
-                self.learning.teach(self.normalizer.normalize(example), draft.intent, {}, source="forge")
-            except Exception:
-                self.logger.exception("Errore registrando gli esempi della skill %s", draft.intent)
 
     # ---- API pubblica --------------------------------------------------------------------
 
@@ -1133,36 +828,7 @@ class JakeCore:
     MODEL_ONLY_INTENTS = frozenset({"ASK_QUESTION", "CHITCHAT", "UNKNOWN"})
     UNCLEAR_REPLY = "Non ho capito bene, puoi ripetere?"
 
-    def _transcript_repair(self) -> TranscriptRepair:
-        """Lessico dagli esempi affidabili (ricostruito solo quando gli esempi cambiano) + la conversazione recente."""
-        examples = self.example_store.all()
-        cached = getattr(self, "_repair_cache", None)
-        if cached is None or cached[0] != len(examples):
-            cached = (len(examples), TranscriptRepair.from_examples(examples))
-            self._repair_cache = cached
-        repair = copy.copy(cached[1])
-        repair.lexicon = set(cached[1].lexicon)
-        for turn in self.conversation_state.get_short_term_history():
-            repair.add_context(turn.get("text", ""))
-        return repair
 
-    def _assess_voice_turn(self, text: str) -> Assessment | None:
-        """Solo per i turni vocali con una confidenza reale (testo scritto e provider senza confidenza: mai). La corsia
-        deterministica (esempi esatti: "che ore sono", date, calcoli) passa sempre: la' non si interpreta nulla.
-        Altrimenti trascrizione corrotta (chiedere), recuperabile (correggere con prudenza) o affidabile: vedi
-        core/nlu/transcript_repair.py."""
-        confidence = current_stt_confidence()
-        if confidence is None or self.example_store.find_exact(text) is not None:
-            return None
-        assessment = self._transcript_repair().assess(
-            text, confidence, self.example_store.find_exact, lambda intent: risk_of(intent) == RiskLevel.READ_ONLY)
-        if assessment.verdict == REPAIRED:
-            self.logger.info("Trascrizione corretta (confidenza %.2f, %s): '%s' -> '%s'", confidence,
-                             assessment.reason, text, assessment.text)
-        elif assessment.verdict in (UNCLEAR, AMBIGUOUS):
-            self.logger.info("Trascrizione incerta (%s): chiedo di ripetere invece di interpretare '%s'",
-                             assessment.reason, text)
-        return assessment
 
     def _run_in_current_profile(self, callback):
         """
@@ -1247,64 +913,10 @@ class JakeCore:
                 self._in_flight_answers -= 1
                 self._last_answer_finished_at = time.time()
 
-    CONTINUITY_TURNS = 6
 
-    def _pc_takes_the_session(self) -> None:
-        if current_conversation_channel() is not None:
-            return   # un telefono che parla resta il suo canale: nessuna elezione (voce, CLI e HUD sono il PC)
-        server = getattr(self, "companion_server", None)
-        if server is None or not getattr(server, "running", False):
-            return
-        try:
-            server.pc_takes_the_session()
-        except Exception:
-            self.logger.exception("Errore riportando la sessione al PC")
 
-    def _continuity_snapshot(self) -> dict:
-        """F7.4.8: gli ultimi scambi della conversazione (unica per tutti i dispositivi) per chi prende la sessione dal
-        PC: sul telefono si riparte da dove si era, senza rispiegare. In modalita' privata nulla: lo scambio privato non
-        esce verso companion e HUD (v4.9.1)."""
-        if self.private_mode:
-            return {"recent": []}
-        turns = self.conversation_state.get_short_term_history()[-self.CONTINUITY_TURNS:]
-        return {"recent": [{"role": turn.get("role"), "text": turn.get("text", "")} for turn in turns]}
 
-    def _turn_device_label(self) -> str | None:
-        """Il nome del dispositivo companion da cui arriva il turno (dal registro, altrimenti l'id); None per il PC."""
-        channel = current_conversation_channel()
-        if channel is None:
-            return None
-        server = getattr(self, "companion_server", None)
-        try:
-            for device in server.devices.list_devices() if server is not None else []:
-                if isinstance(device, dict) and device.get("id") == channel and device.get("name"):
-                    return str(device["name"])
-        except Exception:
-            self.logger.exception("Errore leggendo il nome del dispositivo")
-        return channel
 
-    def _publish_hud_event(self, event: HudEvent) -> None:
-        """Punto unico per lo stato del turno verso HUD/companion. Lo stato e' un effetto collaterale del runtime, non
-        parte della logica: senza bus (core parziali, avvio, fallback) si salta, e un iscritto che fallisce non rompe
-        il turno. La privacy resta del bus (EventBus.redactor, F4.5.7) e di answer(), che decide QUANDO il contenuto
-        esce. Contratto del turno:
-        - THINKING {} all'inizio, EXECUTING {} quando parte una skill autorizzata, THINKING {"status"} se il modello
-          tarda, ERROR {"detail"} generico: solo stato, mai il testo della richiesta o della risposta;
-        - USER_MESSAGE poi JAKE_MESSAGE solo a turno concluso, non annullato e non privato (sono il contenuto: l'HUD
-          conosce gia' la richiesta, l'ha scritta lui o l'ha vista nel TRANSCRIPT della voce);
-        - senza JAKE_MESSAGE (privato, risposta vuota, uscita) un IDLE {} chiude lo stato;
-        - turno annullato: dopo l'annullamento il core non pubblica nulla; lo stato finale e' di chi l'ha annullato
-          (la sessione vocale, l'unica che puo' farlo: _finish_turn torna a IDLE solo se nessuno stato piu' nuovo
-          ha preso il posto del turno)."""
-        publish = getattr(getattr(self, "event_bus", None), "publish", None)
-        if publish is None:
-            return
-        try:
-            publish(event)
-        except Exception:
-            logger = getattr(self, "logger", None)
-            if logger is not None:
-                logger.exception("Errore pubblicando lo stato %s verso l'HUD", event.type.value)
 
     def _answer_counted(self, text: str, raw_text: str) -> str:
         # F1.8.4 ("drain limitato"): conta questa chiamata come "in corso" da qui a return -
@@ -1431,233 +1043,18 @@ class JakeCore:
         values = ", ".join(f"{k}: {v}" for k, v in parameters.items() if v not in (None, "", False))
         return f"{description[0].lower() + description[1:]}" + (f" ({values})" if values else "")
 
-    def _get_dialogue_runtime(self) -> DialogueRuntime:
-        """Keep dialogue state available on cores constructed without __init__."""
-        runtime = getattr(self, "dialogue_runtime", None)
-        if runtime is None:
-            runtime = DialogueRuntime()
-            self.dialogue_runtime = runtime
-        return runtime
-
-    def _dialogue_scope(self) -> str:
-        """
-        Scope conversazionale per F2.6.
-
-        Un profilo vocale riconosciuto ha priorità sul dispositivo.
-        """
-        profile_id = current_speaker_profile_id()
-
-        if profile_id:
-            return f"profile:{profile_id}"
-
-        # l'HUD nativo e' il PC: stesso scope della voce locale (una correzione scritta nell'HUD vale per l'ultimo
-        # comando detto a voce)
-        device_id = current_conversation_channel()
-
-        if device_id:
-            return f"device:{device_id}"
-
-        return "local"
 
 
-    def _set_dialogue_outcome(
-        self,
-        *,
-        action_id: str,
-        text: str,
-        command: Command,
-        status: str,
-        reversible: bool = False,
-        scope: str | None = None,
-    ) -> None:
-        # CORRECT_LAST è un meta-comando.
-        # Il vero turno corretto viene registrato separatamente.
-        if command.intent in META_TURN_INTENTS:
-            return
-
-        effective_scope = scope or self._dialogue_scope()
-
-        existing = self._get_dialogue_runtime().turn(action_id)
-
-        if existing is None:
-            self._get_dialogue_runtime().record_turn(
-                scope=effective_scope,
-                action_id=action_id,
-                heard=text,
-                intent=command.intent,
-                parameters=command.parameters or {},
-                risk=risk_of(command.intent),
-                status=status,
-                reversible=reversible,
-            )
-            return
-
-        self._get_dialogue_runtime().update_turn(
-            action_id,
-            status=status,
-            reversible=reversible,
-        )
 
 
-    def _cancel_dialogue_action(self, action: dict) -> None:
-        action_id = action.get("action_id")
-
-        if not action_id:
-            return
-
-        self._get_dialogue_runtime().update_turn(
-            action_id,
-            status="cancelled",
-        )
-
-        self._finish_correction_learning(
-            action_id,
-            verified=False,
-        )
 
 
-    def _finish_correction_learning(
-        self,
-        action_id: str,
-        *,
-        verified: bool,
-    ) -> None:
-        source_turn, learnable = (
-            self._get_dialogue_runtime().finish_correction_learning(
-                action_id,
-                verified=verified,
-            )
-        )
-
-        if source_turn is None or learnable is None:
-            return
-
-        previous_command = Command(
-            source_turn.intent,
-            dict(source_turn.parameters),
-        )
-
-        corrected_command = Command(
-            learnable.intent,
-            dict(learnable.parameters),
-        )
-
-        self.learning.correct(
-            learnable.heard,
-            previous_command,
-            corrected_command,
-        )
-
-        self.logger.info(
-            "Correzione verificata: %r -> %s %s",
-            learnable.heard,
-            corrected_command.intent,
-            corrected_command.parameters,
-        )
 
 
-    def _execute_corrected_command(
-        self,
-        source_action_id: str,
-        corrected_text: str,
-        command: Command,
-    ) -> str:
-        corrected_action_id = new_action_id()
-
-        source_turn = self._get_dialogue_runtime().turn(source_action_id)
-
-        # Conserva la protezione già esistente:
-        # una frase totalmente diversa non deve insegnare una falsa associazione.
-        related = False
-
-        if source_turn is not None:
-            related = (
-                lexical_similarity(
-                    source_turn.heard,
-                    corrected_text,
-                ) >= 0.25
-                or source_turn.intent
-                in ("UNKNOWN", "CHITCHAT", "ASK_QUESTION")
-            )
-
-        if related:
-            self._get_dialogue_runtime().begin_correction_learning(
-                source_action_id=source_action_id,
-                execution_action_id=corrected_action_id,
-                corrected_text=corrected_text,
-                intent=command.intent,
-                parameters=command.parameters or {},
-            )
-
-        return self._execute_command(
-            corrected_text,
-            command,
-            learn=False,
-            action_id=corrected_action_id,
-        )
 
 
-    def _what_did_you_hear(self) -> str:
-        turn = self._get_dialogue_runtime().last_turn(
-            self._dialogue_scope()
-        )
 
-        if turn is None:
-            return "Non ho ancora un comando precedente da riportarti."
 
-        return f'Ho sentito: "{turn.heard}".'
-
-    def _try_ordinal_reference(self, text: str) -> str | None:
-        """
-        F2.6.1:
-        'apri il primo e il terzo' sui risultati dell'ultima ricerca.
-        """
-        first_word = (
-            text.split(maxsplit=1)[0]
-            if text.strip()
-            else ""
-        )
-
-        if first_word not in {
-            "apri",
-            "aprimi",
-            "mostra",
-            "mostrami",
-        }:
-            return None
-
-        results = self.conversation_state.get_last_search_results()
-
-        if not results:
-            return None
-
-        indexes = resolve_ordinals(
-            text,
-            len(results),
-        )
-
-        if indexes is None:
-            return None
-
-        responses: list[str] = []
-
-        for index in indexes:
-            response = self._execute_command(
-                text,
-                Command(
-                    "OPEN_SEARCH_RESULT",
-                    {"index": index + 1},
-                ),
-                learn=False,
-            )
-
-            responses.append(response)
-
-        return "\n".join(
-            response
-            for response in responses
-            if response
-        )
 
     def apply_correction(self, request: str) -> str:
         """
@@ -2017,8 +1414,6 @@ class JakeCore:
             command,
         )
 
-    def _resolve_pronouns(self, text: str) -> str:
-        return intent_patterns.resolve_pronouns(text, self.conversation_state.get_entities())
 
     def _authorize_command(self, resolved: Command) -> tuple[Command, SkillResult | None, str]:
         """Gate condiviso da comando diretto, agente e ripresa dopo il consenso (F1.2.5).
@@ -2168,146 +1563,8 @@ class JakeCore:
                     )
         return ActionExecution(resolved, result, policy_reason=policy_reason)
 
-    def _run_agent(self, request: str, remember_text: str | None = None) -> str:
-        """Richiesta composta o non riconosciuta: l'orchestratore (v5.0, core/orchestrator.py)
-        sceglie l'agente generico o uno specializzato (coding/ricerca), che pensa un passo alla
-        volta e guarda i risultati veri prima di decidere il successivo (core/agent.py), invece
-        di eseguire un piano fisso scritto in anticipo. Se il modello non e' raggiungibile o non
-        conclude nulla, ripiega sul vecchio planner a piano fisso; se fallisce anche quello, NO_PLAN."""
-        remember_text = remember_text if remember_text is not None else request
-        trace_id = new_trace_id()
-        try:
-            outcome = self.orchestrator.run(
-                request, history=self.conversation_state.get_short_term_history(),
-                trace_id=trace_id, private=self.private_mode,
-            )
-        except Exception:
-            self.logger.exception("Errore nell'agente per: %s", request)
-            outcome = None
 
-        if outcome is None or (outcome.error is not None and not outcome.did_something):
-            return self._try_plan(request)
 
-        self._publish_effect_proof_events(
-            [(step.intent, step.verified) for step in outcome.steps if step.verified is not None],
-            [step.intent for step in outcome.rolled_back],
-            trace_id=trace_id,
-        )
-
-        if outcome.pending_confirmation is not None:
-            reason = "auth_required" if outcome.pending_confirmation.get("kind") == "AUTH_REQUIRED" else "confirmation_required"
-            # F1.5.4 ("mostrare all'utente la sorgente che ha suggerito un'azione sensibile"):
-            # None quando il passo precedente non ha restituito contenuto esterno (il caso
-            # comune, vedi core/agent.py::TaskAgent.run()) - non aggiunto alla busta di conferma
-            # ne' al messaggio in quel caso, per non introdurre rumore su ogni conferma ordinaria.
-            external_source = outcome.pending_confirmation.get("suggested_by_external_content")
-            self.conversation_state.set_pending_action({
-                "intent": outcome.pending_confirmation["intent"],
-                "parameters": outcome.pending_confirmation["parameters"],
-                "reason": reason,
-                "text": remember_text,
-                # F1: ripreso da _finalize_pending_action per far comparire la ricevuta
-                # dell'esecuzione vera, dopo la conferma, correlata alla stessa richiesta invece
-                # di un trace_id scollegato - vedi TaskAgent._log_step per il trace_id dei passi
-                # dell'agente che hanno gia' portato a questa richiesta di conferma.
-                "trace_id": trace_id,
-                "policy_reason": outcome.pending_confirmation.get("policy_reason"),
-                "suggested_by_external_content": external_source,
-            })
-            message = outcome.pending_confirmation["message"]
-            if external_source is not None:
-                message = f"{message} (Attenzione: suggerito da contenuto esterno - {external_source})"
-            # F6.3/F6.7: l'evento IMPORTANTE che questo incremento collega - una conferma/
-            # autenticazione richiesta a meta' di un compito composto. Il ponte valuta urgenza e
-            # contesto (rischio dell'intent, modalita' corrente, quiet hours) e pubblica su
-            # event_bus task/session/device id, le azioni GIA' eseguite e questa stessa decisione
-            # - la sua Decision non cambia il messaggio testuale (gia' deciso sopra), solo se/come
-            # Jake segnala l'evento su un canale esterno (HUD/companion).
-            pending = outcome.pending_confirmation
-            self._publish_task_event(lambda: self.task_bridge.decision_required(
-                outcome, message=message, intent=pending["intent"], parameters=pending["parameters"],
-                policy_reason=pending.get("policy_reason"),
-                session_id=current_session_id(), device_id=current_device_id(),
-            ))
-            self._remember_exchange(remember_text, Command("AGENT", {"request": request}), message)
-            return message
-
-        if outcome.question is not None:
-            # F1.8.4 ("checkpoint"): il compito NON e' interrotto anomalamente - l'agente ha
-            # chiesto qualcosa e _continue_agent() (sotto) ripartira' da capo con la risposta,
-            # costruendo un checkpoint nuovo se necessario. Il checkpoint di QUESTO tentativo non
-            # serve piu'.
-            self.agent_checkpoints.clear()
-            self.conversation_state.set_pending_action({
-                "intent": "AGENT_CONTINUE",
-                "parameters": {"request": request, "question": outcome.question},
-                "reason": "agent_question",
-                "text": remember_text,
-                # F6.3/F6.7: cosi' _continue_agent puo' chiudere il compito che il ponte stava
-                # seguendo quando l'utente risponde (vedi resolve_decision li' sotto) - nessun
-                # altro codice esistente leggeva "trace_id" per un'azione "agent_question" prima
-                # di questo incremento, aggiungerlo non cambia alcun comportamento gia' esistente.
-                "trace_id": outcome.trace_id,
-            })
-            # F6.3/F6.7: anche una domanda di chiarimento e' una decisione richiesta all'utente a
-            # meta' di un compito (intent=None: nessun rischio da un'azione specifica da
-            # valutare, mai critica per default) - stessa valutazione/stesso evento contestuale
-            # della conferma sopra, non un percorso separato.
-            self._publish_task_event(lambda: self.task_bridge.decision_required(
-                outcome, message=outcome.question, session_id=current_session_id(), device_id=current_device_id(),
-            ))
-            self._remember_exchange(remember_text, Command("AGENT", {"request": request}), outcome.question)
-            return outcome.question
-
-        # F1.8.4 ("checkpoint"): il compito e' CONCLUSO (risposta finale o nessun piano) - un
-        # checkpoint serve solo per un'interruzione ANOMALA a meta', mai per il normale "e'
-        # finito" (altrimenti una futura RESUME_INTERRUPTED_TASK crederebbe che ci sia ancora
-        # qualcosa da riprendere quando in realta' il compito precedente e' semplicemente finito).
-        self.agent_checkpoints.clear()
-        response = outcome.final_answer or self.NO_PLAN
-        # F6.7.2: chiude il compito (nessun effetto se il ponte non lo aveva mai aperto - un
-        # turno che non ha eseguito alcun passo dell'agente, il caso comune di una risposta
-        # breve). `outcome.error` distingue un compito finito con un errore interno da uno
-        # concluso normalmente, senza alcuna nuova logica: il campo esiste gia'.
-        self._publish_task_event(lambda: self.task_bridge.finish_task(
-            outcome, message=response, success=outcome.error is None,
-            session_id=current_session_id(), device_id=current_device_id(),
-        ))
-        self._remember_exchange(remember_text, Command("AGENT", {"request": request}), response)
-        return response
-
-    def _continue_agent(self, action: dict, answer_text: str) -> str:
-        """L'utente ha risposto alla domanda di chiarimento posta dall'agente: si riprende il
-        compito con la richiesta originale piu' la risposta appena data.
-
-        F6.3/F6.7: il compito che il ponte stava seguendo (decision_required per la domanda
-        stessa, vedi _run_agent) si chiude QUI - la risposta lo risolve, anche se il compito
-        VERO continua sotto un trace_id nuovo (_run_agent ne genera sempre uno fresco): sono due
-        esecuzioni distinte per il ledger/il checkpoint (mai state la stessa), lo sono anche per
-        il monitor."""
-        self._publish_task_event(lambda: self.task_bridge.resolve_decision(action.get("trace_id"), message=answer_text, success=True))
-        request = action["parameters"]["request"]
-        question = action["parameters"].get("question", "")
-        combined = f"{request}\n(L'utente ha risposto alla domanda \"{question}\" con: {answer_text})"
-        return self._run_agent(combined, remember_text=answer_text)
-
-    def _resume_interrupted_task(self, checkpoint: AgentCheckpoint) -> str:
-        """F1.8.4 ("checkpoint... da cui riprendere"): non serve modificare TaskAgent.run() per
-        "riprendere davvero" un compito - il modello vede gia' cosa e' stato fatto (riassunto
-        dentro la richiesta stessa) e decide da solo il prossimo passo, esattamente come farebbe
-        per qualunque altra richiesta. Se `_run_agent()` sceglie di nuovo l'agente "general", un
-        checkpoint NUOVO sostituisce naturalmente questo (stesso meccanismo di on_step_completed,
-        vedi __init__) - nessuna pulizia esplicita necessaria qui."""
-        steps_summary = "; ".join(
-            f"{step['intent']}({step['parameters']}) -> {'riuscito' if step['success'] else 'fallito'}"
-            for step in checkpoint.completed_steps
-        ) or "nessun passo ancora completato"
-        resume_request = (
-            f"{checkpoint.request}\n\n(Questo compito era gia' iniziato e poi interrotto prima di "
-            f"finire, senza colpa dell'utente. Passi gia' completati: {steps_summary}. Continua da "
-            f"dove eri rimasto, senza ripetere questi passi se non e' necessario.)"
-        )
-        return self._run_agent(resume_request, remember_text="riprendi il compito interrotto")
 
     def _match_meta_command(self, text: str) -> Command | None:
         return intent_patterns.match_meta_command(text, has_last_exchange=self.last_exchange is not None)
@@ -3197,198 +2454,19 @@ class JakeCore:
 
         return response
 
-    def _remember_exchange(
-        self,
-        text: str,
-        command: Command,
-        response: str,
-        *,
-        action_id: str | None = None,
-    ) -> None:
-        if action_id is None:
-            # Anche UNKNOWN/chitchat/agente devono sostituire l'ultimo turno:
-            # correggere una frase non capita non deve correggere un'azione piu' vecchia.
-            action_id = new_action_id()
-            self._set_dialogue_outcome(
-                action_id=action_id, text=text, command=command,
-                status="failed" if command.intent == "UNKNOWN" else "executed",
-            )
-        self.last_exchange = {
-            "text": text,
-            "command": command,
-            "response": response,
-            "action_id": action_id,
-        }
 
-    def _skill_package_root(self, config):
-        from pathlib import Path
 
-        configured = config.get("skill_packages_dir") if config is not None else None
-        return Path(configured) if configured else Path(__file__).resolve().parent.parent / "data" / "skill_packages"
 
-    def _load_skill_packages(self, config) -> list[str]:
-        """Carica ogni skill installata dal catalogo firmato e registra il rischio DICHIARATO dal suo manifest
-        verificato. Un pacchetto alterato va in quarantena e non si carica; nessun errore blocca l'avvio."""
-        from core.skill_package import SkillStore, TrustStore
 
-        root = self._skill_package_root(config)
-        try:
-            self.skill_store = SkillStore(root, TrustStore(root / "trust.json"))
-        except Exception:
-            self.logger.exception("Catalogo delle skill installate non leggibile: nessun pacchetto caricato")
-            return []
-        loaded = []
-        for skill_id in self.skill_store.skills():
-            if self._activate_skill_package(skill_id):
-                loaded.append(skill_id)
-        return loaded
 
-    def _activate_skill_package(self, skill_id: str) -> bool:
-        from core.risk import register_package_risk
 
-        try:
-            result = self.skill_store.load(self.skill_registry, skill_id, self.logger)
-        except Exception:
-            self.logger.exception("Pacchetto %s non caricato", skill_id)
-            return False
-        if not getattr(result, "ok", False) or result.manifest is None:
-            self.logger.warning("Pacchetto %s rifiutato: %s", skill_id, getattr(result, "errors", []))
-            return False
-        for spec in result.manifest.intents:
-            register_package_risk(spec.intent, spec.risk)
-        return True
 
-    def _publish_pending_confirmation(self, action: dict | None) -> None:
-        """F4.4.1/F4.5.3: stato "waiting" e permission card dell'HUD. Solo metadati dell'azione in
-        sospeso (intent, motivo, rischio, fonte esterna), mai i suoi parametri."""
-        if action is None:
-            payload: dict = {"pending": False}
-        else:
-            intent = str(action.get("intent") or "")
-            try:
-                risk = risk_of(intent).value if intent else ""
-            except Exception:
-                risk = ""
-            payload = {
-                "pending": True, "intent": intent, "reason": str(action.get("reason") or "confirmation_required"),
-                "risk": risk, "external_source": bool(action.get("suggested_by_external_content")),
-            }
-        trace_id = action.get("trace_id") if isinstance(action, dict) else None
-        self.event_bus.publish(HudEvent(EventType.CONFIRMATION, payload,
-                                        trace_id=trace_id if isinstance(trace_id, str) else None))
 
-    def _publish_action_receipt(self, receipt) -> None:
-        """F4.5/F4.6.1: ogni ricevuta del ledger ha una rappresentazione nell'HUD (action center)."""
-        self._observe_forge_trial(receipt)
-        result = str(getattr(receipt, "result", "") or "")
-        requested_by = str(getattr(receipt, "requested_by", "") or "")
-        self.event_bus.publish(HudEvent(EventType.ACTION_RECEIPT, {
-            "action_id": receipt.action_id, "intent": receipt.intent,
-            "requested_by": requested_by.split(":", 1)[0],
-            "outcome": "success" if result == "success" else "failed",
-            "error_category": str(getattr(receipt, "error_category", "") or ""),
-            "verified": str(getattr(receipt, "verified", "") or ""),
-        }, trace_id=getattr(receipt, "trace_id", None)))
 
-    def _observe_forge_trial(self, receipt) -> None:
-        """F8.3.7: le skill forgiate in prova vedono ogni loro esecuzione reale; a prova finita (superata o skill
-        disattivata) l'utente lo sa dal canale degli avvisi (voce nella sessione vocale, CLI altrimenti)."""
-        forge = getattr(self, "skill_forge", None)
-        if forge is None or getattr(forge, "skill_store", None) is None:
-            return
-        try:
-            message = forge.observe_execution(str(receipt.intent or ""), str(getattr(receipt, "result", "") or ""),
-                                              str(getattr(receipt, "error_category", "") or ""))
-        except Exception:
-            self.logger.exception("Errore nel periodo di prova di una skill forgiata")
-            return
-        if message:
-            callback = getattr(getattr(self, "system_advisor", None), "on_advisory", None) or self._default_on_advisory
-            try:
-                callback(message)
-            except Exception:
-                self.logger.exception("Errore annunciando la fine della prova di una skill forgiata")
 
-    def _publish_undo_available(self, descriptor) -> None:
-        """F4.6.3: scadenza dell'undo visibile nell'HUD (mai i parametri compensatori)."""
-        self.event_bus.publish(HudEvent(EventType.UNDO_AVAILABLE, {
-            "action_id": descriptor.action_id, "compensating_intent": descriptor.compensating_intent,
-            "expires_at": float(descriptor.expires_at),
-        }))
 
-    def _start_native_hud(self, config: dict, companion_host: str, companion_tls_context) -> None:
-        from pathlib import Path
 
-        from core.native_hud import DEFAULT_EXE, NativeHudSupervisor
 
-        if not bool(config.get("companion_server_enabled", False)):
-            self.logger.warning("hud_native_enabled richiede companion_server_enabled: HUD nativo non avviato")
-            return
-        if companion_tls_context is not None or not is_loopback_host(companion_host):
-            self.logger.warning("HUD nativo non avviato: supporta solo il companion su loopback senza TLS")
-            return
-        port = int(getattr(self.companion_server, "port", 0) or config.get("companion_server_port", 8765) or 8765)
-        exe = Path(config.get("hud_native_path") or DEFAULT_EXE)
-        credentials = self._provision_native_hud_credential()
-        self.native_hud = NativeHudSupervisor(exe, f"http://127.0.0.1:{port}", credentials=credentials,
-                                              on_gave_up=self._native_hud_gave_up)
-        if not self.native_hud.start():
-            self.native_hud = None
-            self._revoke_native_hud_credential()
-
-    def _publish_notification_state(self, mode, pending: int) -> None:
-        from core.notification_center import MODE_LABELS_IT
-
-        self.event_bus.publish(HudEvent(EventType.NOTIFICATION_STATE, {
-            "mode": mode.value, "mode_label": MODE_LABELS_IT.get(mode, mode.value), "pending": pending}))
-
-    def _timed_notification_mode_ended(self, previous, released: list[str]) -> None:
-        """F6.5.6: "non disturbare per 30 minuti" e' finito da solo. Lo si dice, con cio' che e' stato trattenuto,
-        dalla stessa strada delle altre notifiche (e' una richiesta esplicita dell'utente: puntuale come un promemoria)."""
-        from core.notification_center import MODE_LABELS_IT
-
-        message = f"Tempo scaduto: torno alla modalità {MODE_LABELS_IT.get(previous, previous.value)}."
-        if released:
-            message += " Nel frattempo: " + " ".join(released)
-        self.present_notification("reminder", message, source="avevi scelto una modalita' di notifica a tempo")
-
-    def _native_hud_gave_up(self, crashes: int) -> None:
-        """F4.8: l'HUD nativo continua a chiudersi e non viene piu' riavviato. Prima lo diceva solo il log: l'HUD
-        spariva senza spiegazione e la sua credenziale restava valida. Ora la credenziale si revoca (nessuno la usa
-        piu') e l'utente lo sa dalla stessa strada delle altre notifiche."""
-        self._revoke_native_hud_credential()
-        self.present_notification(
-            "advisory", f"L'HUD si è chiuso in modo anomalo {crashes} volte in pochi minuti: lo lascio spento. "
-                        "Jake continua a funzionare; i dettagli sono nel log.")
-
-    def _provision_native_hud_credential(self) -> dict | None:
-        """L'HUD nativo e' un client companion come un altro: si autentica con una credenziale
-        per-dispositivo (F7), mai con un'eccezione per localhost. Ruotata a ogni avvio del core,
-        capability minime (vedere lo stato e mandare comandi; niente approval, file o audio),
-        revocata allo shutdown. Il token esiste in chiaro solo qui e nel processo dell'HUD."""
-        from core.companion_guard import EndpointClass
-        from core.native_hud import NATIVE_HUD_CREDENTIAL_TTL_S, NATIVE_HUD_DEVICE_ID
-
-        store = getattr(self.companion_server, "credential_store", None)
-        if store is None:
-            return None  # nessuna autenticazione per-dispositivo in uso: non serve una credenziale
-        store.register_device(NATIVE_HUD_DEVICE_ID, "HUD nativo (questo PC)")
-        credential = store.issue_credential(NATIVE_HUD_DEVICE_ID, ttl_seconds=NATIVE_HUD_CREDENTIAL_TTL_S)
-        self.companion_server.guard.set_capabilities(
-            NATIVE_HUD_DEVICE_ID, {EndpointClass.READ_ONLY, EndpointClass.COMMAND},
-        )
-        return {"device_id": NATIVE_HUD_DEVICE_ID, "token": credential.token}
-
-    def _revoke_native_hud_credential(self) -> None:
-        from core.native_hud import NATIVE_HUD_DEVICE_ID
-
-        store = getattr(getattr(self, "companion_server", None), "credential_store", None)
-        if store is None:
-            return
-        try:
-            store.revoke(NATIVE_HUD_DEVICE_ID)
-        except Exception:
-            self.logger.exception("Errore revocando la credenziale dell'HUD nativo")
 
     @property
     def private_mode(self) -> bool:
@@ -3410,71 +2488,10 @@ class JakeCore:
         if changed:
             bus.publish(HudEvent(EventType.PRIVACY_MODE, {"enabled": enabled}))
 
-    @property
-    def model_router(self):
-        from core.model_router import build_local_router
 
-        if getattr(self, "_model_router", None) is None:
-            config = dict(getattr(getattr(self, "config", None), "data", {}) or {})
-            config["ollama_model"] = self._configured_model
-            for key in ("ollama_light_model", "ollama_code_model", "ollama_model_vram_mb"):
-                if getattr(self, "config", None) is not None and self.config.get(key):
-                    config[key] = self.config.get(key)
-            self._model_router = build_local_router(config, self.ollama.list_models)
-        return self._model_router
 
-    def _record_model_call(self, model: str, success: bool, latency_ms: float) -> None:
-        from core.model_router import Capability, EvalRecord
 
-        self.model_router.evals.record(EvalRecord(Capability.REASON, model, success, latency_ms))
 
-    @property
-    def model(self) -> str:
-        """Il modello per ragionare ADESSO (agenti, planner, ricevute): scelto dal ModelRouter, con il modello
-        configurato come ripiego se il router non trova nulla (Ollama spento). Mai un'eccezione qui."""
-        from core.model_router import Capability, choose_model
-
-        configured = getattr(self, "_configured_model", "qwen2.5:7b")
-        if getattr(self, "ollama", None) is None:
-            return configured
-        try:
-            chosen = choose_model(self.model_router, Capability.REASON, configured)
-        except Exception:
-            return configured
-        self._release_previous_model(chosen)
-        return chosen
-
-    @model.setter
-    def model(self, value: str) -> None:
-        """SET_MODEL: il modello configurato cambia e il router riparte dal nuovo catalogo; la nuova scelta arriva
-        subito anche alle skill (vedi _propagate_model)."""
-        self._configured_model = value
-        self._model_router = None
-        if getattr(self, "ollama", None) is not None:
-            _ = self.model
-
-    def _release_previous_model(self, chosen: str) -> None:
-        """F8.4.4: quando il router passa a un altro modello (es. quello leggero a batteria bassa), il precedente
-        viene scaricato in background: resterebbe in VRAM/RAM per tutto il keep_alive (ore) senza servire a nulla,
-        proprio quando l'energia conta. Mai bloccante, mai un'eccezione: nel peggiore dei casi resta caricato."""
-        previous = getattr(self, "_last_routed_model", None)
-        self._last_routed_model = chosen
-        if previous is None or previous == chosen:
-            return
-        self._propagate_model(previous, chosen)
-
-        logger = getattr(self, "logger", None)
-
-        def unload():
-            try:
-                self.ollama.unload(previous)
-                if logger is not None:
-                    logger.info("Modello %s scaricato: il router ora usa %s", previous, chosen)
-            except Exception:
-                if logger is not None:
-                    logger.warning("Non sono riuscito a scaricare il modello %s", previous)
-
-        threading.Thread(target=unload, name="jake-model-unload", daemon=True).start()
 
     def _wire_pomodoro_focus(self) -> None:
         """F6 focus assistant: START/STOP_POMODORO silenziano e ripristinano le notifiche con la stessa modalita' a tempo
@@ -3490,184 +2507,16 @@ class JakeCore:
             if hasattr(skills.get(intent), "focus"):
                 skills[intent].focus = focus
 
-    def _propagate_model(self, previous: str, chosen: str) -> None:
-        """F8.4 (router ovunque) + bug reale: ASK_QUESTION, traduzioni, riassunti, correzione testi e gli altri
-        componenti ricevono il nome del modello alla costruzione e chiamano Ollama direttamente con `self.model`. Ne'
-        la scelta del router (modello leggero a batteria) ne' SET_MODEL li raggiungevano: le risposte libere restavano
-        sul vecchio modello fino al riavvio. Qui ogni componente che usava il modello precedente passa a quello nuovo;
-        chi ha un modello proprio diverso (visione, codice, embedding) non viene toccato."""
-        registry = getattr(self, "skill_registry", None)
-        skills = getattr(registry, "skills", {}) or {}
-        components = list(skills.values()) + [
-            getattr(getattr(self, "router", None), "primary_provider", None),
-            getattr(self, "planner_provider", None), getattr(self, "context_summarizer", None),
-        ]
-        for component in components:
-            if component is not None and getattr(component, "model", None) == previous:
-                try:
-                    component.model = chosen
-                except AttributeError:
-                    pass
 
-    def _route_models_tick(self) -> None:
-        """Ricontrolla la scelta del router (batteria, modelli installati): se cambia, propaga e scarica il vecchio."""
-        _ = self.model
 
     # ---- sospensione della proattivita' ----------------------------------------------------
 
-    @contextlib.contextmanager
-    def proactivity_suspended(self, reason: str):
-        """Per la durata del blocco Jake non prende iniziative: promemoria, automazioni e avvisi di
-        sistema/housekeeping si fermano, e qualunque notifica arrivi comunque va in coda. Solo a
-        runtime (nessuna configurazione persistente toccata); all'uscita ripartono SOLO i componenti
-        che erano attivi (un kill switch resta rispettato) e si restituiscono i messaggi in coda ora
-        ammessi. Gate hardware F2 (26/09/2026): notifiche partite durante la misura della voce."""
-        components = [("scheduler", self.scheduler), ("trigger_scheduler", self.trigger_scheduler),
-                      ("system_advisor", self.system_advisor)]
-        paused = []
-        self.notification_center.suspend()
-        self.logger.info("Proattivita' sospesa: %s", reason)
-        try:
-            for name, component in components:
-                thread = getattr(component, "_thread", None)
-                if thread is not None and thread.is_alive():
-                    try:
-                        component.stop()
-                        paused.append((name, component))
-                    except Exception:
-                        self.logger.exception("Errore sospendendo %s", name)
-            released: list[str] = []
-            yield released
-        finally:
-            for name, component in paused:
-                if name != "system_advisor" and self.kill_switch.is_active():
-                    continue  # il kill switch li ha voluti fermi: non si riaccendono da soli
-                try:
-                    component.start()
-                except Exception:
-                    self.logger.exception("Errore riprendendo %s", name)
-            released.extend(self.notification_center.resume())
-            self.logger.info("Proattivita' ripresa: %s", reason)
 
     # ---- kill switch -----------------------------------------------------------------------
 
-    def activate_kill_switch(self) -> None:
-        """Ferma subito agenti e automazioni (F1, vedi core/kill_switch.py): il flag condiviso
-        interrompe qualunque agente/piano PRIMA del passo successivo (mai a meta' di uno gia' in
-        corso, vedi il modulo), e ReminderScheduler/TriggerScheduler vengono fermati per davvero
-        (i loro thread terminano, non solo "smettono di fare qualcosa") - non ripartono da soli:
-        serve reset_kill_switch() per farli ripartire."""
-        self.kill_switch.activate()
-        for scheduler in (self.scheduler, self.trigger_scheduler):
-            try:
-                scheduler.stop()
-            except Exception:
-                self.logger.exception("Errore fermando uno scheduler durante il kill switch")
 
-    def reset_kill_switch(self) -> None:
-        """Disattiva il kill switch e fa ripartire gli scheduler fermati da activate_kill_
-        switch() - non riparte da sola: e' una scelta esplicita, cosi' come lo e' stata fermarli.
-
-        F6: azzera anche il budget di autonomia (core/autonomy_budget.py) - se un'automazione
-        impazzita aveva esaurito il budget prima o durante lo stop di emergenza, un "riprendi"
-        esplicito dell'utente deve dare un budget pieno, non farla ripartire gia' bloccata senza
-        che l'utente lo sappia."""
-        self.kill_switch.reset()
-        self.autonomy_budget.reset()
-        for scheduler in (self.scheduler, self.trigger_scheduler):
-            try:
-                scheduler.start()
-            except Exception:
-                self.logger.exception("Errore riavviando uno scheduler dopo il kill switch")
 
     # ---- chiusura ------------------------------------------------------------------------
 
-    _DRAIN_TIMEOUT_SECONDS = 5.0
-    _DRAIN_POLL_SECONDS = 0.05
 
-    def _drain_in_flight_answers(self) -> None:
-        """F1.8.4 ("gestire shutdown con drain limitato"): aspetta, entro un tetto, che ogni
-        answer() gia' in corso su un ALTRO thread (tipicamente una richiesta companion - core/
-        companion_server.py e' un ThreadingHTTPServer con un thread per richiesta; il loop voce
-        non si sovrappone mai con la propria chiamata a shutdown(), che arriva sempre DOPO che il
-        proprio answer() e' gia' tornato) finisca, PRIMA di fermare gli altri componenti/salvare
-        le cache che quella chiamata potrebbe ancora star usando - altrimenti una richiesta a
-        meta' potrebbe scrivere una cache DOPO il salvataggio "finale" qui sotto, o usare un
-        componente gia' fermato. `companion_server.stop()` e' gia' stato chiamato PRIMA di questo
-        (smette di accettare richieste NUOVE): qui si aspetta solo quelle GIA' in corso. Non
-        blocca per sempre: un tetto di 5s (poi procede comunque, con un avviso nel log) - lo
-        stesso principio "chiedi gentilmente, poi procedi" gia' usato per gli scheduler in
-        background (F1.8.5) e per il worker sandboxato (F1.6)."""
-        deadline = time.monotonic() + self._DRAIN_TIMEOUT_SECONDS
-        while time.monotonic() < deadline:
-            with self._in_flight_lock:
-                if self._in_flight_answers == 0:
-                    return
-            time.sleep(self._DRAIN_POLL_SECONDS)
-        with self._in_flight_lock:
-            remaining = self._in_flight_answers
-        if remaining > 0:
-            self.logger.warning(
-                "Shutdown: %d chiamata/e ad answer() ancora in corso dopo %.1fs, procedo comunque",
-                remaining, self._DRAIN_TIMEOUT_SECONDS,
-            )
 
-    def shutdown(self) -> None:
-        # F1.8.4 ("gestire shutdown con drain limitato, checkpoint e release dei device"): buco
-        # reale - un `except Exception: pass` silenzioso per ognuno di questi passi significava
-        # che un component.stop() fallito (una connessione companion non chiusa, un hook
-        # desktop_context non rimosso...) o un salvataggio di cache fallito (disco pieno,
-        # permessi) sparivano senza lasciare TRACCIA in nessun log: un utente che si accorge che
-        # NEST "dimentica" la cache dopo un riavvio, o che un socket resta occupato, non avrebbe
-        # avuto modo di scoprire perche'. Ogni passo di chiusura logga ora l'eccezione con il
-        # nome del componente prima di continuare con gli altri (non ferma lo shutdown: un
-        # componente che non si chiude bene non deve impedire agli altri di provarci).
-        #
-        # F4.8.2: l'HUD nativo si chiude prima del server a cui e' collegato (niente riconnessioni a vuoto).
-        fallback = getattr(self, "_ready_fallback", None)
-        if fallback is not None:
-            fallback.cancel()
-        native_hud = getattr(self, "native_hud", None)
-        if native_hud is not None:
-            try:
-                native_hud.stop()
-            except Exception:
-                self.logger.exception("Errore chiudendo l'HUD nativo durante lo shutdown")
-            self._revoke_native_hud_credential()
-        # companion_server e' fermato PER PRIMO E DA SOLO (non nel loop sotto): smette di
-        # accettare richieste NUOVE prima che _drain_in_flight_answers() aspetti quelle GIA' in
-        # corso - l'ordine conta, altrimenti una richiesta potrebbe iniziare proprio mentre si
-        # aspetta che le altre finiscano, vanificando il senso del drain.
-        try:
-            self.companion_server.stop()
-        except Exception:
-            self.logger.exception("Errore chiudendo companion_server durante lo shutdown")
-        self._drain_in_flight_answers()
-        for name, component in (
-            ("scheduler", self.scheduler), ("trigger_scheduler", self.trigger_scheduler),
-            ("system_advisor", self.system_advisor), ("desktop_context", self.desktop_context),
-        ):
-            try:
-                component.stop()
-            except Exception:
-                self.logger.exception("Errore chiudendo %s durante lo shutdown", name)
-        try:
-            self.retriever.example_index.save_cache()
-            self.retriever.capability_index.save_cache()
-        except Exception:
-            self.logger.exception("Errore salvando la cache degli indici semantici durante lo shutdown")
-        # F1.6: nessun worker da fermare se nessuna skill forgiata e' mai stata invocata in
-        # questa sessione (stop_sandbox_worker() e' un no-op in quel caso) - se invece il worker
-        # sandboxato e' vivo, deve essere chiuso esplicitamente qui: non e' un processo figlio
-        # che Windows terminerebbe da solo alla chiusura di Jake.
-        try:
-            self.skill_registry.stop_sandbox_worker()
-        except Exception:
-            self.logger.exception("Errore fermando il worker sandboxato per le skill forgiate durante lo shutdown")
-        # F1.4.6 (fase 6): chiude la connessione SQLite del registro credenziali - stesso
-        # principio degli altri passi sopra, un fallimento qui non deve impedire al resto dello
-        # shutdown di proseguire.
-        try:
-            self.device_credential_store.close()
-        except Exception:
-            self.logger.exception("Errore chiudendo device_credential_store durante lo shutdown")
