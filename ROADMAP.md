@@ -1970,7 +1970,9 @@ skill regressiva viene fermata dagli eval o ripristinata automaticamente.
 - ✅ **F0.6.1 deciso e F0.6.3/F0.6.4/F0.6.6/F0.6.7 sbloccati** (02/10/2026): installer = `setup.ps1` portable per
   utente; nuova disinstallazione che conserva i dati personali salvo `-PurgeData`; `tools/updater.py` aggiorna
   solo in fast-forward, rifiuta con modifiche locali, reinstalla le dipendenze solo se il lock cambia, verifica
-  compilazione e import del nucleo e altrimenti torna al commit precedente. Firma degli aggiornamenti ancora ⬜.
+  compilazione e import del nucleo e altrimenti torna al commit precedente. F0.6.5 collegato lo stesso giorno: con
+  `release_public_key` (ancora di fiducia locale, fuori da Git) la stable si installa solo da un `releases/stable.json`
+  firmato Ed25519 col commit esatto (stessa firma di `core/release_eval.py`); un manifest manomesso e' rifiutato.
 
 - ✅ **F6 focus assistant collegato al percorso reale** (02/10/2026): `START_POMODORO` mette la modalita' studio per
   la stessa durata (notifiche non urgenti in coda) e alla fine torna da sola la modalita' di prima con il riepilogo;

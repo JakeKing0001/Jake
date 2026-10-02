@@ -17,7 +17,9 @@ fix di integrità goal/step per F6.4.3/F6.4.4.
    certificato. Rilanciarlo ripara (F0.6.3); `setup.ps1 -Uninstall` conserva `data\` e `config\settings.json`,
    `-PurgeData` li cancella solo su richiesta esplicita (F0.6.4); `python -m tools.updater` aggiorna in
    fast-forward su canale `stable` (ultimo tag v*) o `dev`, con controllo di salute e rollback (F0.6.6/F0.6.7).
-   Restano aperti: firma verificata degli aggiornamenti (F0.6.5) e un pacchetto MSIX se servira' la distribuzione.
+   F0.6.5: con `release_public_key` nelle impostazioni locali la versione stabile si installa solo se
+   `releases/stable.json` (manifest Ed25519 con il commit) e' firmato da quella chiave. Resta all'utente generare
+   la chiave (`--keygen`) e firmare la prima release (`--sign vX`); un pacchetto MSIX solo se servira'.
 4. Sviluppo, gap rimasti in ordine: F4 (rifinitura HUD/glass, orb e stati, GPU/batteria, secondo monitor e testo),
    F5 (separazione entita'/episodi/procedure, retrieval, controlli privacy), F6 (milestone e next action dei goal,
    suggerimenti, focus/meeting), F7 (coda offline, trasporto di sync, continuita' residua, remote wipe), F8
