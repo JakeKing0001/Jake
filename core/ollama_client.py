@@ -45,6 +45,48 @@ def _failure_error(failure) -> OllamaError:
     return OllamaTimeout(message) if failure.kind == "timeout" else OllamaUnavailable(message)
 
 
+PRIMARY_KEEP_ALIVE = "30m"
+SECONDARY_KEEP_ALIVE = "2m"
+LOW_MEMORY_PRIMARY_KEEP_ALIVE = "5m"
+LOW_MEMORY_SECONDARY_KEEP_ALIVE = "0"
+
+_settings_cache: dict | None = None
+
+
+def _settings() -> dict:
+    """Le poche chiavi che servono alla politica di memoria, lette una volta sola."""
+    global _settings_cache
+    if _settings_cache is None:
+        try:
+            from core.config import Config
+
+            config = Config()
+            _settings_cache = {
+                "primary": config.get("ollama_model", "qwen2.5:7b"),
+                "low_memory": str(config.get("low_memory", False)).lower() in {"1", "true", "yes", "on"},
+                "primary_keep_alive": config.get("ollama_keep_alive"),
+                "secondary_keep_alive": config.get("ollama_secondary_keep_alive"),
+            }
+        except Exception:
+            _settings_cache = {"primary": "qwen2.5:7b", "low_memory": False}
+    return _settings_cache
+
+
+def keep_alive_for(model: str | None) -> str:
+    """Quanto a lungo Ollama tiene in RAM/VRAM un modello dopo una richiesta.
+
+    Solo il modello di conversazione principale resta caldo a lungo (la prossima frase vocale
+    non deve aspettare 15-20 s di ricaricamento). Visione, coding ed embedding vengono usati di
+    rado: tenerli 30 minuti voleva dire fino a ~15 GB occupati per una sola domanda sullo
+    schermo. `low_memory` accorcia entrambi; `ollama_keep_alive` e
+    `ollama_secondary_keep_alive` in settings.json sovrascrivono i valori."""
+    settings = _settings()
+    low = settings.get("low_memory", False)
+    if model and model == settings.get("primary"):
+        return settings.get("primary_keep_alive") or (LOW_MEMORY_PRIMARY_KEEP_ALIVE if low else PRIMARY_KEEP_ALIVE)
+    return settings.get("secondary_keep_alive") or (LOW_MEMORY_SECONDARY_KEEP_ALIVE if low else SECONDARY_KEEP_ALIVE)
+
+
 class OllamaClient:
     """Wrapper minimale su /api/chat, /api/embed e /api/tags. Nessuna dipendenza esterna.
 
@@ -57,7 +99,7 @@ class OllamaClient:
     # classificatore a 8192 e il resto al default (2048) ogni alternanza costava un reload.
     DEFAULT_NUM_CTX = 8192
 
-    def __init__(self, base_url: str | None = None, timeout: float = 30, keep_alive: str = "30m", num_ctx: int | None = None):
+    def __init__(self, base_url: str | None = None, timeout: float = 30, keep_alive: str | None = None, num_ctx: int | None = None):
         self.base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
         self.timeout = timeout
         self.keep_alive = keep_alive
@@ -127,7 +169,7 @@ class OllamaClient:
             "model": model,
             "stream": False,
             "messages": messages,
-            "keep_alive": self.keep_alive,
+            "keep_alive": self.keep_alive or keep_alive_for(model),
         }
         if format is not None:
             payload["format"] = format
@@ -163,7 +205,7 @@ class OllamaClient:
             return []
         try:
             payload = self._post(
-                "/api/embed", {"model": model, "input": list(inputs), "keep_alive": self.keep_alive},
+                "/api/embed", {"model": model, "input": list(inputs), "keep_alive": self.keep_alive or keep_alive_for(model)},
                 timeout=timeout,
             )
         except OllamaError:

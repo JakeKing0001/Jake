@@ -1941,6 +1941,19 @@ un progresso sulla fase nel suo complesso.
 **Criterio di uscita:** una skill nuova non può ottenere permessi non dichiarati; una release o
 skill regressiva viene fermata dagli eval o ripristinata automaticamente.
 
+### Cosa e' stato fatto in questa sessione
+
+- ✅ **Uso di RAM/VRAM ridotto con una politica unica di `keep_alive`** (`core/ollama_client.py::
+  keep_alive_for`, 02/10/2026). Nove chiamanti (visione, pianificatore, riassunti, domande,
+  traduzioni, ricerca, appunti, testo) chiedevano a Ollama di tenere il proprio modello caldo 30
+  minuti, e il router dei modelli non scarica mai da solo un modello inattivo: una sola domanda
+  sullo schermo lasciava `qwen2.5vl:7b` accanto a `qwen2.5:7b` (e `qwen2.5-coder:7b` dopo la
+  fucina) fino a ~15 GB per mezz'ora. Ora solo `ollama_model` resta caldo 30 minuti; visione,
+  coding ed embedding vengono scaricati dopo 2 minuti. `low_memory: true` scende a 5 minuti / 0,
+  e `ollama_keep_alive` / `ollama_secondary_keep_alive` permettono valori propri. Misurato anche
+  il lato Python: l'import del nucleo pesa ~43 MB, quindi la RAM vera era in Ollama. Resta da
+  fare: il resto del model router di F8 (scelta per latenza/qualita'/privacy/batteria).
+
 ## Nuove funzionalità “Jarvis”, non concordate prima
 
 Queste proposte ampliano il sogno; non vanno tutte costruite subito.

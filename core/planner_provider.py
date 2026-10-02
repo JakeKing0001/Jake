@@ -4,6 +4,7 @@ from urllib import error, request
 from core.planner import Plan, PlanStep
 from core.ollama_client import DEFAULT_BASE_URL
 from core.network import read_url
+from core.ollama_client import keep_alive_for
 
 
 class PlannerProvider:
@@ -135,7 +136,7 @@ class PlannerProvider:
         payload = {
             "model": self.model,
             "stream": False,
-            "keep_alive": "30m",
+            "keep_alive": keep_alive_for(self.model),
             "format": self._build_output_schema(),
             # Temperatura 0: i parametri (percorsi, nomi) vanno riprodotti esattamente,
             # non generati creativamente.
