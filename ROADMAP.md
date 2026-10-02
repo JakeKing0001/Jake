@@ -1963,6 +1963,11 @@ skill regressiva viene fermata dagli eval o ripristinata automaticamente.
   `sensitivity`, quindi un ricordo "sensibile" sarebbe tornato cifrato o avrebbe sollevato un errore. Ora decide
   il marcatore DPAPI sul valore; test di regressione in `tests/test_memory_sensitivity_controls.py`.
 
+- ✅ **F0.6.1 deciso e F0.6.3/F0.6.4/F0.6.6/F0.6.7 sbloccati** (02/10/2026): installer = `setup.ps1` portable per
+  utente; nuova disinstallazione che conserva i dati personali salvo `-PurgeData`; `tools/updater.py` aggiorna
+  solo in fast-forward, rifiuta con modifiche locali, reinstalla le dipendenze solo se il lock cambia, verifica
+  compilazione e import del nucleo e altrimenti torna al commit precedente. Firma degli aggiornamenti ancora ⬜.
+
 ## Nuove funzionalità “Jarvis”, non concordate prima
 
 Queste proposte ampliano il sogno; non vanno tutte costruite subito.
