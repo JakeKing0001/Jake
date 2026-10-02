@@ -1954,6 +1954,15 @@ skill regressiva viene fermata dagli eval o ripristinata automaticamente.
   il lato Python: l'import del nucleo pesa ~43 MB, quindi la RAM vera era in Ollama. Resta da
   fare: il resto del model router di F8 (scelta per latenza/qualita'/privacy/batteria).
 
+- ✅ **Server RVC chiuso dopo inattivita'** (`core/voice/rvc_server_manager.py`, 02/10/2026): il processo con
+  torch e il modello del timbro (1-2 GB) restava acceso per tutta la sessione. Dopo `rvc_idle_shutdown_minutes`
+  (20, 5 con `low_memory`, 0 = mai) senza parlare si chiude; la frase successiva esce subito con la voce di base
+  e il timbro riparte in background, senza i 20-30 s di ricarica nel turno.
+- ✅ **Bug reale corretto nei ricordi sensibili** (`core/memory_manager.py::_decrypt_if_needed`): chiamava
+  `SecretsVault.is_protected`, che non esiste (mypy rosso su master), e `recall()` non seleziona la colonna
+  `sensitivity`, quindi un ricordo "sensibile" sarebbe tornato cifrato o avrebbe sollevato un errore. Ora decide
+  il marcatore DPAPI sul valore; test di regressione in `tests/test_memory_sensitivity_controls.py`.
+
 ## Nuove funzionalità “Jarvis”, non concordate prima
 
 Queste proposte ampliano il sogno; non vanno tutte costruite subito.

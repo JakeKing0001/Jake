@@ -162,5 +162,29 @@ class PrewarmTests(unittest.TestCase):
         ensure.assert_called_once()
 
 
+class IdleShutdownTests(unittest.TestCase):
+    def _running(self, idle):
+        now = [0.0]
+        manager = RvcServerManager("jake_the_dog", idle_shutdown_seconds=idle, clock=lambda: now[0])
+        manager._process = mock.MagicMock()
+        manager._process.poll.return_value = None
+        return manager, now
+
+    def test_own_server_is_stopped_only_after_the_idle_window(self):
+        manager, now = self._running(600)
+        process = manager._process
+        now[0] = 599
+        self.assertFalse(manager.stop_if_idle())
+        now[0] = 600
+        self.assertTrue(manager.stop_if_idle())
+        process.terminate.assert_called_once()
+        self.assertTrue(manager.idle_stopped)
+
+    def test_disabled_idle_shutdown_never_stops(self):
+        manager, now = self._running(None)
+        now[0] = 10**6
+        self.assertFalse(manager.stop_if_idle())
+
+
 if __name__ == "__main__":
     unittest.main()
