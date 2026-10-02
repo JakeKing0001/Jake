@@ -30,6 +30,9 @@ class EventBus:
         # punto unico per cui passa ogni evento verso HUD e companion (e il buffer di replay): nessun produttore
         # (risposte, trascrizioni della voce, notifiche, passi degli agenti) deve ricordarsi di farlo da se'.
         self.redactor = None
+        # Baseline pre-sperimentazione: callable(event) chiamato in modo sincrono a ogni publish FUORI dalla modalita'
+        # privata (redactor assente). JakeCore lo usa per la timeline degli stati in jake_actions.jsonl.
+        self.observer = None
 
     def publish(self, event) -> None:
         redactor = self.redactor
@@ -41,6 +44,12 @@ class EventBus:
                 self._next_sequence_id += 1
             self._replay_buffer.append(event)
             subscribers = list(self._subscribers)
+        observer = self.observer
+        if observer is not None and redactor is None:
+            try:
+                observer(event)
+            except Exception:
+                pass  # la diagnostica non deve mai bloccare chi pubblica
         for subscriber_queue in subscribers:
             try:
                 subscriber_queue.put_nowait(event)

@@ -10,8 +10,10 @@ from core.logger import get_logger
 from core.request_context import (
     reset_current_speaker_profile_id,
     reset_current_stt_confidence,
+    reset_current_stt_ms,
     set_current_speaker_profile_id,
     set_current_stt_confidence,
+    set_current_stt_ms,
 )
 from core.turn_cancellation import (
     TurnCancelled,
@@ -108,6 +110,8 @@ class _VoiceTurn:
     # Vero da quando la risposta e' stata accettata per la consegna: da quel momento "basta" ferma
     # la voce ma non puo' piu' dichiarare annullato un lavoro gia' finito.
     delivered: bool = False
+    # durata della trascrizione di questa frase (diagnostica del turno, nessun audio salvato)
+    stt_ms: float | None = None
 
 
 class _SessionSpeaker:
@@ -553,6 +557,18 @@ class WakeWordSession:
         "speaking": EventType.JAKE_MESSAGE, "responding": EventType.JAKE_MESSAGE,  # senza testo = SPEAKING
     }
 
+    def _log_speech(self, tts_ms: float) -> None:
+        """Diagnostica: durata della voce, collegata all'ultimo turno. Niente in modalita' privata."""
+        core = self.jake_core
+        if getattr(core, "private_mode", False) is not False:
+            return
+        try:
+            from core.logger import log_speech
+
+            log_speech(tts_ms, trace_id=getattr(core, "last_trace_id", None))
+        except Exception:
+            self._logger.exception("Errore registrando la durata della voce")
+
     def _set_state(self, state: str, detail: str = "") -> None:
         previous, self.state = getattr(self, "state", None), state
         event_type = self._HUD_STATES.get(state)
@@ -613,10 +629,13 @@ class WakeWordSession:
             # F2.3.5: lo stream resta aperto mentre Jake parla, i frame si scartano soltanto.
             self._update_mic(True, "speaking", discarding=True)
             self._set_state("speaking", text)
+            spoken_at = time.monotonic()
             try:
                 self.tts_provider.speak(text)
             except Exception:
                 self._logger.exception("Errore nella sintesi vocale")
+            else:
+                self._log_speech((time.monotonic() - spoken_at) * 1000)
             finally:
                 # Piccolo margine: la coda dell'audio puo' ancora rimbombare nel microfono.
                 time.sleep(0.25)
@@ -744,14 +763,18 @@ class WakeWordSession:
     def _transcribe(self, utterance) -> str:
         self._set_state("transcribing", "")
         self.last_confidence = None
+        self.last_stt_ms = None
+        started = time.monotonic()
         try:
             with self._stt_lock:
                 # confidenza vera solo da un provider che la riporta (WhisperSttProvider): si guarda la CLASSE, cosi'
                 # un finto/mock senza il metodo non produce un valore inventato
                 if getattr(type(self.stt_provider), "transcribe_detailed", None) is not None:
                     text, self.last_confidence = self.stt_provider.transcribe_detailed(utterance, self.vad_listener.SAMPLE_RATE)
-                    return text.strip()
-                return self.stt_provider.transcribe(utterance, self.vad_listener.SAMPLE_RATE).strip()
+                else:
+                    text = self.stt_provider.transcribe(utterance, self.vad_listener.SAMPLE_RATE)
+                self.last_stt_ms = (time.monotonic() - started) * 1000
+                return text.strip()
         except Exception:
             self._logger.exception("Errore nella trascrizione vocale")
             return ""
@@ -972,6 +995,7 @@ class WakeWordSession:
         # Questi valori appartengono a QUESTA utterance: catturati prima che il listener possa
         # sovrascriverli con la frase successiva.
         turn = _VoiceTurn(
+            stt_ms=getattr(self, "last_stt_ms", None),
             command=command,
             audio=(
                 self._last_utterance_audio.copy()
@@ -1025,6 +1049,7 @@ class WakeWordSession:
             if turn.confidence is not None
             else None
         )
+        stt_ms_token = set_current_stt_ms(turn.stt_ms)
         try:
             return self.jake_core.answer(turn.command), False
         except TurnCancelled:
@@ -1037,6 +1062,7 @@ class WakeWordSession:
                 reset_current_speaker_profile_id(speaker_token)
             if confidence_token is not None:
                 reset_current_stt_confidence(confidence_token)
+            reset_current_stt_ms(stt_ms_token)
             reset_current_turn_cancel_event(cancellation_token)
 
     def _run_turn(self, turn: _VoiceTurn) -> None:

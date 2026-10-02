@@ -103,3 +103,33 @@ def log_action(
         "verification_note": verification_note,
     }
     log.info(json.dumps({k: v for k, v in record.items() if v is not None}, ensure_ascii=False))
+
+
+def log_turn(record: dict, *, private: bool = False, logger: logging.Logger | None = None) -> None:
+    """Riga riassuntiva di UN turno in jake_actions.jsonl (stesso file e stesso trace_id delle azioni): percorso,
+    intent, modello, tempi, errore classificato, id dei ricordi usati. Il chiamante passa solo metadati, mai testo.
+    In modalita' privata solo che un turno privato e' passato, come log_action."""
+    log = logger or get_action_logger()
+    if private:
+        log.info(json.dumps({"ts": time.time(), "kind": "turn", "private": True}))
+        return
+    line = {"ts": time.time(), "kind": "turn", **record}
+    log.info(json.dumps({k: v for k, v in line.items() if v is not None}, ensure_ascii=False))
+
+
+def log_state(state: str, *, trace_id: str | None = None, logger: logging.Logger | None = None) -> None:
+    """Una transizione di stato voce/HUD (LISTENING, THINKING, ...): solo il nome dello stato."""
+    log = logger or get_action_logger()
+    line = {"ts": time.time(), "kind": "state", "state": state}
+    if trace_id:
+        line["trace_id"] = trace_id
+    log.info(json.dumps(line))
+
+
+def log_speech(tts_ms: float, *, trace_id: str | None = None, logger: logging.Logger | None = None) -> None:
+    """Durata della sintesi vocale di una risposta (dopo il turno), collegata al trace_id del turno che l'ha prodotta."""
+    log = logger or get_action_logger()
+    line = {"ts": time.time(), "kind": "speech", "tts_ms": round(tts_ms, 1)}
+    if trace_id:
+        line["trace_id"] = trace_id
+    log.info(json.dumps(line))

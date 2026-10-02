@@ -1,30 +1,45 @@
 ## 24. Prossima azione esatta
 
-Aggiornato 02/10/2026 (le versioni precedenti restano nella cronologia Git). PR #191: RAM ridotta (modelli Ollama secondari scaricati dopo 2 minuti, `low_memory`, server RVC chiuso dopo inattivita'), master di nuovo verde (lint, mypy e quattro letture dei ricordi sensibili cifrati), decisione installer F0.6.1, updater atomico, focus assistant collegato al pomodoro. Stato al 29/09: Sviluppo del 28/09 su master (#168-#190),
-compresi provenienza dei messaggi companion nell'HUD (#184, F7.4.6), test dei pacchetti di terzi nella sandbox
-(#185, F8.3), merge di PR #186-#189 e aggiornamento di #190 con correzione della logica di riparazione trascrizione
-(e verificato con test_strongly_corrupted_or_garbled_uncertain_speech_still_asks_to_repeat), oltre al
-fix di integrità goal/step per F6.4.3/F6.4.4.
+Aggiornato 02/10/2026, baseline pre-sperimentazione (le versioni precedenti restano nella cronologia Git). Da qui
+lo sviluppo e' guidato dai problemi osservati nell'uso reale: nessuna feature nuova finche' la prova non li indica.
 
-1. Utente: gate hardware di F2 con `docs/f2-hardware-validation.md` (tre profili, interruzioni, sessione wake di 24 h,
-   poi `python -m benchmarks.f2_hardware_session evaluate`). Solo con `PASS` F2 passa a `DONE`. Microfono dedicato e
-   VRAM libera prima della prova (il 28/09 mattina: 55 MB liberi): il preflight lo segnala.
-2. Utente, verifica a schermo: vetro vero dietro i pannelli su desktop scuri/chiari/colorati, orb 3D per stato,
-   HUD su un secondo monitor a scala diversa; interruttore "Privato"; con il telefono: conferma che passa al telefono
-   e ritorno al PC, notifiche solo sul dispositivo attivo, "Tu (da Telefono)" nella conversazione; "impara a ..." con
-   specifica, permessi, installazione firmata e periodo di prova.
-3. Decisione presa il 02/10/2026 (F0.6.1): installazione portable per utente con `setup.ps1`, senza admin ne'
-   certificato. Rilanciarlo ripara (F0.6.3); `setup.ps1 -Uninstall` conserva `data\` e `config\settings.json`,
-   `-PurgeData` li cancella solo su richiesta esplicita (F0.6.4); `python -m tools.updater` aggiorna in
-   fast-forward su canale `stable` (ultimo tag v*) o `dev`, con controllo di salute e rollback (F0.6.6/F0.6.7).
-   F0.6.5: con `release_public_key` nelle impostazioni locali la versione stabile si installa solo se
-   `releases/stable.json` (manifest Ed25519 con il commit) e' firmato da quella chiave. Resta all'utente generare
-   la chiave (`--keygen`) e firmare la prima release (`--sign vX`); un pacchetto MSIX solo se servira'.
-4. Sviluppo, gap rimasti in ordine: F4 (rifinitura HUD/glass, orb e stati, GPU/batteria, secondo monitor e testo),
-   F5 (separazione entita'/episodi/procedure, retrieval, controlli privacy), F6 (milestone e next action dei goal,
-   suggerimenti, focus/meeting), F7 (coda offline, trasporto di sync, continuita' residua, remote wipe), F8
-   (runtime degli agenti: loop e budget, eval e rollback), F0 (packaging/preflight/performance non legati
-   all'installer).
+Gia' su master e verificato nel codice (non piu' da elencare come mancante):
+
+- F5.1.2 entita'/episodi/procedure con schema v4 (#188); goal con passi e prossimo passo nella todo list
+  (F6.4.3/F6.4.4, PR #190 chiusa come superata: il suo contenuto era gia' su master).
+- Skill Forge: pacchetti firmati nel catalogo (#170), prova nel runtime e periodo di prova con rollback (#174),
+  specifica con casi di prova prima del codice (#175), test dei pacchetti di terzi in sandbox (#185).
+- Continuita' companion: conferma che segue chi risponde (#169), notifiche solo al dispositivo attivo (#173), il PC
+  riprende la sessione (#181), provenienza dei messaggi nell'HUD (#184).
+- F0.6: installer portable deciso (`setup.ps1`, ripara/disinstalla conservando i dati), updater atomico con
+  controllo di salute e rollback, canali stable/dev, firma Ed25519 della stable se `release_public_key` e' impostata.
+- RAM (#191): solo `ollama_model` resta caldo 30 min, visione/coding/embedding 2 min, `low_memory`, server RVC chiuso
+  dopo inattivita'; ricordi sensibili cifrati letti correttamente.
+- 3.2 (#192): `SkillRegistry` diviso in catalogo, esecutore e gestore dei plugin; `jake_core.py` diviso in moduli.
+- Baseline diagnostica (questa PR): un `trace_id` per turno condiviso da turno, azioni, agente e ledger; riga
+  `kind: "turn"` in `data/jake_actions.jsonl` (percorso exact/llm/rules/retrieval/agent, intent, modelli, tempi di
+  STT/routing/LLM/totale, errore classificato, id opachi dei ricordi e se la risposta li ha usati, RAM del processo);
+  timeline degli stati (`kind: "state"`) e durata della voce (`kind: "speech"`); `python main.py --diagnostics`
+  produce un bundle condivisibile (commit, config redatta, modello e modelli caricati, preflight, RAM, errori,
+  tempi mediani/p95). Niente audio, testo dell'utente, valori di ricordi, credenziali o utente Windows; in modalita'
+  privata solo un marcatore anonimo.
+
+Baseline misurata il 02/10/2026 su questa macchina: preflight tutto OK; RAM 16,9 GB (3,8 GB liberi con le app
+aperte); VRAM 6,9 GB liberi su 8,2 GB, stima qwen2.5:7b + Whisper + voce/HUD ~6,9 GB; nessun modello rimasto
+caricato in Ollama a riposo (keep_alive 30m/2m rispettato); import del nucleo ~43 MB.
+
+1. Utente, prova reale: usare Jake normalmente e, dopo un errore, lanciare `python main.py --diagnostics` e
+   condividere `data/jake_diagnostic_bundle.json` (dopo averlo letto) con l'ora o il trace_id del turno sbagliato.
+2. Utente, gate hardware di F2 con `docs/f2-hardware-validation.md` (tre profili, interruzioni, sessione wake di
+   24 h, poi `python -m benchmarks.f2_hardware_session evaluate`). Solo con `PASS` F2 passa a `DONE`: resta `VERIFY`.
+3. Utente, verifica a schermo (F4 resta `VERIFY`): vetro vero dietro i pannelli su desktop scuri/chiari/colorati,
+   orb per stato, HUD su un secondo monitor a scala diversa, interruttore "Privato"; con il telefono: conferma che
+   passa al telefono e torna al PC, notifiche solo sul dispositivo attivo; "impara a ..." fino al periodo di prova.
+4. Utente, una tantum se vuole aggiornamenti firmati: `python -m tools.updater --keygen`, chiave pubblica in
+   `release_public_key`, poi `--sign vX` per ogni stable.
+5. Aperto, da riprendere solo se la prova lo chiede: F7 coda offline, trasporto della sync e remote wipe end-to-end
+   (oggi solo libreria in `core/sync_engine.py`); F8 runtime degli agenti oltre i budget gia' presenti; budget GPU e
+   frame-time dell'HUD misurati sul desktop reale; `__init__` di JakeCore (~600 righe di cablaggio).
 
 ## Registro owner e stato dei pacchetti attivi
 
@@ -33,8 +48,8 @@ Questo registro riguarda l'incremento in corso; il catalogo storico completo res
 
 | Pacchetto | Owner logico | Stato |
 |---|---|---|
-| `F4.3` | Sviluppo HUD | `DOING` |
-| `F4.7` | Sviluppo HUD / utente per monitor fisici | `DOING` |
+| `F4.3` | Utente (verifica visiva e GPU sul desktop reale) | `VERIFY` |
+| `F4.7` | Utente (monitor fisici, scala testo reale) | `VERIFY` |
 
 ## Incremento del 29/09/2026 — materiale HUD e regressioni
 
@@ -63,5 +78,5 @@ Verifiche locali dell'incremento: build MSVC/Qt 6.7.3 riuscita, 5/5 CTest, 213 t
 della struttura roadmap superati, `qmllint` e lint Python dei file toccati puliti. Non eseguita la CI remota
 ne' la suite Python completa del repository.
 
-Prossima azione di sviluppo: proseguire F4 su orb/stati e budget GPU, mantenendo aperte le verifiche manuali
-del punto 2; poi F5 nell'ordine sopra. I gate F2 e la decisione sull'installer non cambiano.
+Prossima azione di sviluppo (aggiornata il 02/10/2026): nessuna fino ai risultati della prova reale; poi fix
+mirati sui turni segnalati, ricostruiti dal bundle diagnostico.

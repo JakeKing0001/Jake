@@ -1,3 +1,4 @@
+import hashlib
 import json
 import sqlite3
 import threading
@@ -634,6 +635,13 @@ class MemoryManager:
                 break
             chosen.append(entry)
             used += size
+        # Baseline pre-sperimentazione: quali ricordi sono entrati nel turno, con un id opaco (hash della chiave,
+        # mai chiave o valore in chiaro), la categoria e il punteggio
+        from core.request_context import note_turn
+
+        note_turn(memory=[{"id": hashlib.sha256(f"{e.get('key')}|{e.get('category', 'fact')}".encode()).hexdigest()[:10],
+                           "category": e.get("category", "fact"),
+                           "score": round(float(e.get("score") or 0.0), 3)} for e in chosen])
         return chosen
 
     def _secret_keys(self) -> set[tuple]:

@@ -87,6 +87,9 @@ class AskQuestionSkill:
 
             self._record_use(cited)
             kept = f"{kept}\n{memory_citation(cited)}"
+        from core.request_context import note_turn
+
+        note_turn(memory_cited=len(cited))  # diagnostica del turno: quanti ricordi la risposta ha usato davvero
         return SkillResult(success=True, data={"answer": kept, "memories_used": [m["key"] for m in cited]})
 
     MAX_MEMORY_CHARS = 700

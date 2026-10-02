@@ -10,6 +10,7 @@ from core.command import Command
 from core.hud_protocol import EventType, HudEvent
 from core.logger import new_trace_id
 from core.request_context import current_device_id, current_session_id
+from core.request_context import current_trace_id, note_turn
 
 
 class AgentMixin:
@@ -113,7 +114,8 @@ class AgentMixin:
         di eseguire un piano fisso scritto in anticipo. Se il modello non e' raggiungibile o non
         conclude nulla, ripiega sul vecchio planner a piano fisso; se fallisce anche quello, NO_PLAN."""
         remember_text = remember_text if remember_text is not None else request
-        trace_id = new_trace_id()
+        trace_id = current_trace_id() or new_trace_id()
+        note_turn(route="agent")
         try:
             outcome = self.orchestrator.run(
                 request, history=self.conversation_state.get_short_term_history(),

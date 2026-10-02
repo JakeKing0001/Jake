@@ -253,3 +253,54 @@ def set_current_stt_confidence(confidence: float | None) -> contextvars.Token:
 
 def reset_current_stt_confidence(token: contextvars.Token) -> None:
     _current_stt_confidence.reset(token)
+
+
+# Baseline pre-sperimentazione: UN trace_id per turno (voce, CLI, HUD, telefono), riusato da azioni, agente, ledger e
+# dalla riga riassuntiva del turno in data/jake_actions.jsonl (core/logger.log_turn). Il dizionario raccoglie solo
+# metadati misurati durante il turno (tempi, percorso, intent, id dei ricordi), mai testo dell'utente o segreti.
+_current_turn: contextvars.ContextVar[dict | None] = contextvars.ContextVar("current_turn", default=None)
+_current_stt_ms: contextvars.ContextVar[float | None] = contextvars.ContextVar("current_stt_ms", default=None)
+
+
+def begin_turn_trace(trace_id: str) -> contextvars.Token:
+    return _current_turn.set({"trace_id": trace_id})
+
+
+def end_turn_trace(token: contextvars.Token) -> None:
+    _current_turn.reset(token)
+
+
+def current_turn_trace() -> dict | None:
+    return _current_turn.get()
+
+
+def current_trace_id() -> str | None:
+    turn = _current_turn.get()
+    return turn.get("trace_id") if turn else None
+
+
+def note_turn(**fields) -> None:
+    """Aggiunge metadati al turno in corso; fuori da un turno non fa nulla."""
+    turn = _current_turn.get()
+    if turn is not None:
+        turn.update(fields)
+
+
+def add_turn_timing(name: str, ms: float) -> None:
+    """Somma una durata (es. piu' chiamate al modello nello stesso turno)."""
+    turn = _current_turn.get()
+    if turn is not None:
+        timings = turn.setdefault("timings_ms", {})
+        timings[name] = round(timings.get(name, 0.0) + ms, 1)
+
+
+def current_stt_ms() -> float | None:
+    return _current_stt_ms.get()
+
+
+def set_current_stt_ms(ms: float | None) -> contextvars.Token:
+    return _current_stt_ms.set(ms)
+
+
+def reset_current_stt_ms(token: contextvars.Token) -> None:
+    _current_stt_ms.reset(token)

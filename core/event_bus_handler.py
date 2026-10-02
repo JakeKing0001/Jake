@@ -134,3 +134,67 @@ class EventPublishingMixin:
             "action_id": descriptor.action_id, "compensating_intent": descriptor.compensating_intent,
             "expires_at": float(descriptor.expires_at),
         }))
+
+    # Baseline pre-sperimentazione: stati registrati nella timeline (SPEAKING = JAKE_MESSAGE senza testo)
+    _TRACED_STATES = frozenset({"IDLE", "LISTENING", "TRANSCRIBING", "THINKING", "EXECUTING", "ERROR", "PAUSED",
+                                "DICTATION"})
+
+    def _record_state_event(self, event) -> None:
+        """Osservatore dell'event bus (mai chiamato in modalita' privata): solo il NOME dello stato, nessun contenuto."""
+        from core.logger import log_state
+        from core.request_context import current_trace_id
+
+        kind = getattr(getattr(event, "type", None), "value", None)
+        payload = getattr(event, "payload", None) or {}
+        if kind == "JAKE_MESSAGE":
+            if payload.get("text"):
+                return
+            kind = "SPEAKING"
+        elif kind not in self._TRACED_STATES:
+            return
+        log_state(kind, trace_id=current_trace_id())
+
+    def _log_turn_summary(self, started: float, outcome: str) -> None:
+        """Una riga per turno in jake_actions.jsonl: niente testo dell'utente, niente valori di ricordi o parametri."""
+        import time
+
+        from core.logger import log_turn
+        from core.request_context import (
+            current_conversation_channel,
+            current_stt_confidence,
+            current_stt_ms,
+            current_turn_trace,
+        )
+
+        turn = dict(current_turn_trace() or {})
+        self.last_trace_id = None if self.private_mode else turn.get("trace_id")
+        if self.private_mode:
+            log_turn({}, private=True)
+            return
+        timings = dict(turn.pop("timings_ms", {}))
+        timings["total"] = round((time.monotonic() - started) * 1000, 1)
+        stt_ms = current_stt_ms()
+        if stt_ms is not None:
+            timings["stt"] = round(stt_ms, 1)
+        confidence = current_stt_confidence()
+        record = {
+            **turn,
+            "outcome": outcome,
+            "channel": current_conversation_channel() or "local",
+            "stt_confidence": round(confidence, 3) if isinstance(confidence, float) else None,
+            "timings_ms": timings,
+            # retrieved = ricordi messi nel contesto; used = citati davvero dalla risposta quando la skill lo sa
+            "memory_used": bool(turn["memory_cited"]) if "memory_cited" in turn else bool(turn.get("memory")),
+            "rss_mb": _rss_mb(),
+        }
+        record.setdefault("route", "other")
+        log_turn(record)
+
+
+def _rss_mb() -> float | None:
+    try:
+        import psutil
+
+        return round(psutil.Process().memory_info().rss / 1e6, 1)
+    except Exception:
+        return None
