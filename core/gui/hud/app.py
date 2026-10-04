@@ -102,6 +102,10 @@ class JarvisApp:
             mode=mode, backdrop_mode=backdrop, auto_hide_seconds=auto_hide_seconds,
             hotkey_label=self.hotkey_label, snapshot_provider=self._snapshot,
         )
+        # Un solo HUD a schermo: con l'HUD nativo acceso (core.native_hud, avviato da JakeCore) questa finestra PySide
+        # non si mostra e non risponde a Ctrl+Shift+J (lo gestisce l'HUD nativo). Torna l'HUD di riserva solo se il
+        # nativo non c'e', e' stato chiuso o dopo troppi crash non viene piu' riavviato.
+        self.hud.suppressed = self._native_hud_active
         self.custom_quick_actions = quick_actions or []
         self._voice_thread = None
         self._busy_lock = threading.Lock()
@@ -214,7 +218,7 @@ class JarvisApp:
         self.tray.setToolTip("Jake 3.0")
         menu = QMenu()
         show_action = QAction(f"Apri la console  ({self.hotkey_label})", menu)
-        show_action.triggered.connect(lambda: self.hud.show_hud(input_mode=True))
+        show_action.triggered.connect(self._open_console)
         menu.addAction(show_action)
         if self.session is not None:
             self.listen_action = QAction("Ascolto vocale attivo", menu)
@@ -247,11 +251,26 @@ class JarvisApp:
 
     # ---- eventi ------------------------------------------------------------------------
 
+    def _native_hud_active(self) -> bool:
+        native = getattr(self.core, "native_hud", None)
+        return getattr(native, "active", False) is True
+
+    def _open_console(self) -> None:
+        """Tray: con l'HUD nativo attivo lo riporta grande (stesso HUD_SHOW del protocollo), altrimenti la console."""
+        if self._native_hud_active():
+            from core.hud_protocol import EventType, HudEvent
+
+            self.core.event_bus.publish(HudEvent(EventType.HUD_SHOW, {"presentation": "expanded", "reason": "manual"}))
+            return
+        self.hud.show_hud(input_mode=True)
+
     def _on_tray_activated(self, reason) -> None:
         if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
-            self.hud.show_hud(input_mode=True)
+            self._open_console()
 
     def _on_hotkey(self) -> None:
+        if self._native_hud_active():
+            return  # Ctrl+Shift+J lo gestisce l'HUD nativo: due console aperte insieme erano il bug
         if self.hud.isVisible() and self.hud.input_mode:
             self.hud.hide_hud()
         else:

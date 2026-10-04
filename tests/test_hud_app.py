@@ -403,5 +403,38 @@ class OpenSettingsAndCleanupTests(unittest.TestCase):
         quit_method.assert_called_once()
 
 
+class SingleHudTests(unittest.TestCase):
+    """Bug reale (prova del 04/10/2026): con l'HUD nativo acceso comparivano due Jake, l'orb 2D di questo HUD PySide e
+    l'orb 3D del nativo. Con il nativo attivo questo resta solo l'HUD di riserva."""
+
+    def _app(self, native_active):
+        core = _fake_core()
+        core.native_hud = mock.MagicMock(active=native_active)
+        return _jarvis_app(core=core)
+
+    def test_with_the_native_hud_active_this_window_never_shows(self):
+        app = self._app(True)
+        app._on_state("listening", "")
+        app._on_state("responding", "ecco")
+        app.hud.show_hud(input_mode=True)
+        self.assertFalse(app.hud.isVisible())
+
+    def test_hotkey_and_tray_go_to_the_native_hud(self):
+        app = self._app(True)
+        with mock.patch.object(app.hud, "show_hud") as show_hud:
+            app._on_hotkey()
+            app._open_console()
+        show_hud.assert_not_called()
+        event = app.core.event_bus.publish.call_args.args[0]
+        self.assertEqual(event.payload, {"presentation": "expanded", "reason": "manual"})
+
+    def test_without_the_native_hud_this_is_the_hud_again(self):
+        app = self._app(False)
+        with mock.patch.object(app.hud, "isVisible", return_value=False):
+            with mock.patch.object(app.hud, "show_hud") as show_hud:
+                app._on_hotkey()
+        show_hud.assert_called_once_with(input_mode=True)
+
+
 if __name__ == "__main__":
     unittest.main()

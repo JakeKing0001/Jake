@@ -199,6 +199,10 @@ class HudOverlay(QWidget):
             win_effects.apply_acrylic(hwnd, tint=(6, 14, 40, 170))
 
     def show_hud(self, input_mode: bool = False, mode: str = None) -> None:
+        # Un solo HUD a schermo: con l'HUD nativo attivo questo resta l'HUD di riserva e non si mostra
+        suppressed = getattr(self, "suppressed", None)
+        if suppressed is not None and suppressed():
+            return
         self._hide_timer.stop()
         if mode is not None and mode != self.mode:
             self.set_mode(mode)

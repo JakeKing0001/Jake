@@ -66,6 +66,17 @@ class NativeHudSupervisor:
         process = self._process
         return process is not None and process.poll() is None
 
+    @property
+    def active(self) -> bool:
+        """Vero finche' l'HUD nativo e' l'HUD di Jake: acceso o in riavvio dopo un crash. Falso se non e' mai partito,
+        se l'utente l'ha chiuso o se dopo troppi crash non viene piu' riavviato: allora serve l'HUD di riserva."""
+        if self.gave_up:
+            return False
+        if self.running:
+            return True
+        thread = self._thread
+        return thread is not None and thread.is_alive() and not self._stop.is_set()
+
     def start(self) -> bool:
         """Lancia l'HUD e la sua sorveglianza. False (con un avviso nel log) se l'eseguibile non c'e'."""
         if not self.exe_path.exists():

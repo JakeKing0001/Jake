@@ -126,6 +126,20 @@ class NativeHudSupervisorTests(unittest.TestCase):
         self.assertFalse(supervisor.start())
         self.assertEqual(launches, [])
 
+    def test_active_while_running_and_not_after_giving_up(self):
+        """`active` decide se serve l'HUD di riserva (core/gui/hud/app.py): acceso o in riavvio = attivo."""
+        supervisor, _ = self._supervisor([None])
+        self.assertFalse(supervisor.active)        # mai partito
+        supervisor.start()
+        self.assertTrue(supervisor.active)
+        supervisor.stop()
+        self.assertFalse(supervisor.active)
+        crashing, _ = self._supervisor([1, 1, 1, 1])
+        crashing.start()
+        crashing._thread.join(timeout=5)
+        self.assertTrue(crashing.gave_up)
+        self.assertFalse(crashing.active)
+
 
 if __name__ == "__main__":
     unittest.main()
