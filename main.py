@@ -10,6 +10,7 @@ USAGE = f"""Jake {VERSION} - assistente personale locale
   python main.py --cli           modalita' testo nel terminale
   python main.py --preflight     controlla cosa serve a Jake su questa macchina
   python main.py --diagnostics   scrive data/jake_diagnostic_bundle.json da condividere dopo una prova
+  python main.py --calibrate-gpu misura quanti layer del modello stanno nel budget di VRAM
   python main.py --voice         push-to-talk nel terminale (tieni premuto F9)
   python main.py --voice --wake-word   voce continua nel terminale, senza HUD
   python main.py --tray          vecchia icona tray con pannello Tk (v1.1)
@@ -49,6 +50,21 @@ def _dispatch():
     if "--version" in sys.argv:
         print(f"Jake {VERSION} (protocollo {PROTOCOL_VERSION})")
         return
+    if "--calibrate-gpu" in sys.argv:
+        # misura quanti layer del modello principale stanno nel budget di VRAM (ollama_gpu_budget_mb) e lo salva
+        from core.ollama_client import gpu_policy
+
+        policy = gpu_policy()
+        if not policy.budget.enabled:
+            print("Nessun budget di VRAM impostato (ollama_gpu_budget_mb o low_memory): niente da calibrare.")
+            sys.exit(0)
+        print(f"Calibro {policy.model} per un budget di {policy.budget.budget_mb} MB ({policy.budget.mode}): ~30 s...")
+        policy.start(force=True)
+        layers = policy.layers()
+        result = policy.result or {}
+        print(f"{layers}/{result.get('layers_total', '?')} layer sulla GPU, ~{result.get('vram_mb', 0)} MB di VRAM "
+              f"(misure: {result.get('measured', {})}).")
+        sys.exit(0)
     if "--diagnostics" in sys.argv:
         # baseline pre-sperimentazione: bundle condivisibile della sessione recente (redatto, nessun audio/segreto)
         from tools.diagnostic_bundle import main as diagnostics

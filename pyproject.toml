@@ -38,6 +38,7 @@ files = [
     "core/memory_context_manager.py",
     "core/lifecycle_manager.py",
     "core/skill_registry.py",
+    "core/ollama_gpu_budget.py",
     "core/skill_executor.py",
     "core/plugin_manager.py",
     "core/router.py",

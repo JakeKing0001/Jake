@@ -64,6 +64,17 @@ caricato in Ollama a riposo (keep_alive 30m/2m rispettato); import del nucleo ~4
   riavvio) quello PySide non si mostra e lascia hotkey e tray al nativo; torna di riserva se il nativo manca, e'
   chiuso o abbandonato dopo i crash.
 
+## Incremento del 04/10/2026 — budget di VRAM per qwen2.5:7b
+
+- `core/ollama_gpu_budget.py` + `runtime_options()` in `core/ollama_client.py` (unico punto, usato dal client e dai
+  nove chiamanti diretti): `num_gpu` calibrato misurando `size_vram` di `/api/ps`, cache per modello/digest/GPU/
+  budget/modo/context, CPU-only se la calibrazione non e' pronta o fallisce. `low_memory` implica 1024 MB.
+- Misura reale (RTX 4060 Laptop, Ollama 0.35.1, budget 1024 hard): 3/29 layer, 987 MB di VRAM (era 4987 MB),
+  `ollama ps` 82%/18% CPU/GPU; generazione da ~51 a ~7 token/s, risposta da 120 token da ~2,4 s a ~17-18 s.
+  Sotto ~1 GB la sola CPU e' veloce uguale (7,4 token/s): il budget libera VRAM, non accelera nulla.
+- Context 8192 vs 4096: -240 MB a GPU piena, -33 MB con 3 layer, nessuna differenza di velocita'; resta 8192
+  (il classificatore lo usa) e `ollama_context` e' solo configurabile. Impatto su Whisper sotto carico: non misurato.
+
 ## Registro owner e stato dei pacchetti attivi
 
 Questo registro riguarda l'incremento in corso; il catalogo storico completo resta nella cronologia Git.

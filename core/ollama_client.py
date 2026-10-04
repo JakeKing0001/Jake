@@ -66,10 +66,53 @@ def _settings() -> dict:
                 "low_memory": str(config.get("low_memory", False)).lower() in {"1", "true", "yes", "on"},
                 "primary_keep_alive": config.get("ollama_keep_alive"),
                 "secondary_keep_alive": config.get("ollama_secondary_keep_alive"),
+                # quanta VRAM usa il modello principale mentre e' caricato (core/ollama_gpu_budget.py)
+                "gpu": {key: config.get(key) for key in ("low_memory", "ollama_gpu_budget_mb", "ollama_gpu_budget_mode",
+                                                          "ollama_num_gpu_layers", "ollama_context")},
             }
         except Exception:
             _settings_cache = {"primary": "qwen2.5:7b", "low_memory": False}
     return _settings_cache
+
+
+_gpu_policy = None
+_gpu_policy_lock = __import__("threading").Lock()
+
+
+def gpu_policy():
+    """La politica dei layer GPU del modello principale, una per processo (core/ollama_gpu_budget.py)."""
+    global _gpu_policy
+    with _gpu_policy_lock:
+        if _gpu_policy is None:
+            from core.ollama_gpu_budget import GpuLayerPolicy, budget_from_settings
+
+            settings = _settings()
+            budget = budget_from_settings(settings.get("gpu") or {})
+            _gpu_policy = GpuLayerPolicy(budget, settings.get("primary", "qwen2.5:7b"),
+                                         budget.context or OllamaClient.DEFAULT_NUM_CTX, DEFAULT_BASE_URL)
+        return _gpu_policy
+
+
+def runtime_options(model: str | None, options: dict | None = None) -> dict:
+    """UNICO punto in cui si decidono le opzioni di runtime di una chiamata a Ollama.
+
+    Le opzioni del chiamante (temperature, num_predict, num_ctx...) restano. Per il modello PRINCIPALE si aggiungono
+    `num_gpu` (budget di VRAM) e, se configurato, `ollama_context` come `num_ctx`: due chiamate allo stesso modello
+    con valori diversi farebbero ricaricare il modello da Ollama, quindi qui valgono per tutte. Il chiamante non
+    sceglie `num_gpu`. Visione, coding ed embedding restano invariati (per loro conta keep_alive_for)."""
+    merged = dict(options or {})
+    settings = _settings()
+    if not model or model != settings.get("primary"):
+        return merged
+    policy = gpu_policy()
+    if policy.budget.context is not None:
+        merged["num_ctx"] = policy.budget.context
+    layers = policy.layers()
+    if layers is None:
+        merged.pop("num_gpu", None)
+    else:
+        merged["num_gpu"] = layers
+    return merged
 
 
 def keep_alive_for(model: str | None) -> str:
@@ -173,7 +216,7 @@ class OllamaClient:
         }
         if format is not None:
             payload["format"] = format
-        payload["options"] = {"num_ctx": self.num_ctx, **(options or {})}
+        payload["options"] = runtime_options(model, {"num_ctx": self.num_ctx, **(options or {})})
         observer = getattr(self, "on_chat", None)
         if observer is None:
             return self._post("/api/chat", payload, timeout=timeout)

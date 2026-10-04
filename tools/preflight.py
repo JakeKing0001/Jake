@@ -132,7 +132,32 @@ KV_CACHE_MB = 600
 VOICE_AND_HUD_MB = 700
 
 
-def check_gpu_budget(model: str, tags: dict | None, total_vram_mb: int | None, whisper_mb: int | None) -> Check | None:
+def check_ollama_offload(model: str, budget, calibration: dict | None) -> list[Check]:
+    """Con un budget di VRAM (core/ollama_gpu_budget.py): quanto pesa il modello e quanto ne sta DAVVERO sulla GPU.
+    Il modello non diventa piu' piccolo: cambia solo dove stanno i suoi layer."""
+    if budget is None or not budget.enabled:
+        return []
+    if budget.fixed_layers is not None and calibration is None:
+        return [Check(f"Ollama {model}", INFO, f"num_gpu fisso a {budget.fixed_layers} layer (ollama_num_gpu_layers): "
+                                               "VRAM non misurata")]
+    if calibration is None:
+        return [Check("Budget GPU", WARN, f"modello principale <= {budget.budget_mb} MB ({budget.mode}) impostato ma non "
+                                          "ancora calibrato: Jake lo calibra da solo al primo avvio (~30 s, nel frattempo "
+                                          "usa la CPU) oppure: python main.py --calibrate-gpu")]
+    vram = int(calibration.get("vram_mb") or 0)
+    size = int(calibration.get("size_mb") or 0)
+    layers, total = calibration.get("num_gpu"), calibration.get("layers_total")
+    where = "solo CPU" if layers == 0 else f"offload parziale {layers}/{total} layer"
+    detail = (f"~{size / 1000:.1f} GB modello, ~{vram / 1000:.2f} GB VRAM, ~{max(0, size - vram) / 1000:.1f} GB CPU/RAM, "
+              f"{where}")
+    within = vram <= budget.limit_mb
+    budget_detail = f"modello principale ~{vram} MB <= {budget.budget_mb} MB ({budget.mode})" if within else (
+        f"modello principale ~{vram} MB oltre il budget di {budget.budget_mb} MB ({budget.mode})")
+    return [Check(f"Ollama {model}", OK, detail), Check("Budget GPU", OK if within else WARN, budget_detail)]
+
+
+def check_gpu_budget(model: str, tags: dict | None, total_vram_mb: int | None, whisper_mb: int | None,
+                     resident_model_mb: int | None = None) -> Check | None:
     """Prova reale del 27/09/2026: qwen2.5:7b (~4,8 GB in GPU) + Whisper su CUDA + voce + HUD 3D su una GPU da 8 GB hanno
     esaurito la memoria video e ogni risposta del modello e' scaduta. Qui si somma cio' che dovra' convivere sulla
     GPU e lo si confronta con la memoria totale, PRIMA di scoprirlo parlando."""
@@ -142,7 +167,8 @@ def check_gpu_budget(model: str, tags: dict | None, total_vram_mb: int | None, w
                  and m.get("name") in (model, f"{model}:latest")), None)
     if not isinstance(size, int):
         return None
-    model_mb = size // (1024 * 1024) + KV_CACHE_MB
+    # con un budget calibrato conta solo la parte del modello residente sulla GPU, non i suoi ~5 GB
+    model_mb = resident_model_mb if resident_model_mb is not None else size // (1024 * 1024) + KV_CACHE_MB
     need = model_mb + (whisper_mb or 0) + VOICE_AND_HUD_MB
     detail = (f"modello {model} ~{model_mb} MB + Whisper ~{whisper_mb or 0} MB + voce/HUD ~{VOICE_AND_HUD_MB} MB "
               f"= ~{need} MB su {total_vram_mb} MB")
@@ -173,7 +199,11 @@ def run_all(config: dict) -> list[Check]:
         total = _gpu_total_vram_mb()
         whisper_mb = 1118 if WhisperSttProvider._cuda_compute_type(total) == "int8_float16" else 2061  # misurati
         tags = json.loads(request.urlopen(f"{DEFAULT_BASE_URL}/api/tags", timeout=2).read().decode("utf-8"))
-        budget = check_gpu_budget(str(config.get("ollama_model") or "qwen2.5:7b"), tags, total, whisper_mb)
+        model = str(config.get("ollama_model") or "qwen2.5:7b")
+        offload, calibration = _offload_status(config, tags, model)
+        checks.extend(offload)
+        resident = int(calibration["vram_mb"]) if calibration else None
+        budget = check_gpu_budget(model, tags, total, whisper_mb, resident_model_mb=resident)
     except Exception:
         budget = None
     if budget is not None:
@@ -182,6 +212,21 @@ def run_all(config: dict) -> list[Check]:
     if hud is not None:
         checks.append(hud)
     return checks
+
+
+def _offload_status(config: dict, tags: dict, model: str) -> tuple[list[Check], dict | None]:
+    from core.ollama_client import OllamaClient
+    from core.ollama_gpu_budget import Calibrator, OllamaApi, budget_from_settings, gpu_name, model_digest
+
+    budget = budget_from_settings(config)
+    if not budget.enabled:
+        return [], None
+    from core.ollama_client import DEFAULT_BASE_URL
+
+    calibrator = Calibrator(OllamaApi(DEFAULT_BASE_URL), model, budget, budget.context or OllamaClient.DEFAULT_NUM_CTX,
+                            gpu_name())
+    calibration = calibrator.cached(model_digest(tags.get("models", []), model))
+    return check_ollama_offload(model, budget, calibration), calibration
 
 
 def render(checks: list[Check]) -> str:
@@ -203,7 +248,8 @@ def main() -> int:
 
     config = Config()
     checks = run_all({key: config.get(key) for key in (
-        "ollama_model", "hud_native_enabled", "hud_native_path", "companion_server_enabled")})
+        "ollama_model", "hud_native_enabled", "hud_native_path", "companion_server_enabled", "low_memory",
+        "ollama_gpu_budget_mb", "ollama_gpu_budget_mode", "ollama_num_gpu_layers", "ollama_context")})
     print(render(checks))
     return 1 if any(c.status == FAIL for c in checks) else 0
 

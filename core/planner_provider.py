@@ -4,7 +4,7 @@ from urllib import error, request
 from core.planner import Plan, PlanStep
 from core.ollama_client import DEFAULT_BASE_URL
 from core.network import read_url
-from core.ollama_client import keep_alive_for
+from core.ollama_client import keep_alive_for, runtime_options
 
 
 class PlannerProvider:
@@ -140,7 +140,7 @@ class PlannerProvider:
             "format": self._build_output_schema(),
             # Temperatura 0: i parametri (percorsi, nomi) vanno riprodotti esattamente,
             # non generati creativamente.
-            "options": {"num_ctx": 8192, "temperature": 0},
+            "options": runtime_options(self.model, {"num_ctx": 8192, "temperature": 0}),
             "messages": [
                 {"role": "system", "content": self._build_system_prompt()},
                 {"role": "user", "content": text},

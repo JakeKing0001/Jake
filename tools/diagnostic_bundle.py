@@ -180,8 +180,7 @@ def collect_environment() -> dict:
     try:
         from tools.preflight import run_all
 
-        checks = run_all({key: config_values.get(key) for key in (
-            "ollama_model", "hud_native_enabled", "hud_native_path", "companion_server_enabled")})
+        checks = run_all(config_values)
         env["preflight"] = [_scrub_home({"name": c.name, "status": c.status, "detail": c.detail}) for c in checks]
     except Exception as exc:
         env["preflight"] = {"error": type(exc).__name__}
