@@ -719,3 +719,25 @@
 {"text": "per finire la tesi i passi sono scrivere l'introduzione, fare gli esperimenti e rileggere", "intent": "PLAN_GOAL", "parameters": {"goal": "finire la tesi", "steps": ["scrivere l'introduzione", "fare gli esperimenti", "rileggere"]}}
 {"text": "qual è il prossimo passo per la tesi", "intent": "NEXT_STEP", "parameters": {"goal": "tesi"}}
 {"text": "cosa mi manca per il trasloco", "intent": "NEXT_STEP", "parameters": {"goal": "trasloco"}}
+{"text": "rimpicciolisciti", "intent": "SET_HUD_PRESENTATION", "parameters": {"mode": "mini"}}
+{"text": "fatti piccolo", "intent": "SET_HUD_PRESENTATION", "parameters": {"mode": "mini"}}
+{"text": "modalità mini", "intent": "SET_HUD_PRESENTATION", "parameters": {"mode": "mini"}}
+{"text": "modalita mini", "intent": "SET_HUD_PRESENTATION", "parameters": {"mode": "mini"}}
+{"text": "modalità mini hud", "intent": "SET_HUD_PRESENTATION", "parameters": {"mode": "mini"}}
+{"text": "mettiti nell'angolo", "intent": "SET_HUD_PRESENTATION", "parameters": {"mode": "mini"}}
+{"text": "lascia solo l'orb", "intent": "SET_HUD_PRESENTATION", "parameters": {"mode": "mini"}}
+{"text": "rimpicciolisci l'hud", "intent": "SET_HUD_PRESENTATION", "parameters": {"mode": "mini"}}
+{"text": "riduciti", "intent": "SET_HUD_PRESENTATION", "parameters": {"mode": "mini"}}
+{"text": "ingrandisciti", "intent": "SET_HUD_PRESENTATION", "parameters": {"mode": "expanded"}}
+{"text": "torna grande", "intent": "SET_HUD_PRESENTATION", "parameters": {"mode": "expanded"}}
+{"text": "espanditi", "intent": "SET_HUD_PRESENTATION", "parameters": {"mode": "expanded"}}
+{"text": "mostra tutto", "intent": "SET_HUD_PRESENTATION", "parameters": {"mode": "expanded"}}
+{"text": "mostrati", "intent": "SET_HUD_PRESENTATION", "parameters": {"mode": "expanded"}}
+{"text": "riappari", "intent": "SET_HUD_PRESENTATION", "parameters": {"mode": "expanded"}}
+{"text": "ingrandisci l'hud", "intent": "SET_HUD_PRESENTATION", "parameters": {"mode": "expanded"}}
+{"text": "mostra l'hud", "intent": "SET_HUD_PRESENTATION", "parameters": {"mode": "expanded"}}
+{"text": "riduciti a icona", "intent": "SET_HUD_PRESENTATION", "parameters": {"mode": "hidden"}}
+{"text": "nasconditi", "intent": "SET_HUD_PRESENTATION", "parameters": {"mode": "hidden"}}
+{"text": "sparisci dallo schermo", "intent": "SET_HUD_PRESENTATION", "parameters": {"mode": "hidden"}}
+{"text": "nascondi l'hud", "intent": "SET_HUD_PRESENTATION", "parameters": {"mode": "hidden"}}
+{"text": "togliti dallo schermo", "intent": "SET_HUD_PRESENTATION", "parameters": {"mode": "hidden"}}

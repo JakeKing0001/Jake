@@ -124,6 +124,7 @@ set(JAKE_HUD_QML_FILES
         qml/StatusPanel.qml
         qml/ActionCenter.qml
         qml/Ambience.qml
+        qml/Presence.qml
 )
 if(TARGET Qt6::Quick3D)
     list(APPEND JAKE_HUD_QML_FILES qml/Orb3D.qml)
@@ -240,3 +241,13 @@ set_tests_properties(hud_glass_material hud_glass_material_hidpi PROPERTIES
 )
 set_property(TEST hud_glass_material APPEND PROPERTY ENVIRONMENT "QT_SCALE_FACTOR=1")
 set_property(TEST hud_glass_material_hidpi APPEND PROPERTY ENVIRONMENT "QT_SCALE_FACTOR=1.5")
+
+# Presenza ambientale (expanded | mini | hidden): la stessa qml/Presence.qml dell'app, senza finestra.
+qt_add_executable(JakeHudPresenceTests tests/presence_tests.cpp)
+target_link_libraries(JakeHudPresenceTests PRIVATE Qt6::Core Qt6::Gui Qt6::Qml)
+set_target_properties(JakeHudPresenceTests PROPERTIES WIN32_EXECUTABLE OFF)
+add_dependencies(JakeHudPresenceTests JakeHud)
+add_test(NAME hud_presence COMMAND JakeHudPresenceTests "${CMAKE_CURRENT_SOURCE_DIR}/qml/Presence.qml")
+set_tests_properties(hud_presence PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>"
+    TIMEOUT 30)

@@ -15,6 +15,19 @@ if TYPE_CHECKING:
 
 
 class CompanionMixin:
+    def hud_presentation_command(self, text: str) -> str | None:
+        """La modalita' (expanded|mini|hidden) se `text` e' ESATTAMENTE una frase di SET_HUD_PRESENTATION, altrimenti
+        None. Solo la corsia esatta: la sessione vocale lo chiede prima di riportare grande l'HUD alla wake word, cosi'
+        "Jake, rimpicciolisciti" detto da mini non passa per un fotogramma da grande."""
+        try:
+            example = self.example_store.find_exact(self.normalizer.normalize(text or ""))
+        except Exception:
+            return None
+        if example is None or example.intent != "SET_HUD_PRESENTATION":
+            return None
+        mode = (example.parameters or {}).get("mode")
+        return mode if isinstance(mode, str) else None
+
     native_hud: NativeHudSupervisor | None
 
     def _on_pairing_requested(self, challenge, requested_name: str, sync_public_key: dict | None) -> None:

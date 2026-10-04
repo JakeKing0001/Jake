@@ -15,6 +15,7 @@ Item {
     // F4.2.1: vedi lo stesso alias in StatusPanel.qml - l'orb non gestisce ancora click propri,
     // ma resta comunque un'area "del pannello", non uno sfondo click-through.
     property alias hovered: hoverHandler.hovered
+    property bool showLabel: true      // presenza mini: solo l'orb, niente etichetta di stato
 
     HoverHandler {
         id: hoverHandler
@@ -105,6 +106,7 @@ Item {
         anchors.topMargin: 4
         anchors.horizontalCenter: parent.horizontalCenter
         text: root.stateLabel
+        visible: root.showLabel
         color: "#d1d5db"
         font.pixelSize: Theme.fontSmall
     }

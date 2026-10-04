@@ -118,6 +118,9 @@ signals:
     // setState(type), lasciando la finestra sempre visibile con lo stato scritto alla lettera
     // "HUD_SHOW"/"HUD_HIDE" (non riconosciuto da Orb.qml, quindi mostrato col colore di default).
     void visibilityRequested(bool visible);
+    // Presenza ambientale: emesso PRIMA di visibilityRequested per lo stesso HUD_SHOW/HUD_HIDE, cosi' l'HUD
+    // nascosto applica la geometria giusta (mini o completa) prima di ricomparire. mode: expanded|mini|hidden.
+    void presentationRequested(const QString &mode, const QString &reason);
 
 private slots:
     void onEventStreamReadyRead();

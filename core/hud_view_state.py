@@ -41,6 +41,9 @@ class HudViewState:
     # evento di stato; un nuovo stato senza "status" lo cancella
     state_status: str = ""
     visible: bool = True
+    # presenza sullo schermo: expanded | mini | hidden (HUD_SHOW/HUD_HIDE), e chi l'ha chiesta
+    presentation: str = "expanded"
+    presentation_reason: str = ""
     mic_open: bool = False
     mic_discarding: bool = False
     mic_reason: str = ""
@@ -155,8 +158,12 @@ class HudViewState:
             self._push(self.notifications, [_text(payload, "kind"), _text(payload, "text")])
         elif event_type == "HUD_SHOW":
             self.visible = True
+            self.presentation = "mini" if _text(payload, "presentation") == "mini" else "expanded"
+            self.presentation_reason = _text(payload, "reason")
         elif event_type == "HUD_HIDE":
             self.visible = False
+            self.presentation = "hidden"
+            self.presentation_reason = _text(payload, "reason")
         elif event_type == "DEVICE_HANDOFF":
             self.active_device = _text(payload, "to")
         elif event_type == "MIC_STATE":
