@@ -4,7 +4,7 @@ from pathlib import Path
 from urllib import error, request
 from core.ollama_client import DEFAULT_BASE_URL
 from core.turn_cancellation import TurnCancelled, cancellable_call
-from core.ollama_client import keep_alive_for
+from core.ollama_client import keep_alive_for, runtime_options
 
 DEFAULT_PROMPT = (
     "Descrivi in italiano, in modo conciso, cosa vedi in questa schermata: layout, "
@@ -34,7 +34,7 @@ class VisionProvider:
             "model": self.model,
             "stream": False,
             "keep_alive": keep_alive_for(self.model),
-            "options": {"num_ctx": 8192},
+            "options": runtime_options(self.model, {"num_ctx": 8192}),
             "messages": [
                 {"role": "user", "content": question or DEFAULT_PROMPT, "images": [image_b64]},
             ],

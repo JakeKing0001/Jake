@@ -4,7 +4,7 @@ from urllib import error, request
 from core.skill_result import SkillResult
 from core.ollama_client import DEFAULT_BASE_URL
 from core.network import read_url
-from core.ollama_client import keep_alive_for
+from core.ollama_client import keep_alive_for, runtime_options
 
 
 class ResearchSkill:
@@ -62,7 +62,7 @@ class ResearchSkill:
             "model": self.model,
             "stream": False,
             "keep_alive": keep_alive_for(self.model),
-            "options": {"num_ctx": 8192, "temperature": 0.3},
+            "options": runtime_options(self.model, {"num_ctx": 8192, "temperature": 0.3}),
             "messages": [
                 {
                     "role": "system",

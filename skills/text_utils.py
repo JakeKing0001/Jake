@@ -7,7 +7,7 @@ from urllib import error, request
 from core.skill_result import SkillResult
 from core.ollama_client import DEFAULT_BASE_URL
 from core.network import read_url
-from core.ollama_client import keep_alive_for
+from core.ollama_client import keep_alive_for, runtime_options
 
 _ROMAN_VALUES = [
     (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"), (100, "C"), (90, "XC"),
@@ -132,7 +132,7 @@ class _OllamaTextSkill:
             "model": self.model,
             "stream": False,
             "keep_alive": keep_alive_for(self.model),
-            "options": {"num_ctx": 8192, "temperature": 0.2},
+            "options": runtime_options(self.model, {"num_ctx": 8192, "temperature": 0.2}),
             "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}],
         }
         body = json.dumps(payload).encode("utf-8")

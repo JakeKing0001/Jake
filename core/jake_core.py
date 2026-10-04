@@ -571,6 +571,10 @@ class JakeCore(NotificationMixin, ModelRoutingMixin, CompanionMixin, EventPublis
             state_path=Path(config.get("advisor_state_path") or Path(__file__).resolve().parent.parent / "data" / "advisor_state.json"),
         )
         self.system_advisor.start()
+        # budget di VRAM del modello principale: calibrazione (una volta, in background) o valore salvato
+        from core.ollama_client import gpu_policy
+
+        gpu_policy().start()
 
         # Fucina di skill (v3.0): Jake si scrive nuove capacita' da solo.
         self.skill_forge = SkillForge(
