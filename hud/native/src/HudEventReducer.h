@@ -13,6 +13,8 @@ struct HudViewState {
     QString state = QStringLiteral("IDLE");
     QString stateStatus;       // stato leggibile che accompagna lo stato (payload "status")
     bool visible = true;
+    QString presentation = QStringLiteral("expanded"); // expanded | mini | hidden (HUD_SHOW/HUD_HIDE)
+    QString presentationReason;
     bool micOpen = false;
     bool micDiscarding = false;
     QString micReason;

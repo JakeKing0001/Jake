@@ -19,8 +19,11 @@ import JakeHud
 ApplicationWindow {
     id: window
     // F4.7.3/F4.7.4: completo (orb + pannelli ai lati), compatto (orb + pannelli sotto), focus (solo l'orb)
-    width: layoutMode === "full" ? 1080 : layoutMode === "compact" ? 600 : 560
-    height: layoutMode === "full" ? 680 : layoutMode === "compact" ? 820 : 540
+    // Presenza (Presence.qml): in mini la FINESTRA stessa diventa piccola, nessuna regione trasparente che prende il mouse
+    width: geometryMode === "mini" ? presence.windowSize
+        : layoutMode === "full" ? 1080 : layoutMode === "compact" ? 600 : 560
+    height: geometryMode === "mini" ? presence.windowSize
+        : layoutMode === "full" ? 680 : layoutMode === "compact" ? 820 : 540
     visible: true
     title: qsTr("Jake HUD")
     color: "transparent"
@@ -67,8 +70,11 @@ ApplicationWindow {
     JakeClient {
         id: jake
         onMessageReceived: (role, text, device) => { conversation.append(role, text, device); window.touch(); }
-        onNotification: (kind, text) => toast.show(text, kind === "reminder" ? Theme.accent : Theme.textMuted, kind)
-        onErrorOccurred: (detail) => toast.show(detail || qsTr("Errore sconosciuto"), Theme.danger, "error")
+        onNotification: (kind, text) => window.notify(text, kind === "reminder" ? Theme.accent : Theme.textMuted, kind)
+        onErrorOccurred: (detail) => window.notify(detail || qsTr("Errore sconosciuto"), Theme.danger, "error")
+        // arriva PRIMA di onVisibilityRequested per lo stesso evento: da nascosto la geometria e' gia' giusta quando
+        // la finestra ricompare
+        onPresentationRequested: (mode, reason) => window.setPresentation(mode, reason)
         onVisibilityRequested: (visible) => {
             window.visible = visible;
             overlayStyler.forceVisibility(window, visible);
@@ -80,6 +86,59 @@ ApplicationWindow {
     }
 
     OverlayStyler { id: overlayStyler }
+
+    // ---- presenza: expanded | mini | hidden (Presence.qml), indipendente da layoutMode -------------------------
+    Presence { id: presence; reducedMotion: window.reducedMotion }
+    property string geometryMode: "expanded"   // geometria applicata alla finestra: expanded | mini
+    property real chromeLevel: 1               // pannelli, ambiente, barra: 0 in mini
+    property real orbLevel: 1                  // l'orb si dissolve e riappare mentre la finestra cambia
+    property int unseenNotifications: 0        // in mini: notifiche arrivate senza toast
+    readonly property bool chromeVisible: geometryMode === "expanded"
+    function setPresentation(target, why) {
+        // tornare grandi e' un'interazione: l'inattivita' si azzera PRIMA del cambio, o il mini automatico
+        // risulterebbe dovuto per un istante e riporterebbe subito l'HUD in mini
+        if (target === "expanded" && !presence.expanded) touch();
+        if (!presence.request(target, why)) return;
+        if (presence.expanded) unseenNotifications = 0;
+        if (presence.hidden) { presentationSwap.stop(); return; }   // la finestra la nasconde HUD_HIDE
+        if (!window.visible || presence.transitionMs === 0) {
+            presentationSwap.stop();
+            applyPresentationGeometry();
+            chromeLevel = geometryMode === "expanded" ? 1 : 0;
+            orbLevel = 1;
+            return;
+        }
+        presentationSwap.restart();   // interrupt-safe: riparte dai valori correnti verso l'ultima richiesta
+    }
+    function applyPresentationGeometry() {
+        if (presence.hidden) return;
+        geometryMode = presence.mini ? "mini" : "expanded";
+        Qt.callLater(place);
+    }
+    readonly property real chromeTarget: presence.expanded ? 1 : 0
+    SequentialAnimation {
+        id: presentationSwap
+        ParallelAnimation {
+            NumberAnimation { target: window; property: "chromeLevel"; to: 0; duration: presence.transitionMs / 2; easing.type: Easing.InCubic }
+            NumberAnimation { target: window; property: "orbLevel"; to: 0; duration: presence.transitionMs / 2; easing.type: Easing.InCubic }
+        }
+        ScriptAction { script: window.applyPresentationGeometry() }
+        ParallelAnimation {
+            NumberAnimation { target: window; property: "orbLevel"; to: 1; duration: presence.transitionMs / 2; easing.type: Easing.OutCubic }
+            NumberAnimation { target: window; property: "chromeLevel"; to: window.chromeTarget; duration: presence.transitionMs / 2; easing.type: Easing.OutCubic }
+        }
+    }
+    // Mini automatico dopo inattivita' vera (Presence.autoMiniDue): stessi segnali dei pannelli, nessun timer nuovo
+    property bool presenceReady: false        // dopo l'avvio: il primo mini automatico arriva dopo il timeout normale
+    readonly property bool autoMiniDue: presenceReady && !orbDemo && presence.autoMiniDue({
+        visible: window.visible, state: window.shownState, recentlyActive: window.recentlyActive,
+        typing: window.typing, confirmationPending: jake.confirmationPending, pointerOverPanel: window.cursorOverPanel,
+        holdingError: window.holdingError, toastShown: toast.opacity > 0.01 })
+    onAutoMiniDueChanged: if (autoMiniDue) setPresentation("mini", "auto_idle")
+    function notify(text, color, kind) {
+        if (presence.notificationShowsToast()) toast.show(text, color, kind);
+        else if (presence.notificationMarksOrb()) unseenNotifications += 1;
+    }
 
     // F4.3.1: il desktop vero, sfocato da DWM, dietro ogni pannello visibile (src/DesktopGlass.h). Segue i pannelli
     // registrati in Theme.panels alla stessa cadenza del click-through; si spegne con l'HUD e senza trasparenza.
@@ -108,6 +167,7 @@ ApplicationWindow {
     GlobalHotkeys {
         id: hotkeys
         onCommandBarRequested: {
+            window.setPresentation("expanded", "manual");
             window.visible = true;
             overlayStyler.forceVisibility(window, true);
             window.typing = true;   // in layout focus la barra e' nascosta finche' non si scrive
@@ -155,6 +215,13 @@ ApplicationWindow {
     function place() {
         const area = overlayStyler.availableGeometry(window);
         const s = window.screen;
+        if (geometryMode === "mini") {
+            const corner = presence.miniPosition(area.width > 0 ? area
+                : Qt.rect(s ? s.virtualX : 0, s ? s.virtualY : 0, s ? s.width : 0, s ? s.height - 48 : 0), window.width);
+            window.x = corner.x;
+            window.y = corner.y;
+            return;
+        }
         if (area.width > 0) {
             window.x = Math.round(area.x + (area.width - window.width) / 2);
             window.y = Math.round(area.y + Math.max(0, (area.height - window.height) / 2));
@@ -212,6 +279,7 @@ ApplicationWindow {
         target: jake
         function onViewChanged() {
             if (jake.transcriptText.length > 0 || jake.planSteps.length > 0 || jake.confirmationPending) window.touch();
+            if (jake.confirmationPending && presence.confirmationRestores()) window.setPresentation("expanded", "confirmation");
         }
     }
 
@@ -258,6 +326,8 @@ ApplicationWindow {
         jake.connectToJake(jakeBaseUrl)
         overlayStyler.makeNoActivate(window)
         overlayStyler.setClickThrough(window, true)
+        touch()
+        presenceReady = true
         chooseScreen()
     }
     Binding { target: Theme; property: "highContrast"; value: window.highContrast }
@@ -269,8 +339,9 @@ ApplicationWindow {
 
     // ---- geometria -----------------------------------------------------------------------------------------
     readonly property int margin: 16
-    readonly property int orbSize: layoutMode === "full" ? 410 : layoutMode === "compact" ? 350 : 320
-    readonly property int orbTop: 64
+    readonly property int orbSize: geometryMode === "mini" ? presence.orbSize
+        : layoutMode === "full" ? 410 : layoutMode === "compact" ? 350 : 320
+    readonly property int orbTop: geometryMode === "mini" ? (presence.windowSize - presence.orbSize) / 2 : 64
     readonly property int sideWidth: 318
     readonly property int sideGap: 26
     readonly property point orbCenter: Qt.point(width / 2, orbTop + orbSize / 2)
@@ -280,7 +351,8 @@ ApplicationWindow {
         id: frosted
         anchors.fill: ambience
         source: ambience
-        visible: Theme.richGlass
+        visible: Theme.richGlass && window.chromeVisible
+        opacity: window.chromeLevel
         blurEnabled: true
         blur: 1.0
         blurMax: 48
@@ -289,6 +361,8 @@ ApplicationWindow {
     Ambience {
         id: ambience
         anchors.fill: parent
+        visible: window.chromeVisible
+        opacity: window.chromeLevel
         state: window.shownState
         tint: Theme.stateColor
         center: window.orbCenter
@@ -304,8 +378,9 @@ ApplicationWindow {
         anchors.topMargin: 10
         anchors.horizontalCenter: parent.horizontalCenter
         width: Math.min(parent.width - 2 * window.margin, 640)
-        opacity: window.recentlyActive || hovered ? 1 : 0.72
-        Behavior on opacity { NumberAnimation { duration: 300 } }
+        visible: window.chromeVisible
+        opacity: (window.recentlyActive || hovered ? 1 : 0.72) * window.chromeLevel
+        Behavior on opacity { enabled: !presentationSwap.running; NumberAnimation { duration: 300 } }
         connected: jake.connected
         connectionProblem: jake.connectionProblem
         state: jake.state
@@ -332,11 +407,30 @@ ApplicationWindow {
         y: window.orbTop
         width: window.orbSize
         height: window.orbSize
+        opacity: window.orbLevel
+        scale: 0.85 + 0.15 * window.orbLevel
+        TapHandler {
+            enabled: window.geometryMode === "mini"
+            onTapped: window.setPresentation("expanded", "manual")
+        }
+        // in mini, notifiche arrivate senza toast: un punto discreto, sparisce tornando grandi
+        Rectangle {
+            visible: window.geometryMode === "mini" && window.unseenNotifications > 0
+            anchors.top: parent.top
+            anchors.right: parent.right
+            width: 10; height: 10; radius: 5
+            z: 2
+            color: Theme.accent
+            border.width: 1
+            border.color: Theme.glassBorder
+            Accessible.role: Accessible.Indicator
+            Accessible.name: qsTr("%1 notifiche da vedere").arg(window.unseenNotifications)
+        }
         Loader {
             id: orb
             anchors.centerIn: parent
             // un Loader con dimensioni esplicite ridimensiona il suo item: le dimensioni stanno solo qui
-            width: window.orb3d ? orbArea.width : 160
+            width: window.orb3d ? orbArea.width : Math.min(160, orbArea.width)
             height: width
             readonly property bool hovered: item ? item.hovered : false
             source: window.orb3d ? "Orb3D.qml" : "Orb.qml"
@@ -379,6 +473,8 @@ ApplicationWindow {
               when: orb.item !== null && orb.item.hasOwnProperty("reducedMotion") }
     Binding { target: orb.item; property: "quality"; value: window.orbQuality
               when: orb.item !== null && orb.item.hasOwnProperty("quality") }
+    Binding { target: orb.item; property: "showLabel"; value: window.geometryMode !== "mini"
+              when: orb.item !== null && orb.item.hasOwnProperty("showLabel") }
 
     // pillola di vetro dietro al sottotitolo: sopra un desktop pieno di testo il sottotitolo nudo non si leggeva
     Rectangle {
@@ -390,7 +486,7 @@ ApplicationWindow {
         border.width: 1
         border.color: Theme.glassBorder
         opacity: caption.opacity * 0.92
-        visible: caption.text.length > 0
+        visible: caption.visible && caption.text.length > 0
     }
     // sottotitolo live sotto l'orb: cio' che Jake sta sentendo (provvisorio, in corsivo) o il passo in corso; nei
     // layout senza conversazione laterale anche l'ultima risposta, per qualche secondo
@@ -413,7 +509,8 @@ ApplicationWindow {
         color: live ? Theme.textMuted : Theme.text
         style: Text.Raised
         styleColor: "#a0000000"
-        opacity: text.length > 0 ? 1 : 0
+        visible: window.chromeVisible
+        opacity: text.length > 0 ? window.chromeLevel : 0
         Behavior on opacity { NumberAnimation { duration: 250 } }
         Accessible.name: live ? qsTr("Sto sentendo: ") + jake.transcriptText : text
     }
@@ -421,15 +518,15 @@ ApplicationWindow {
     // ---- colonna sinistra: conversazione (solo layout completo) ------------------------------------------------
     ConversationPanel {
         id: conversation
-        readonly property bool wanted: window.layoutMode === "full"
+        readonly property bool wanted: window.layoutMode === "full" && window.chromeVisible
             && (expanded || hovered || (hasContent && window.recentlyActive))
         x: orbArea.x - window.sideGap - width
         width: window.sideWidth
         height: Math.min(implicitHeight, window.orbSize)
         anchors.verticalCenter: orbArea.verticalCenter
-        opacity: wanted ? 1 : 0
+        opacity: wanted ? window.chromeLevel : 0
         visible: opacity > 0.01
-        Behavior on opacity { NumberAnimation { duration: window.reducedMotion ? 0 : 320; easing.type: Easing.OutCubic } }
+        Behavior on opacity { enabled: !presentationSwap.running; NumberAnimation { duration: window.reducedMotion ? 0 : 320; easing.type: Easing.OutCubic } }
         transcriptText: ""   // la trascrizione live e' il sottotitolo sotto l'orb
         transcriptFinal: jake.transcriptFinal
         stepDescription: jake.state === "EXECUTING" ? jake.stepDescription : ""
@@ -446,7 +543,8 @@ ApplicationWindow {
         width: window.layoutMode === "full" ? window.sideWidth : Math.min(window.width - 2 * window.margin, 480)
         x: window.layoutMode === "full" ? orbArea.x + orbArea.width + window.sideGap : (window.width - width) / 2
         y: window.layoutMode === "full" ? orbArea.y + (orbArea.height - height) / 2 : caption.y + Math.max(caption.height, 20) + 16
-        visible: window.layoutMode !== "focus" || jake.confirmationPending
+        visible: window.chromeVisible && (window.layoutMode !== "focus" || jake.confirmationPending)
+        opacity: window.chromeLevel
 
         // F4.5.3: permission card - azione, rischio, fonte esterna. Si conferma a voce o scrivendo "si'"
         // (stesso percorso della policy), nessun bottone che scavalchi la conferma. Sempre visibile se in sospeso.
@@ -506,7 +604,8 @@ ApplicationWindow {
     CommandBar {
         id: commandBar
         // in focus ricompare solo mentre si scrive (Ctrl+Shift+J)
-        visible: window.layoutMode !== "focus" || window.typing
+        visible: window.chromeVisible && (window.layoutMode !== "focus" || window.typing)
+        opacity: window.chromeLevel
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 12
         anchors.horizontalCenter: parent.horizontalCenter
@@ -545,7 +644,7 @@ ApplicationWindow {
         y: 56
         width: Math.min(parent.width - 40, 560, Math.max(toastText.implicitWidth, toastActions.implicitWidth) + 40)
         height: toastColumn.implicitHeight + 20
-        visible: opacity > 0
+        visible: opacity > 0 && window.chromeVisible
         opacity: 0
         accentColor: tone
         Behavior on opacity { NumberAnimation { duration: window.reducedMotion ? 0 : 220 } }

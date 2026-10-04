@@ -97,6 +97,26 @@
       "expect": {"visible": false, "active_device": "telefono", "state": "IDLE"}
     },
     {
+      "name": "presenza: mini, nascosto, la wake word lo riporta grande; presentazione sconosciuta = expanded",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "HUD_SHOW", "payload": {"presentation": "mini", "reason": "manual"}, "sequence_id": 1}},
+        {"event": {"type": "HUD_HIDE", "payload": {"reason": "manual"}, "sequence_id": 2}},
+        {"event": {"type": "HUD_SHOW", "payload": {"presentation": "expanded", "reason": "wake"}, "sequence_id": 3}},
+        {"event": {"type": "HUD_SHOW", "payload": {"presentation": "gigante"}, "sequence_id": 4}}
+      ],
+      "expect": {"visible": true, "presentation": "expanded", "presentation_reason": ""}
+    },
+    {
+      "name": "presenza mini: visibile ma ridotto",
+      "steps": [
+        {"connect": true},
+        {"event": {"type": "HUD_HIDE", "sequence_id": 1}},
+        {"event": {"type": "HUD_SHOW", "payload": {"presentation": "mini", "reason": "manual"}, "sequence_id": 2}}
+      ],
+      "expect": {"visible": true, "presentation": "mini", "presentation_reason": "manual"}
+    },
+    {
       "name": "tipo sconosciuto e payload non oggetto: ignorati, mai diventano uno stato",
       "steps": [
         {"connect": true},

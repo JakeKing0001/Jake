@@ -18,7 +18,15 @@ from enum import Enum
 from core.version import PROTOCOL_VERSION
 
 
+PRESENTATION_MODES = ("expanded", "mini", "hidden")
+
+
 class EventType(str, Enum):
+    # Presenza dell'HUD sullo schermo, indipendente dal layout full/compact/focus scelto nell'HUD.
+    # HUD_SHOW payload opzionale: {"presentation": "expanded" | "mini", "reason": str}; senza "presentation" vale
+    # "expanded" (comportamento di sempre). HUD_HIDE = presentazione "hidden": solo la finestra sparisce, Jake, la
+    # voce e il processo dell'HUD restano attivi. "reason" (es. "wake", "manual") serve all'HUD per decidere cosa
+    # puo' riaprirlo; non e' contenuto dell'utente.
     HUD_SHOW = "HUD_SHOW"
     HUD_HIDE = "HUD_HIDE"
     USER_MESSAGE = "USER_MESSAGE"

@@ -931,6 +931,8 @@ def _format_success(intent: str, result: SkillResult, registry=None) -> str | No
         return ""
     if intent == "PAUSE_LISTENING":
         return f"Ok, non ascolto per {data['minutes']} minuti. Per svegliarmi prima dì: Jake, svegliati."
+    if intent == "SET_HUD_PRESENTATION":
+        return {"mini": "Ok, resto qui nell'angolo.", "hidden": "Ok, mi nascondo. Dì Jake quando ti servo."}.get(data["mode"], "Eccomi.")
     if intent == "SET_PRIVATE_MODE":
         return "Modalità privata attiva: non registro questa conversazione." if data["enabled"] else "Modalità privata disattivata: torno a registrare normalmente."
     if intent in ("KILL_SWITCH", "RESET_KILL_SWITCH"):

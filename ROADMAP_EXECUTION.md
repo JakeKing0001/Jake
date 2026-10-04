@@ -41,6 +41,25 @@ caricato in Ollama a riposo (keep_alive 30m/2m rispettato); import del nucleo ~4
    (oggi solo libreria in `core/sync_engine.py`); F8 runtime degli agenti oltre i budget gia' presenti; budget GPU e
    frame-time dell'HUD misurati sul desktop reale; `__init__` di JakeCore (~600 righe di cablaggio).
 
+## Incremento del 04/10/2026 — presenza ambientale dell'HUD (da prova reale dell'utente)
+
+- Presenza separata dal layout: `expanded` (HUD normale nel layout full/compact/focus del monitor), `mini` (solo
+  l'orb, finestra 168 px logici nell'angolo alto destro dell'area utile del monitor dell'HUD), `hidden` (finestra
+  invisibile, Jake/voce/wake word/processo dell'HUD attivi). Logica in `hud/native/qml/Presence.qml`, stato di
+  sessione mai salvato; il layout per monitor non viene mai toccato.
+- Protocollo: stessi `HUD_SHOW`/`HUD_HIDE`, `HUD_SHOW` con payload opzionale `{"presentation": "mini"|"expanded",
+  "reason"}`; reducer Python e C++ allineati e verificati dal fixture condiviso.
+- Comandi esatti `SET_HUD_PRESENTATION` ("rimpicciolisciti", "nasconditi", "riduciti a icona", "ingrandisciti",
+  "mostrati"...). La wake word riconosciuta davvero (`WakeWordSession`, dopo il cooldown) riporta l'HUD grande; non
+  se la frase stessa e' un comando di presenza (niente lampo grande->mini).
+- Mini automatico dopo 30 s di vera inattivita' (IDLE, niente conferme, scrittura, cursore su pannelli, errori o
+  avvisi); notifiche normali in mini = punto discreto sull'orb, da nascosto nulla; una conferma riporta grande solo
+  da mini. Transizione 260 ms, immediata con movimento ridotto; clic sull'orb mini = grande.
+- Verificato: build Release + 6/6 ctest (nuovo `hud_presence`), nessun warning qmllint nuovo; `JakeHud.exe` vero
+  collegato a un server companion vero: dimensioni e angolo reali, click-through fuori dall'orb, ritorno allo stesso
+  layout, nascosto con processo vivo, mini automatico a 30 s.
+- `VERIFY` utente: prova A-G con voce e microfono veri, aspetto della transizione, secondo monitor e DPI diversi.
+
 ## Registro owner e stato dei pacchetti attivi
 
 Questo registro riguarda l'incremento in corso; il catalogo storico completo resta nella cronologia Git.

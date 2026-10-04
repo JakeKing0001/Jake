@@ -591,6 +591,19 @@ class WakeWordSession:
         if self.state in ("listening", "transcribing", "dictation"):
             self._audio_levels.update("mic", level if is_speech else level * 0.4)
 
+    def _restore_hud_on_wake(self, remainder: str) -> None:
+        """Richiamare Jake vuol dire "mi servi adesso": un HUD mini o nascosto torna grande (stesso HUD_SHOW del
+        protocollo, reason "wake"). Solo qui, dove una frase che INIZIA con la wake word ha superato il cooldown: mai
+        da un parziale, da un follow-up senza "Jake" o da un "Jake" a meta' di una frase non rivolta a lui. Se la
+        frase stessa chiede di cambiare presenza ("Jake, rimpicciolisciti") non si riapre: niente lampo grande->mini."""
+        decide = getattr(self.jake_core, "hud_presentation_command", None)
+        try:
+            if remainder and callable(decide) and decide(remainder) is not None:
+                return
+        except Exception:
+            self._logger.exception("Errore controllando il comando di presenza dell'HUD")
+        self._publish_hud_event(HudEvent(EventType.HUD_SHOW, {"presentation": "expanded", "reason": "wake"}))
+
     def _publish_hud_event(self, event) -> None:
         bus = getattr(self.jake_core, "event_bus", None)
         publish = getattr(bus, "publish", None)
@@ -883,6 +896,7 @@ class WakeWordSession:
             self.wake_cooldown.register()
             if self.metrics is not None:
                 self.metrics.wake()
+            self._restore_hud_on_wake(remainder)
             self._interrupt_speech(wait=False)  # "Jake" detto mentre stava ancora parlando: interrompilo
             if not remainder:
                 self.listening.arm_command()

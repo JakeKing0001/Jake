@@ -95,6 +95,7 @@ from skills.notification_mode import GetNotificationModeSkill, SetNotificationMo
 from skills.pairing import ApprovePairingSkill
 from skills.session_control import (
     HelpSkill,
+    HudPresentationSkill,
     PauseListeningSkill,
     PrivateModeSkill,
     RepeatLastSkill,
@@ -643,6 +644,7 @@ class JakeCore(NotificationMixin, ModelRoutingMixin, CompanionMixin, EventPublis
             ("STOP_TALKING", StopTalkingSkill(self)),
             ("PAUSE_LISTENING", PauseListeningSkill(self)),
             ("SET_PRIVATE_MODE", PrivateModeSkill(self)),
+            ("SET_HUD_PRESENTATION", HudPresentationSkill(self)),
             ("RESUME_INTERRUPTED_TASK", ResumeInterruptedTaskSkill(self)),
             ("KILL_SWITCH", KillSwitchSkill(self)),
             ("RESET_KILL_SWITCH", ResetKillSwitchSkill(self)),

@@ -30,6 +30,7 @@ Item {
     property string outcome: ""
     property int outcomeSerial: 0     // cresce a ogni esito: due successi di fila = due reazioni
     property real level: 0            // 0..1, livello audio reale (mai audio), se disponibile
+    property bool showLabel: true      // presenza mini: solo l'orb, niente etichetta di stato
     property bool reducedMotion: false
     property string quality: "high"    // "high" | "low"
     // F4.3 (qualita' adattiva): se in qualita' alta i fotogrammi restano sotto ~40 fps per 3 s (GPU debole, sistema
@@ -253,6 +254,7 @@ Item {
         anchors.bottom: parent.bottom
         anchors.horizontalCenter: parent.horizontalCenter
         text: root.stateLabel
+        visible: root.showLabel
         color: "#e5e7eb"
         font.pixelSize: Theme.fontLabel
         style: Text.Raised

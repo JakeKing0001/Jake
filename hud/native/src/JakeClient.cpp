@@ -210,6 +210,7 @@ void JakeClient::handleEventLine(const QString &jsonLine) {
     } else if (type == QLatin1String(JakeHudEventType::DEVICE_HANDOFF)) {
         emit deviceHandoff(payload.value("from").toString(), view.activeDevice);
     } else if (type == QLatin1String(JakeHudEventType::HUD_SHOW) || type == QLatin1String(JakeHudEventType::HUD_HIDE)) {
+        emit presentationRequested(view.presentation, view.presentationReason);
         emit visibilityRequested(view.visible);
     }
     setActiveDevice(view.activeDevice);

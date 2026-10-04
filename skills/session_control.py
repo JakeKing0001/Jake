@@ -169,3 +169,38 @@ class ResumeInterruptedTaskSkill:
             return SkillResult(success=False, data={}, error="NOT_FOUND")
         response = self.core._resume_interrupted_task(checkpoint)
         return SkillResult(success=True, data={"response": response})
+
+
+class HudPresentationSkill:
+    """Quanto e' presente l'HUD sullo schermo: grande (expanded), solo l'orb nell'angolo (mini) o nascosto (hidden).
+    Nascosto NON spegne niente: Jake, il microfono, la wake word e il processo dell'HUD restano attivi, e "Jake" lo
+    riporta grande (core/voice/wake_word_session.py). Riusa HUD_SHOW/HUD_HIDE del protocollo, nessun canale nuovo."""
+
+    metadata = {
+        "intent": "SET_HUD_PRESENTATION",
+        "description": "Cambia quanto spazio occupa l'HUD di Jake: 'mini' (solo l'orb piccolo in alto a destra), "
+        "'expanded' (HUD normale) o 'hidden' (HUD invisibile, Jake continua ad ascoltare). Usalo per "
+        "'rimpicciolisciti', 'fatti piccolo', 'ingrandisciti', 'torna grande', 'nasconditi', 'riduciti a icona', "
+        "'mostrati'.",
+        "parameters": {
+            "mode": {"type": "string", "required": True, "description": "Una tra: mini, expanded, hidden."},
+        },
+    }
+
+    MODES = ("expanded", "mini", "hidden")
+
+    def __init__(self, core):
+        self.core = core
+
+    def execute(self, parameters: dict = None):
+        from core.hud_protocol import EventType, HudEvent
+
+        mode = str((parameters or {}).get("mode") or "").strip().lower()
+        if mode not in self.MODES:
+            return SkillResult(success=False, data={"mode": mode}, error="INVALID_VALUE")
+        if mode == "hidden":
+            event = HudEvent(EventType.HUD_HIDE, {"reason": "manual"})
+        else:
+            event = HudEvent(EventType.HUD_SHOW, {"presentation": mode, "reason": "manual"})
+        self.core.event_bus.publish(event)
+        return SkillResult(success=True, data={"mode": mode})

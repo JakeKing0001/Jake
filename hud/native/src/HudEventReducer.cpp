@@ -46,6 +46,8 @@ QJsonObject HudViewState::snapshot() const {
         {"state", state},
         {"state_status", stateStatus},
         {"visible", visible},
+        {"presentation", presentation},
+        {"presentation_reason", presentationReason},
         {"mic_open", micOpen},
         {"mic_discarding", micDiscarding},
         {"mic_reason", micReason},
@@ -170,9 +172,15 @@ void HudEventReducer::reduce(const QString &type, const QJsonObject &payload, co
     } else if (isType(type, NOTIFICATION)) {
         push(m_view.notifications, QJsonArray{text(payload, "kind"), text(payload, "text")});
     } else if (isType(type, HUD_SHOW)) {
+        // come core/hud_view_state.py: senza "presentation" (o con un valore sconosciuto) vale "expanded"
         m_view.visible = true;
+        m_view.presentation = text(payload, "presentation") == QLatin1String("mini") ? QStringLiteral("mini")
+                                                                                   : QStringLiteral("expanded");
+        m_view.presentationReason = text(payload, "reason");
     } else if (isType(type, HUD_HIDE)) {
         m_view.visible = false;
+        m_view.presentation = QStringLiteral("hidden");
+        m_view.presentationReason = text(payload, "reason");
     } else if (isType(type, DEVICE_HANDOFF)) {
         m_view.activeDevice = text(payload, "to");
     } else if (isType(type, MIC_STATE)) {
