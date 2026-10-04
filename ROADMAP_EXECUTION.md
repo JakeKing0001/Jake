@@ -59,6 +59,10 @@ caricato in Ollama a riposo (keep_alive 30m/2m rispettato); import del nucleo ~4
   collegato a un server companion vero: dimensioni e angolo reali, click-through fuori dall'orb, ritorno allo stesso
   layout, nascosto con processo vivo, mini automatico a 30 s.
 - `VERIFY` utente: prova A-G con voce e microfono veri, aspetto della transizione, secondo monitor e DPI diversi.
+- Bug reale dalla prova del 04/10: comparivano due Jake (orb 2D dell'HUD PySide di `main.py` e orb 3D del nativo),
+  entrambi anche su Ctrl+Shift+J. Ora con l'HUD nativo attivo (`NativeHudSupervisor.active`: acceso o in
+  riavvio) quello PySide non si mostra e lascia hotkey e tray al nativo; torna di riserva se il nativo manca, e'
+  chiuso o abbandonato dopo i crash.
 
 ## Registro owner e stato dei pacchetti attivi
 
