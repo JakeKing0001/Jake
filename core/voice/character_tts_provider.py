@@ -152,6 +152,11 @@ class CharacterTtsProvider(TtsProvider):
             self.base_tts_provider.speak(text)
             return
 
+        if getattr(self.server_manager, "held", False) is True:
+            # GPU ceduta a un gioco/app (core/gpu_yield.py): niente torch finche' non torna libera
+            self.base_tts_provider.speak(text)
+            return
+
         if getattr(self.server_manager, "idle_stopped", False) is True:
             # Server chiuso per inattivita' (RAM liberata): niente 20-30 s di attesa per ricaricare
             # torch, questa frase esce con la voce di base e il timbro riparte in background.
