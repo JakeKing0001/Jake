@@ -88,6 +88,15 @@ caricato in Ollama a riposo (keep_alive 30m/2m rispettato); import del nucleo ~4
   4756 a 4546 MB, ~51 token/s invariati. Flash attention era gia' attiva (auto) in Ollama 0.35.1.
 - Visione: qwen2.5vl:3b sullo stesso screenshot reale 2697 MB / 7,3 s contro 5128 MB / 11,4 s del 7b, descrizione
   corretta ma meno precisa (non legge il nome del file). Scelta locale, il default resta 7b.
+## Incremento del 05/10/2026 — HUD a riposo meno costoso per la GPU
+
+- Misura reale (`JakeHud.exe`, contatori GPU Engine di Windows, schermo a 144 Hz): HUD grande in IDLE ~9-12% del
+  motore 3D, presenza mini 4,8%, 137 MB di VRAM, 153 MB di RAM.
+- L'orb 3D a riposo (IDLE/PAUSED, anche in mini) avanza a 30 fps con un Timer invece che a vsync; particelle a tempo
+  manuale (mai riavviate, nessun salto). La rilevazione dei fotogrammi lenti vale solo a vsync. L'impulso dell'aura
+  girava anche con l'ambiente nascosto (mini) e teneva la finestra a vsync: ora solo se visibile.
+- Dopo: grande 7,1%, mini 2,7%; orb mini verificato a schermo (particelle presenti e in movimento). La polvere a meta'
+  risoluzione e' stata provata e scartata (6,7%, nel rumore). Build + 6/6 ctest.
 
 ## Registro owner e stato dei pacchetti attivi
 

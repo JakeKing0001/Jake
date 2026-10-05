@@ -22,7 +22,8 @@ Item {
     readonly property bool audioState: state === "LISTENING" || state === "SPEAKING" || state === "DICTATION"
     property real pulse: 0
     SequentialAnimation on pulse {
-        running: !root.reducedMotion
+        // anche nascosta (presenza mini) un'animazione infinita tiene la finestra a vsync: solo se visibile
+        running: !root.reducedMotion && root.visible
         loops: Animation.Infinite
         NumberAnimation { to: 1; duration: root.state === "IDLE" ? 4200 : 1600; easing.type: Easing.InOutSine }
         NumberAnimation { to: 0; duration: root.state === "IDLE" ? 4200 : 1600; easing.type: Easing.InOutSine }
