@@ -29,6 +29,7 @@ class RvcServerManager:
         self._clock = clock
         self._last_used = clock()
         self._idle_stopped = False
+        self._held = False
         self._watchdog: threading.Thread | None = None
         self._watchdog_stop = threading.Event()
 
@@ -97,6 +98,20 @@ class RvcServerManager:
         """Vero se il server e' stato chiuso per inattivita' e non e' ancora ripartito."""
         return self._idle_stopped
 
+    @property
+    def held(self) -> bool:
+        """Vero mentre la GPU e' ceduta ad altro (core/gpu_yield.py): il server resta spento, si parla con la voce
+        di base e nessun prewarm lo riaccende."""
+        return self._held
+
+    def hold(self) -> None:
+        with self._start_lock:
+            self._held = True
+            self.stop()
+
+    def release(self) -> None:
+        self._held = False
+
     def stop_if_idle(self) -> bool:
         """Chiude il server SOLO se l'abbiamo avviato noi e nessuno lo usa da troppo."""
         if not self.idle_shutdown_seconds or self._process is None or self._process.poll() is not None:
@@ -125,6 +140,8 @@ class RvcServerManager:
         Non blocca il bootstrap. Se speak() arriva prima che abbia finito,
         ensure_running() aspettera' lo stesso avvio grazie a _start_lock.
         """
+        if self._held:
+            return
         if self._prewarm_thread is not None and self._prewarm_thread.is_alive():
             return
 
