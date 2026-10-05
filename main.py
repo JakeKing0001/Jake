@@ -222,6 +222,22 @@ def _build_character_tts_provider(base_tts_provider, character_name: str):
         )
         return base_tts_provider, None
 
+    # Voce Piper addestrata sul timbro (core/voice/piper_tts_provider.py): ONNX su CPU, niente torch/RVC. Ha la
+    # precedenza se il modello esiste; "voice_character_engine": "rvc" in settings.json torna alla conversione RVC.
+    from core.config import Config
+    from core.voice.piper_tts_provider import PiperTtsProvider, piper_model_path
+
+    piper_model = piper_model_path(character_name)
+    if piper_model is not None and str(Config().get("voice_character_engine", "auto")).lower() != "rvc":
+        try:
+            provider = PiperTtsProvider(piper_model, base_tts_provider,
+                                        consent_check=lambda: consent.is_allowed(character_name),
+                                        rate_percent=getattr(base_tts_provider, "_base_rate_percent", 0))
+            print(f"Voce '{character_name}': modello Piper locale (niente RVC).")
+            return provider, None
+        except Exception as exc:
+            print(f"Nota: voce Piper non caricabile ({exc}), uso la conversione RVC.")
+
     print(f"Avvio la conversione vocale per '{character_name}' (puo' richiedere qualche secondo)...")
     provider = CharacterTtsProvider(
         base_tts_provider, manager, consent_check=lambda: consent.is_allowed(character_name),
@@ -261,6 +277,8 @@ def _setup_voice(core=None):
     if character_name:
         tts_provider, server_manager = _build_character_tts_provider(tts_provider, character_name)
 
+    if server_manager is None and character_name and hasattr(tts_provider, "prewarm"):
+        tts_provider.prewarm()   # voce Piper: inizializza ONNX prima della prima risposta
     if server_manager is not None and hasattr(tts_provider, "prewarm"):
         print("Riscaldo la pipeline vocale RVC in background...")
         tts_provider.prewarm()
