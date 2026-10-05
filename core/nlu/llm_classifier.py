@@ -150,6 +150,10 @@ class OllamaProvider(IntentProvider):
             "LEARN_COMMAND), dove l'intera richiesta va in quel parametro."),
             ("- Saluti, ringraziamenti, commenti senza una richiesta: CHITCHAT. Domande di conoscenza "
             "generale o richieste di aiuto testuale: ASK_QUESTION."),
+            # prova del 05/10/2026: gemma3:4b dava UNKNOWN a 5 domande di cultura generale su 8 (qwen2.5:7b 0 su 8)
+            ("- Una domanda di cultura generale, una spiegazione o un consiglio che non riguarda questo PC (chi era, "
+            "cos'e', perche', come funziona, qual e', spiegami, che differenza c'e') e' SEMPRE ASK_QUESTION, mai UNKNOWN: "
+            "UNKNOWN solo per azioni sul PC che nessuna capacita' sa fare."),
             "- Non inventare intent o parametri e non aggiungere spiegazioni o Markdown.",
         ])
         lines.append("Capacita' disponibili (scegline UNA):")
