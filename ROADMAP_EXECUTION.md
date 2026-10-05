@@ -175,6 +175,8 @@ non viene riusato. Prompt reale ~7000 caratteri: capacita' ~3800, regole ~1300, 
   "buco nero" in 0-37 ms, il resto 1,8-2,5 s (5 s la prima volta), VRAM libera invariata (319 MB). Prima: 25 s di timeout.
 - GPU libera: percorso normale invariato (~1 s, prompt completo). Build HUD Release + 6/6 ctest (presenza expanded/
   mini/hidden).
+- Voce: la voce Piper veniva considerata solo se anche il modello RVC era installato (controllo `is_installed` prima);
+  ora consenso -> Piper -> RVC come ripiego, senza nemmeno creare il gestore RVC quando Piper c'e'.
 - `VERIFY` utente: qualita' della voce Piper (#202) rispetto a RVC; la prova con un training/gioco vero.
 
 ## Registro owner e stato dei pacchetti attivi

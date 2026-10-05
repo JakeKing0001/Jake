@@ -215,6 +215,7 @@ class MainWiringTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             registry = VoiceConsentRegistry(Path(tmp) / "c.json")
             with mock.patch("core.voice.voice_consent.VoiceConsentRegistry", lambda: registry), \
+                    mock.patch("core.voice.piper_tts_provider.piper_model_path", lambda name: None), \
                     mock.patch("core.voice.rvc_server_manager.RvcServerManager") as manager_class:
                 manager_class.return_value.is_installed.return_value = True
                 provider, manager = main._build_character_tts_provider(base, "jake_the_dog")
@@ -226,6 +227,30 @@ class MainWiringTests(unittest.TestCase):
                 self.assertTrue(provider.consent_check())
                 registry.revoke("jake_the_dog")
                 self.assertFalse(provider.consent_check())
+
+
+    def test_piper_voice_wins_even_without_the_rvc_model(self):
+        # voce Piper addestrata presente: niente RVC/torch, neppure il suo gestore, anche se rvc_models/ e' vuoto
+        import tempfile
+        from pathlib import Path
+
+        import main
+        from core.voice.voice_consent import VoiceConsentRegistry
+
+        base = mock.MagicMock()
+        with tempfile.TemporaryDirectory() as tmp:
+            registry = VoiceConsentRegistry(Path(tmp) / "c.json")
+            registry.grant("jake_the_dog", "personaggio", "fictional-character", "Personaggio di fantasia.")
+            piper = mock.MagicMock()
+            with mock.patch("core.voice.voice_consent.VoiceConsentRegistry", lambda: registry), \
+                    mock.patch("core.voice.piper_tts_provider.piper_model_path", lambda name: Path(tmp) / "j.onnx"), \
+                    mock.patch("core.voice.piper_tts_provider.PiperTtsProvider", return_value=piper), \
+                    mock.patch("core.voice.rvc_server_manager.RvcServerManager") as manager_class:
+                manager_class.return_value.is_installed.return_value = False
+                provider, manager = main._build_character_tts_provider(base, "jake_the_dog")
+            self.assertIs(provider, piper)
+            self.assertIsNone(manager)
+            manager_class.assert_not_called()
 
 
 if __name__ == "__main__":
