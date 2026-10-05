@@ -5,6 +5,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
     && rm -rf /var/lib/apt/lists/*
 RUN git clone --depth 1 https://github.com/OHF-voice/piper1-gpl.git /piper
 WORKDIR /piper
-RUN pip install --no-cache-dir -e '.[train]' \
-    && ./build_monotonic_align.sh \
-    && python setup.py build_ext --inplace
+RUN pip install --no-cache-dir scikit-build
+RUN pip install --no-cache-dir -e '.[train]'
+RUN ./build_monotonic_align.sh && python setup.py build_ext --inplace
