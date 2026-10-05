@@ -1,0 +1,4 @@
+# Il predittore MOS (UTMOS) e' spento: scaricherebbe un modello da GitHub e occupa VRAM durante la validazione.
+# Il checkpoint su "val_mos" e' tolto da patch_piper.py; restano val_mel e last.ckpt.
+model:
+  mos_metric: none

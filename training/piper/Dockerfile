@@ -8,3 +8,7 @@ WORKDIR /piper
 RUN pip install --no-cache-dir scikit-build
 RUN pip install --no-cache-dir -e '.[train]'
 RUN ./build_monotonic_align.sh && python setup.py build_ext --inplace
+# esportazione ONNX (torch.onnx dynamo) e niente checkpoint su val_mos (vedi patch_piper.py)
+RUN pip install --no-cache-dir onnx onnxscript
+COPY patch_piper.py /tmp/patch_piper.py
+RUN python /tmp/patch_piper.py
