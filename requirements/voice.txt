@@ -7,3 +7,5 @@ sounddevice==0.5.6
 keyboard==0.13.5
 winsdk==1.0.0b10
 webrtcvad-wheels==2.0.14
+# voce del personaggio senza torch/RVC (core/voice/piper_tts_provider.py): ONNX su CPU
+piper-tts==1.8.0

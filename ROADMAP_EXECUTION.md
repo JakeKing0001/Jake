@@ -108,6 +108,18 @@ caricato in Ollama a riposo (keep_alive 30m/2m rispettato); import del nucleo ~4
   produzione presa dalla corsia esatta).
 - Modello principale piu' piccolo valutato e NON adottato: qwen2.5:3b stessa accuratezza sugli intent (78,3%), p50
   830 ms, 2157 MB di VRAM e 95 token/s, ma risposte in italiano visibilmente peggiori su domande tipiche.
+## Incremento del 05/10/2026 — voce del personaggio con Piper, senza torch/RVC
+
+- `core/voice/piper_tts_provider.py`: se esiste `data/piper/models/<personaggio>.onnx` Jake parla con Piper (ONNX su
+  CPU) e non avvia il server RVC; stesso consenso di RVC (revocato = voce di base). `voice_character_engine: "rvc"`
+  torna alla conversione. Misura con una voce italiana pubblica: prima frase 56 ms dopo il prewarm (2,8 s senza),
+  6,8 s di audio in 0,25 s, +158 MB di RAM, 0 di VRAM (RVC: ~2 GB di RAM e ~1 GB di VRAM).
+- Dati: `tools/piper_voice_dataset.py` (frasi dal modello locale -> edge-tts DiegoNeural -> RVC del personaggio,
+  ripresa automatica, frasi saltate se edge-tts non risponde). Addestramento: `training/piper/` (Docker + GPU, il
+  training di Piper e' solo Linux), fine-tuning dal checkpoint italiano serena-medium, export ONNX. Patch all'immagine:
+  niente checkpoint su `val_mos` (Lightning falliva a fine epoca) ed export con `dynamo=False` (torch 2.14).
+- Verificato l'intero percorso su un'epoca di prova: checkpoint ripreso, export ONNX da 63 MB, sintesi dal provider di
+  Jake. `VERIFY` utente: ascolto della voce addestrata e confronto con RVC.
 
 ## Registro owner e stato dei pacchetti attivi
 
