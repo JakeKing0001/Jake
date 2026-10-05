@@ -753,16 +753,19 @@ class JakeCore(NotificationMixin, ModelRoutingMixin, CompanionMixin, EventPublis
     def _build_gpu_yield(self, config):
         """La GPU torna a un gioco/app a schermo intero quando serve (core/gpu_yield.py): il modello principale la
         lascia e ci ritorna da solo. Ascoltatori in piu' (voce RVC) li aggiunge chi avvia la sessione."""
-        from core.gpu_yield import GpuDemand, GpuYieldMonitor
+        from core.gpu_yield import GpuDemand, GpuYieldMonitor, VramPressure
         from core.notification_center import NotificationMode
-        from core.ollama_client import gpu_policy
+        from core.ollama_client import DEFAULT_BASE_URL, gpu_policy
+        from core.ollama_gpu_budget import OllamaApi
 
         if not bool(config.get("gpu_yield_enabled", True)):
             return None
-        demand = GpuDemand(yield_apps=config.get("gpu_yield_apps") or (),
-                           gaming_mode=lambda: self.notification_center.mode == NotificationMode.GAMING)
-        monitor = GpuYieldMonitor(demand)
         primary = config.get("ollama_model", "qwen2.5:7b")
+        api = OllamaApi(DEFAULT_BASE_URL)
+        demand = GpuDemand(yield_apps=config.get("gpu_yield_apps") or (),
+                           gaming_mode=lambda: self.notification_center.mode == NotificationMode.GAMING,
+                           vram_pressure=VramPressure(primary, api.ps, api.tags))
+        monitor = GpuYieldMonitor(demand)
 
         def apply(yielding: bool, reason: str | None) -> None:
             gpu_policy().set_yield(0 if yielding else None)

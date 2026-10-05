@@ -31,6 +31,19 @@ class GpuYieldTest(unittest.TestCase):
         self.assertEqual(_demand(processes={"blender.exe"}, apps=["Blender.exe"]).reason(), "app:blender.exe")
         self.assertEqual(_demand(gaming=True).reason(), "gaming_mode")
 
+    def test_vram_pressure_counts_the_model_own_memory(self):
+        from core.gpu_yield import VramPressure
+
+        mb = 2**20
+        tags = lambda: [{"name": "m:1", "size": 3000 * mb}]
+        # non caricato, 200 MB liberi (un training ha preso la GPU): non ci sta
+        self.assertTrue(VramPressure("m:1", lambda: [], tags, free_vram=lambda: 200)().startswith("vram:"))
+        # caricato tutto sulla GPU: la sua memoria conta come disponibile
+        loaded = lambda: [{"name": "m:1", "size": 3500 * mb, "size_vram": 3500 * mb}]
+        self.assertIsNone(VramPressure("m:1", loaded, tags, free_vram=lambda: 400)())
+        # senza GPU NVIDIA nessun segnale
+        self.assertIsNone(VramPressure("m:1", lambda: [], tags, free_vram=lambda: None)())
+
     def test_monitor_hysteresis_and_listeners(self):
         now = [0.0]
         demand = _Flip()
