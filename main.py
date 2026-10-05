@@ -261,6 +261,11 @@ def _setup_voice(core=None):
     if character_name:
         tts_provider, server_manager = _build_character_tts_provider(tts_provider, character_name)
 
+    if server_manager is not None and getattr(core, "gpu_yield", None) is not None:
+        # GPU ceduta a un gioco/app (core/gpu_yield.py): anche torch/RVC la lascia, si parla con la voce di base
+        core.gpu_yield.add_listener(
+            lambda yielding, _reason: server_manager.hold() if yielding else server_manager.release())
+
     if server_manager is not None and hasattr(tts_provider, "prewarm"):
         print("Riscaldo la pipeline vocale RVC in background...")
         tts_provider.prewarm()
