@@ -75,6 +75,28 @@ caricato in Ollama a riposo (keep_alive 30m/2m rispettato); import del nucleo ~4
 - Context 8192 vs 4096: -240 MB a GPU piena, -33 MB con 3 layer, nessuna differenza di velocita'; resta 8192
   (il classificatore lo usa) e `ollama_context` e' solo configurabile. Impatto su Whisper sotto carico: non misurato.
 
+## Incremento del 05/10/2026 — la GPU torna a giochi e app solo quando servono
+
+- Il budget fisso di 1024 MB rallentava ogni risposta (~17 s) anche a GPU libera: tolto dalla configurazione locale.
+  Al suo posto `core/gpu_yield.py`: con un gioco/app a schermo intero (SHQueryUserNotificationState, esclusi Jake,
+  browser e lettori video), un eseguibile in `gpu_yield_apps` o la modalita' "gioco", dopo 4 s il modello principale
+  lascia la GPU (scaricato, poi CPU con keep_alive 2 min) e RVC si ferma (voce di base); 20 s dopo la fine torna
+  sulla GPU e viene ricaricato in anticipo. `gpu_yield_enabled: false` lo spegne; il budget fisso resta disponibile.
+- Bug trovato nella prova vera: senza `num_gpu` Ollama riusava il runner CPU aperto durante il gioco; ora la ripresa
+  scarica e ricarica (verificato: 0 -> 4546 MB di VRAM).
+- Cache KV q8_0 (`OLLAMA_KV_CACHE_TYPE`, impostata anche da `setup.ps1`): 448 -> 238 MB a 8192 token, qwen2.5:7b da
+  4756 a 4546 MB, ~51 token/s invariati. Flash attention era gia' attiva (auto) in Ollama 0.35.1.
+- Visione: qwen2.5vl:3b sullo stesso screenshot reale 2697 MB / 7,3 s contro 5128 MB / 11,4 s del 7b, descrizione
+  corretta ma meno precisa (non legge il nome del file). Scelta locale, il default resta 7b.
+## Incremento del 05/10/2026 — HUD a riposo meno costoso per la GPU
+
+- Misura reale (`JakeHud.exe`, contatori GPU Engine di Windows, schermo a 144 Hz): HUD grande in IDLE ~9-12% del
+  motore 3D, presenza mini 4,8%, 137 MB di VRAM, 153 MB di RAM.
+- L'orb 3D a riposo (IDLE/PAUSED, anche in mini) avanza a 30 fps con un Timer invece che a vsync; particelle a tempo
+  manuale (mai riavviate, nessun salto). La rilevazione dei fotogrammi lenti vale solo a vsync. L'impulso dell'aura
+  girava anche con l'ambiente nascosto (mini) e teneva la finestra a vsync: ora solo se visibile.
+- Dopo: grande 7,1%, mini 2,7%; orb mini verificato a schermo (particelle presenti e in movimento). La polvere a meta'
+  risoluzione e' stata provata e scartata (6,7%, nel rumore). Build + 6/6 ctest.
 ## Incremento del 05/10/2026 — prompt del classificatore con prefisso stabile
 
 - Misura reale: ogni classificazione mandava a qwen2.5:7b 1900-3000 token e il prefill era 750-1500 ms, ~65% della

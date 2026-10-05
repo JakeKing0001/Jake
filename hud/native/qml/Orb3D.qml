@@ -204,22 +204,41 @@ Item {
     property real angle: 0
     property real breath: 0
     property real clock: 0
-    FrameAnimation {
-        running: !root.reducedMotion && root.visible
-        onTriggered: {
-            root.clock += frameTime;
-            if (root.effectiveQuality === "high" && frameTime > 0 && frameTime < 1) {
-                root.slowSeconds = frameTime > 1 / 40 ? root.slowSeconds + frameTime : Math.max(0, root.slowSeconds - frameTime);
-                if (root.slowSeconds > 3) {
-                    root.autoLowered = true;
-                    console.warn("Orb 3D: fotogrammi lenti per 3 s, passo alla qualita' bassa");
-                }
+    // A riposo (IDLE/PAUSED, anche nella presenza mini) l'orb respira piano: 30 fotogrammi al secondo bastano e su uno
+    // schermo a 144 Hz la GPU lavora ~5 volte meno (misura del 05/10/2026: HUD mini 4,8% del motore 3D a vsync). Negli
+    // altri stati torna al ritmo dello schermo. Le particelle seguono lo stesso orologio (tempo manuale, mai riavviate).
+    readonly property bool calm: state === "IDLE" || state === "PAUSED"
+    readonly property bool animating: !reducedMotion && visible
+    function advance(dt, measured) {
+        root.clock += dt;
+        particles.time += Math.round(dt * 1000);
+        if (measured && root.effectiveQuality === "high" && dt > 0 && dt < 1) {
+            root.slowSeconds = dt > 1 / 40 ? root.slowSeconds + dt : Math.max(0, root.slowSeconds - dt);
+            if (root.slowSeconds > 3) {
+                root.autoLowered = true;
+                console.warn("Orb 3D: fotogrammi lenti per 3 s, passo alla qualita' bassa");
             }
-            const target = root.rawAudio;
-            const tau = target > root.audio ? 0.06 : 0.45;
-            root.audio += (target - root.audio) * (1 - Math.exp(-Math.min(frameTime, 0.1) / tau));
-            root.angle = (root.angle + (8 + root.outerOrbit * 0.2) * frameTime) % 360;
-            root.breath = Math.sin(root.clock * 2 * Math.PI * 1000 / root.breathPeriod);
+        }
+        const target = root.rawAudio;
+        const tau = target > root.audio ? 0.06 : 0.45;
+        root.audio += (target - root.audio) * (1 - Math.exp(-Math.min(dt, 0.1) / tau));
+        root.angle = (root.angle + (8 + root.outerOrbit * 0.2) * dt) % 360;
+        root.breath = Math.sin(root.clock * 2 * Math.PI * 1000 / root.breathPeriod);
+    }
+    FrameAnimation {
+        running: root.animating && !root.calm
+        onTriggered: root.advance(frameTime, true)
+    }
+    Timer {
+        interval: 33
+        repeat: true
+        running: root.animating && root.calm
+        property real last: 0
+        onRunningChanged: last = Date.now()
+        onTriggered: {
+            const now = Date.now();
+            root.advance(Math.min(0.1, Math.max(0, (now - last) / 1000)), false);
+            last = now;
         }
     }
     // l'asse delle orbite oscilla lentamente: il moto non si ripete uguale
@@ -348,7 +367,7 @@ Item {
         // massa di particelle: NON figlia del nodo che ruota (niente rotazione rigida condivisa)
         ParticleSystem3D {
             id: particles
-            running: root.visible
+            running: false          // tempo guidato da advance(): 30 fps a riposo, vsync negli altri stati
             readonly property bool high: root.effectiveQuality === "high"
 
             // seconda prova reale del 27/09/2026 ("ancora una sfera rigida di puntini"): il guscio esterno e' DUE
