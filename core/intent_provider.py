@@ -29,8 +29,13 @@ class RuleBasedProvider(IntentProvider):
 		self.news_triggers = ["notizie su", "news su", "ultime notizie"]
 		self.web_search_triggers = ["cerca sul web", "cerca su internet", "cerca online"]
 		self.clipboard_read_triggers = ["cosa c'e' negli appunti", "leggi gli appunti", "cosa ho copiato"]
-		self.volume_up_triggers = ["alza il volume", "aumenta il volume"]
-		self.volume_down_triggers = ["abbassa il volume", "diminuisci il volume"]
+		self.volume_up_triggers = ["alza il volume", "aumenta il volume", "alza un po' il volume", "alza un po il volume",
+								   "alza l'audio"]
+		self.volume_down_triggers = ["abbassa il volume", "diminuisci il volume", "abbassa un po' il volume",
+									 "abbassa un po il volume", "abbassa l'audio"]
+		# GPU ceduta (core/nlu/degraded_routing.py): "quanta batteria mi resta" non deve aspettare il modello su CPU
+		self.battery_triggers = ["quanta batteria", "livello della batteria", "stato della batteria",
+								 "carica della batteria", "percentuale di batteria", "percentuale della batteria"]
 		self.volume_mute_triggers = ["silenzia", "muta l'audio", "togli l'audio"]
 		self.list_processes_triggers = ["mostra i processi", "elenca i processi", "che processi sono aperti"]
 		# "termina" NON e' incluso (a differenza di prima): e' anche la forma indicativa del
@@ -310,6 +315,9 @@ class RuleBasedProvider(IntentProvider):
 			return Command("SET_VOLUME", {"action": "down"})
 		if self._has_trigger(text, self.volume_mute_triggers):
 			return Command("SET_VOLUME", {"action": "mute"})
+
+		if self._has_trigger(text, self.battery_triggers):
+			return Command("GET_BATTERY_STATUS", {})
 
 		if self._has_trigger(text, self.list_processes_triggers):
 			return Command("LIST_PROCESSES", {})

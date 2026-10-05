@@ -776,6 +776,9 @@ class JakeCore(NotificationMixin, ModelRoutingMixin, CompanionMixin, EventPublis
 
         monitor.add_listener(apply)
         monitor.start()
+        # a GPU ceduta il classificatore gira su CPU: prima le corsie senza modello, poi la forma compatta
+        self.router.degraded = lambda: gpu_policy().yielding
+        self.router.degraded_model = self.degraded_classifier_model
         return monitor
 
     def _quiet_ollama_call(self, yielding: bool, model: str) -> None:

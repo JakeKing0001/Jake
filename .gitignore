@@ -27,3 +27,4 @@ benchmarks/results/
 # Diagnostica prodotta localmente dallo stesso step usato in CI; il runner la pubblica come
 # artifact, ma non deve mai entrare nel repository.
 .ci-artifacts/
+hud/native/build-release/
