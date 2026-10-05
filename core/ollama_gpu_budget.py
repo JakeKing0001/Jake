@@ -277,7 +277,16 @@ class GpuLayerPolicy:
         self._done = threading.Event()
         self._thread: threading.Thread | None = None
         self.result: dict | None = None
+        self._yield_layers: int | None = None
         self.logger = get_logger()
+
+    @property
+    def yielding(self) -> bool:
+        return self._yield_layers is not None
+
+    def set_yield(self, layers: int | None) -> None:
+        """GPU ceduta ad altro (core/gpu_yield.py): `layers` sostituisce budget e calibrazione finche' non torna None."""
+        self._yield_layers = layers
 
     def _calibrator(self) -> Calibrator:
         return Calibrator(self.api, self.model, self.budget, self.num_ctx, self._gpu(), self.cache_path)
@@ -321,6 +330,8 @@ class GpuLayerPolicy:
     def layers(self, wait: bool = True) -> int | None:
         """Il valore da mettere in `num_gpu`. Aspetta (una volta, al massimo WAIT_FOR_CALIBRATION_S) la calibrazione
         in corso: una richiesta con un valore diverso ricaricherebbe il modello a meta' misura."""
+        if self._yield_layers is not None:
+            return self._yield_layers
         if not self._resolved:
             self.start()
             if wait:

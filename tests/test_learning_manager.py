@@ -109,6 +109,17 @@ class ObserveAndCommitTests(unittest.TestCase):
         manager.observe("che ore sono", None, None, route="llm")  # qualsiasi comando successivo
         self.assertIsNotNone(manager.example_store.find_exact("apri il blocco note"))
 
+    def test_compound_request_is_not_learned(self):
+        # prova del 05/10/2026: classificata solo GET_TIME, la frase intera era diventata un esempio esatto
+        manager = self._manager()
+        text = "che ore sono e che giorno e' oggi"
+        manager.observe(text, Command("GET_TIME", {}), _success({}), route="llm")
+        manager.commit_pending()
+        self.assertIsNone(manager.example_store.find_exact(text))
+        manager.observe("dimmi il meteo di roma e milano", Command("GET_WEATHER", {}), _success({}), route="llm")
+        manager.commit_pending()
+        self.assertIsNotNone(manager.example_store.find_exact("dimmi il meteo di roma e milano"))
+
     def test_non_llm_route_is_never_learned(self):
         manager = self._manager()
         result = _success({"app": "blocco note"})

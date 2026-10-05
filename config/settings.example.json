@@ -7,6 +7,8 @@
   "low_memory": false,
   "ollama_keep_alive": "30m",
   "ollama_secondary_keep_alive": "2m",
+  "gpu_yield_enabled": true,
+  "gpu_yield_apps": [],
   "tts_engine": "edge",
   "tts_voice": "it-IT-DiegoNeural",
   "tts_rate": "+8%",
