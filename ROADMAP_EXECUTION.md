@@ -1,7 +1,14 @@
 ## 24. Prossima azione esatta
 
-Aggiornato 02/10/2026, baseline pre-sperimentazione (le versioni precedenti restano nella cronologia Git). Da qui
-lo sviluppo e' guidato dai problemi osservati nell'uso reale: nessuna feature nuova finche' la prova non li indica.
+Aggiornato 05/10/2026. La prima prova reale (04-05/10) e' avvenuta e i suoi problemi sono chiusi negli incrementi
+qui sotto (#194-#203 e l'instradamento a GPU ceduta). Si torna alla sperimentazione: niente feature nuove finche' la
+prova non indica il prossimo problema.
+
+Prossimo test reale dell'utente: `python main.py` con un training CUDA o un gioco acceso (GPU quasi piena), poi
+"che ore sono", "apri Spotify", "quanta batteria ho", "abbassa il volume", "spiegami cos'e' un buco nero", "chiudi
+chrome"; dopo un errore `python main.py --diagnostics` e il bundle con l'ora del turno.
+
+Baseline del 02/10/2026 (resta come riferimento storico):
 
 Gia' su master e verificato nel codice (non piu' da elencare come mancante):
 
@@ -120,6 +127,57 @@ caricato in Ollama a riposo (keep_alive 30m/2m rispettato); import del nucleo ~4
   niente checkpoint su `val_mos` (Lightning falliva a fine epoca) ed export con `dynamo=False` (torch 2.14).
 - Verificato l'intero percorso su un'epoca di prova: checkpoint ripreso, export ONNX da 63 MB, sintesi dal provider di
   Jake. `VERIFY` utente: ascolto della voce addestrata e confronto con RVC.
+
+## Incremento del 05/10/2026 — apprendimento automatico: niente richieste composte (#200)
+
+- "che ore sono e che giorno e' oggi", classificata solo GET_TIME, era diventata un esempio exact: meta' richiesta
+  spariva per sempre. `LearningManager.observe` non impara piu' frasi con richieste coordinate (`looks_compound`).
+
+## Incremento del 05/10/2026 — cultura generale sempre ASK_QUESTION (#201)
+
+- gemma3:4b dava UNKNOWN a 5 domande di cultura generale su 8 (all'agente, nessuna risposta). Regola esplicita nel
+  prompt: spiegazioni/consigli non sul PC -> ASK_QUESTION, UNKNOWN solo per azioni sul PC sconosciute. 8/8 su gemma3:4b
+  e qwen2.5:7b, `bench_nlu` invariato (78,3%).
+
+## Incremento del 05/10/2026 — cessione della GPU anche per VRAM insufficiente (#203)
+
+- Con un training da 7,7 GB ogni classificazione andava in timeout (Ollama non caricava il modello). `VramPressure`:
+  VRAM libera + quella del modello contro il suo fabbisogno; se non basta la GPU viene ceduta come per un gioco.
+
+## Incremento del 05/10/2026 — instradamento a GPU ceduta senza il timeout da 25 s
+
+Diagnosi (gemma3:4b, Ollama 0.35.1, stesse 9 frasi; nessun JakeCore nelle misure, niente scritto su memoria/esempi):
+
+| Scenario | caricamento | prefill | generazione | totale per frase |
+|---|---|---|---|---|
+| GPU libera | ~0,03 s | 0,5-0,8 s (~2000-2300 token) | 0,2-0,4 s | ~1,0 s |
+| CPU a freddo | 6,5 s una volta | 19-26 s | 1,1-2,3 s | 21-28 s (oltre il timeout da 25 s) |
+| CPU gia' caldo | ~0 | 22-26 s | 1,2-2,4 s | 23-28 s |
+
+Il prefill su CPU (~90 token/s) e' il 90% del tempo; tenere il modello caldo non aiuta e con gemma3 il prefisso in cache
+non viene riusato. Prompt reale ~7000 caratteri: capacita' ~3800, regole ~1300, esempi ~1000, piu' contesto e cronologia.
+
+- `core/nlu/degraded_routing.py` + `Router.degraded/degraded_model`: a GPU ceduta, dopo l'exact, regole locali solo per
+  frasi brevi, non composte, non correzioni, intent di sola lettura o reversibili, ora/data solo con formule esplicite
+  ("a che ora parte il treno" non diventa GET_TIME), OPEN_APP solo per app che il resolver trova; poi l'esempio piu'
+  simile (soglia 0,80, stessi vincoli); poi domande di cultura generale -> ASK_QUESTION (la regola di #201 senza
+  modello). Il resto va al classificatore compatto: 6 capacita' su una riga, 4 esempi, regole condensate, 2 turni di
+  cronologia, contesto del desktop solo se la frase lo richiama (495-611 token invece di ~2000-2300).
+- Il modello del classificatore a GPU ceduta lo sceglie il ModelRouter (`choose_model(..., prefer_fast=True)`): uno
+  dichiarato veloce in `ollama_light_model` se installato, altrimenti il principale in forma compatta. A GPU ceduta anche i
+  modelli non principali girano su CPU (`num_gpu` 0): qwen2.5:1.5b si era caricato tutto sulla GPU durante la prova.
+- Regole: "quanta batteria", varianti di "abbassa/alza il volume" (servono anche al ripiego normale).
+- Misure CPU (classificatore): gemma3:4b compatto 5,6-7,0 s (prefill 4,1-5,4 s); qwen2.5:1.5b compatto 2,0-2,4 s a caldo,
+  3,9 s a freddo, 1,2 GB di RAM solo mentre e' caricato (keep_alive 2 min). Corsie veloci 0-47 ms.
+- Accuratezza `bench_nlu` 60 frasi seed 7: normale 78,3%; degradato 80,0% sia con gemma3:4b sia con qwen2.5:1.5b
+  (p50 44 ms). Scelto qwen2.5:1.5b come `ollama_light_model` locale: stessa accuratezza, CPU ~3 volte piu' veloce.
+- Scenario reale con un altro modello da 5,2 GB sulla GPU (321 MB liberi): GPU ceduta, ora/data/Spotify/batteria/volume/
+  "buco nero" in 0-37 ms, il resto 1,8-2,5 s (5 s la prima volta), VRAM libera invariata (319 MB). Prima: 25 s di timeout.
+- GPU libera: percorso normale invariato (~1 s, prompt completo). Build HUD Release + 6/6 ctest (presenza expanded/
+  mini/hidden).
+- Voce: la voce Piper veniva considerata solo se anche il modello RVC era installato (controllo `is_installed` prima);
+  ora consenso -> Piper -> RVC come ripiego, senza nemmeno creare il gestore RVC quando Piper c'e'.
+- `VERIFY` utente: qualita' della voce Piper (#202) rispetto a RVC; la prova con un training/gioco vero.
 
 ## Registro owner e stato dei pacchetti attivi
 

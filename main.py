@@ -201,14 +201,6 @@ def _build_character_tts_provider(base_tts_provider, character_name: str):
     from core.voice.character_tts_provider import CharacterTtsProvider
     from core.voice.rvc_server_manager import RvcServerManager
 
-    manager = RvcServerManager(model_name=character_name, idle_shutdown_seconds=_rvc_idle_seconds())
-    if not manager.is_installed():
-        print(
-            f"Nota: il modello vocale '{character_name}' non è installato in rvc_models/, "
-            "uso la voce normale."
-        )
-        return base_tts_provider, None
-
     # F2.5.6: clonare un timbro richiede un consenso scritto e revocabile, registrato da un umano
     # da terminale (mai da Jake). Senza, si parla con la voce normale e si dice come sbloccarla.
     from core.voice.voice_consent import VoiceConsentRegistry
@@ -223,7 +215,8 @@ def _build_character_tts_provider(base_tts_provider, character_name: str):
         return base_tts_provider, None
 
     # Voce Piper addestrata sul timbro (core/voice/piper_tts_provider.py): ONNX su CPU, niente torch/RVC. Ha la
-    # precedenza se il modello esiste; "voice_character_engine": "rvc" in settings.json torna alla conversione RVC.
+    # precedenza se il modello esiste, anche senza il modello RVC installato; "voice_character_engine": "rvc" in
+    # settings.json torna alla conversione RVC.
     from core.config import Config
     from core.voice.piper_tts_provider import PiperTtsProvider, piper_model_path
 
@@ -236,7 +229,15 @@ def _build_character_tts_provider(base_tts_provider, character_name: str):
             print(f"Voce '{character_name}': modello Piper locale (niente RVC).")
             return provider, None
         except Exception as exc:
-            print(f"Nota: voce Piper non caricabile ({exc}), uso la conversione RVC.")
+            print(f"Nota: voce Piper non caricabile ({exc}), provo la conversione RVC.")
+
+    manager = RvcServerManager(model_name=character_name, idle_shutdown_seconds=_rvc_idle_seconds())
+    if not manager.is_installed():
+        print(
+            f"Nota: il modello vocale '{character_name}' non è installato in rvc_models/, "
+            "uso la voce normale."
+        )
+        return base_tts_provider, None
 
     print(f"Avvio la conversione vocale per '{character_name}' (puo' richiedere qualche secondo)...")
     provider = CharacterTtsProvider(

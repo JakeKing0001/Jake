@@ -103,6 +103,10 @@ def runtime_options(model: str | None, options: dict | None = None) -> dict:
     merged = dict(options or {})
     settings = _settings()
     if not model or model != settings.get("primary"):
+        # GPU ceduta (core/gpu_yield.py): nemmeno gli altri modelli (es. il classificatore leggero scelto a GPU ceduta)
+        # devono finirci sopra. Prova del 05/10/2026: qwen2.5:1.5b si era caricato tutto sulla GPU durante la cessione.
+        if _gpu_policy is not None and _gpu_policy.yielding:
+            merged["num_gpu"] = 0
         return merged
     policy = gpu_policy()
     if policy.budget.context is not None:

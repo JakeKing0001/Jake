@@ -71,6 +71,20 @@ class ModelRoutingMixin:
             if model not in models:
                 models.append(model)
 
+    def degraded_classifier_model(self) -> str | None:
+        """Il modello del classificatore a GPU ceduta: uno dichiarato veloce (`ollama_light_model`) se il ModelRouter lo
+        trova installato, altrimenti None (resta il modello del classificatore, in forma compatta)."""
+        from core.model_router import Capability, choose_model
+
+        configured = getattr(self, "_configured_model", "qwen2.5:7b")
+        if getattr(self, "ollama", None) is None:
+            return None
+        try:
+            chosen = choose_model(self.model_router, Capability.CLASSIFY, configured, prefer_fast=True)
+        except Exception:
+            return None
+        return chosen if chosen != configured else None
+
     @property
     def model(self) -> str:
         """Il modello per ragionare ADESSO (agenti, planner, ricevute): scelto dal ModelRouter, con il modello

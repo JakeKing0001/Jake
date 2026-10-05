@@ -512,12 +512,15 @@ def build_local_router(config, list_installed: Callable[[], list[str] | None],
     return ModelRouter(inventory)
 
 
-def choose_model(router: ModelRouter, capability: Capability, fallback: str) -> str:
+def choose_model(router: ModelRouter, capability: Capability, fallback: str, prefer_fast: bool = False) -> str:
     """Il modello da usare ADESSO. Su batteria sotto il 30% si prova prima un modello a basso consumo (se
     dichiarato e installato); poi il migliore locale; se nessuno e' disponibile (Ollama spento, modello non
     installato) resta il modello configurato, cosi' l'errore resta quello chiaro di Ollama e non un nome vuoto."""
     hardware = router.inventory.hardware()
     requests = []
+    if prefer_fast:
+        # GPU ceduta (core/gpu_yield.py): sulla CPU conta la latenza, si prova prima un modello dichiarato veloce
+        requests.append(RouteRequest(capability, require_local=True, max_latency=LatencyClass.FAST))
     if hardware.on_battery and hardware.battery_percent is not None and hardware.battery_percent < LOW_BATTERY_PERCENT:
         requests.append(RouteRequest(capability, require_local=True, max_battery_impact=BatteryImpact.LOW))
     requests.append(RouteRequest(capability, require_local=True, prefer=fallback))

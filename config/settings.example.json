@@ -9,6 +9,7 @@
   "ollama_secondary_keep_alive": "2m",
   "gpu_yield_enabled": true,
   "gpu_yield_apps": [],
+  "ollama_light_model": "",
   "tts_engine": "edge",
   "tts_voice": "it-IT-DiegoNeural",
   "tts_rate": "+8%",
