@@ -125,7 +125,9 @@ def keep_alive_for(model: str | None) -> str:
     `ollama_secondary_keep_alive` in settings.json sovrascrivono i valori."""
     settings = _settings()
     low = settings.get("low_memory", False)
-    if model and model == settings.get("primary"):
+    # GPU ceduta (core/gpu_yield.py): il modello principale gira su CPU e non deve restare in RAM a lungo
+    yielding = _gpu_policy is not None and _gpu_policy.yielding
+    if model and model == settings.get("primary") and not yielding:
         return settings.get("primary_keep_alive") or (LOW_MEMORY_PRIMARY_KEEP_ALIVE if low else PRIMARY_KEEP_ALIVE)
     return settings.get("secondary_keep_alive") or (LOW_MEMORY_SECONDARY_KEEP_ALIVE if low else SECONDARY_KEEP_ALIVE)
 
@@ -286,6 +288,12 @@ class OllamaClient:
         """F8.4.4: libera subito la memoria (VRAM/RAM) di un modello. L'API REST di Ollama non ha un comando di
         scaricamento dedicato: una richiesta senza prompt con keep_alive 0 scarica il modello e basta."""
         self._post("/api/generate", {"model": model, "keep_alive": 0}, timeout=30)
+
+    def preload(self, model: str) -> None:
+        """Carica il modello senza generare, con le STESSE opzioni delle chiamate vere (un num_ctx o num_gpu diverso
+        farebbe ricaricare il modello alla prima domanda)."""
+        self._post("/api/generate", {"model": model, "keep_alive": self.keep_alive or keep_alive_for(model),
+                                     "options": runtime_options(model, {"num_ctx": self.num_ctx})}, timeout=300)
 
     def has_model(self, name: str) -> bool:
         models = self.list_models() or []

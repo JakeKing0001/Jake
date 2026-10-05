@@ -95,6 +95,17 @@ if (-not $ollamaFound) {
     Write-Host "  Trovato."
 }
 
+if ($ollamaFound) {
+    # cache del contesto quantizzata: meta' VRAM per il context (448 -> 238 MB con qwen2.5:7b a 8192), stessa velocita'.
+    # Richiede flash attention. Vale dal prossimo avvio di Ollama.
+    foreach ($pair in @(@("OLLAMA_FLASH_ATTENTION", "1"), @("OLLAMA_KV_CACHE_TYPE", "q8_0"))) {
+        if (-not [Environment]::GetEnvironmentVariable($pair[0], "User")) {
+            [Environment]::SetEnvironmentVariable($pair[0], $pair[1], "User")
+            Write-Host "  $($pair[0])=$($pair[1]) impostata (riavvia Ollama per applicarla)."
+        }
+    }
+}
+
 Write-Host "6/7 Verifico i modelli Ollama necessari..."
 if ($ollamaFound) {
     try {

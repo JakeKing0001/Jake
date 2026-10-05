@@ -575,6 +575,7 @@ class JakeCore(NotificationMixin, ModelRoutingMixin, CompanionMixin, EventPublis
         from core.ollama_client import gpu_policy
 
         gpu_policy().start()
+        self.gpu_yield = self._build_gpu_yield(config)
 
         # Fucina di skill (v3.0): Jake si scrive nuove capacita' da solo.
         self.skill_forge = SkillForge(
@@ -748,6 +749,39 @@ class JakeCore(NotificationMixin, ModelRoutingMixin, CompanionMixin, EventPublis
 
 
 
+
+    def _build_gpu_yield(self, config):
+        """La GPU torna a un gioco/app a schermo intero quando serve (core/gpu_yield.py): il modello principale la
+        lascia e ci ritorna da solo. Ascoltatori in piu' (voce RVC) li aggiunge chi avvia la sessione."""
+        from core.gpu_yield import GpuDemand, GpuYieldMonitor
+        from core.notification_center import NotificationMode
+        from core.ollama_client import gpu_policy
+
+        if not bool(config.get("gpu_yield_enabled", True)):
+            return None
+        demand = GpuDemand(yield_apps=config.get("gpu_yield_apps") or (),
+                           gaming_mode=lambda: self.notification_center.mode == NotificationMode.GAMING)
+        monitor = GpuYieldMonitor(demand)
+        primary = config.get("ollama_model", "qwen2.5:7b")
+
+        def apply(yielding: bool, reason: str | None) -> None:
+            gpu_policy().set_yield(0 if yielding else None)
+            # in background, Ollama puo' metterci secondi. Al ritorno prima si scarica: un modello caricato su CPU
+            # durante il gioco resterebbe li' (senza num_gpu Ollama riusa il runner gia' aperto, prova del 05/10/2026)
+            threading.Thread(target=self._quiet_ollama_call, args=(yielding, primary), name="gpu-yield-apply",
+                             daemon=True).start()
+
+        monitor.add_listener(apply)
+        monitor.start()
+        return monitor
+
+    def _quiet_ollama_call(self, yielding: bool, model: str) -> None:
+        try:
+            self.ollama.unload(model)
+            if not yielding:
+                self.ollama.preload(model)
+        except Exception as exc:
+            self.logger.warning("GPU yield: %s di %s non riuscito: %s", "rilascio" if yielding else "ripresa", model, exc)
 
     def _default_on_trigger_fired(self, trigger: dict, outcome, total_steps: int) -> None:
         # F1.3.8: il percorso automatico (nessun turno di conversazione, nessun utente in
