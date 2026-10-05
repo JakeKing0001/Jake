@@ -11,6 +11,7 @@ Tre canali:
 
 Gli esempi automatici sono memorizzati solo se ogni parametro compare letteralmente nella
 frase: cosi' non si cristallizzano valori allucinati dal modello."""
+import re
 from copy import deepcopy
 
 from core.command import Command
@@ -22,6 +23,22 @@ NON_LEARNABLE_INTENTS = {
     "CREATE_SKILL", "LIST_CREATED_SKILLS", "DELETE_CREATED_SKILL",
     "OPEN_SEARCH_RESULT", "RUN_COMMAND", "SET_MODEL", "SYSTEM_POWER", "DELETE_PATH",
 }
+
+
+# Prova del 05/10/2026: "che ore sono e che giorno e' oggi" classificata solo GET_TIME era diventata un esempio esatto,
+# e da li' meta' della richiesta spariva per sempre senza passare dal modello. Una frase con piu' richieste coordinate
+# non si impara da sola: nel dubbio non si impara (costa solo una chiamata al modello la prossima volta).
+_COMPOUND = re.compile(
+    r"(?:,|\b(?:e|ed|poi|anche|inoltre|dopo)\b)\s+(?:poi\s+|anche\s+|mi\s+)?(?:che|quanto|quanta|quanti|quante|come|"
+    r"dove|quando|chi|cosa|cos'|qual|quale|dimmi|apri|chiudi|metti|cerca|crea|leggi|spiegami|mostrami|fammi|scrivi|"
+    r"manda|invia|imposta|avvia|ferma|controlla|calcola|converti|traduci|ricordami|segna|aggiungi|elimina|cancella|"
+    r"alza|abbassa|accendi|spegni|riproduci)\b",
+    re.IGNORECASE,
+)
+
+
+def looks_compound(text: str) -> bool:
+    return bool(_COMPOUND.search(text or ""))
 
 
 class LearningManager:
@@ -61,7 +78,7 @@ class LearningManager:
             return
         if result is None or (not result.success and result.error != "CONFIRMATION_REQUIRED"):
             return
-        if not self._parameters_grounded(text, command.parameters):
+        if not self._parameters_grounded(text, command.parameters) or looks_compound(text):
             return
         self._pending = (text, command.intent, deepcopy(command.parameters or {}))
 
