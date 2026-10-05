@@ -75,6 +75,18 @@ caricato in Ollama a riposo (keep_alive 30m/2m rispettato); import del nucleo ~4
 - Context 8192 vs 4096: -240 MB a GPU piena, -33 MB con 3 layer, nessuna differenza di velocita'; resta 8192
   (il classificatore lo usa) e `ollama_context` e' solo configurabile. Impatto su Whisper sotto carico: non misurato.
 
+## Incremento del 05/10/2026 — prompt del classificatore con prefisso stabile
+
+- Misura reale: ogni classificazione mandava a qwen2.5:7b 1900-3000 token e il prefill era 750-1500 ms, ~65% della
+  latenza; le parti variabili (contesto del desktop, capacita' ed esempi scelti per la frase) venivano prima delle
+  regole fisse, quindi Ollama non poteva riusare la cache del prefisso.
+- Ora: intestazione, istruzione sulla cronologia e regole prima; capacita', esempi e contesto dopo. Prefill -15%
+  (750 -> 641 ms, 954 -> 814 ms). `bench_nlu` 60 frasi seed 7: p50 1476 -> 1340 ms, p95 1971 -> 1606 ms; accuratezza
+  78,3% -> 76,7%, unica differenza "leggi gli appunti" (CLIPBOARD_READ -> LIST_NOTES, ambigua in italiano e in
+  produzione presa dalla corsia esatta).
+- Modello principale piu' piccolo valutato e NON adottato: qwen2.5:3b stessa accuratezza sugli intent (78,3%), p50
+  830 ms, 2157 MB di VRAM e 95 token/s, ma risposte in italiano visibilmente peggiori su domande tipiche.
+
 ## Registro owner e stato dei pacchetti attivi
 
 Questo registro riguarda l'incremento in corso; il catalogo storico completo resta nella cronologia Git.
