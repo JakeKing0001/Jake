@@ -66,6 +66,20 @@ if (-not $ExportOnly) {
     if ($last) {
         $resume = "/work/" + $last.FullName.Substring($work.Length + 1).Replace("\", "/")
         Write-Host "Riprendo dall'ultimo checkpoint: $resume"
+        # ogni ripartenza apre una nuova cartella version_N: i checkpoint delle corse precedenti (~807 MB l'uno) non
+        # servono piu', tranne quello da cui si riparte
+        $old = Get-ChildItem (Join-Path $work "runs\$Character") -Recurse -Filter "*.ckpt" |
+            Where-Object { $_.FullName -ne $last.FullName -and $_.Directory.FullName -ne $last.Directory.FullName }
+        # nella corsa da cui si riparte restano l'ultimo e il migliore per val_mel (potrebbe suonare meglio)
+        $best = Get-ChildItem $last.Directory.FullName -Filter "epoch=*-val_mel=*.ckpt" |
+            Sort-Object { [double]($_.BaseName -replace '^.*val_mel=', '') } | Select-Object -First 1
+        $sameRun = Get-ChildItem $last.Directory.FullName -Filter "*.ckpt" |
+            Where-Object { $_.FullName -ne $last.FullName -and (-not $best -or $_.FullName -ne $best.FullName) }
+        $freed = (($old + $sameRun) | Measure-Object Length -Sum).Sum
+        if ($freed) {
+            ($old + $sameRun) | Remove-Item -Force
+            Write-Host ("Tolti i checkpoint delle corse precedenti: {0:N1} GB liberati" -f ($freed / 1GB))
+        }
     }
     $mode = if ($Detach) { @("-d", "--name", $container) } else { @() }
     Invoke-Docker "Avvio dell'addestramento" {

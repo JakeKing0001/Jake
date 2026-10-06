@@ -12,8 +12,13 @@ source = path.read_text(encoding="utf-8")
 patched, count = re.subn(r"\n    ModelCheckpoint\(\n        monitor=\"val_mos\",.*?\n    \),", "", source, flags=re.DOTALL)
 if count != 1:
     raise SystemExit(f"patch val_mos: attesa 1 sostituzione, trovate {count}")
+# Un checkpoint pesa ~807 MB: 5 migliori + last facevano ~4,8 GB per corsa (prova del 06/10/2026, disco da 150 a 98 GB
+# liberi). Ne bastano 2 + last: si ascolta l'ultimo e si tiene il migliore per val_mel.
+if patched.count("save_top_k=5,") != 1:
+    raise SystemExit("patch save_top_k: attesa 1 occorrenza")
+patched = patched.replace("save_top_k=5,", "save_top_k=2,")
 path.write_text(patched, encoding="utf-8")
-print("patch val_mos applicata")
+print("patch val_mos e save_top_k=2 applicate")
 
 # torch >= 2.9 esporta con dynamo di default, che fallisce sulle forme dipendenti dai dati di VITS (durate dei fonemi):
 # l'esportatore TorchScript classico e' quello con cui sono state esportate tutte le voci Piper pubblicate.
