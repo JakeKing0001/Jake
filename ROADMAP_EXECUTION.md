@@ -179,6 +179,24 @@ non viene riusato. Prompt reale ~7000 caratteri: capacita' ~3800, regole ~1300, 
   ora consenso -> Piper -> RVC come ripiego, senza nemmeno creare il gestore RVC quando Piper c'e'.
 - `VERIFY` utente: qualita' della voce Piper (#202) rispetto a RVC; la prova con un training/gioco vero.
 
+## Incremento del 06/10/2026 — runtime piu' leggero (misurato, niente funzioni nuove)
+
+- numpy/OpenBLAS preparava buffer per 20 thread all'import: processo di Jake 652 MB di memoria impegnata contro 57 MB
+  di working set. `main.py` fissa `OPENBLAS_NUM_THREADS=2` (se non gia' impostato) prima di ogni import: 73 MB impegnati,
+  stesso working set (numpy serve solo a piccole similarita' fra embedding).
+- Embedding (nomic-embed-text) sempre sulla CPU: una frase 46 ms contro 43 ms sulla GPU; il processo di Ollama passa da
+  396 MB di RAM, 934 MB impegnati e 409 MB di VRAM a 287 MB, 396 MB e 0. Gli embedding dell'indice sono in cache su disco.
+  `core/embedding_provider.py` ora manda le stesse opzioni e lo stesso keep_alive di `OllamaClient.embed()` (prima
+  niente keep_alive e niente opzioni: il modello si sarebbe ricaricato fra CPU e GPU). `ollama_embedding_gpu: true`
+  lo riporta sulla GPU.
+- VRAM libera letta da NVML (`core/nvml.py`) invece di lanciare `nvidia-smi` ogni 10 s: ~60 ms e un processo a lettura
+  contro ~0 dopo un'inizializzazione da ~20 ms; stessi valori; `nvidia-smi` resta come ripiego.
+- Bug: con `stt_device: "cuda"` esplicito le DLL di cuBLAS/cuDNN non venivano registrate e Whisper ripiegava in
+  silenzio sul modello medium su CPU.
+- Misurato e scartato: Whisper large-v3-turbo su CPU (5 s a frase invece di 0,25 s, e piu' RAM: ~1 GB e 3,3 GB
+  impegnati contro 651 MB e 2,2 GB sulla GPU, che resta); HUD PySide di riserva creato pigramente (costa ~77 MB e 0 CPU
+  a riposo, serve comunque QApplication per tray e hotkey: non vale il rischio).
+
 ## Registro owner e stato dei pacchetti attivi
 
 Questo registro riguarda l'incremento in corso; il catalogo storico completo resta nella cronologia Git.

@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import ctypes
 import os
-import subprocess
 import threading
 import time
 from collections.abc import Callable, Iterable
@@ -114,13 +113,9 @@ def running_exes() -> set[str]:
 
 
 def _free_vram_mb() -> int | None:
-    try:
-        out = subprocess.run(["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
-                             capture_output=True, text=True, timeout=5,
-                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        return int(out.stdout.split()[0]) if out.returncode == 0 and out.stdout.strip() else None
-    except (OSError, ValueError, subprocess.SubprocessError, IndexError):
-        return None
+    from core.nvml import free_vram_mb  # NVML, nvidia-smi solo come ripiego
+
+    return free_vram_mb()
 
 
 class VramPressure:

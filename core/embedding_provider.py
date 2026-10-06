@@ -17,7 +17,13 @@ class EmbeddingProvider:
         self.timeout = timeout
 
     def embed(self, text: str) -> list[float] | None:
-        payload = {"model": self.model, "input": text}
+        from core.ollama_client import keep_alive_for, runtime_options
+
+        # stesse opzioni e keep_alive di OllamaClient.embed(): altrimenti Ollama ricarica il modello fra CPU e GPU
+        payload = {"model": self.model, "input": text, "keep_alive": keep_alive_for(self.model)}
+        options = runtime_options(self.model)
+        if options:
+            payload["options"] = options
         body = json.dumps(payload).encode("utf-8")
         http_request = request.Request(
             f"{self.base_url}/api/embed",
