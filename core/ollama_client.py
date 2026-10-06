@@ -66,6 +66,8 @@ def _settings() -> dict:
                 "low_memory": str(config.get("low_memory", False)).lower() in {"1", "true", "yes", "on"},
                 "primary_keep_alive": config.get("ollama_keep_alive"),
                 "secondary_keep_alive": config.get("ollama_secondary_keep_alive"),
+                "embedding": config.get("embedding_model", "nomic-embed-text"),
+                "embedding_gpu": str(config.get("ollama_embedding_gpu", False)).lower() in {"1", "true", "yes", "on"},
                 # quanta VRAM usa il modello principale mentre e' caricato (core/ollama_gpu_budget.py)
                 "gpu": {key: config.get(key) for key in ("low_memory", "ollama_gpu_budget_mb", "ollama_gpu_budget_mode",
                                                           "ollama_num_gpu_layers", "ollama_context")},
@@ -102,6 +104,14 @@ def runtime_options(model: str | None, options: dict | None = None) -> dict:
     sceglie `num_gpu`. Visione, coding ed embedding restano invariati (per loro conta keep_alive_for)."""
     merged = dict(options or {})
     settings = _settings()
+    embedding = settings.get("embedding")
+    if model and embedding and model.split(":")[0] == str(embedding).split(":")[0] and not settings.get("embedding_gpu"):
+        # Embedding sempre su CPU (misura del 06/10/2026, nomic-embed-text): una frase 46 ms contro 43 ms sulla GPU, e
+        # 308 MB di VRAM liberi. Gli embedding dell'indice sono in cache su disco, il blocco lento capita di rado.
+        # `ollama_embedding_gpu: true` lo riporta sulla GPU. TUTTE le chiamate devono avere le stesse opzioni, o Ollama
+        # ricarica il modello (core/embedding_provider.py passa di qui).
+        merged["num_gpu"] = 0
+        return merged
     if not model or model != settings.get("primary"):
         # GPU ceduta (core/gpu_yield.py): nemmeno gli altri modelli (es. il classificatore leggero scelto a GPU ceduta)
         # devono finirci sopra. Prova del 05/10/2026: qwen2.5:1.5b si era caricato tutto sulla GPU durante la cessione.
@@ -253,10 +263,13 @@ class OllamaClient:
         if not inputs:
             return []
         try:
-            payload = self._post(
-                "/api/embed", {"model": model, "input": list(inputs), "keep_alive": self.keep_alive or keep_alive_for(model)},
-                timeout=timeout,
-            )
+            request: dict[str, object] = {"model": model, "input": list(inputs),
+                                          "keep_alive": self.keep_alive or keep_alive_for(model)}
+            options = runtime_options(model)
+            if options:
+                # GPU ceduta: anche l'embedding resta sulla CPU (prima nomic-embed si caricava sulla GPU durante un gioco)
+                request["options"] = options
+            payload = self._post("/api/embed", request, timeout=timeout)
         except OllamaError:
             return None
         embeddings = payload.get("embeddings")

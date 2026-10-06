@@ -1,6 +1,12 @@
+import os
 import sys
 
-from core.jake_core import JakeCore
+# numpy (OpenBLAS) prepara buffer per ogni thread della CPU gia' all'import: con 20 thread logici ~660 MB di memoria
+# impegnata contro ~85 MB con 2 (misura del 06/10/2026), e Jake lo usa solo per piccole similarita' fra embedding.
+# Va fissato prima di qualunque import di numpy; un valore gia' impostato dall'utente resta.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "2")
+
+from core.jake_core import JakeCore  # noqa: E402
 from core.version import PROTOCOL_VERSION, VERSION
 
 USAGE = f"""Jake {VERSION} - assistente personale locale

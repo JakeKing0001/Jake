@@ -98,6 +98,10 @@ class WhisperSttProvider(SttProvider):
         logger = get_logger()
         self.language = language
         use_cuda = device == "cuda" or (device is None and cuda_available())
+        if use_cuda:
+            # con stt_device "cuda" esplicito cuda_available() non veniva chiamata: senza le DLL di cuBLAS/cuDNN il
+            # modello non si caricava e si finiva in silenzio sul modello medium su CPU
+            _add_cuda_dll_dirs()
         self.device = "cuda" if use_cuda else "cpu"
         self.model_size = model_size or (self.GPU_MODEL if use_cuda else self.CPU_MODEL)
         self.compute_type = compute_type or (self._cuda_compute_type() if use_cuda else "int8")
