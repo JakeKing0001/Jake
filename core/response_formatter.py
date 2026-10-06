@@ -1,6 +1,8 @@
 """Traduzione dei SkillResult in frasi italiane da leggere/mostrare (estratto da JakeCore
 nella v3.0: era diventato meta' del file). Le skill di terze parti possono fornire un
 format_result() proprio, usato come ultimo ripiego."""
+import re
+
 from core.skill_result import SkillResult
 
 
@@ -355,6 +357,8 @@ def _format_error(intent: str, result: SkillResult) -> str:
         return "Il comando ha impiegato troppo tempo e l'ho interrotto."
     if error == "INVALID_EXPRESSION":
         return f"'{data.get('expression', '')}' non è un'espressione valida."
+    if error == "CALCULATOR_NOT_FOCUSED":
+        return "Non sono riuscito a portare davanti la Calcolatrice, quindi non ho digitato niente."
     if error == "INCOMPATIBLE_UNITS":
         return "Non posso convertire tra queste due unità di misura."
     if error == "HOST_UNREACHABLE":
@@ -655,7 +659,12 @@ def _format_success(intent: str, result: SkillResult, registry=None) -> str | No
     if intent in ("TRANSLATE_TEXT", "TRANSLATE_CLIPBOARD"):
         return data["translation"]
     if intent == "CALCULATE":
-        return f"{data['expression']} = {data['result']}"
+        return f"{spoken_expression(data['expression'])} fa {spoken_number(data['result'])}."
+    if intent == "SHOW_ON_CALCULATOR":
+        spoken = f"{spoken_expression(data['expression'])} fa {spoken_number(data['result'])}"
+        if data.get("exact", True):
+            return f"Fatto sulla calcolatrice: {spoken}."
+        return f"Sulla calcolatrice ho scritto il risultato: {spoken} (la modalità standard non rispetta le precedenze)."
     if intent == "CONVERT_UNITS":
         return f"{data['value']} {data['from_unit']} corrispondono a {data['result']} {data['to_unit']}"
     if intent in ("SUMMARIZE_CLIPBOARD", "SUMMARIZE_TEXT"):
@@ -974,6 +983,22 @@ def _format_success(intent: str, result: SkillResult, registry=None) -> str | No
             return f"Modalità {label}: {pending} {noun} in attesa."
         return f"Modalità {label}."
     return None
+
+
+def spoken_number(value) -> str:
+    """20.0 -> "20", 2.5 -> "2,5", 1.4142135623730951 -> "1,4142": letto a voce, non da un programma."""
+    if isinstance(value, float):
+        value = int(value) if value.is_integer() else round(value, 4)
+    return str(value).replace(".", ",")
+
+
+def spoken_expression(expression: str) -> str:
+    """'sqrt(400)' -> 'la radice quadrata di 400', '12*8' -> '12 per 8': la voce non deve leggere i simboli."""
+    text = re.sub(r"sqrt\(([^()]*)\)", r"la radice quadrata di \1", expression)
+    text = re.sub(r"\*\*\s*2\b", " al quadrato", text)
+    for symbol, word in (("**", " elevato "), ("*", " per "), ("/", " diviso "), ("+", " più "), ("-", " meno ")):
+        text = text.replace(symbol, word)
+    return re.sub(r"\s+", " ", text).strip().replace(".", ",")
 
 
 def format_skill_result(intent: str, result: SkillResult | None, registry=None) -> str:

@@ -116,9 +116,23 @@ class ObserveAndCommitTests(unittest.TestCase):
         manager.observe(text, Command("GET_TIME", {}), _success({}), route="llm")
         manager.commit_pending()
         self.assertIsNone(manager.example_store.find_exact(text))
-        manager.observe("dimmi il meteo di roma e milano", Command("GET_WEATHER", {}), _success({}), route="llm")
+        reminder = {"text": "comprare pane e latte"}
+        manager.observe("ricordami di comprare pane e latte", Command("SET_REMINDER", reminder), _success(reminder),
+                        route="llm")
         manager.commit_pending()
-        self.assertIsNotNone(manager.example_store.find_exact("dimmi il meteo di roma e milano"))
+        self.assertIsNotNone(manager.example_store.find_exact("ricordami di comprare pane e latte"))
+
+    def test_phrase_saying_more_than_the_command_is_not_learned(self):
+        # prova reale del 07/10/2026: "radice quadrata di 400" persa, imparata come semplice apertura della calcolatrice
+        manager = self._manager()
+        text = "fai la radice quadrata di 400 sulla calcolatrice"
+        app = {"app": "calcolatrice"}
+        manager.observe(text, Command("OPEN_APP", app), _success(app), route="llm")
+        manager.commit_pending()
+        self.assertIsNone(manager.example_store.find_exact(text))
+        manager.observe("apri calcolatrice", Command("OPEN_APP", app), _success(app), route="llm")
+        manager.commit_pending()
+        self.assertIsNotNone(manager.example_store.find_exact("apri calcolatrice"))
 
     def test_non_llm_route_is_never_learned(self):
         manager = self._manager()
