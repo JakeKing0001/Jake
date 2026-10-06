@@ -263,7 +263,8 @@ class OllamaClient:
         if not inputs:
             return []
         try:
-            request = {"model": model, "input": list(inputs), "keep_alive": self.keep_alive or keep_alive_for(model)}
+            request: dict[str, object] = {"model": model, "input": list(inputs),
+                                          "keep_alive": self.keep_alive or keep_alive_for(model)}
             options = runtime_options(model)
             if options:
                 # GPU ceduta: anche l'embedding resta sulla CPU (prima nomic-embed si caricava sulla GPU durante un gioco)
