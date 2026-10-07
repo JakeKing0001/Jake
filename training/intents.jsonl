@@ -235,6 +235,7 @@
 {"text": "come si dice grazie in giapponese", "intent": "TRANSLATE_TEXT", "parameters": {"text": "grazie", "target_language": "giapponese"}}
 {"text": "traduci in spagnolo ci vediamo domani", "intent": "TRANSLATE_TEXT", "parameters": {"text": "ci vediamo domani", "target_language": "spagnolo"}}
 {"text": "quanto fa 12 per 8", "intent": "CALCULATE", "parameters": {"expression": "12 * 8"}}
+{"text": "quanto fa la radice quadrata di 144", "intent": "CALCULATE", "parameters": {"expression": "sqrt(144)"}}
 {"text": "calcola 150 diviso 4", "intent": "CALCULATE", "parameters": {"expression": "150 / 4"}}
 {"text": "quanto fa 25 più 17 meno 3", "intent": "CALCULATE", "parameters": {"expression": "25 + 17 - 3"}}
 {"text": "radice quadrata di 144", "intent": "CALCULATE", "parameters": {"expression": "sqrt(144)"}}
@@ -741,3 +742,9 @@
 {"text": "sparisci dallo schermo", "intent": "SET_HUD_PRESENTATION", "parameters": {"mode": "hidden"}}
 {"text": "nascondi l'hud", "intent": "SET_HUD_PRESENTATION", "parameters": {"mode": "hidden"}}
 {"text": "togliti dallo schermo", "intent": "SET_HUD_PRESENTATION", "parameters": {"mode": "hidden"}}
+{"text": "fai la radice quadrata di 400 sulla calcolatrice", "intent": "SHOW_ON_CALCULATOR", "parameters": {"expression": "sqrt(400)"}}
+{"text": "fai sulla calcolatrice radice quadrata di 400", "intent": "SHOW_ON_CALCULATOR", "parameters": {"expression": "sqrt(400)"}}
+{"text": "calcola 12 per 8 con la calcolatrice", "intent": "SHOW_ON_CALCULATOR", "parameters": {"expression": "12*8"}}
+{"text": "mostrami sulla calcolatrice quanto fa 150 diviso 4", "intent": "SHOW_ON_CALCULATOR", "parameters": {"expression": "150/4"}}
+{"text": "usa la calcolatrice per fare 25 più 17", "intent": "SHOW_ON_CALCULATOR", "parameters": {"expression": "25+17"}}
+{"text": "sulla calcolatrice fai 9 al quadrato", "intent": "SHOW_ON_CALCULATOR", "parameters": {"expression": "9**2"}}

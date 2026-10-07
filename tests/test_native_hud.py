@@ -112,6 +112,15 @@ class NativeHudSupervisorTests(unittest.TestCase):
         self.assertEqual(len(launches), 1)
         self.assertFalse(supervisor.gave_up)
 
+    def test_a_hud_ended_from_task_manager_is_not_reopened(self):
+        # prova reale del 07/10/2026: "Termina attivita'" (codice 1) lo faceva riaprire ogni volta
+        supervisor, launches = self._supervisor([1])
+        supervisor.start()
+        supervisor._thread.join(timeout=5)
+        self.assertEqual(len(launches), 1)
+        self.assertTrue(supervisor.user_closed)
+        self.assertFalse(supervisor.gave_up)
+
     def test_stop_closes_a_running_hud_without_restarting_it(self):
         supervisor, launches = self._supervisor([None])
         supervisor.start()
@@ -134,7 +143,7 @@ class NativeHudSupervisorTests(unittest.TestCase):
         self.assertTrue(supervisor.active)
         supervisor.stop()
         self.assertFalse(supervisor.active)
-        crashing, _ = self._supervisor([1, 1, 1, 1])
+        crashing, _ = self._supervisor([3, 3, 3, 3])
         crashing.start()
         crashing._thread.join(timeout=5)
         self.assertTrue(crashing.gave_up)

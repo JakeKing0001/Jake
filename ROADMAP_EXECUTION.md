@@ -197,6 +197,28 @@ non viene riusato. Prompt reale ~7000 caratteri: capacita' ~3800, regole ~1300, 
   impegnati contro 651 MB e 2,2 GB sulla GPU, che resta); HUD PySide di riserva creato pigramente (costa ~77 MB e 0 CPU
   a riposo, serve comunque QApplication per tray e hotkey: non vale il rischio).
 
+## Incremento del 07/10/2026 — calcolatrice, apprendimento e chiusura dell'HUD (dalla prova reale)
+
+Dal bundle diagnostico e dal log della sessione del 07/10 (00:56-01:11):
+- "fai sulla calcolatrice radice quadrata di 400" -> CALCULATE 'sqrt(400)' -> "non e' un'espressione valida"; l'agente
+  poi cliccava sul TESTO "400" e "4" con l'OCR. Ora: CALCULATE accetta sqrt/abs (whitelist, esponente <= 1000) e legge a
+  voce "la radice quadrata di 400 fa 20"; nuova `SHOW_ON_CALCULATOR` apre la Calcolatrice e digita l'operazione con la
+  tastiera (cifre, + - * /, '@' radice, '=', separatore decimale di Windows), simula l'esecuzione immediata della
+  modalita' Standard e se non coincide digita il risultato; non digita mai se la Calcolatrice non e' in primo piano.
+  Verificato sulla Calcolatrice vera: radice di 400 = 20, 2,5x2 = 5, 150/4 = 37,5, 9x9 = 81, 2+3*4 -> 14.
+- Apprendimento automatico: "fai la radice quadrata di 400 sulla calcolatrice" era stata imparata come OPEN_APP e
+  "fai l'operazione" come GET_SYSTEM_INFO. Non si imparano piu' le frasi che dicono piu' di quanto il comando abbia
+  capito (un numero fuori dai parametri o >3 parole non spiegate) ne' quelle che rimandano al turno precedente
+  ("fai l'operazione", "mostramelo", "fallo di nuovo"). Tolti dagli esempi appresi questi due e altri tre sbagliati
+  ("che tempo fa oggi" con citta' "oggi", "tutto posto" -> MINIMIZE_ALL_WINDOWS, un ADD_TODO storpiato); copia in
+  `data/backups/learned_examples_20261007.jsonl`.
+- L'HUD nativo non ha un comando di chiusura: terminato da Gestione attivita' (codice 1) veniva riaperto come un crash.
+  Ora 0 e 1 = chiuso dall'utente: non si riapre, non compare l'HUD di riserva, "Apri la console" dal tray lo riavvia.
+  "Esci" resta nel menu dell'icona di Jake nell'area di notifica.
+- Aperti, da riprendere se la prova li ripropone: "mostramelo sulla calcolatrice" senza il turno precedente (nessuna
+  espressione da mostrare); `DESCRIBE_SCREEN` -> `VISION_UNAVAILABLE` con la GPU ceduta (qwen2.5vl:3b sulla GPU insieme
+  al resto); "chiuditi" imparata come KILL_SWITCH (ferma gli agenti, non chiude Jake).
+
 ## Registro owner e stato dei pacchetti attivi
 
 Questo registro riguarda l'incremento in corso; il catalogo storico completo resta nella cronologia Git.

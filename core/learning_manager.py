@@ -41,6 +41,47 @@ def looks_compound(text: str) -> bool:
     return bool(_COMPOUND.search(text or ""))
 
 
+# Prova reale del 07/10/2026: "fai la radice quadrata di 400 sulla calcolatrice" -> OPEN_APP {app: calcolatrice} era
+# diventato un esempio esatto (nessuna "e", quindi looks_compound non bastava). Se la frase dice molto piu' di quanto il
+# comando abbia capito (un numero che non sta nei parametri, o piu' di MAX_UNEXPLAINED_WORDS parole fuori dai parametri)
+# non si impara: costa solo una chiamata al modello la volta dopo.
+MAX_UNEXPLAINED_WORDS = 3
+_STOPWORDS = frozenset(
+    "il lo la i gli le l un uno una un' di a da in con su per tra fra del dello della dei degli delle al allo alla ai "
+    "agli alle dal dallo dalla dai dagli dalle nel nello nella nei negli nelle col sul sullo sulla sui sugli sulle e o "
+    "mi ti ci vi si me te ne che jake per favore grazie po un'".split()
+)
+_WORD = re.compile(r"[\w']+", re.UNICODE)
+
+
+# Frasi che rimandano a cio' che e' stato detto prima ("fai l'operazione", "mostramelo", "fallo di nuovo"): il loro
+# significato dipende dal turno precedente, quindi un esempio esatto le legherebbe per sempre a un solo comando. Prova
+# reale del 07/10/2026: "fai l'operazione" (dopo una richiesta di calcolo) era diventata GET_SYSTEM_INFO.
+_REFERS_BACK = re.compile(
+    r"\b(?:\w+(?:melo|mela|meli|mele|telo|tela|celo|cela|glielo|gliela)|"
+    r"(?:fa|rifa|ripeti|mostra|leggi|spegni|accendi|apri|chiudi|manda|scrivi|cancella|metti|togli|dici|di)"
+    r"(?:llo|lla|lli|lle|lo|la|li|le)|"
+    r"l'operazione|il\s+calcolo|quell[oaie]|quest[oaie]|lo\s+stesso|la\s+stessa|di\s+nuovo|ancora|"
+    r"anche\s+quello|come\s+prima)\b",
+    re.IGNORECASE,
+)
+
+
+def refers_back(text: str) -> bool:
+    return bool(_REFERS_BACK.search(text or ""))
+
+
+def says_more_than(text: str, parameters: dict | None) -> bool:
+    values = " ".join(str(v).lower() for v in (parameters or {}).values() if not isinstance(v, bool))
+    covered = set(_WORD.findall(values))
+    numbers = {int(w) for w in covered if w.isdigit()}   # "alle 8" con at_time "08:00": stesso numero
+    words = [w for w in _WORD.findall((text or "").lower()) if w not in _STOPWORDS]
+    unexplained = [w for w in words if w not in covered and not (w.isdigit() and int(w) in numbers)]
+    if any(w.isdigit() for w in unexplained):
+        return True
+    return len(unexplained) > MAX_UNEXPLAINED_WORDS
+
+
 class LearningManager:
     def __init__(self, example_store, retriever=None, normalizer=None, logger=None):
         self.example_store = example_store
@@ -78,7 +119,8 @@ class LearningManager:
             return
         if result is None or (not result.success and result.error != "CONFIRMATION_REQUIRED"):
             return
-        if not self._parameters_grounded(text, command.parameters) or looks_compound(text):
+        if (not self._parameters_grounded(text, command.parameters) or looks_compound(text)
+                or says_more_than(text, command.parameters) or refers_back(text)):
             return
         self._pending = (text, command.intent, deepcopy(command.parameters or {}))
 

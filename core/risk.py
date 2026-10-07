@@ -230,6 +230,8 @@ SKILL_RISK: dict[str, RiskLevel] = {
     "ASK_QUESTION": RiskLevel.READ_ONLY,
     "TRANSLATE_TEXT": RiskLevel.READ_ONLY,
     "CALCULATE": RiskLevel.READ_ONLY,
+    # apre la Calcolatrice e ci digita: come TYPE_TEXT, ma solo se la Calcolatrice e' davvero in primo piano
+    "SHOW_ON_CALCULATOR": RiskLevel.LOCAL_REVERSIBLE,
     "CONVERT_UNITS": RiskLevel.READ_ONLY,
     "SUMMARIZE_CLIPBOARD": RiskLevel.READ_ONLY,
     "CLIPBOARD_READ": RiskLevel.READ_ONLY,

@@ -252,12 +252,18 @@ class JarvisApp:
     # ---- eventi ------------------------------------------------------------------------
 
     def _native_hud_active(self) -> bool:
+        """Vero finche' lo schermo spetta all'HUD nativo: acceso, in riavvio dopo un crash o chiuso dall'utente (allora
+        non deve comparire l'HUD di riserva al suo posto: la console dal tray lo riapre)."""
         native = getattr(self.core, "native_hud", None)
-        return getattr(native, "active", False) is True
+        return getattr(native, "active", False) is True or getattr(native, "user_closed", False) is True
 
     def _open_console(self) -> None:
         """Tray: con l'HUD nativo attivo lo riporta grande (stesso HUD_SHOW del protocollo), altrimenti la console."""
         if self._native_hud_active():
+            native = getattr(self.core, "native_hud", None)
+            if getattr(native, "user_closed", False) is True:
+                native.start()   # chiuso dall'utente: "Apri la console" lo riapre (parte gia' grande)
+                return
             from core.hud_protocol import EventType, HudEvent
 
             self.core.event_bus.publish(HudEvent(EventType.HUD_SHOW, {"presentation": "expanded", "reason": "manual"}))

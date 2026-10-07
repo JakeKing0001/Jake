@@ -428,6 +428,15 @@ class SingleHudTests(unittest.TestCase):
         event = app.core.event_bus.publish.call_args.args[0]
         self.assertEqual(event.payload, {"presentation": "expanded", "reason": "manual"})
 
+    def test_native_hud_closed_by_the_user_stays_closed_and_the_tray_reopens_it(self):
+        # prova reale del 07/10/2026: chiuso l'HUD nativo non deve comparire quello di riserva al suo posto
+        app = self._app(False)
+        app.core.native_hud.user_closed = True
+        app.hud.show_hud(input_mode=True)
+        self.assertFalse(app.hud.isVisible())
+        app._open_console()
+        app.core.native_hud.start.assert_called_once()
+
     def test_without_the_native_hud_this_is_the_hud_again(self):
         app = self._app(False)
         with mock.patch.object(app.hud, "isVisible", return_value=False):

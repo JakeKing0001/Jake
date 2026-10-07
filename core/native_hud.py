@@ -4,7 +4,8 @@ Il core parte per primo; l'HUD nativo (`hud/native/build/JakeHud.exe`) viene lan
 companion server e' in ascolto, con l'indirizzo giusto (`--jake-url`). I due processi restano separati:
 - se l'HUD va in crash (codice d'uscita diverso da 0) viene riavviato con attese crescenti, al massimo
   `max_restarts` volte in `window_s` secondi, poi si smette e lo si scrive nel log (niente loop infiniti);
-- se l'utente lo chiude (uscita 0) non viene riaperto;
+- se l'utente lo chiude (uscita 0, oppure 1 = "Termina attivita'" di Gestione attivita') non viene riaperto: prova
+  reale del 07/10/2026, l'HUD non ha un pulsante di chiusura e terminato da Gestione attivita' tornava ogni volta;
 - il core non aspetta mai l'HUD: la sorveglianza gira su un thread daemon;
 - allo shutdown del core l'HUD viene chiuso (terminate, poi kill se non esce entro qualche secondo).
 """
@@ -25,6 +26,9 @@ DEFAULT_EXE = Path(__file__).resolve().parent.parent / "hud" / "native" / "build
 # accoppiato (F7), ruotata a ogni avvio del core, con capability minime e revocata allo shutdown.
 # NATIVE_HUD_DEVICE_ID vive in core/request_context.py: per la conversazione l'HUD e' una superficie del PC
 NATIVE_HUD_CREDENTIAL_TTL_S = 30 * 24 * 3600
+# 0 = uscita normale; 1 = processo terminato da Gestione attivita' ("Termina attivita'"). Un crash vero di Qt esce con un
+# codice di eccezione di Windows (es. 0xC0000005) o 3 (abort), e quello si' viene riavviato.
+USER_CLOSE_CODES = (0, 1)
 
 
 class NativeHudSupervisor:
@@ -57,6 +61,7 @@ class NativeHudSupervisor:
         self._thread: threading.Thread | None = None
         self._restarts: list[float] = []
         self.gave_up = False
+        self.user_closed = False   # chiuso dall'utente: niente riavvii e niente HUD di riserva al suo posto
         # F4.8: chiamato una volta quando si smette di riavviare (numero di crash): chi usa l'HUD deve saperlo
         self._on_gave_up = on_gave_up
         self._logger = get_logger()
@@ -83,6 +88,9 @@ class NativeHudSupervisor:
             self._logger.warning("HUD nativo non trovato in %s: compilalo con cmake (hud/native/README.md)", self.exe_path)
             return False
         self._stop.clear()
+        self.user_closed = False
+        self.gave_up = False
+        self._restarts = []
         if not self._spawn():
             return False
         self._thread = threading.Thread(target=self._watch, name="jake-native-hud", daemon=True)
@@ -114,8 +122,9 @@ class NativeHudSupervisor:
             code = process.wait()
             if self._stop.is_set():
                 return
-            if code == 0:
-                self._logger.info("HUD nativo chiuso dall'utente: non viene riaperto")
+            if code in USER_CLOSE_CODES:
+                self.user_closed = True
+                self._logger.info("HUD nativo chiuso dall'utente (codice %s): non viene riaperto", code)
                 return
             now = self._clock()
             self._restarts = [at for at in self._restarts if now - at < self.window_s]

@@ -106,6 +106,7 @@ from skills.security_utils import CheckPasswordStrengthSkill, CheckFileHashSkill
 from skills.ask_question import AskQuestionSkill
 from skills.translate_text import TranslateTextSkill
 from skills.calculate import CalculateSkill
+from skills.calculator_show import ShowOnCalculatorSkill
 from skills.convert_units import ConvertUnitsSkill
 from skills.summarize_clipboard import SummarizeClipboardSkill
 from skills.clipboard import ClipboardReadSkill, ClipboardWriteSkill, TranslateClipboardSkill
@@ -372,6 +373,7 @@ def build_text_and_math_skills(config, conversation_state, memory_manager=None, 
                                          dashboard=dashboard),
         "TRANSLATE_TEXT": TranslateTextSkill(model=config.get("ollama_model", "qwen2.5:7b")),
         "CALCULATE": CalculateSkill(),
+        "SHOW_ON_CALCULATOR": ShowOnCalculatorSkill(),
         "CONVERT_UNITS": ConvertUnitsSkill(),
         "SUMMARIZE_CLIPBOARD": SummarizeClipboardSkill(model=config.get("ollama_model", "qwen2.5:7b")),
         "CLIPBOARD_READ": ClipboardReadSkill(),
