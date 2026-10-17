@@ -149,6 +149,10 @@ files = [
     "core/voice/dialogue.py",
     "core/voice/speaker_profile.py",
     "core/profiles.py",
+    "core/jake_server_client.py",
+    "jake_server/__init__.py",
+    "jake_server/health.py",
+    "jake_server/__main__.py",
 ]
 ignore_missing_imports = true
 no_implicit_optional = true

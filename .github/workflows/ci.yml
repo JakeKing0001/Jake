@@ -47,7 +47,7 @@ jobs:
         run: mypy
 
       - name: Compila i moduli Python (rete di sicurezza per errori di sintassi 3.11-only)
-        run: python -m compileall -q core skills plugins tests main.py
+        run: python -m compileall -q core skills plugins tests jake_server main.py
 
       - name: Test unitari (niente Ollama/microfono richiesti)
         shell: pwsh

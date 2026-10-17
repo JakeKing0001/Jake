@@ -1,0 +1,11 @@
+# F9.1: l'unica immagine Docker del repo e' Jake Server (jake_server/Dockerfile, contesto = radice). Si esclude tutto
+# e si riammette solo cio' che il Dockerfile copia: modelli, venv, dati e config/settings.json non devono mai entrare
+# nel contesto di build (dimensioni e segreti).
+*
+!core/__init__.py
+!core/version.py
+!core/companion_guard.py
+!config/release.json
+!jake_server/__init__.py
+!jake_server/__main__.py
+!jake_server/health.py
