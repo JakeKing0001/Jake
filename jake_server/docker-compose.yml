@@ -1,0 +1,31 @@
+# Jake Server (F9.1) - avvio: `docker compose up -d --build` da questa cartella. Vedi README.md.
+#
+# Solo LAN: nessun port forwarding sul router, nessuna esposizione Internet. JAKE_SERVER_PUBLISH_IP sceglie su quale
+# indirizzo dell'host pubblicare la porta (es. l'IP LAN del server per non ascoltare anche su altre interfacce);
+# il default 0.0.0.0 la pubblica su tutte. JAKE_SERVER_PUBLISH_PORT cambia la porta sull'host (default 8770).
+# Si impostano in un file .env accanto a questo (non versionato). Nota: Docker scrive le proprie regole iptables e
+# non passa da ufw.
+name: jake-server
+
+services:
+  jake-server:
+    build:
+      context: ..
+      dockerfile: jake_server/Dockerfile
+    image: jake-server:local
+    container_name: jake-server
+    restart: unless-stopped
+    ports:
+      - "${JAKE_SERVER_PUBLISH_IP:-0.0.0.0}:${JAKE_SERVER_PUBLISH_PORT:-8770}:8770"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    pids_limit: 64
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"

@@ -28,3 +28,6 @@ benchmarks/results/
 # artifact, ma non deve mai entrare nel repository.
 .ci-artifacts/
 hud/native/build-release/
+
+# F9.1: variabili locali di docker compose (IP di pubblicazione, porta): specifiche della macchina.
+.env

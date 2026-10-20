@@ -48,6 +48,144 @@ caricato in Ollama a riposo (keep_alive 30m/2m rispettato); import del nucleo ~4
    (oggi solo libreria in `core/sync_engine.py`); F8 runtime degli agenti oltre i budget gia' presenti; budget GPU e
    frame-time dell'HUD misurati sul desktop reale; `__init__` di JakeCore (~600 righe di cablaggio).
 
+## F9 — Distributed / Always-On Jake
+
+Aggiornato 20/10/2026, branch `feature/f9-distributed-server`.
+
+### Architettura
+
+- **PC Windows = nodo principale** quando e' acceso: voce, HUD, agenti, memoria, modelli restano li'. Jake Windows
+  deve funzionare identico con il server spento, irraggiungibile o lento.
+- **Jake Server = nodo Linux sempre acceso** (Lenovo, Ubuntu 24.04 LTS, IP LAN riservato, Docker Compose). Codice in
+  `jake_server/`, separato dal runtime desktop; l'immagine contiene solo `jake_server/` piu' `core/version.py` e
+  `core/companion_guard.py` (sola libreria standard), nessuna dipendenza Windows.
+- **Solo LAN** in questa fase: niente port forwarding, NAT o esposizione Internet. L'accesso da fuori arrivera' con
+  una VPN (Tailscale/WireGuard).
+- **Nessun secondo sistema di sicurezza**: ogni endpoint futuro che legge o cambia dati (sync, memoria, comandi) usa
+  la pipeline gia' esistente di `core/companion_server.py` (token per dispositivo, pairing, `CompanionGuard` con
+  capability, anti-replay, rate limit e audit, TLS obbligatorio fuori dal loopback) e il formato di `SyncEngine`.
+  `check_bind_policy` resta invariata.
+
+### F9.1 — Jake Server e sonda dal PC
+
+#### Cosa implementa
+
+- `jake_server/health.py`: `HealthServer` (http.server, come il CompanionServer) con il solo `GET /health` (e
+  `HEAD`): `{"status","service":"jake-server","version","protocol_version","node":"server","uptime_s"}`. Ogni altro
+  percorso 404, metodi con corpo 501, rate limit per indirizzo riusando `RateLimiter` di `core/companion_guard.py`,
+  timeout di 5 s per connessione, header `Server` senza versione di Python. Niente comandi ne' credenziali: per
+  questo puo' ascoltare in LAN senza TLS senza toccare la policy F7.1.4.
+- `jake_server/__main__.py`: `python -m jake_server`, configurato da `JAKE_SERVER_HOST` (default 127.0.0.1) e
+  `JAKE_SERVER_PORT` (default 8770); chiusura pulita su SIGTERM/SIGINT.
+- `jake_server/Dockerfile`, `jake_server/docker-compose.yml`, `.dockerignore`: immagine `python:3.12-slim-bookworm`,
+  utente non root, filesystem in sola lettura, `cap_drop: ALL`, `no-new-privileges`, 128 MB, healthcheck su
+  `/health`, `restart: unless-stopped`; IP/porta di pubblicazione da `.env` non versionato. Istruzioni in
+  `jake_server/README.md`.
+- `core/jake_server_client.py`: `JakeServerClient`, sonda dal PC. URL da `server_url` / `JAKE_SERVER_URL` (nessun
+  indirizzo nel codice), timeout `server_timeout_seconds` / `JAKE_SERVER_TIMEOUT_SECONDS` (default 1,5 s, tra 0,2 e
+  5 s). Stati ONLINE, DEGRADED (risponde qualcosa ma non un Jake Server sano: HTTP non 200, JSON malformato o
+  troppo grande, servizio diverso, status non "ok", redirect, errore TLS), OFFLINE (timeout, rifiutato, nome non
+  risolto, rete assente), DISABLED (nessun URL o URL non valido, incluse credenziali nell'URL). `probe()` non solleva
+  mai; niente proxy di sistema, niente redirect seguiti, certificati HTTPS sempre verificati. Log solo ai cambi di
+  stato, a livello INFO.
+- `core/jake_core.py`: `self.jake_server` costruito dopo il server companion; `probe_in_background()` su un thread
+  daemon. Senza URL non parte nessun thread ne' richiesta.
+- CI: `compileall` include `jake_server`; i nuovi moduli sono in `[tool.mypy].files`.
+- Test: `tests/test_jake_server_health.py` (schema esatto, solo /health, niente metodi con corpo, header, rate
+  limit) e `tests/test_jake_server_client.py` (ONLINE contro un HealthServer vero, porta chiusa, nome non
+  risolvibile, server muto -> timeout, risposte malformate/servizio sbagliato/503/redirect/byte non HTTP, URL da
+  `JAKE_SERVER_URL`, eccezione imprevista -> OFFLINE, sonda in background che ritorna subito anche con il server
+  appeso).
+
+#### Cosa NON implementa
+
+Nessuno spostamento di memoria, RAG, scheduler, Ollama, database, embeddings, automazioni o stato della
+conversazione; nessun trasporto della sync (SyncEngine resta libreria); nessun endpoint autenticato sul server;
+nessuna sonda periodica, nessuna UI/voce che mostri lo stato del server; nessuna VPN o accesso remoto.
+
+#### Criteri di completamento
+
+1. Test, ruff, mypy, compileall e smoke test verdi sul branch (fatto).
+2. Utente: `docker compose up -d --build` sul Lenovo, container `healthy`, `curl http://<ip-lan>:8770/health` dal
+   PC risponde con lo schema sopra (fatto: confermato dall'utente il 20/10/2026).
+3. Utente: con `server_url` impostato, `data/jake.log` riporta "Jake Server raggiungibile";
+   con il container fermo riporta "Jake Server offline ... Jake continua in locale" e Jake risponde normalmente.
+
+Stato: `VERIFY` finche' il punto 3 non e' provato sull'hardware reale.
+
+### F9.2 — Node Presence & Capability Negotiation
+
+#### Cosa implementa
+
+- Server: `GET /capabilities` (stessa pipeline di `/health`: sola lettura, rate limit, 501 sui metodi con corpo)
+  -> `{"service","node","version","protocol_version","min_protocol_version","capabilities":["health"]}`. Le
+  capability vivono in `jake_server.CAPABILITIES` e un nome entra solo quando il servizio esiste davvero. Niente
+  token, percorsi, IP, dati utente o configurazione.
+- Client: `core/jake_server_client.py` esteso, non duplicato. Una sonda = `/health` poi `/capabilities`;
+  `ServerStatus` porta stato, motivo, versione, `protocol_version`, `capabilities`, latenza dell'ultima sonda,
+  `checked_at` e `last_success_at` (mantenuto anche quando il nodo cade). `supports(nome)` e' vero solo con il nodo
+  ONLINE e il nome dichiarato: e' la porta da cui passeranno i servizi di F9.3. `ServerStatus.as_dict()` e' la forma
+  condivisibile (eta' in secondi, nessun URL).
+- Runtime: oltre alla sonda di avvio (F9.1), `JakeCore._answer_in_profile` chiama `refresh_if_due()` a ogni turno:
+  un confronto di orologio, e una sonda in background solo quando quella precedente e' scaduta.
+- Diagnostica: `python main.py --diagnostics` ha `environment.jake_server` (stato, motivo, versione, protocollo,
+  latenza, capability, `checked_age_s`, `last_success_age_s`) da una sonda fatta al momento; `server_url` nella
+  configurazione redatta mostra solo se e' impostato. Server spento = sezione "offline", bundle comunque scritto.
+- Riuso, non duplicazione: finestra di protocollo di `core/companion_guard.py` (`MIN_PROTOCOL_VERSION`..
+  `PROTOCOL_VERSION`); `DeviceRegistry` resta dei dispositivi companion (lease e dispositivo attivo) e non e' stato
+  forzato a descrivere un nodo server.
+- Docker: invariato, `restart: unless-stopped` gia' presente; nessun cambio di rete.
+
+#### Stati
+
+- ONLINE: `/health` sano e `/capabilities` valido con finestra di protocollo compatibile. Solo qui `supports()` puo'
+  essere vero.
+- DEGRADED: risponde qualcosa, ma non un Jake Server utilizzabile: HTTP non 200, JSON malformato o troppo grande,
+  servizio diverso, status non "ok", redirect, errore TLS, `capabilities_unavailable` (server F9.1 non aggiornato),
+  `protocol_incompatible`. Jake continua in locale.
+- OFFLINE: timeout, connessione rifiutata, nome non risolto, rete assente. Jake continua in locale.
+- DISABLED: nessun `server_url`/`JAKE_SERVER_URL` o URL non valido: nessuna richiesta, mai.
+
+#### Timeout, cache e backoff
+
+- Timeout per richiesta 1,5 s (`server_timeout_seconds`, tra 0,2 e 5 s); nessuna richiesta all'import; il runtime
+  non aspetta mai la sonda (thread daemon breve), la diagnostica si' (e' un comando a parte).
+- Stato in memoria. Ricontrollo dopo 60 s se ONLINE; dopo un fallimento 15 s, poi 30, 60, 120, 240 e al massimo
+  300 s; un successo azzera il backoff. Al massimo una sonda in corso; nessun thread permanente e nessuna sonda
+  quando Jake non viene usato.
+
+#### Compatibilita' di protocollo
+
+Il server pubblica la sua finestra (`min_protocol_version`..`protocol_version`, se manca il minimo vale il massimo),
+il client ha quella di `companion_guard`: compatibili se si sovrappongono. Altrimenti DEGRADED
+`protocol_incompatible` con versione e capability visibili in diagnostica, ma `supports()` sempre falso.
+
+#### Cosa NON implementa
+
+Trasporto della sync, trasferimento di memoria, RAG/Ollama/database/scheduler remoti, comandi remoti, accesso
+Internet, Tailscale, port forwarding. Nessuna UI/voce per lo stato del server.
+
+#### Criteri di completamento
+
+1. Test, ruff, mypy, compileall e smoke test verdi sul branch.
+2. Utente: deploy aggiornato sul Lenovo, `curl http://<ip-lan>:8770/capabilities` dal PC risponde con lo schema
+   sopra.
+3. Utente: `python main.py --diagnostics` con il server acceso riporta `online` e `["health"]`; con il container
+   fermo riporta `offline`, il bundle si scrive e Jake risponde normalmente.
+
+Stato: `VERIFY` finche' i punti 2-3 non sono provati sull'hardware reale.
+
+### Passi successivi (non iniziati)
+
+- F9.3: il primo vero servizio distribuito, annunciato come nuova capability e usato da Jake Windows solo con
+  `supports(...)` vero, con fallback locale identico a oggi quando il nodo non e' ONLINE. Ogni endpoint che legge o
+  cambia dati passa dalla pipeline companion esistente (TLS, credenziale per dispositivo ottenuta col pairing,
+  `CompanionGuard`), non da `jake_server/health.py`; per la sync riusa `SyncEngine`/`sync_crypto` e la coda offline.
+- Stato del server visibile in HUD/voce, se la prova reale lo chiede.
+- Spostamenti graduali sul server (memoria/RAG, scheduler, automazioni, eventuale modello di riserva), ognuno con
+  fallback locale quando il server non c'e'.
+- Accesso remoto via VPN (Tailscale/WireGuard), mai porte aperte su Internet.
+
 ## Incremento del 04/10/2026 — presenza ambientale dell'HUD (da prova reale dell'utente)
 
 - Presenza separata dal layout: `expanded` (HUD normale nel layout full/compact/focus del monitor), `mini` (solo
@@ -228,6 +366,8 @@ Questo registro riguarda l'incremento in corso; il catalogo storico completo res
 |---|---|---|
 | `F4.3` | Utente (verifica visiva e GPU sul desktop reale) | `VERIFY` |
 | `F4.7` | Utente (monitor fisici, scala testo reale) | `VERIFY` |
+| `F9.1` | Utente (deploy sul Lenovo Ubuntu, sonda dal PC) | `VERIFY` |
+| `F9.2` | Utente (capability e diagnostica tra PC e Lenovo) | `VERIFY` |
 
 ## Incremento del 29/09/2026 — materiale HUD e regressioni
 

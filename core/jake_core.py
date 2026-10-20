@@ -26,6 +26,7 @@ from core.event_bus_handler import EventPublishingMixin
 from core.execution_safety import ActionExecution
 from core.hud_protocol import EventType, HudEvent
 from core.identity import current_windows_user
+from core.jake_server_client import JakeServerClient
 from core.kill_switch import KillSwitch
 from core.learning_manager import LearningManager
 from core.lifecycle_manager import LifecycleMixin
@@ -318,6 +319,11 @@ class JakeCore(NotificationMixin, ModelRoutingMixin, CompanionMixin, EventPublis
         # separato sorvegliato; solo su loopback senza TLS ne' token (il client nativo non si autentica).
         if bool(config.get("hud_native_enabled", False)):
             self._start_native_hud(config, companion_host, companion_tls_context)
+        # F9.1: Jake Server (nodo Linux sempre acceso, jake_server/) e' facoltativo. Senza server_url/JAKE_SERVER_URL
+        # non parte nessuna richiesta; con l'URL la sonda gira su un thread daemon: un server spento, lento o
+        # irraggiungibile non rallenta l'avvio e non cambia nulla di cio' che Jake fa in locale.
+        self.jake_server = JakeServerClient.from_config(config)
+        self.jake_server.probe_in_background()
 
         # Skill/plugin installabili (v2.0): un file .py in plugins/ con una funzione
         # register(registry) diventa una capacita' di Jake senza toccare il core.
@@ -821,6 +827,11 @@ class JakeCore(NotificationMixin, ModelRoutingMixin, CompanionMixin, EventPublis
         # F7.4.2: chi parla o scrive al PC (voce, CLI, HUD nativo) lo rende di nuovo il dispositivo che risponde, con la
         # conferma che aspettava sul telefono: il "si'" detto qui la trova
         self._pc_takes_the_session()
+        # F9.2: lo stato di Jake Server resta fresco mentre Jake viene usato, senza thread permanenti ne' polling a
+        # vuoto: una sonda in background parte solo se la precedente e' scaduta (cache/backoff in JakeServerClient).
+        jake_server = getattr(self, "jake_server", None)
+        if jake_server is not None:
+            jake_server.refresh_if_due()
 
         # F2.6.4:
         # una passphrase NON deve attraversare normalizzatore, NLU, memoria,
