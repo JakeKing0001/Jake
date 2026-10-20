@@ -23,6 +23,10 @@ credenziali sostituite), modello Ollama scelto e modelli caricati, preflight, RA
 (errori classificati, timeline degli stati, tempi mediani/p95). Le righe di turno e di stato non contengono mai testo
 dell'utente ne' valori di ricordi (core/logger.log_turn/log_state); i percorsi della cartella utente diventano "~".
 
+F9.2: `environment.jake_server` riporta lo stato di Jake Server da una sonda fatta al momento (stato, motivo, versione,
+protocollo, latenza, capability, eta' dell'ultimo successo), senza URL ne' IP; `server_url` nella configurazione
+redatta dice solo se e' impostato. Server spento o irraggiungibile = stato "offline", mai un bundle fallito.
+
 Uso:
     python main.py --diagnostics                              # stesso comando, dal punto d'ingresso di Jake
     python -m tools.diagnostic_bundle                        # scrive data/jake_diagnostic_bundle.json
@@ -50,6 +54,8 @@ DEFAULT_LIMIT = 200
 ROOT = Path(__file__).resolve().parent.parent
 _SECRET_NAME = re.compile(r"token|passphrase|password|secret|api_key|_key$|pin$", re.IGNORECASE)
 _HOME = os.path.expanduser("~")
+# Indirizzi di nodi della rete di casa: nel bundle condiviso basta sapere se sono impostati.
+_LOCATION_KEYS = {"server_url"}
 
 
 def _load_jsonl(path: Path, limit: int) -> list[dict]:
@@ -98,7 +104,7 @@ def redact_config(values: dict) -> dict:
 
     redacted = {}
     for key, value in values.items():
-        if key in SECRET_KEYS or _SECRET_NAME.search(key):
+        if key in SECRET_KEYS or _SECRET_NAME.search(key) or key in _LOCATION_KEYS:
             redacted[key] = "<redacted>" if value else ""
         else:
             redacted[key] = _scrub_home(value)
@@ -146,6 +152,7 @@ def collect_environment() -> dict:
     """Commit, configurazione redatta, modello e modelli caricati, preflight e RAM. Ogni sezione e' indipendente:
     una che fallisce dice perche', non fa fallire il bundle."""
     env: dict = {}
+    config = None
     try:
         head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, timeout=10)
         dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=ROOT,
@@ -177,6 +184,7 @@ def collect_environment() -> dict:
                          "keep_alive_secondary": keep_alive_for("__secondary__"), "loaded": loaded}
     except Exception as exc:
         env["ollama"] = {"error": f"{type(exc).__name__}: Ollama non raggiungibile o risposta non valida"}
+    env["jake_server"] = collect_jake_server(config if config is not None else {})
     try:
         from tools.preflight import run_all
 
@@ -192,6 +200,17 @@ def collect_environment() -> dict:
     except Exception as exc:
         env["ram_mb"] = {"error": type(exc).__name__}
     return env
+
+
+def collect_jake_server(config) -> dict:
+    """F9.2: una sonda sincrona di Jake Server (timeout breve di JakeServerClient, nessuna eccezione) nella forma
+    condivisibile di `ServerStatus.as_dict`. Senza `server_url`/`JAKE_SERVER_URL`: stato "disabled", nessuna rete."""
+    try:
+        from core.jake_server_client import JakeServerClient
+
+        return JakeServerClient.from_config(config).probe().as_dict()
+    except Exception as exc:
+        return {"error": type(exc).__name__}
 
 
 def _redact_ledger_record(record: dict) -> dict:
