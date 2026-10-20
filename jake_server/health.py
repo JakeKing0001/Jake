@@ -1,12 +1,12 @@
-"""Endpoint di salute di Jake Server (F9.1): `GET /health` e nient'altro.
+"""Endpoint di sola lettura di Jake Server: `GET /health` (F9.1), `GET /capabilities` (F9.2) e nient'altro.
 
 Solo libreria standard (`http.server`), come `core/companion_server.py`: nessun framework in piu' da installare
-sul server per un endpoint solo.
+sul server per due endpoint fissi.
 
 Perche' qui non vale `check_bind_policy` (F7.1.4) e il server ascolta in LAN senza TLS: quella regola vieta un bind
 non locale in chiaro **per i comandi**, perche' token e testo viaggerebbero leggibili. Questo server non ha comandi
 ne' credenziali: non legge mai un corpo, non accetta altri metodi o percorsi e risponde con un JSON fisso senza dati
-personali (servizio, versione di Jake, ruolo, uptime). Il confine resta voluto e verificato dai test: qualunque endpoint
+personali (servizio, versione di Jake e del protocollo, ruolo, uptime, nomi delle capability). Il confine resta voluto e verificato dai test: qualunque endpoint
 futuro che legga o cambi dati (sync, memoria, comandi) va servito dalla pipeline di `core/companion_server.py`
 (autenticazione, capability, anti-replay, TLS), non aggiunto a questa tabella.
 
@@ -22,11 +22,12 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import cast
 
-from core.companion_guard import EndpointClass, RateLimiter
+from core.companion_guard import MIN_PROTOCOL_VERSION, EndpointClass, RateLimiter
 from core.version import PROTOCOL_VERSION, VERSION
-from jake_server import DEFAULT_PORT, NODE_ROLE, SERVICE_NAME
+from jake_server import CAPABILITIES, DEFAULT_PORT, NODE_ROLE, SERVICE_NAME
 
 HEALTH_PATH = "/health"
+CAPABILITIES_PATH = "/capabilities"
 REQUEST_TIMEOUT_SECONDS = 5
 
 _logger = logging.getLogger("jake_server")
@@ -41,6 +42,19 @@ def health_payload(started_at: float, now: float) -> dict:
         "protocol_version": PROTOCOL_VERSION,
         "node": NODE_ROLE,
         "uptime_s": max(0, int(now - started_at)),
+    }
+
+
+def capabilities_payload() -> dict:
+    """Il corpo di `/capabilities` (F9.2): chi e' il nodo, quale finestra di protocollo parla e cosa offre. La finestra
+    e' la stessa del server companion (`core/companion_guard.py`): un client e' compatibile se la sua si sovrappone."""
+    return {
+        "service": SERVICE_NAME,
+        "node": NODE_ROLE,
+        "version": VERSION,
+        "protocol_version": PROTOCOL_VERSION,
+        "min_protocol_version": MIN_PROTOCOL_VERSION,
+        "capabilities": list(CAPABILITIES),
     }
 
 
@@ -121,10 +135,13 @@ class _Handler(BaseHTTPRequestHandler):
         if not ok:
             self._json(429, {"error": "rate_limited"}, include_body, {"Retry-After": str(max(1, int(wait + 0.999)))})
             return
-        if self.path.split("?", 1)[0] != HEALTH_PATH:
+        path = self.path.split("?", 1)[0]
+        if path == HEALTH_PATH:
+            self._json(200, self.health.payload(), include_body)
+        elif path == CAPABILITIES_PATH:
+            self._json(200, capabilities_payload(), include_body)
+        else:
             self._json(404, {"error": "not_found"}, include_body)
-            return
-        self._json(200, self.health.payload(), include_body)
 
     def _json(self, status: int, payload: dict, include_body: bool, headers: dict | None = None) -> None:
         body = json.dumps(payload).encode("utf-8")

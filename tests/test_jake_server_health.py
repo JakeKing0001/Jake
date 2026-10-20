@@ -1,9 +1,10 @@
-"""F9.1: `GET /health` di Jake Server (jake_server/health.py) su un'istanza vera, porta effimera su 127.0.0.1."""
+"""F9.1/F9.2: `GET /health` e `GET /capabilities` di Jake Server (jake_server/health.py) su un'istanza vera, porta
+effimera su 127.0.0.1."""
 import json
 import unittest
 from urllib import error, request
 
-from core.companion_guard import EndpointClass, Limit, RateLimiter
+from core.companion_guard import MIN_PROTOCOL_VERSION, EndpointClass, Limit, RateLimiter
 from core.version import PROTOCOL_VERSION, VERSION
 from jake_server.health import HealthServer
 
@@ -63,6 +64,45 @@ class HealthEndpointTests(unittest.TestCase):
             with self.subTest(method=method):
                 status, _, _ = _call(self.base + "/health", method=method, data=b"{}")
                 self.assertEqual(status, 501)
+
+
+class CapabilitiesEndpointTests(unittest.TestCase):
+    """F9.2: GET /capabilities descrive il nodo, la sua finestra di protocollo e cosa offre - nient'altro."""
+
+    def setUp(self):
+        self.server = HealthServer(host="127.0.0.1", port=0)
+        self.server.start()
+        self.addCleanup(self.server.stop)
+        self.base = f"http://127.0.0.1:{self.server.port}"
+
+    def test_capabilities_returns_the_documented_schema_and_nothing_else(self):
+        status, headers, body = _call(self.base + "/capabilities")
+
+        self.assertEqual(status, 200)
+        self.assertTrue(headers["Content-Type"].startswith("application/json"))
+        payload = json.loads(body)
+        self.assertEqual(set(payload), {"service", "node", "version", "protocol_version", "min_protocol_version",
+                                        "capabilities"})
+        self.assertEqual(payload["service"], "jake-server")
+        self.assertEqual(payload["node"], "server")
+        self.assertEqual(payload["version"], VERSION)
+        self.assertEqual(payload["protocol_version"], PROTOCOL_VERSION)
+        self.assertEqual(payload["min_protocol_version"], MIN_PROTOCOL_VERSION)
+        # Solo capability che esistono davvero: oggi il server sa dire solo se e' vivo.
+        self.assertEqual(payload["capabilities"], ["health"])
+
+    def test_capabilities_reveal_no_address_or_path(self):
+        _, _, body = _call(self.base + "/capabilities")
+
+        text = body.decode("utf-8")
+        for leak in ("127.0.0.1", str(self.server.port), "\\", "/home", "token"):
+            with self.subTest(leak=leak):
+                self.assertNotIn(leak, text)
+
+    def test_capabilities_reject_methods_with_a_body(self):
+        status, _, _ = _call(self.base + "/capabilities", method="POST", data=b"{}")
+
+        self.assertEqual(status, 501)
 
 
 class HealthRateLimitTests(unittest.TestCase):

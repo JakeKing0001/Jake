@@ -41,7 +41,8 @@ def main() -> int:
 
     server = HealthServer(host=host, port=port)
     server.start()
-    logger.info("%s %s in ascolto su %s:%d (solo GET /health)", SERVICE_NAME, VERSION, host, server.port)
+    logger.info("%s %s in ascolto su %s:%d (solo GET /health e /capabilities)",
+                SERVICE_NAME, VERSION, host, server.port)
 
     stop = threading.Event()
 
