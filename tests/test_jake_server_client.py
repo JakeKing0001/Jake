@@ -1,6 +1,7 @@
-"""F9.1: la sonda di Jake Server dal PC (core/jake_server_client.py) contro server veri su 127.0.0.1: un Jake Server
-sano, una porta chiusa, un socket che non risponde mai, server che rispondono in modo sbagliato. Nessun mock di rete:
-il punto e' proprio che errori veri del sistema operativo non arrivino mai al runtime come eccezioni."""
+"""F9.1/F9.2: la sonda di Jake Server dal PC (core/jake_server_client.py) contro server veri su 127.0.0.1: un Jake
+Server sano, una porta chiusa, un socket che non risponde mai, server che rispondono in modo sbagliato o con un
+protocollo incompatibile. Il punto e' che errori veri del sistema operativo non arrivino mai al runtime come eccezioni;
+solo i test di cache/backoff usano un opener finto, per contare le richieste con un orologio finto."""
 import json
 import os
 import socket
@@ -11,9 +12,12 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
+from urllib import error as urllib_error
 
+from core.companion_guard import MIN_PROTOCOL_VERSION
 from core.config import Config
-from core.jake_server_client import JakeServerClient, ServerState
+from core.jake_server_client import JakeServerClient, ServerState, protocol_compatible
+from core.version import PROTOCOL_VERSION
 from jake_server.health import HealthServer
 
 SHORT_TIMEOUT = 0.3
@@ -26,14 +30,15 @@ def _free_port() -> int:
 
 
 class _CannedServer:
-    """Server HTTP che risponde sempre con lo stesso status e lo stesso corpo."""
+    """Server HTTP che risponde sempre con lo stesso status e lo stesso corpo, salvo i percorsi in `routes`."""
 
-    def __init__(self, status: int, body: bytes):
+    def __init__(self, status: int, body: bytes, routes: dict | None = None):
         canned = (status, body)
+        by_path = dict(routes or {})
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
-                code, payload = canned
+                code, payload = by_path.get(self.path, canned)
                 self.send_response(code)
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
@@ -175,6 +180,232 @@ class DegradedTests(unittest.TestCase):
         self.addCleanup(raw.close)
         status = JakeServerClient(raw.url, timeout=2).probe()
         self.assertEqual((status.state, status.reason), (ServerState.DEGRADED, "malformed_response"))
+
+
+_HEALTH_OK = json.dumps({"status": "ok", "service": "jake-server", "version": "5.9"}).encode()
+
+
+def _described(**fields) -> bytes:
+    payload = {"service": "jake-server", "node": "server", "version": "5.9", "protocol_version": PROTOCOL_VERSION,
+               "min_protocol_version": MIN_PROTOCOL_VERSION, "capabilities": ["health"]}
+    payload.update(fields)
+    return json.dumps(payload).encode()
+
+
+class CapabilityTests(unittest.TestCase):
+    """F9.2: oltre a "e' vivo", il client sa con quale protocollo parla il nodo e cosa offre."""
+
+    def _probe_routes(self, capabilities: tuple[int, bytes]):
+        server = _CannedServer(200, _HEALTH_OK, routes={"/capabilities": capabilities})
+        self.addCleanup(server.close)
+        client = JakeServerClient(server.url, timeout=2)
+        return client, client.probe()
+
+    def test_online_status_carries_version_protocol_capabilities_and_last_success(self):
+        server = HealthServer(host="127.0.0.1", port=0)
+        server.start()
+        self.addCleanup(server.stop)
+        client = JakeServerClient(f"http://127.0.0.1:{server.port}", timeout=2)
+
+        status = client.probe()
+
+        self.assertEqual(status.state, ServerState.ONLINE)
+        self.assertEqual(status.protocol_version, PROTOCOL_VERSION)
+        self.assertEqual(status.capabilities, ("health",))
+        self.assertEqual(status.last_success_at, status.checked_at)
+        self.assertTrue(client.supports("health"))
+        self.assertFalse(client.supports("memory"))
+
+    def test_a_server_from_f9_1_without_capabilities_is_degraded_not_offline(self):
+        client, status = self._probe_routes((404, b'{"error": "not_found"}'))
+
+        self.assertEqual((status.state, status.reason, status.version),
+                         (ServerState.DEGRADED, "capabilities_unavailable", "5.9"))
+        self.assertFalse(client.supports("health"))
+
+    def test_incompatible_protocol_is_degraded_and_offers_nothing(self):
+        newer = PROTOCOL_VERSION + 5
+        client, status = self._probe_routes((200, _described(protocol_version=newer, min_protocol_version=newer)))
+
+        self.assertEqual((status.state, status.reason), (ServerState.DEGRADED, "protocol_incompatible"))
+        self.assertEqual(status.protocol_version, newer)
+        self.assertEqual(status.capabilities, ("health",))
+        self.assertFalse(client.is_available)
+        self.assertFalse(client.supports("health"))
+
+    def test_overlapping_protocol_windows_are_compatible(self):
+        _, status = self._probe_routes((200, _described(protocol_version=PROTOCOL_VERSION + 1,
+                                                        min_protocol_version=PROTOCOL_VERSION)))
+
+        self.assertEqual(status.state, ServerState.ONLINE)
+        self.assertEqual(status.protocol_version, PROTOCOL_VERSION + 1)
+
+    def test_compatibility_is_the_overlap_of_the_two_windows(self):
+        self.assertTrue(protocol_compatible(PROTOCOL_VERSION, PROTOCOL_VERSION))
+        self.assertTrue(protocol_compatible(PROTOCOL_VERSION + 3, MIN_PROTOCOL_VERSION))
+        self.assertFalse(protocol_compatible(PROTOCOL_VERSION + 3, PROTOCOL_VERSION + 1))
+        self.assertFalse(protocol_compatible(MIN_PROTOCOL_VERSION - 1, MIN_PROTOCOL_VERSION - 1))
+
+    def test_malformed_capability_descriptions_are_degraded(self):
+        cases = {
+            "not json": b"capabilities: health",
+            "capabilities not a list": _described(capabilities="health"),
+            "unsafe name": _described(capabilities=["../etc/passwd"]),
+            "upper case name": _described(capabilities=["Health"]),
+            "too many": _described(capabilities=[f"cap{i}" for i in range(40)]),
+            "protocol not an int": _described(protocol_version="1"),
+            "protocol is a bool": _described(protocol_version=True),
+            "min above max": _described(protocol_version=1, min_protocol_version=2),
+        }
+        for name, body in cases.items():
+            with self.subTest(name):
+                _, status = self._probe_routes((200, body))
+                self.assertEqual((status.state, status.reason), (ServerState.DEGRADED, "malformed_response"))
+
+    def test_capabilities_from_another_service_are_unexpected(self):
+        _, status = self._probe_routes((200, _described(service="something-else")))
+
+        self.assertEqual((status.state, status.reason), (ServerState.DEGRADED, "unexpected_service"))
+
+    def test_duplicate_capabilities_are_kept_once(self):
+        _, status = self._probe_routes((200, _described(capabilities=["health", "health"])))
+
+        self.assertEqual(status.capabilities, ("health",))
+
+
+class RecoveryTests(unittest.TestCase):
+    def test_server_that_comes_back_turns_online_and_remembers_the_last_success(self):
+        port = _free_port()
+        client = JakeServerClient(f"http://127.0.0.1:{port}", timeout=SHORT_TIMEOUT)
+
+        first = client.probe()
+        server = HealthServer(host="127.0.0.1", port=port)
+        server.start()
+        back = client.probe()
+        server.stop()
+        gone_again = client.probe()
+
+        self.assertEqual(first.state, ServerState.OFFLINE)
+        self.assertIsNone(first.last_success_at)
+        self.assertEqual(back.state, ServerState.ONLINE)
+        self.assertEqual(gone_again.state, ServerState.OFFLINE)
+        self.assertEqual(gone_again.last_success_at, back.checked_at)
+        self.assertFalse(client.is_available)
+
+
+class _FakeClock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+class _CountingOpener:
+    """Opener che conta le richieste e risponde "connessione rifiutata" (o si blocca finche' `release` non e' set)."""
+
+    def __init__(self, block: threading.Event | None = None):
+        self.calls = 0
+        self.block = block
+
+    def open(self, req, timeout=None):
+        self.calls += 1
+        if self.block is not None:
+            self.block.wait(5)
+        raise urllib_error.URLError(ConnectionRefusedError())
+
+
+class CacheAndBackoffTests(unittest.TestCase):
+    """F9.2: niente polling aggressivo - una sonda solo quando la precedente e' scaduta, mai due insieme."""
+
+    def _refresh_and_wait(self, client) -> bool:
+        thread = client.refresh_if_due()
+        if thread is None:
+            return False
+        thread.join(5)
+        return True
+
+    def test_offline_server_is_retried_with_doubling_waits_up_to_the_cap(self):
+        clock, opener = _FakeClock(), _CountingOpener()
+        client = JakeServerClient("http://127.0.0.1:1", opener=opener, clock=clock)
+        client.probe()  # primo fallimento
+        waits = []
+        for _ in range(7):
+            waited = 0.0
+            while not self._refresh_and_wait(client):
+                clock.now += 1
+                waited += 1
+                self.assertLess(waited, 1000, "la sonda non e' mai tornata dovuta")
+            waits.append(waited)
+
+        self.assertEqual(waits, [15, 30, 60, 120, 240, 300, 300])
+        self.assertEqual(opener.calls, 8)
+
+    def test_online_server_is_rechecked_only_after_the_cache_expires(self):
+        server = HealthServer(host="127.0.0.1", port=0)
+        server.start()
+        self.addCleanup(server.stop)
+        clock = _FakeClock()
+        client = JakeServerClient(f"http://127.0.0.1:{server.port}", timeout=2, clock=clock)
+        self.assertTrue(self._refresh_and_wait(client))  # mai controllato: dovuta subito
+        self.assertTrue(client.is_available)
+
+        clock.now += 59
+        self.assertIsNone(client.refresh_if_due())
+        self.assertEqual(client.seconds_until_next_probe(), 1.0)
+        clock.now += 1
+        self.assertTrue(self._refresh_and_wait(client))
+
+    def test_success_resets_the_backoff(self):
+        port = _free_port()
+        clock = _FakeClock()
+        client = JakeServerClient(f"http://127.0.0.1:{port}", timeout=SHORT_TIMEOUT, clock=clock)
+        for _ in range(3):
+            client.probe()
+        self.assertEqual(client.seconds_until_next_probe(), 60.0)  # 15 -> 30 -> 60
+        server = HealthServer(host="127.0.0.1", port=port)
+        server.start()
+        self.addCleanup(server.stop)
+        client.probe()
+        server.stop()
+        client.probe()
+
+        self.assertEqual(client.seconds_until_next_probe(), 15.0)
+
+    def test_only_one_probe_at_a_time(self):
+        release = threading.Event()
+        opener = _CountingOpener(block=release)
+        client = JakeServerClient("http://127.0.0.1:1", opener=opener)
+
+        first = client.refresh_if_due()
+        second = client.refresh_if_due()
+        third = client.probe_in_background()
+        release.set()
+        first.join(5)
+
+        self.assertIsNotNone(first)
+        self.assertIsNone(second)
+        self.assertIsNone(third)
+        self.assertEqual(opener.calls, 1)
+
+    def test_refresh_returns_at_once_even_if_the_server_hangs(self):
+        silent = _SilentServer()
+        self.addCleanup(silent.close)
+        client = JakeServerClient(silent.url, timeout=SHORT_TIMEOUT)
+
+        started = time.monotonic()
+        thread = client.refresh_if_due()
+        returned_after = time.monotonic() - started
+        thread.join(5)
+
+        self.assertLess(returned_after, 0.1)
+        self.assertEqual(client.last_status.reason, "timeout")
+
+    def test_disabled_client_never_schedules_anything(self):
+        client = JakeServerClient(None)
+
+        self.assertIsNone(client.refresh_if_due())
+        self.assertIsNone(client.seconds_until_next_probe())
 
 
 class ConfigurationTests(unittest.TestCase):

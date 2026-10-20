@@ -827,6 +827,11 @@ class JakeCore(NotificationMixin, ModelRoutingMixin, CompanionMixin, EventPublis
         # F7.4.2: chi parla o scrive al PC (voce, CLI, HUD nativo) lo rende di nuovo il dispositivo che risponde, con la
         # conferma che aspettava sul telefono: il "si'" detto qui la trova
         self._pc_takes_the_session()
+        # F9.2: lo stato di Jake Server resta fresco mentre Jake viene usato, senza thread permanenti ne' polling a
+        # vuoto: una sonda in background parte solo se la precedente e' scaduta (cache/backoff in JakeServerClient).
+        jake_server = getattr(self, "jake_server", None)
+        if jake_server is not None:
+            jake_server.refresh_if_due()
 
         # F2.6.4:
         # una passphrase NON deve attraversare normalizzatore, NLU, memoria,
