@@ -1,7 +1,8 @@
-# Jake Server (F9.1)
+# Jake Server (F9.1, F9.2)
 
-Il nodo Linux sempre acceso di Jake. Oggi fa una cosa sola: risponde a `GET /health` così Jake Windows sa se il
-server c'è. Memoria, RAG, scheduler, sync e automazioni restano sul PC finché le fasi successive di F9 non li
+Il nodo Linux sempre acceso di Jake. Oggi fa due cose sole: risponde a `GET /health` (è vivo?) e a
+`GET /capabilities` (con quale protocollo parla e cosa offre), così Jake Windows sa se il server c'è e se può usarlo.
+Memoria, RAG, scheduler, sync e automazioni restano sul PC finché le fasi successive di F9 non li
 spostano (vedi `ROADMAP_EXECUTION.md`, sezione F9).
 
 - Solo libreria standard Python, nessuna dipendenza pip.
@@ -12,6 +13,14 @@ spostano (vedi `ROADMAP_EXECUTION.md`, sezione F9).
 ```json
 {"status": "ok", "service": "jake-server", "version": "5.9", "protocol_version": 1, "node": "server", "uptime_s": 42}
 ```
+
+```json
+{"service": "jake-server", "node": "server", "version": "5.9", "protocol_version": 1, "min_protocol_version": 1,
+ "capabilities": ["health"]}
+```
+
+`capabilities` elenca solo servizi che esistono davvero: Jake Windows ne userà uno solo se il nome è in lista e il
+nodo è ONLINE con una finestra di protocollo compatibile.
 
 ## Avvio con Docker Compose (Ubuntu)
 
@@ -55,12 +64,14 @@ Sul PC, in `config/settings.json`:
 ```
 
 oppure la variabile d'ambiente `JAKE_SERVER_URL`. Senza questa chiave Jake non fa nessuna richiesta. Con la chiave,
-all'avvio Jake interroga `/health` in background (timeout 1,5 s, `server_timeout_seconds` per cambiarlo, massimo 5 s)
+all'avvio Jake interroga `/health` e `/capabilities` in background (timeout 1,5 s, `server_timeout_seconds` per cambiarlo, massimo 5 s)
 e scrive nel log se il server è raggiungibile; se è spento o irraggiungibile Jake funziona esattamente come prima.
+Durante l'uso lo stato si aggiorna a ogni turno solo quando è scaduto (60 s se ONLINE; altrimenti 15 s, 30 s, 60 s…
+fino a 5 minuti). `python main.py --diagnostics` riporta lo stato in `environment.jake_server`.
 
 ## Perché un server separato e non il CompanionServer
 
-`/health` non ha comandi né credenziali, quindi può rispondere in LAN senza TLS. Ogni endpoint futuro che legge o
-cambia dati (sync, memoria, comandi) passerà dalla pipeline di `core/companion_server.py`: autenticazione per
+`/health` e `/capabilities` non hanno comandi né credenziali, quindi possono rispondere in LAN senza TLS. Ogni
+endpoint futuro che legge o cambia dati (sync, memoria, comandi) passerà dalla pipeline di `core/companion_server.py`: autenticazione per
 dispositivo, `CompanionGuard` (capability, anti-replay, rate limit, audit) e TLS obbligatorio fuori dal loopback.
-Questo servizio non va esteso con altri percorsi.
+Questo servizio non va esteso con percorsi che leggono o cambiano dati.
